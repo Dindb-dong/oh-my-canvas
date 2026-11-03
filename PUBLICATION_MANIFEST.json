@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "policy": "docs/independent/publication-policy.md",
   "source": "staged regular files only; no repository history",
-  "sourceDigest": "fcfc3acd84ae13d7c93f58635a4eb71293e7eae9c0f777433b713283f72d3e16",
-  "snapshotDigest": "664597a82e3b8b30b7bb7598b65aacff57c8bec8b00b419beda34ebdc8916b9e",
+  "sourceDigest": "378acd27c8428de52ce6bc78d4076a5ea0f8a9a82ac9c68daff0c4d576fa125c",
+  "snapshotDigest": "516bc5193974aef37e24e3a39bea202147fc9925c55944d7349dc6e4ed761a22",
   "explicitEvidence": [
     "docs/qa/collaboration.png",
     "docs/qa/e2e-result.json",
@@ -431,12 +431,12 @@
     {
       "path": "docs/design/system/component-library.omc",
       "mode": "0644",
-      "sourceSha256": "e4c60f0a5de83e1a6e12b1418a8edc545f00b42cc34a2912e22100803bb1f924",
-      "sha256": "6efa82e810cfc3090d6d0b0341aa4d6812e907a765930b5c98fa99d747c9f10f",
+      "sourceSha256": "6efa82e810cfc3090d6d0b0341aa4d6812e907a765930b5c98fa99d747c9f10f",
+      "sha256": "315ccbc0fc91bab9aad4785b06dcc8e85082837e5bcc59c3185b0f2d3e07fa95",
       "size": 2610905,
       "transform": {
         "kind": "omc-current-document-fresh-history-v2",
-        "documentSha256": "c4484a91ddb126300ada84159b560737b078867831661d549f859363d1c89ec9",
+        "documentSha256": "bb4f832afbcaada9b69e56ea4e4a184fe8a331a09ef385eabba38458a0a706a4",
         "previousStateBytes": 1957937,
         "newStateBytes": 1957937,
         "thumbnailRemoved": false
@@ -935,22 +935,22 @@
     {
       "path": "docs/qa/package-provenance.json",
       "mode": "0644",
-      "sourceSha256": "40d5930225b43616467703a7a5fa7e15b5f4ffb27f0533c44c4fde897583ee1c",
-      "sha256": "40d5930225b43616467703a7a5fa7e15b5f4ffb27f0533c44c4fde897583ee1c",
+      "sourceSha256": "13ec05bab2bf69c9d9c269da2ea0aa4d26fa3564265117123912d20cdb14f68c",
+      "sha256": "13ec05bab2bf69c9d9c269da2ea0aa4d26fa3564265117123912d20cdb14f68c",
       "size": 108811
     },
     {
       "path": "docs/qa/packaged-app.png",
       "mode": "0644",
-      "sourceSha256": "cb73fb490c88f61afa160762f7f1af14ef3c7c3fcc98d7ed2db78da34a3e72d1",
-      "sha256": "cb73fb490c88f61afa160762f7f1af14ef3c7c3fcc98d7ed2db78da34a3e72d1",
+      "sourceSha256": "4d0b466acee85cf6038e7f29fceabd51a93aeeb2e89a922219054577df8ed8e8",
+      "sha256": "4d0b466acee85cf6038e7f29fceabd51a93aeeb2e89a922219054577df8ed8e8",
       "size": 197365
     },
     {
       "path": "docs/qa/packaged-result.json",
       "mode": "0644",
-      "sourceSha256": "89a5f5dda6543062add9062774b4b374fcc69c111d463d3309b9c3d3f024a804",
-      "sha256": "89a5f5dda6543062add9062774b4b374fcc69c111d463d3309b9c3d3f024a804",
+      "sourceSha256": "43909a7e9950f41cc20c91eebdb664e582b0e6677efed4ee421da37efc5e1e50",
+      "sha256": "43909a7e9950f41cc20c91eebdb664e582b0e6677efed4ee421da37efc5e1e50",
       "size": 436
     },
     {
@@ -2489,9 +2489,9 @@
     {
       "path": "src/style.css",
       "mode": "0644",
-      "sourceSha256": "79c5b72940730c72c9131ab213146d59bbebf009b4a6819ff50ecc18ad0a23a4",
-      "sha256": "79c5b72940730c72c9131ab213146d59bbebf009b4a6819ff50ecc18ad0a23a4",
-      "size": 14840
+      "sourceSha256": "ee750f8ce857b83201502d6d6b5c85601b8aa6d60868eb473c7986f486954852",
+      "sha256": "ee750f8ce857b83201502d6d6b5c85601b8aa6d60868eb473c7986f486954852",
+      "size": 14848
     },
     {
       "path": "tests/bootstrap.test.mjs",

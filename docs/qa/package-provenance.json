@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "at": "2026-11-03T16:10:19.658Z",
+  "at": "2026-11-03T16:18:15.973Z",
   "passed": true,
   "archive": "release/mac-arm64/Oh My Canvas.app/Contents/Resources/app.asar",
-  "archiveSha256": "38c6f5a86d37cf3e8b38e417b2f29f5c79d536b9aa94501fe53dd4c087d43296",
+  "archiveSha256": "a241c5db72d312d55355403147bddb96a5bc7c4df4bfd818b3041742ff24d272",
   "scope": "ASAR path inventory and exact current file bytes only. No compiled-code AST analysis, source-authorship proof, exhaustive restricted-source detection, legal clearance or reproducible-build claim.",
   "indexedPaths": 4260,
   "excludedPathPatterns": [
@@ -66,19 +66,19 @@
       "equal": true
     },
     {
-      "target": "dist/assets/index-pYL9Zl4q.js",
-      "source": "dist/assets/index-pYL9Zl4q.js",
+      "target": "dist/assets/index-CzXAXRpz.js",
+      "source": "dist/assets/index-CzXAXRpz.js",
       "group": "dist",
       "bytes": 476551,
       "sha256": "29ce92ea8f174e6fd4c587ac05f9c47d03001d44c91f4274f028ab0e49cff9a2",
       "equal": true
     },
     {
-      "target": "dist/assets/index-wgLbSPNM.css",
-      "source": "dist/assets/index-wgLbSPNM.css",
+      "target": "dist/assets/index-jO7MDXYL.css",
+      "source": "dist/assets/index-jO7MDXYL.css",
       "group": "dist",
-      "bytes": 14557,
-      "sha256": "15dd0987d966814e7f40868a3dcd704f12bbea38c856ad4fbad1a153343107df",
+      "bytes": 14565,
+      "sha256": "45f2d68ffb34b46005c1ed9a74bba87dbb9c1ba6a6edfb749fa10816f1bf69b7",
       "equal": true
     },
     {
@@ -1118,7 +1118,7 @@
       "source": "dist/index.html",
       "group": "dist",
       "bytes": 3329,
-      "sha256": "a52d33dc3f9b7a847ff54dad74f9adaaed69b633f4f9424a2cef8f16e348b374",
+      "sha256": "88b26fcc73a82270e26636a753ea4080ac5400ec026664f04244c87348692c24",
       "equal": true
     },
     {
