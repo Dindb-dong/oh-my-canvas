@@ -30,3 +30,8 @@ dialog{border:1px solid var(--line);border-radius:8px;padding:28px;width:520px;m
 #topbar #toggle-layers{border:0;background:none;padding:5px;border-radius:5px;display:flex;align-items:center;color:#666}#topbar #toggle-layers:hover{background:#e7e7e7}
 /* Keep native select semantics without the platform's raised popup-button skin. */
 .library-controls select{appearance:none;-webkit-appearance:none;min-width:134px;height:34px;padding:0 34px 0 12px;border:1px solid #e2e8f0;border-radius:8px;background-color:#fff;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;box-shadow:none;color:#475569;font-size:12px;line-height:1.4;cursor:pointer}.library-controls select:hover{background-color:#f8fafc;border-color:#cbd5e1}.library-controls select:focus-visible{border-color:#2563eb;outline:2px solid #bfdbfe;outline-offset:2px}
+
+/* Tabler control glyphs share the editor's 24-unit geometry and currentColor. */
+.ui-icon{display:inline-block;width:18px;height:18px;flex:none;vertical-align:middle;pointer-events:none}
+[data-icon]{display:inline-flex;align-items:center;justify-content:center;flex:none}
+#topbar .bar-actions>button,#new{display:inline-flex;align-items:center;justify-content:center;gap:7px}

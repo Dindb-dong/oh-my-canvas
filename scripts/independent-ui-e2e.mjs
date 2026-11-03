@@ -203,9 +203,7 @@ async function choose(tool) {
         await b.click();
     else {
         const group = ["pen", "pencil"].includes(tool) ? "3" : "2";
-        await page.locator(`#editor [data-group="${group}"] button`).filter({
-            hasText: "\u2304"
-        }).click();
+        await page.locator(`#editor [data-group="${group}"] button[aria-label="More drawing tools"]`).click();
         await page.locator(`.context-menu [data-key="tool.${tool}"]`).click();
     }
 }
@@ -628,9 +626,9 @@ try {
         await fs.writeFile(png, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j0ioAAAAASUVORK5CYII=", "base64"));
         await fs.writeFile(svg, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"30\"><rect width=\"40\" height=\"30\" fill=\"#ad85d8\"/></svg>");
         const before = await snapshot();
-        const chooser = page.waitForEvent("filechooser");
+        await app.evaluate(({dialog},files)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:files});},[png,svg]);
         await page.keyboard.press(mod + "+Shift+k");
-        await (await chooser).setFiles([png, svg]);
+
         await until(async () => Object.keys(await objects()).length >= 4, "multi-file import missing");
         const after = await snapshot();
         assert.equal(after.ack - before.ack, 1);
@@ -861,7 +859,7 @@ try {
         await selected("rect");
         const panel = name => page.locator("#right section").filter({
             has: page.locator("h3").filter({
-                hasText: new RegExp("^" + name + "(?:\\+)?$")
+                hasText: new RegExp("^" + name + "\\s*(?:\\+)?\\s*$")
             })
         }).first();
         const fill = panel("Fill");

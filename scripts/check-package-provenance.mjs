@@ -62,6 +62,8 @@ for (const field of runtimePackageFields) {
   catch { mismatches.push({target: 'package.json', group: 'runtime-package', error: `Runtime package field differs: ${field}`}); }
 }
 const license = await readFile(path.join(root, 'LICENSE'), 'utf8');
+assert.ok(!entries.some(name=>name.startsWith('node_modules/lucide/')), 'Removed icon dependency must not ship');
+for(const name of ['LICENSE','manifest.json'])await compare('dist/licenses/tabler-icons/'+name,'editor/ui/icons/tabler/'+name,'tabler-original');
 assert.match(license, /MIT License/);
 assert.match(license, /Permission is hereby granted, free of charge/);
 await compare('dist/licenses/native/manifest.json', 'licenses/native/manifest.json', 'native-original');

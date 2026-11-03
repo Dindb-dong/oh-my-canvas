@@ -1,0 +1,186 @@
+{
+  "pass": true,
+  "platform": "darwin",
+  "rows": [
+    {
+      "label": "before",
+      "enabled": true,
+      "opacity": 1,
+      "calls": [],
+      "pixels": [
+        255,
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "label": "asset-picker-open",
+      "enabled": true,
+      "opacity": 1,
+      "calls": [
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        }
+      ],
+      "pixels": [
+        255,
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "label": "asset-picker-after-reload",
+      "enabled": true,
+      "opacity": 1,
+      "calls": [
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        }
+      ],
+      "pixels": [
+        255,
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "label": "after-cancel",
+      "enabled": true,
+      "opacity": 1,
+      "calls": [
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        }
+      ],
+      "pixels": [
+        255,
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "label": "import-open-0",
+      "enabled": true,
+      "opacity": 1,
+      "calls": [
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        },
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        }
+      ],
+      "pixels": [
+        255,
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "label": "import-cancel-0",
+      "enabled": true,
+      "opacity": 1,
+      "calls": [
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        },
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        }
+      ],
+      "pixels": [
+        255,
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "label": "import-open-1",
+      "enabled": true,
+      "opacity": 1,
+      "calls": [
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        },
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        },
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        }
+      ],
+      "pixels": [
+        255,
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "label": "import-cancel-1",
+      "enabled": true,
+      "opacity": 1,
+      "calls": [
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        },
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        },
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        }
+      ],
+      "pixels": [
+        255,
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "label": "usable-canvas",
+      "enabled": true,
+      "opacity": 1,
+      "calls": [
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        },
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        },
+        {
+          "key": "showOpenDialog",
+          "parentAttached": false
+        }
+      ],
+      "pixels": [
+        255,
+        255,
+        255,
+        255
+      ]
+    }
+  ]
+}

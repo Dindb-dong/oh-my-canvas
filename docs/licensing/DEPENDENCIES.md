@@ -16,7 +16,6 @@ Resolved versions from the lockfile and installed package metadata; ranges in pa
 | `electron-builder` | 26.18.0 | Development | MIT |
 | `esbuild` | 0.25.12 | Development | MIT |
 | `jsdom` | 28.1.0 | Development | MIT |
-| `lucide` | 0.563.0 | Runtime | ISC |
 | `playwright` | 1.64.1 | Development | Apache-2.0 |
 | `selfsigned` | 3.0.1 | Runtime | MIT |
 | `typescript` | 5.9.3 | Development | Apache-2.0 |
@@ -27,10 +26,10 @@ Resolved versions from the lockfile and installed package metadata; ranges in pa
 
 ## Counts and interpretation
 
-- Direct runtime dependencies: **8**; direct development dependencies: **10**.
-- Lockfile package locations: **547**, representing **501 distinct name/version pairs**. This includes platform-specific optional packages and duplicate/nested versions.
-- Non-dev lockfile locations: **106**; development-only locations: **441**. This classification is npm metadata, not a measurement of the tree-shaken JS bundle.
-- Locally installed locations: **471**; all **106** non-dev locations are installed and have a top-level license/notice text. Optional packages for other platforms account for many absent development entries.
+- Direct runtime dependencies: **7**; direct development dependencies: **10**.
+- Lockfile package locations: **546**, representing **500 distinct name/version pairs**. This includes platform-specific optional packages and duplicate/nested versions.
+- Non-dev lockfile locations: **105**; development-only locations: **441**. This classification is npm metadata, not a measurement of the tree-shaken JS bundle.
+- Locally installed locations: **470**; all **105** non-dev locations are installed and have a top-level license/notice text. Optional packages for other platforms account for many absent development entries.
 - Electron is declared as a development dependency but its runtime is shipped with the application. Chromium/Node and their native libraries are outside the npm package count.
 - Package results belong to the exact built artifact. The [current verification record](../independent/VERIFICATION.md) records the passing current local package smoke and exact-byte provenance checks; the existing installed app has not been replaced by this task.
 
@@ -50,7 +49,7 @@ The full development inventory also includes Apache-2.0, BlueOak-1.0.0, Python-2
 ## Evidence and regeneration
 
 - [Machine-readable inventory](dependencies.json): every lockfile location, exact version, declared/installed license, optional/dev flags and available notice-file hashes.
-- [Runtime license texts](../../THIRD_PARTY_LICENSES.txt): complete top-level license/notice texts from all 106 installed non-dev package locations, unchanged.
+- [Runtime license texts](../../THIRD_PARTY_LICENSES.txt): complete top-level license/notice texts from all 105 installed non-dev package locations, unchanged.
 - `node scripts/license-inventory.mjs` regenerates both files locally. It rejects missing runtime notice evidence or installed/locked version drift.
 - `npm run build` additionally writes the consolidated npm notices and byte-identical Electron MIT/Chromium notices into `dist/licenses/`, which is included by the existing `dist/**` packaging rule. This does not publish or authorize release.
 - `node --test tests/license-artifacts.test.mjs` verifies those generated distribution notices against their installed originals and all runtime inventory entries.
@@ -69,3 +68,5 @@ The icon was supplied by the user and edited for transparency. On 2026-11-03 the
 4. The current package passed smoke and provenance checks with no byte mismatches. Its native notices, audited WASM, fonts, Electron notices and current source/build bytes were checked. This is artifact evidence, not exhaustive native legal clearance. The installed `.app` has not been replaced; signing/notarization and the clean publication snapshot remain outside the completed package checks.
 
 The independent renderer no longer imports `rbush`; its direct dependency and unused `quickselect` transitive dependency were removed from the lockfile without installing additional packages. Counts above describe the current graph, not the historical pre-replacement graph.
+
+The vendored Tabler Icons v3.50.0 subset is a separate MIT-licensed asset dependency, not an npm dependency. See [source, hashes and license](../../editor/ui/icons/tabler/README.md).

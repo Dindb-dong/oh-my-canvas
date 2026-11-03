@@ -1,20 +1,20 @@
 {
   "schemaVersion": 1,
-  "lockfileSha256": "777a6bb671baa5e68de3171276c7fbc41d928034f4061eec2c3547ff5503c2d1",
+  "lockfileSha256": "6229dd133e0e94ca1042ae0a569d4faa6f07c68f45ef5c310369e5ec7e3a552c",
   "counting": "Lockfile package locations, including optional platform packages and duplicate versions. Runtime means not marked dev, not a tree-shaken bundle attribution. Electron runtime is separately distributed despite devDependency placement.",
   "summary": {
-    "directRuntime": 8,
+    "directRuntime": 7,
     "directDevelopment": 10,
-    "lockfileLocations": 547,
-    "uniqueNameVersions": 501,
-    "runtimeLocations": 106,
+    "lockfileLocations": 546,
+    "uniqueNameVersions": 500,
+    "runtimeLocations": 105,
     "developmentOnlyLocations": 441,
-    "installedLocations": 471,
+    "installedLocations": 470,
     "runtimeLicenseCounts": {
       "(BSD-3-Clause OR GPL-2.0)": 1,
       "BSD-2-Clause": 1,
       "BSD-3-Clause": 4,
-      "ISC": 8,
+      "ISC": 7,
       "MIT": 90,
       "OFL-1.1": 2
     },
@@ -28,7 +28,7 @@
       "BSD-3-Clause": 14,
       "BlueOak-1.0.0": 10,
       "CC0-1.0": 1,
-      "ISC": 41,
+      "ISC": 40,
       "MIT": 450,
       "MIT-0": 2,
       "OFL-1.1": 3,
@@ -6187,25 +6187,6 @@
           "file": "LICENSE",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
-        }
-      ]
-    },
-    {
-      "location": "node_modules/lucide",
-      "name": "lucide",
-      "version": "0.563.0",
-      "license": "ISC",
-      "installedLicense": "ISC",
-      "developmentOnly": false,
-      "optional": false,
-      "installed": true,
-      "directRuntime": true,
-      "directDevelopment": false,
-      "licenseFiles": [
-        {
-          "file": "LICENSE",
-          "sha256": "668dcc52803480e0a026b31140a4cae668772663cd764e5991d252eef03f98db",
-          "bytes": 2004
         }
       ]
     },

@@ -809,4 +809,17 @@ export const workspaceStyle = `
     display:none;
   }
 }
+
+/* The glyph is decorative; button title/aria-label and state remain authoritative. */
+.ui-icon { display:inline-block; width:18px; height:18px; flex:none; vertical-align:middle; pointer-events:none; }
+.icon-button { display:inline-flex; align-items:center; justify-content:center; gap:5px; min-width:28px; min-height:28px; padding:5px!important; }
+.has-icon { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+#tools .ui-icon { width:20px; height:20px; }
+#tools button { display:inline-flex; align-items:center; justify-content:center; }
+#tools small { line-height:1; }
+.type-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; width:18px; }
+.type-icon .ui-icon { width:15px; height:15px; color:#8490a5; }
+.disclosure-placeholder { visibility:hidden; pointer-events:none; }
+.context-menu button { display:flex; align-items:center; gap:9px; }
+.inspector-actions .icon-button { flex:1; }
 `;

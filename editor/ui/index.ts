@@ -1,7 +1,9 @@
 import type { Data, EditorServices, MountOptions, Point, Tool, WorkspaceHandle } from "../contracts";
 import { createShape, remapReferences, isEditable, ancestors } from "../document";
-import { el, button, input, select, check, section, row, clone, toast, askName, modal, jsonEditor } from "./dom";
+import { el, button, iconButton, labeledIconButton, input, select, check, section, row, clone, toast, askName, modal, jsonEditor } from "./dom";
 import { workspaceStyle } from "./style";
+import { createIcon } from "./icons";
+import { chooseFiles, readImageFile } from "./picker";
 import { createTextSession } from "../interaction/text";
 import { createCanvasInteraction } from "../interaction/canvas";
 import { createClipboard } from "../interaction/clipboard";
@@ -61,17 +63,17 @@ const toolEntries: [
     string,
     string
 ][] = [
-    ["move", "\u2196", "V"],
-    ["frame", "\u25A3", "F"],
-    ["rect", "\u25A1", "R"],
-    ["ellipse", "\u25CB", "O"],
-    ["polygon", "\u2B20", ""],
-    ["star", "\u2606", ""],
-    ["line", "\u2571", "L"],
-    ["arrow", "\u2197", "\u21E7L"],
-    ["pen", "\u2301", "P"],
-    ["pencil", "\u270E", "\u21E7P"],
-    ["text", "T", "T"]
+    ["move", "pointer", "V"],
+    ["frame", "frame", "F"],
+    ["rect", "square", "R"],
+    ["ellipse", "circle", "O"],
+    ["polygon", "hexagon", ""],
+    ["star", "star", ""],
+    ["line", "line", "L"],
+    ["arrow", "arrow-up-right", "\u21E7L"],
+    ["pen", "vector-bezier", "P"],
+    ["pencil", "pencil", "\u21E7P"],
+    ["text", "typography", "T"]
 ];
 const shortcutMap: Record<string, string> = {
     "mod+z": "edit.undo",
@@ -282,6 +284,9 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
                 closeMenu();
                 run(id);
             });
+            const toolIcon = toolEntries.find(([tool]) => id === "tool." + tool)?.[1];
+            if (toolIcon)
+                item.prepend(createIcon(toolIcon));
             item.setAttribute("role", "menuitem");
             item.dataset.key = id;
             item.disabled = !services.commands.enabled(id);
@@ -358,14 +363,14 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
         pasteHere.dataset.key = "edit.paste-here";
         menu?.prepend(pasteHere);
     }
-    const collapse = button("\u2630", () => {
+    const collapse = iconButton("layout-sidebar", () => {
         root.classList.toggle("collapsed");
         measure();
     }, "", "Collapse sidebar");
     collapse.id = "toggle-layers";
     header.prepend(collapse);
-    header.append(button("\u21B6", () => run("edit.undo"), "", "Undo"), button("\u21B7", () => run("edit.redo"), "", "Redo"), button("\u2318", () => quickActions(), "desktop-only", "Quick actions"), button("\u2315", () => openFind(), "desktop-only", "Find layers"));
-    const componentsButton = button("\u25C7", () => {
+    header.append(iconButton("arrow-back-up", () => run("edit.undo"), "", "Undo"), iconButton("arrow-forward-up", () => run("edit.redo"), "", "Redo"), iconButton("command", () => quickActions(), "desktop-only", "Quick actions"), iconButton("search", () => openFind(), "desktop-only", "Find layers"));
+    const componentsButton = iconButton("components", () => {
         leftTab = "assets";
         renderLeft();
         root.classList.add("mobile-left");
@@ -401,7 +406,7 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
             });
         }
     };
-    zoomControl.append(button("\u2212", () => run("view.zoom-out"), "", "Zoom out"), zoomSelect, button("+", () => run("view.zoom-in"), "", "Zoom in"));
+    zoomControl.append(iconButton("zoom-out", () => run("view.zoom-out"), "", "Zoom out"), zoomSelect, iconButton("zoom-in", () => run("view.zoom-in"), "", "Zoom in"));
     header.append(zoomControl);
     for (const [groupIndex, entries] of [[0, toolEntries.slice(0, 1)], [1, toolEntries.slice(1, 2)], [2, toolEntries.slice(2, 8)], [3, toolEntries.slice(8, 10)], [4, toolEntries.slice(10)]] as [
         number,
@@ -410,14 +415,14 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
         const group = el("div", "tool-group");
         group.dataset.group = String(groupIndex);
         for (const [tool, icon, key] of entries) {
-            const b = button(icon, () => run("tool." + tool), "", `${tool[0].toUpperCase() + tool.slice(1)}${key ? " (" + key + ")" : ""}`);
+            const b = iconButton(icon, () => run("tool." + tool), "", `${tool[0].toUpperCase() + tool.slice(1)}${key ? " (" + key + ")" : ""}`);
             b.dataset.tool = tool;
             if (key)
                 b.append(el("small", "", key));
             group.append(b);
         }
         if (groupIndex === 2 || groupIndex === 3) {
-            group.append(button("\u2304", eventlessToolMenu(groupIndex), "", "More drawing tools"));
+            group.append(iconButton("chevron-down", eventlessToolMenu(groupIndex), "", "More drawing tools"));
         }
         tools.append(group);
     }
@@ -438,22 +443,22 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
         };
     }
     const mobile = el("div", "mobile-controls");
-    mobile.append(button("\u21B6", () => run("edit.undo"), "", "Undo"), button("Fit", () => canvas.fit([])), button("\u25C7", () => run("edit.duplicate"), "", "Duplicate"), button("\u232B", () => run("edit.delete"), "", "Delete"), button("Order", () => {
+    mobile.append(iconButton("arrow-back-up", () => run("edit.undo"), "", "Undo"), labeledIconButton("arrows-maximize", "Fit", () => canvas.fit([])), iconButton("copy", () => run("edit.duplicate"), "", "Duplicate"), iconButton("trash", () => run("edit.delete"), "", "Delete"), labeledIconButton("stack", "Order", () => {
         const box = mobile.getBoundingClientRect();
         commandMenu({
             clientX: box.x + box.width / 2,
             clientY: box.y - 180
         }, ["order.front", "order.forward", "order.backward", "order.back"]);
-    }), button("Multi", () => {
+    }), labeledIconButton("select-all", "Multi", () => {
         editor.multiSelect = !editor.multiSelect;
         mobile.querySelector("[aria-label=\"Multi\"]")?.setAttribute("aria-pressed", String(editor.multiSelect));
-    }), button("Done", async () => {
+    }), labeledIconButton("check", "Done", async () => {
         await text.exit(true);
         root.classList.remove("mobile-left", "mobile-right");
-    }), button("Layers", () => {
+    }), labeledIconButton("layout-sidebar", "Layers", () => {
         root.classList.toggle("mobile-left");
         root.classList.remove("mobile-right");
-    }), button("Design", () => {
+    }), labeledIconButton("adjustments-horizontal", "Design", () => {
         root.classList.toggle("mobile-right");
         root.classList.remove("mobile-left");
     }));
@@ -574,14 +579,14 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
         }
         const pages = el("div", "pages");
         const ph = el("div", "panel-heading", "Pages");
-        ph.append(button("+", () => pageAction("add", editor.pageId), "", "Add page"));
+        ph.append(iconButton("plus", () => pageAction("add", editor.pageId), "", "Add page"));
         pages.append(ph);
         for (const id of editor.doc.pages) {
             const page = editor.doc.pagesById[id];
             const n = el("div", `page-row ${id === editor.pageId ? "active" : ""}`);
             n.dataset.id = id;
             n.draggable = isEditable(editor.page, id);
-            n.append(el("span", "", "\u25A4"));
+            n.append(createIcon("file", 16));
             const name = el("span", "name", page.name ?? "Page");
             n.append(name);
             n.onclick = async () => {
@@ -589,7 +594,7 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
                 editor.setPage(id);
             };
             n.ondblclick = () => pageAction("rename", id);
-            n.append(button("\u22EF", () => {
+            n.append(iconButton("dots", () => {
                 modal("Page actions", (body, close) => {
                     for (const action of ["rename", "clone", "delete"])
                         body.append(button(action[0].toUpperCase() + action.slice(1), () => {
@@ -651,25 +656,39 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
             n.dataset.locked = String(!!shape.locked);
             n.style.paddingLeft = `${8 + depth * 14}px`;
             n.draggable = isEditable(editor.page, id);
-            const disclosure = button(shape.childIds?.length ? (collapsedNodes.has(id) ? "\u203A" : "\u2304") : "", () => {
+            const disclosure = iconButton(collapsedNodes.has(id) ? "chevron-right" : "chevron-down", () => {
                 if (collapsedNodes.has(id))
                     collapsedNodes.delete(id);
                 else
                     collapsedNodes.add(id);
                 renderLeft();
             }, "", "Expand layer");
+            if (!shape.childIds?.length) {
+                disclosure.classList.add("disclosure-placeholder");
+                disclosure.setAttribute("aria-hidden", "true");
+                disclosure.tabIndex = -1;
+            }
             if (shape.childIds)
                 n.setAttribute("aria-expanded", String(!collapsedNodes.has(id)));
-            n.append(disclosure, el("span", "type-icon", shape.isMain ? "\u25C7" : shape.isInstanceRoot ? "\u25C8" : shape.type === "text" ? "T" : shape.type === "frame" ? "\u25A3" : shape.type === "path" ? "\u2301" : "\u25A1"));
+            const typeIcon = el("span", "type-icon");
+            typeIcon.append(createIcon(shape.isMain ? "components" : shape.isInstanceRoot ? "diamond" : ({
+                text: "typography",
+                frame: "frame",
+                group: "box",
+                path: "vector-bezier",
+                image: "photo",
+                boolean: "components"
+            } as Record<string, string>)[shape.type] ?? "square", 15));
+            n.append(disclosure, typeIcon);
             const name = el("span", "name", shape.name ?? shape.type);
             n.append(name);
-            n.append(button(shape.hidden ? "\u25CB" : "\u25C9", () => editor.transact("Toggle layer visibility", doc => {
+            n.append(iconButton(shape.hidden ? "eye-off" : "eye", () => editor.transact("Toggle layer visibility", doc => {
                 const page = doc.pagesById[editor.pageId];
                 if (ancestors(page, id).some(parent => parent.locked || parent.hidden))
                     return;
                 const s = page.objects[id];
                 s.hidden = !s.hidden;
-            }), "", "Toggle visibility"), button(shape.locked ? "\u25A3" : "\u2311", () => editor.transact("Toggle layer lock", doc => {
+            }), "", "Toggle visibility"), iconButton(shape.locked ? "lock" : "lock-open", () => editor.transact("Toggle layer lock", doc => {
                 const page = doc.pagesById[editor.pageId];
                 if (ancestors(page, id).some(parent => parent.locked || parent.hidden))
                     return;
@@ -924,10 +943,10 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
                     services.styles.apply(style.id, editor.selection.filter(id => isEditable(editor.page, id)), style.type === "paint" ? "fill" : style.type === "effect" ? "effect" : "text");
                 else
                     editStyle(style);
-            }), button("\u22EF", () => editStyle(style), "", "Edit style"));
+            }), iconButton("dots", () => editStyle(style), "", "Edit style"));
             content.append(r);
         }
-        content.append(button("+ Style", () => modal("Create local style", (body, close) => {
+        content.append(labeledIconButton("plus", "Style", () => modal("Create local style", (body, close) => {
             let name = "Style", type = "paint";
             body.append(input("Name", name, v => name = v), select("Type", type, ["paint", "text", "effect"], v => type = v), button("Create", () => {
                 const value = type === "paint" ? [{
@@ -944,29 +963,32 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
                 close();
                 renderLeft();
             }));
-        })));
+        }), "", "+ Style"));
         content.append(el("div", "asset-heading", "Libraries"));
         const libraries = services.libraries?.list?.() ?? Object.values(editor.doc.libraries ?? {});
         for (const library of libraries) {
             const r = el("div", "row");
-            r.append(check(library.name ?? library.id, library.enabled !== false, v => services.libraries?.enable(library.id, v)), button("\u22EF", () => libraryDialog(library), "", "Library settings"));
+            r.append(check(library.name ?? library.id, library.enabled !== false, v => services.libraries?.enable(library.id, v)), iconButton("dots", () => libraryDialog(library), "", "Library settings"));
             content.append(r);
         }
-        content.append(button("Import library", () => {
-            const picker = el("input");
-            picker.type = "file";
-            picker.accept = ".json";
-            picker.onchange = async () => {
-                const file = picker.files?.[0];
-                if (!file)
-                    return;
+        content.append(button("Import library", async () => {
+            const pageId = editor.pageId;
+            const current = () => !destroyed && editor.pageId === pageId;
+            try {
+                await text.exit(true);
+                if (!current()) return;
+                const [file] = await chooseFiles(options, { kind: "library" }, signal);
+                if (!file || !current()) return;
                 const snapshot = JSON.parse(await file.text());
+                if (!current()) return;
                 if (!services.libraries?.add)
                     throw Error("Library service unavailable");
                 services.libraries.add(snapshot);
                 renderLeft();
-            };
-            picker.click();
+            }
+            catch (error) {
+                if (current()) throw error;
+            }
         }), button("Place image / font", pickFiles));
     }
     async function editStyle(style: Data) {
@@ -979,11 +1001,11 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
                     [style.type === "paint" ? "paints" : style.type === "text" ? "text" : "effects"]: v
                 });
                 renderLeft();
-            })), button("Duplicate", () => {
+            })), iconButton("copy", () => {
                 services.styles.create(style.type, style.name + " copy", clone(style.type === "paint" ? style.paints : style.type === "text" ? style.text : style.effects));
                 close();
                 renderLeft();
-            }), button("Delete", () => {
+            }, "", "Duplicate"), button("Delete", () => {
                 services.styles.remove(style.id);
                 close();
                 renderLeft();
@@ -1187,7 +1209,7 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
             wholeWord = v;
             search();
         }));
-        const searchRow = row(query, count, button("\u2191", () => next(-1), "", "Previous match"), button("\u2193", () => next(1), "", "Next match"), button("\u00D7", () => {
+        const searchRow = row(query, count, iconButton("arrow-up", () => next(-1), "", "Previous match"), iconButton("arrow-down", () => next(1), "", "Next match"), iconButton("x", () => {
             findBar?.remove();
             findBar = null;
             stage.focus();
@@ -1224,53 +1246,33 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
             });
         });
     }
-    function placeImage() {
-        return new Promise<Data | null>(resolve => {
-            const picker = el("input");
-            picker.type = "file";
-            picker.accept = "image/*";
-            picker.oncancel = () => resolve(null);
-            picker.onchange = async () => {
-                const file = picker.files?.[0];
-                if (!file) {
-                    resolve(null);
-                    return;
-                }
-                try {
-                    const src = await new Promise<string>((ok, fail) => {
-                        const reader = new FileReader();
-                        reader.onload = () => ok(String(reader.result));
-                        reader.onerror = () => fail(reader.error);
-                        reader.readAsDataURL(file);
-                    });
-                    const image = new Image();
-                    image.src = src;
-                    await image.decode();
-                    resolve({
-                        src,
-                        width: image.naturalWidth,
-                        height: image.naturalHeight,
-                        mimeType: file.type
-                    });
-                }
-                catch (error) {
-                    toast(String(error), "error");
-                    resolve(null);
-                }
-            };
-            picker.click();
-        });
+    async function placeImage(): Promise<Data | null> {
+        const pageId = editor.pageId;
+        const current = () => !destroyed && editor.pageId === pageId;
+        try {
+            const [file] = await chooseFiles(options, { kind: "image" }, signal);
+            if (!file || !current()) return null;
+            const image = await readImageFile(file);
+            return current() ? image : null;
+        }
+        catch (error) {
+            if (current()) toast(String(error), "error");
+            return null;
+        }
     }
-    function pickFiles() {
-        const picker = el("input");
-        picker.type = "file";
-        picker.accept = "image/*,.woff,.woff2,.ttf,.otf,.json";
-        picker.multiple = true;
-        picker.onchange = () => {
-            if (picker.files)
-                text.exit(true).then(() => clipboard.importFiles(Array.from(picker.files!), clipboard.center())).catch(e => toast(String(e), "error"));
-        };
-        picker.click();
+    async function pickFiles() {
+        const pageId = editor.pageId;
+        const current = () => !destroyed && editor.pageId === pageId;
+        try {
+            await text.exit(true);
+            if (!current()) return;
+            const files = await chooseFiles(options, { kind: "assets", multiple: true }, signal);
+            if (!files.length || !current()) return;
+            await clipboard.importFiles(files, clipboard.center());
+        }
+        catch (error) {
+            if (current()) throw error;
+        }
     }
     function key(event: KeyboardEvent) {
         if (destroyed || event.defaultPrevented || event.isComposing)

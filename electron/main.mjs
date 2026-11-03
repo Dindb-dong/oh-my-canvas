@@ -1,3 +1,4 @@
+import {createFileDialogs} from './file-dialogs.mjs';
 import {app,BrowserWindow,ipcMain,dialog,protocol,Menu,clipboard} from 'electron';
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
@@ -19,6 +20,7 @@ if(profile)app.setPath('userData',path.resolve(profile));
 if(!app.requestSingleInstanceLock()){app.quit();}else{
 protocol.registerSchemesAsPrivileged([{scheme:'omc',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true,stream:true}}]);
 app.whenReady().then(async()=>{
+const fileDialogs=createFileDialogs(dialog);
 const dir=app.getPath('userData'),store=new Store(path.join(dir,'documents'));
 let win,current,collab,bridge,saveTimer,quitting=false,seq=0;
 let prefs={name:os.userInfo().username},prefsWork=Promise.resolve();
@@ -83,7 +85,7 @@ const dispatch=async(action,data)=>{
     case 'flush':await save();return true;
     case 'thumbnail':{requireCurrent();if(typeof data.src==='string'&&data.src.startsWith('data:image/')&&data.src.length<500000){current.thumbnail=data.src;dirty();}return true;}
     case 'import':{
-      const result=await dialog.showOpenDialog(win,{title:'Open canvas',filters:[{name:'Canvas documents',extensions:['omc','json']}],properties:['openFile']});
+      const result=await fileDialogs.open({title:'Open canvas',filters:[{name:'Canvas documents',extensions:['omc','json']}],properties:['openFile']});
       if(result.canceled)return null;
       const stat=await fs.stat(result.filePaths[0]);if(stat.size>MAX_ENVELOPE_BYTES)throw Error('Document file exceeds 24 MiB');
       const raw=await fs.readFile(result.filePaths[0],'utf8');
@@ -97,14 +99,14 @@ const dispatch=async(action,data)=>{
     }
     case 'export-file':{
       requireCurrent();const file=exportFileData(data);
-      const result=await dialog.showSaveDialog(win,{defaultPath:file.name,filters:[{name:file.format.toUpperCase(),extensions:[file.format]}]});
+      const result=await fileDialogs.save({defaultPath:file.name,filters:[{name:file.format.toUpperCase(),extensions:[file.format]}]});
       if(result.canceled)return false;
       await atomicWrite(result.filePath,file.bytes);return true;
     }
     case 'export':{
       requireCurrent();const format=data.format;
       if(!['omc','json','svg','png'].includes(format))throw Error('Unsupported export');
-      const result=await dialog.showSaveDialog(win,{defaultPath:current.title.replace(/[\\/:*?"<>|]/g,'-')+'.'+format,filters:[{name:format.toUpperCase(),extensions:[format]}]});
+      const result=await fileDialogs.save({defaultPath:current.title.replace(/[\\/:*?"<>|]/g,'-')+'.'+format,filters:[{name:format.toUpperCase(),extensions:[format]}]});
       if(result.canceled)return false;
       let content=format==='omc'?encodeFile(current):data.content;
       if(typeof content!=='string'||content.length>100*1024*1024)throw Error('Invalid export data');
@@ -144,7 +146,7 @@ const dispatch=async(action,data)=>{
   }
 };
 let operations=Promise.resolve();
-ipcMain.handle('omc:invoke',async(event,action,data)=>{trusted(event);if(action==='cursor')return dispatch(action,data);const result=operations.then(()=>dispatch(action,data));operations=result.catch(()=>{});return result;});
+ipcMain.handle('omc:invoke',async(event,action,data)=>{trusted(event);if(action==='pick-files')return fileDialogs.pick(data);if(action==='cursor')return dispatch(action,data);const result=operations.then(()=>dispatch(action,data));operations=result.catch(()=>{});return result;});
 ipcMain.on('omc:tool-result',(event,id,result)=>{trusted(event);const pending=pendingTools.get(id);if(pending){clearTimeout(pending.timer);pendingTools.delete(id);pending.resolve(result);}});
 bridge=await startMcpBridge({dir,dispatch:call=>{
   if(!current)throw Error('Open a document in Oh My Canvas first');

@@ -1,4 +1,5 @@
 import type { Data } from "../contracts";
+import { createIcon } from "./icons";
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text?: string): HTMLElementTagNameMap[K] {
     const n = document.createElement(tag);
     n.className = cls;
@@ -22,6 +23,16 @@ export function button(label: string, run: () => unknown, cls = "", title = labe
         }
     });
     return n;
+}
+export function iconButton(name: string, run: () => unknown, cls = "", title: string) {
+    const control = button("", run, `icon-button ${cls}`.trim(), title);
+    control.append(createIcon(name));
+    return control;
+}
+export function labeledIconButton(name: string, label: string, run: () => unknown, cls = "", title = label) {
+    const control = button("", run, `has-icon ${cls}`.trim(), title);
+    control.append(createIcon(name), document.createTextNode(label));
+    return control;
 }
 export function toast(message: string, kind = "status") {
     document.querySelector(".omc-toast")?.remove();
@@ -192,7 +203,7 @@ export function modal(title: string, build: (body: HTMLElement, close: () => voi
     const previous = document.activeElement as HTMLElement;
     const dialog = el("dialog", "omc-dialog");
     const head = el("header");
-    head.append(el("h2", "", title), button("\u00D7", () => dialog.close(), "close", "Close"));
+    head.append(el("h2", "", title), iconButton("x", () => dialog.close(), "close", "Close"));
     const body = el("div", "dialog-body");
     dialog.append(head, body);
     const close = () => dialog.close();

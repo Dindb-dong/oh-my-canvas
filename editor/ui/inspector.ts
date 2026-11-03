@@ -1,7 +1,8 @@
-import type { Data, EditorServices, Shape } from "../contracts";
+import type { Data, EditorServices, Shape, MountOptions } from "../contracts";
 import { moveTree, resizeTree, topLevelIds, isEditable, ancestors } from "../document";
 import { rotateShapes, setPathHandle } from "../commands";
-import { el, button, input, select, check, section, row, clone, jsonEditor, askName, modal, toast, download } from "./dom";
+import { el, button, iconButton, labeledIconButton, input, select, check, section, row, clone, jsonEditor, askName, modal, toast, download } from "./dom";
+import { chooseFiles, readImageFile } from "./picker";
 import type { createTextSession } from "../interaction/text";
 import type { createCanvasInteraction } from "../interaction/canvas";
 const blends = [
@@ -22,8 +23,9 @@ const blends = [
     "color",
     "luminosity"
 ];
-export function createInspector(root: HTMLElement, services: EditorServices, text: ReturnType<typeof createTextSession>, canvas: ReturnType<typeof createCanvasInteraction>, options: Data) {
+export function createInspector(root: HTMLElement, services: EditorServices, text: ReturnType<typeof createTextSession>, canvas: ReturnType<typeof createCanvasInteraction>, options: Data & Pick<MountOptions, "pickFiles">) {
     const editor = services.editor;
+    const pickerAbort = new AbortController();
     let destroyed = false, rendering = false, numericSession = false;
     const selected = () => editor.selection.map(id => editor.page.objects[id]).filter((s): s is Shape => !!s);
     const applyChange = (label: string, apply: (doc: Data) => void) => {
@@ -116,7 +118,21 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
     };
     const choice = (label: string, key: string, values: string[], fallback = "") => select(label, value(key, fallback), values, v => patch(key, v));
     const toggle = (label: string, key: string) => check(label, value(key), v => patch(key, v));
-    const action = (id: string, label: string) => button(label, () => services.commands.run(id), undefined, label);
+    const action = (id: string, label: string) => {
+        const icons: Record<string, string> = {
+            "align.left": "align-box-left-middle",
+            "align.h-center": "align-box-center-middle",
+            "align.right": "align-box-right-middle",
+            "align.top": "align-box-top-center",
+            "align.v-center": "align-box-center-middle",
+            "align.bottom": "align-box-bottom-center",
+            "distribute.h": "arrows-horizontal",
+            "distribute.v": "arrows-vertical",
+            "transform.flip-h": "flip-horizontal",
+            "transform.flip-v": "flip-vertical"
+        };
+        return icons[id] ? iconButton(icons[id], () => services.commands.run(id), "", label) : button(label, () => services.commands.run(id), undefined, label);
+    };
     async function textStyle(patch: Data) {
         const ids = [...editor.selection];
         if (patch.fontFamily) {
@@ -149,7 +165,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
     function heading(title: string, add?: () => void) {
         const s = section(title);
         if (add)
-            s.querySelector("h3")!.append(button("+", add, "", "Add " + title.toLowerCase()));
+            s.querySelector("h3")!.append(iconButton("plus", add, "", "Add " + title.toLowerCase()));
         return s;
     }
     function paintPanel(field: "fills" | "strokes") {
@@ -210,22 +226,22 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
                     });
                     canvas.editGradient(selected()[0].id, field, index);
                 }
-            }), button(paint.hidden ? "\u25CB" : "\u25C9", () => set({
+            }), iconButton(paint.hidden ? "eye-off" : "eye", () => set({
                 hidden: !paint.hidden
-            }), "", "Toggle paint visibility"), button("\u2212", remove, "", "Remove paint"));
+            }), "", "Toggle paint visibility"), iconButton("minus", remove, "", "Remove paint"));
             item.append(top);
-            item.append(row(button("\u2191", () => update("Reorder paint", shape => {
+            item.append(row(iconButton("arrow-up", () => update("Reorder paint", shape => {
                 if (index > 0) {
                     const paints = shape[field];
                     [paints[index - 1], paints[index]] = [paints[index], paints[index - 1]];
                 }
-            }), "", "Move paint up"), button("\u2193", () => update("Reorder paint", shape => {
+            }), "", "Move paint up"), iconButton("arrow-down", () => update("Reorder paint", shape => {
                 const paints = shape[field];
                 if (index < paints.length - 1)
                     [paints[index], paints[index + 1]] = [paints[index + 1], paints[index]];
             }), "", "Move paint down")));
             if (mode === "solid" && "EyeDropper" in window)
-                item.append(button("Eyedropper", async () => {
+                item.append(labeledIconButton("color-picker", "Eyedropper", async () => {
                     try {
                         const result = await new (window as any).EyeDropper().open();
                         set({
@@ -274,7 +290,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
                     setGradient({
                         stops
                     });
-                }, "number"), button("\u2212", () => {
+                }, "number"), iconButton("minus", () => {
                     const stops = clone(gradient.stops);
                     if (stops.length > 2) {
                         stops.splice(i, 1);
@@ -283,18 +299,18 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
                         });
                     }
                 }, "", "Remove stop"))));
-                item.append(row(button("Flip", () => setGradient({
+                item.append(row(labeledIconButton("flip-horizontal", "Flip", () => setGradient({
                     x1: gradient.x2,
                     y1: gradient.y2,
                     x2: gradient.x1,
                     y2: gradient.y1
-                })), button("Rotate 90\u00B0", () => setGradient({
+                })), labeledIconButton("rotate-clockwise", "Rotate 90\u00B0", () => setGradient({
                     x1: 1 - gradient.y1,
                     y1: gradient.x1,
                     x2: 1 - gradient.y2,
                     y2: gradient.x2
                 }))));
-                item.append(button("+ Stop", () => {
+                item.append(labeledIconButton("plus", "Stop", () => {
                     if (gradient.stops.length >= 16)
                         throw Error("A gradient supports up to 16 stops");
                     return setGradient({
@@ -303,7 +319,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
                                 offset: 0.5
                             }].sort((a, b) => a.offset - b.offset)
                     });
-                }));
+                }, "", "+ Stop"));
                 for (const pair of [["x1", "y1"], ["x2", "y2"]])
                     item.append(row(...pair.map(key => input(key, gradient[key], v => setGradient({
                         [key]: v
@@ -378,40 +394,25 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
         s.append(button("Apply style", () => stylePicker(field)), button("Create style", () => saveStyle("paint", field)));
         return s;
     }
-    function imagePaint(field: string, index: number) {
-        const picker = el("input");
-        picker.type = "file";
-        picker.accept = "image/*";
-        picker.onchange = async () => {
-            const file = picker.files?.[0];
-            if (!file)
-                return;
-            const url = await new Promise<string>((resolve, reject) => {
-                const r = new FileReader();
-                r.onload = () => resolve(String(r.result));
-                r.onerror = () => reject(r.error);
-                r.readAsDataURL(file);
-            });
-            const image = new Image();
-            image.src = url;
-            await image.decode();
+    async function imagePaint(field: string, index: number) {
+        const pageId = editor.pageId, ids = [...editor.selection];
+        const current = () => !destroyed && editor.pageId === pageId && JSON.stringify(editor.selection) === JSON.stringify(ids);
+        try {
+            const [file] = await chooseFiles(options, { kind: "image" }, pickerAbort.signal);
+            if (!file || !current()) return;
+            const image = await readImageFile(file);
+            if (!current()) return;
             update("Set image paint", shape => {
+                if (!shape[field]?.[index]) return;
                 shape[field][index] = {
-                    ...shape[field][index],
-                    color: undefined,
-                    gradient: undefined,
-                    image: {
-                        id: url,
-                        src: url,
-                        width: image.naturalWidth,
-                        height: image.naturalHeight,
-                        mimeType: file.type,
-                        scaleMode: "fill"
-                    }
+                    ...shape[field][index], color: undefined, gradient: undefined,
+                    image: { id: image.src, ...image, scaleMode: "fill" }
                 };
             });
-        };
-        picker.click();
+        }
+        catch (error) {
+            if (current()) toast(String(error), "error");
+        }
     }
     function stylePicker(kind: string) {
         modal("Apply style", (body, close) => {
@@ -463,7 +464,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
                     close();
                 }));
             }
-            body.append(button("Detach style", () => {
+            body.append(labeledIconButton("unlink", "Detach style", () => {
                 const detach = () => services.styles.detach(editor.selection.filter(id => isEditable(editor.page, id)), ({
                     fills: "fill",
                     strokes: "stroke",
@@ -755,9 +756,9 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             const set = (patch: Data) => update("Edit shadow", shape => Object.assign(shape.shadows[i], patch));
             item.append(row(select("Shadow", shadow.style, ["drop", "inner"], v => set({
                 style: v
-            })), button(shadow.hidden ? "\u25CB" : "\u25C9", () => set({
+            })), iconButton(shadow.hidden ? "eye-off" : "eye", () => set({
                 hidden: !shadow.hidden
-            })), button("\u2212", () => update("Remove shadow", shape => shape.shadows.splice(i, 1)))));
+            }), "", "Toggle shadow visibility"), iconButton("minus", () => update("Remove shadow", shape => shape.shadows.splice(i, 1)), "", "Remove")));
             for (const keys of [["offsetX", "offsetY"], ["blur", "spread"]])
                 item.append(row(...keys.map(key => input(key, shadow[key], v => set({
                     [key]: v
@@ -767,10 +768,10 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             }), "color"), input("Opacity", shadow.opacity ?? 1, v => set({
                 opacity: v
             }), "number")));
-            item.append(row(button("\u2191", () => update("Reorder shadow", s => {
+            item.append(row(iconButton("arrow-up", () => update("Reorder shadow", s => {
                 if (i > 0)
                     [s.shadows[i - 1], s.shadows[i]] = [s.shadows[i], s.shadows[i - 1]];
-            }), "", "Move shadow up"), button("\u2193", () => update("Reorder shadow", s => {
+            }), "", "Move shadow up"), iconButton("arrow-down", () => update("Reorder shadow", s => {
                 if (i < s.shadows.length - 1)
                     [s.shadows[i], s.shadows[i + 1]] = [s.shadows[i + 1], s.shadows[i]];
             }), "", "Move shadow down")));
@@ -969,7 +970,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             const set = (patch: Data) => update("Edit export setting", s => Object.assign(s.exportSettings[index], patch));
             item.append(row(select("Format", setting.format, ["png", "jpg", "webp", "svg", "pdf"], v => set({
                 format: v
-            })), button("\u2212", () => update("Remove export setting", s => s.exportSettings.splice(index, 1)))));
+            })), iconButton("minus", () => update("Remove export setting", s => s.exportSettings.splice(index, 1)), "", "Remove")));
             item.append(select("Preset", "", [
                 "",
                 "0.5x",
@@ -1042,7 +1043,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             axis: "x",
             position: 0
         })));
-        guides.forEach((guide: Data, index: number) => panel.append(row(select("Axis", guide.axis, ["x", "y"], v => mutate("Edit guide", g => g[index].axis = v)), input("Position", guide.position, v => mutate("Edit guide", g => g[index].position = v), "number"), button("\u2212", () => mutate("Delete guide", g => g.splice(index, 1))))));
+        guides.forEach((guide: Data, index: number) => panel.append(row(select("Axis", guide.axis, ["x", "y"], v => mutate("Edit guide", g => g[index].axis = v)), input("Position", guide.position, v => mutate("Edit guide", g => g[index].position = v), "number"), iconButton("minus", () => mutate("Delete guide", g => g.splice(index, 1)), "", "Remove"))));
         return panel;
     }
     function gridPanel(shape: Shape) {
@@ -1056,9 +1057,9 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             const item = el("div", "paint-row"), set = (patch: Data) => update("Edit layout grid", s => Object.assign(s.layoutGrids[index], patch));
             item.append(row(select("Pattern", grid.pattern, ["grid", "columns", "rows"], v => set({
                 pattern: v
-            })), button(grid.hidden ? "\u25CB" : "\u25C9", () => set({
+            })), iconButton(grid.hidden ? "eye-off" : "eye", () => set({
                 hidden: !grid.hidden
-            }), "", "Toggle grid visibility"), button("\u2212", () => update("Remove layout grid", s => s.layoutGrids.splice(index, 1)))));
+            }), "", "Toggle grid visibility"), iconButton("minus", () => update("Remove layout grid", s => s.layoutGrids.splice(index, 1)), "", "Remove")));
             item.append(row(input("Size", grid.size ?? 8, v => set({
                 size: Math.max(1, v)
             }), "number"), input("Opacity", grid.opacity ?? 0.1, v => set({
@@ -1138,15 +1139,15 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
         top.append(input("Name", value("name"), v => patch("name", v)), row(num("X", "x"), num("Y", "y")), row(num("W", "width"), num("H", "height")), row(num("Rotate", "rotation"), toggle("Proportions", "constrainProportions")), row(toggle("Hidden", "hidden"), toggle("Locked", "locked")));
         const align = el("div", "inspector-actions");
         for (const [id, label] of [
-            ["left", "\u21E4"],
-            ["h-center", "\u2194"],
-            ["right", "\u21E5"],
-            ["top", "\u21A5"],
-            ["v-center", "\u2195"],
-            ["bottom", "\u21A7"]
+            ["left", "Align left"],
+            ["h-center", "Align horizontal center"],
+            ["right", "Align right"],
+            ["top", "Align top"],
+            ["v-center", "Align vertical center"],
+            ["bottom", "Align bottom"]
         ])
             align.append(action("align." + id, label));
-        top.append(align, row(action("distribute.h", "Distribute \u2194"), action("distribute.v", "Distribute \u2195")), row(action("transform.flip-h", "Flip \u2194"), action("transform.flip-v", "Flip \u2195")));
+        top.append(align, row(action("distribute.h", "Distribute horizontally"), action("distribute.v", "Distribute vertically")), row(action("transform.flip-h", "Flip horizontally"), action("transform.flip-v", "Flip vertically")));
         design.append(top);
         const appearance = section("Appearance");
         appearance.append(row(num("Opacity", "opacity", 1), choice("Blend", "blendMode", blends, "normal")));
@@ -1300,6 +1301,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
         exportLayer,
         destroy() {
             destroyed = true;
+            pickerAbort.abort();
             root.dispatchEvent(new Event("numeric-dispose"));
             if (numericSession) {
                 numericSession = false;

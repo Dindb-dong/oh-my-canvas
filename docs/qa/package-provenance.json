@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "at": "2026-11-03T13:00:37.824Z",
+  "at": "2026-11-03T15:05:47.623Z",
   "passed": true,
   "archive": "release/mac-arm64/Oh My Canvas.app/Contents/Resources/app.asar",
-  "archiveSha256": "069a40ce4d8488442d79b94a453ecba8b86bc14b61fcdab8b634aa5d7ecfbc0a",
+  "archiveSha256": "2c69f8368d714dd86cab9e09d56925404659cb916408aedaba7989f49b7bec31",
   "scope": "ASAR path inventory and exact current file bytes only. No compiled-code AST analysis, source-authorship proof, exhaustive restricted-source detection, legal clearance or reproducible-build claim.",
-  "indexedPaths": 7629,
+  "indexedPaths": 4260,
   "excludedPathPatterns": [
     "vendor/** at any depth",
     "apps/** at any depth",
@@ -32,15 +32,16 @@
   "rootLicenseSha256": "4a5e5cccfd0d73f6917a0f00e93afbccaf9106a989af0803bf2a740698198e66",
   "standaloneCli": {
     "matchesCurrentDist": true,
-    "bytes": 612469,
-    "sha256": "e76f3026e654a80ce96c68f2eba25f7ce918958d6f4d652d24667c45bd6c20ee"
+    "bytes": 613519,
+    "sha256": "4293582929d2f340d203d4d70151d3958717f87baa98ff15928b2eacd9c46981"
   },
   "groups": {
-    "dist": 178,
+    "dist": 180,
     "core": 6,
-    "electron": 3,
+    "electron": 4,
     "cli": 1,
     "root": 2,
+    "tabler-original": 2,
     "native-original": 39,
     "audited-wasm": 1,
     "electron-original": 2,
@@ -65,19 +66,19 @@
       "equal": true
     },
     {
-      "target": "dist/assets/index-BS1IF8Za.js",
-      "source": "dist/assets/index-BS1IF8Za.js",
+      "target": "dist/assets/index-B_irvURN.js",
+      "source": "dist/assets/index-B_irvURN.js",
       "group": "dist",
-      "bytes": 451212,
-      "sha256": "4e6cefbcd56a83a995d910dd6e9a1eb1ae2488349a8c788a3530fcb8e14ea2eb",
+      "bytes": 476223,
+      "sha256": "f19b51bf096a2c44db450776a0e0e7b1b4302f95f33b94b54716ac6f25d57749",
       "equal": true
     },
     {
-      "target": "dist/assets/index-Dl-EOww4.css",
-      "source": "dist/assets/index-Dl-EOww4.css",
+      "target": "dist/assets/index-wgLbSPNM.css",
+      "source": "dist/assets/index-wgLbSPNM.css",
       "group": "dist",
-      "bytes": 14265,
-      "sha256": "77b1ca140ff9b410821aab62284871d793953a38ad835d40d5fad9b0a4ced5f1",
+      "bytes": 14557,
+      "sha256": "15dd0987d966814e7f40868a3dcd704f12bbea38c856ad4fbad1a153343107df",
       "equal": true
     },
     {
@@ -1116,8 +1117,8 @@
       "target": "dist/index.html",
       "source": "dist/index.html",
       "group": "dist",
-      "bytes": 3092,
-      "sha256": "ca6a0a326c1d84609d024ad188962fe4fe216d2e3b88ea46cbce8f61bdfe8bf3",
+      "bytes": 3329,
+      "sha256": "e0958fcd13a9db22187930fcaadbabad890bddcc26c77e003c997b91027ae0b6",
       "equal": true
     },
     {
@@ -1452,16 +1453,32 @@
       "target": "dist/licenses/npm-runtime.txt",
       "source": "dist/licenses/npm-runtime.txt",
       "group": "dist",
-      "bytes": 165278,
-      "sha256": "d26c0979ceadaed28f1c3b3462152c428f6e61e5bd3f44ed8f350e3c4da5b8d9",
+      "bytes": 163079,
+      "sha256": "371f73fc320c411627af42162f31600dd14080fc82fb9c950c0f45f02093bf73",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/tabler-icons/LICENSE",
+      "source": "dist/licenses/tabler-icons/LICENSE",
+      "group": "dist",
+      "bytes": 1073,
+      "sha256": "b740a1d46122672da62833e97f7e7c8a13fa85cbc7445b584b297cc00dde93db",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/tabler-icons/manifest.json",
+      "source": "dist/licenses/tabler-icons/manifest.json",
+      "group": "dist",
+      "bytes": 18537,
+      "sha256": "0c2965bf4650db8860c0938d6343842c3ae2b9e134719a62a9ab54da849522ee",
       "equal": true
     },
     {
       "target": "dist/preload.cjs",
       "source": "dist/preload.cjs",
       "group": "dist",
-      "bytes": 930,
-      "sha256": "9f8e35fc02170bb8b7dbc60c3bf780309174b88f1cc4693ac4524575aaedfff6",
+      "bytes": 944,
+      "sha256": "5ef4f534fbd8616e28a1df6e84e0a5b35c2b97d3d828803dadb219433385fb02",
       "equal": true
     },
     {
@@ -1521,11 +1538,19 @@
       "equal": true
     },
     {
+      "target": "electron/file-dialogs.mjs",
+      "source": "electron/file-dialogs.mjs",
+      "group": "electron",
+      "bytes": 2141,
+      "sha256": "d4a94e920b2b7f57c4ecf12967713fede408be8de786b9b6490aa7a1176d43bd",
+      "equal": true
+    },
+    {
       "target": "electron/main.mjs",
       "source": "electron/main.mjs",
       "group": "electron",
-      "bytes": 14951,
-      "sha256": "3ef45f3f618bc8282d5f8bb874132d7e3c396815b8877b15f4c12038b1a4c14c",
+      "bytes": 15078,
+      "sha256": "2fbadf98dc98810808f086b1d13b2b8d4ad144d04cc99fc3970b08acbec01c04",
       "equal": true
     },
     {
@@ -1540,8 +1565,8 @@
       "target": "electron/preload.cjs",
       "source": "electron/preload.cjs",
       "group": "electron",
-      "bytes": 854,
-      "sha256": "1569d8c08874cc90fa18fdc986a3b8d736ea3d585712deb2fb7957c4134f3b83",
+      "bytes": 867,
+      "sha256": "7a690d79e5172370fe270c57178ffff257a2978f4bf45194cedcec80cae23b81",
       "equal": true
     },
     {
@@ -1564,8 +1589,24 @@
       "target": "THIRD_PARTY_NOTICES.md",
       "source": "THIRD_PARTY_NOTICES.md",
       "group": "root",
-      "bytes": 3154,
-      "sha256": "135426cdbe0098d27b9ecea4646df65f74cd86207bf9d6b620e55d12b21fc84f",
+      "bytes": 3604,
+      "sha256": "5e16b673546e95eef06cc061ef508437ca3c7e38d9b21e3fe14dbaf2790f7c3d",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/tabler-icons/LICENSE",
+      "source": "editor/ui/icons/tabler/LICENSE",
+      "group": "tabler-original",
+      "bytes": 1073,
+      "sha256": "b740a1d46122672da62833e97f7e7c8a13fa85cbc7445b584b297cc00dde93db",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/tabler-icons/manifest.json",
+      "source": "editor/ui/icons/tabler/manifest.json",
+      "group": "tabler-original",
+      "bytes": 18537,
+      "sha256": "0c2965bf4650db8860c0938d6343842c3ae2b9e134719a62a9ab54da849522ee",
       "equal": true
     },
     {

@@ -1,3 +1,8 @@
-import {createElement,Clock,Search,Star,LayoutGrid,List,File,Ellipsis,Plus,PanelLeft} from 'lucide';
-const nodes={clock:Clock,search:Search,star:Star,grid:LayoutGrid,list:List,file:File,more:Ellipsis,plus:Plus,panel:PanelLeft};
-export const icon=name=>createElement(nodes[name],{width:18,height:18,'stroke-width':1.6,'aria-hidden':'true'}).outerHTML;
+import { svgIcon } from '../editor/ui/icons/tabler/runtime.js';
+const names = {
+  clock: 'clock', search: 'search', star: 'star', grid: 'layout-grid', list: 'list',
+  file: 'file', more: 'dots', plus: 'plus', panel: 'layout-sidebar',
+  components: 'components', external: 'external-link', download: 'download', upload: 'upload',
+  close: 'x', minimize: 'arrows-minimize', maximize: 'arrows-maximize'
+};
+export const icon = name => svgIcon(names[name] ?? name);
