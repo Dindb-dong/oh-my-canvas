@@ -1,0 +1,24 @@
+{
+  "document": "component-library.omc",
+  "shapes": 1065,
+  "transport": "official MCP SDK stdio → actual Electron → renderer → durable commit/fsync → response",
+  "samples": 10,
+  "warmupEdits": 1,
+  "medianMethod": "middle value or midpoint for an even sample count",
+  "p95Method": "nearest rank",
+  "medianMs": 515.6826244999997,
+  "p95Ms": 603.4094169999998,
+  "samplesMs": [
+    446.4557920000002,
+    449.797458,
+    471.0269579999999,
+    483.87350000000015,
+    507.81133299999965,
+    523.5539159999998,
+    555.9548750000004,
+    563.7105410000004,
+    590.5740420000002,
+    603.4094169999998
+  ],
+  "at": "2026-11-03T12:33:19.265Z"
+}

@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "policy": {
+    "localSources": false,
+    "fallbackRendering": false,
+    "updateEnv": "ALLOW_FONT_MANIFEST_UPDATE=1"
+  },
+  "files": [
+    {
+      "filename": "0b6d2e1ca65de8a9.woff2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/woff2-dynamic-subset/Pretendard-Regular.subset.89.woff2",
+      "sha256": "83a14f747ce9273567a4cf60c7d79f848477233964f1f43018b98cd41a9acede",
+      "bytes": 9712
+    },
+    {
+      "filename": "47f7871b120acad9.woff2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/woff2-dynamic-subset/Pretendard-Regular.subset.91.woff2",
+      "sha256": "231cc8c05ecc16b9904dde4291484423616610609988496a0d1a6b6ca9a42eb1",
+      "bytes": 19780
+    },
+    {
+      "filename": "5130a0aac8240ed6.woff2",
+      "sourceUrl": "https://fonts.gstatic.com/s/notosanskr/v39/PbykFmXiEBPT4ITbgNA5Cgm20xz64px_1hVWr0wuPNGmlQNMEfD4.119.woff2",
+      "sha256": "12f2407b1bf32d201792a1f6635364cefea5b9c1ea1a3196c91823042b4fa2bb",
+      "bytes": 16676
+    },
+    {
+      "filename": "a57a52adcb86d6ba.woff",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/woff-dynamic-subset/Pretendard-Regular.subset.91.woff",
+      "sha256": "cff37f29c95664946a8d7228e40616d0193b30293a5a5df5413bec5cc8b73a84",
+      "bytes": 24616
+    },
+    {
+      "filename": "aa007782537a1538.woff2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/woff2-dynamic-subset/Pretendard-ExtraBold.subset.91.woff2",
+      "sha256": "80591165156456bd911b71f45a93481e4a115881a0a39e5b195f8d56fc6eed79",
+      "bytes": 20064
+    }
+  ],
+  "faces": [
+    {
+      "family": "Noto Sans KR",
+      "weight": "100",
+      "style": "normal",
+      "unicodeRange": "U+20-22, U+27-2a, U+2c-38, U+3a-3b, U+3f, U+41-47, U+4a-4c, U+4f-5d, U+61-7b, U+7d, U+a1, U+ab, U+ae, U+b7, U+bb, U+bf, U+2013-2014, U+201c-201d, U+2122, U+ac00, U+ace0, U+ae30, U+b2e4, U+b85c, U+b9ac, U+c0ac, U+c2a4, U+c2dc, U+c774, U+c778, U+c9c0, U+d558",
+      "filename": "5130a0aac8240ed6.woff2",
+      "sha256": "12f2407b1bf32d201792a1f6635364cefea5b9c1ea1a3196c91823042b4fa2bb",
+      "bytes": 16676,
+      "sourceUrl": "https://fonts.gstatic.com/s/notosanskr/v39/PbykFmXiEBPT4ITbgNA5Cgm20xz64px_1hVWr0wuPNGmlQNMEfD4.119.woff2"
+    },
+    {
+      "family": "Noto Sans KR",
+      "weight": "200",
+      "style": "normal",
+      "unicodeRange": "U+20-22, U+27-2a, U+2c-38, U+3a-3b, U+3f, U+41-47, U+4a-4c, U+4f-5d, U+61-7b, U+7d, U+a1, U+ab, U+ae, U+b7, U+bb, U+bf, U+2013-2014, U+201c-201d, U+2122, U+ac00, U+ace0, U+ae30, U+b2e4, U+b85c, U+b9ac, U+c0ac, U+c2a4, U+c2dc, U+c774, U+c778, U+c9c0, U+d558",
+      "filename": "5130a0aac8240ed6.woff2",
+      "sha256": "12f2407b1bf32d201792a1f6635364cefea5b9c1ea1a3196c91823042b4fa2bb",
+      "bytes": 16676,
+      "sourceUrl": "https://fonts.gstatic.com/s/notosanskr/v39/PbykFmXiEBPT4ITbgNA5Cgm20xz64px_1hVWr0wuPNGmlQNMEfD4.119.woff2"
+    },
+    {
+      "family": "Noto Sans KR",
+      "weight": "300",
+      "style": "normal",
+      "unicodeRange": "U+20-22, U+27-2a, U+2c-38, U+3a-3b, U+3f, U+41-47, U+4a-4c, U+4f-5d, U+61-7b, U+7d, U+a1, U+ab, U+ae, U+b7, U+bb, U+bf, U+2013-2014, U+201c-201d, U+2122, U+ac00, U+ace0, U+ae30, U+b2e4, U+b85c, U+b9ac, U+c0ac, U+c2a4, U+c2dc, U+c774, U+c778, U+c9c0, U+d558",
+      "filename": "5130a0aac8240ed6.woff2",
+      "sha256": "12f2407b1bf32d201792a1f6635364cefea5b9c1ea1a3196c91823042b4fa2bb",
+      "bytes": 16676,
+      "sourceUrl": "https://fonts.gstatic.com/s/notosanskr/v39/PbykFmXiEBPT4ITbgNA5Cgm20xz64px_1hVWr0wuPNGmlQNMEfD4.119.woff2"
+    },
+    {
+      "family": "Noto Sans KR",
+      "weight": "400",
+      "style": "normal",
+      "unicodeRange": "U+20-22, U+27-2a, U+2c-38, U+3a-3b, U+3f, U+41-47, U+4a-4c, U+4f-5d, U+61-7b, U+7d, U+a1, U+ab, U+ae, U+b7, U+bb, U+bf, U+2013-2014, U+201c-201d, U+2122, U+ac00, U+ace0, U+ae30, U+b2e4, U+b85c, U+b9ac, U+c0ac, U+c2a4, U+c2dc, U+c774, U+c778, U+c9c0, U+d558",
+      "filename": "5130a0aac8240ed6.woff2",
+      "sha256": "12f2407b1bf32d201792a1f6635364cefea5b9c1ea1a3196c91823042b4fa2bb",
+      "bytes": 16676,
+      "sourceUrl": "https://fonts.gstatic.com/s/notosanskr/v39/PbykFmXiEBPT4ITbgNA5Cgm20xz64px_1hVWr0wuPNGmlQNMEfD4.119.woff2"
+    },
+    {
+      "family": "Noto Sans KR",
+      "weight": "500",
+      "style": "normal",
+      "unicodeRange": "U+20-22, U+27-2a, U+2c-38, U+3a-3b, U+3f, U+41-47, U+4a-4c, U+4f-5d, U+61-7b, U+7d, U+a1, U+ab, U+ae, U+b7, U+bb, U+bf, U+2013-2014, U+201c-201d, U+2122, U+ac00, U+ace0, U+ae30, U+b2e4, U+b85c, U+b9ac, U+c0ac, U+c2a4, U+c2dc, U+c774, U+c778, U+c9c0, U+d558",
+      "filename": "5130a0aac8240ed6.woff2",
+      "sha256": "12f2407b1bf32d201792a1f6635364cefea5b9c1ea1a3196c91823042b4fa2bb",
+      "bytes": 16676,
+      "sourceUrl": "https://fonts.gstatic.com/s/notosanskr/v39/PbykFmXiEBPT4ITbgNA5Cgm20xz64px_1hVWr0wuPNGmlQNMEfD4.119.woff2"
+    },
+    {
+      "family": "Noto Sans KR",
+      "weight": "600",
+      "style": "normal",
+      "unicodeRange": "U+20-22, U+27-2a, U+2c-38, U+3a-3b, U+3f, U+41-47, U+4a-4c, U+4f-5d, U+61-7b, U+7d, U+a1, U+ab, U+ae, U+b7, U+bb, U+bf, U+2013-2014, U+201c-201d, U+2122, U+ac00, U+ace0, U+ae30, U+b2e4, U+b85c, U+b9ac, U+c0ac, U+c2a4, U+c2dc, U+c774, U+c778, U+c9c0, U+d558",
+      "filename": "5130a0aac8240ed6.woff2",
+      "sha256": "12f2407b1bf32d201792a1f6635364cefea5b9c1ea1a3196c91823042b4fa2bb",
+      "bytes": 16676,
+      "sourceUrl": "https://fonts.gstatic.com/s/notosanskr/v39/PbykFmXiEBPT4ITbgNA5Cgm20xz64px_1hVWr0wuPNGmlQNMEfD4.119.woff2"
+    },
+    {
+      "family": "Noto Sans KR",
+      "weight": "700",
+      "style": "normal",
+      "unicodeRange": "U+20-22, U+27-2a, U+2c-38, U+3a-3b, U+3f, U+41-47, U+4a-4c, U+4f-5d, U+61-7b, U+7d, U+a1, U+ab, U+ae, U+b7, U+bb, U+bf, U+2013-2014, U+201c-201d, U+2122, U+ac00, U+ace0, U+ae30, U+b2e4, U+b85c, U+b9ac, U+c0ac, U+c2a4, U+c2dc, U+c774, U+c778, U+c9c0, U+d558",
+      "filename": "5130a0aac8240ed6.woff2",
+      "sha256": "12f2407b1bf32d201792a1f6635364cefea5b9c1ea1a3196c91823042b4fa2bb",
+      "bytes": 16676,
+      "sourceUrl": "https://fonts.gstatic.com/s/notosanskr/v39/PbykFmXiEBPT4ITbgNA5Cgm20xz64px_1hVWr0wuPNGmlQNMEfD4.119.woff2"
+    },
+    {
+      "family": "Noto Sans KR",
+      "weight": "800",
+      "style": "normal",
+      "unicodeRange": "U+20-22, U+27-2a, U+2c-38, U+3a-3b, U+3f, U+41-47, U+4a-4c, U+4f-5d, U+61-7b, U+7d, U+a1, U+ab, U+ae, U+b7, U+bb, U+bf, U+2013-2014, U+201c-201d, U+2122, U+ac00, U+ace0, U+ae30, U+b2e4, U+b85c, U+b9ac, U+c0ac, U+c2a4, U+c2dc, U+c774, U+c778, U+c9c0, U+d558",
+      "filename": "5130a0aac8240ed6.woff2",
+      "sha256": "12f2407b1bf32d201792a1f6635364cefea5b9c1ea1a3196c91823042b4fa2bb",
+      "bytes": 16676,
+      "sourceUrl": "https://fonts.gstatic.com/s/notosanskr/v39/PbykFmXiEBPT4ITbgNA5Cgm20xz64px_1hVWr0wuPNGmlQNMEfD4.119.woff2"
+    },
+    {
+      "family": "Noto Sans KR",
+      "weight": "900",
+      "style": "normal",
+      "unicodeRange": "U+20-22, U+27-2a, U+2c-38, U+3a-3b, U+3f, U+41-47, U+4a-4c, U+4f-5d, U+61-7b, U+7d, U+a1, U+ab, U+ae, U+b7, U+bb, U+bf, U+2013-2014, U+201c-201d, U+2122, U+ac00, U+ace0, U+ae30, U+b2e4, U+b85c, U+b9ac, U+c0ac, U+c2a4, U+c2dc, U+c774, U+c778, U+c9c0, U+d558",
+      "filename": "5130a0aac8240ed6.woff2",
+      "sha256": "12f2407b1bf32d201792a1f6635364cefea5b9c1ea1a3196c91823042b4fa2bb",
+      "bytes": 16676,
+      "sourceUrl": "https://fonts.gstatic.com/s/notosanskr/v39/PbykFmXiEBPT4ITbgNA5Cgm20xz64px_1hVWr0wuPNGmlQNMEfD4.119.woff2"
+    },
+    {
+      "family": "Pretendard",
+      "weight": "400",
+      "style": "normal",
+      "unicodeRange": "U+d, U+7c, U+ac10, U+ac15, U+ac74, U+ac80, U+ac83, U+acc4, U+ad11, U+ad50, U+ad6d, U+adfc, U+ae00, U+ae08, U+ae4c, U+b0a8, U+b124, U+b144, U+b178, U+b274, U+b2a5, U+b2e8, U+b2f9, U+b354, U+b370, U+b418, U+b41c, U+b4f1, U+b514, U+b798, U+b808, U+b824-b825, U+b8cc, U+b978, U+b9d0, U+b9e4, U+baa9, U+bb3c, U+bc18, U+bc1c, U+bc30, U+bc84, U+bcf5, U+bcf8, U+bd84, U+be0c, U+be14, U+c0b0, U+c0c9, U+c0dd, U+c124, U+c2dd, U+c2e4, U+c2ec, U+c54c, U+c57c-c57d, U+c591, U+c5c5-c5c6, U+c5ed, U+c608, U+c640, U+c6b8, U+c6d4, U+c784, U+c7ac, U+c800-c801, U+c9c1, U+c9d1, U+cc28, U+cc98, U+cc9c, U+ccad, U+cd5c, U+cd94, U+cd9c, U+cde8, U+ce68, U+cf54, U+d0dc, U+d14c, U+d1a0, U+d1b5, U+d2f0, U+d30c, U+d310, U+d398, U+d45c, U+d50c, U+d53c, U+d560, U+d568, U+d589, U+d604, U+d6c4, U+d788",
+      "filename": "0b6d2e1ca65de8a9.woff2",
+      "sha256": "83a14f747ce9273567a4cf60c7d79f848477233964f1f43018b98cd41a9acede",
+      "bytes": 9712,
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/woff2-dynamic-subset/Pretendard-Regular.subset.89.woff2"
+    },
+    {
+      "family": "Pretendard",
+      "weight": "400",
+      "style": "normal",
+      "unicodeRange": "U+20-22, U+27-2a, U+2c-39, U+3a-3b, U+3f, U+41-4e, U+4f-5d, U+61-7b, U+7d, U+a0-a1, U+ab, U+ad-ae, U+b7, U+bb, U+bf, U+2013-2014, U+201c-201d, U+2122, U+ac00, U+ace0, U+ae30, U+b2e4, U+b85c, U+b9ac, U+c0ac, U+c2a4, U+c2dc, U+c774, U+c778, U+c9c0, U+d558",
+      "filename": "47f7871b120acad9.woff2",
+      "sha256": "231cc8c05ecc16b9904dde4291484423616610609988496a0d1a6b6ca9a42eb1",
+      "bytes": 19780,
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/woff2-dynamic-subset/Pretendard-Regular.subset.91.woff2"
+    },
+    {
+      "family": "Pretendard",
+      "weight": "400",
+      "style": "normal",
+      "unicodeRange": "U+20-22, U+27-2a, U+2c-39, U+3a-3b, U+3f, U+41-4e, U+4f-5d, U+61-7b, U+7d, U+a0-a1, U+ab, U+ad-ae, U+b7, U+bb, U+bf, U+2013-2014, U+201c-201d, U+2122, U+ac00, U+ace0, U+ae30, U+b2e4, U+b85c, U+b9ac, U+c0ac, U+c2a4, U+c2dc, U+c774, U+c778, U+c9c0, U+d558",
+      "filename": "a57a52adcb86d6ba.woff",
+      "sha256": "cff37f29c95664946a8d7228e40616d0193b30293a5a5df5413bec5cc8b73a84",
+      "bytes": 24616,
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/woff-dynamic-subset/Pretendard-Regular.subset.91.woff"
+    },
+    {
+      "family": "Pretendard",
+      "weight": "800",
+      "style": "normal",
+      "unicodeRange": "U+20-22, U+27-2a, U+2c-39, U+3a-3b, U+3f, U+41-4e, U+4f-5d, U+61-7b, U+7d, U+a0-a1, U+ab, U+ad-ae, U+b7, U+bb, U+bf, U+2013-2014, U+201c-201d, U+2122, U+ac00, U+ace0, U+ae30, U+b2e4, U+b85c, U+b9ac, U+c0ac, U+c2a4, U+c2dc, U+c774, U+c778, U+c9c0, U+d558",
+      "filename": "aa007782537a1538.woff2",
+      "sha256": "80591165156456bd911b71f45a93481e4a115881a0a39e5b195f8d56fc6eed79",
+      "bytes": 20064,
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/woff2-dynamic-subset/Pretendard-ExtraBold.subset.91.woff2"
+    }
+  ]
+}

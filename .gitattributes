@@ -1,0 +1,5 @@
+# Preserve upstream license bytes, including original CRLF and trailing spaces.
+THIRD_PARTY_LICENSES.txt -text -whitespace
+
+# Preserve checksum-audited upstream native notices without line-ending changes.
+licenses/native/** -text -whitespace

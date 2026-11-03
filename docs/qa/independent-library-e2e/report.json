@@ -1,0 +1,1342 @@
+{
+  "startedAt": "2026-11-03T12:32:09.740Z",
+  "fixture": "docs/design/system/component-library.omc",
+  "profileOwnership": "fresh task-owned temporary profile; removed after processes exit",
+  "actualMainImport": true,
+  "build": "existing shared dist; this script never builds",
+  "stages": [
+    {
+      "name": "fixture-decode-start",
+      "at": "2026-11-03T12:32:09.741Z"
+    },
+    {
+      "name": "fixture-decoded",
+      "at": "2026-11-03T12:32:09.885Z",
+      "counts": {
+        "objects": 1065,
+        "mains": 172,
+        "components": 172,
+        "variants": 170,
+        "variantSets": 14,
+        "nestedInstances": 5
+      }
+    },
+    {
+      "name": "launch-start",
+      "at": "2026-11-03T12:32:09.885Z"
+    },
+    {
+      "name": "desktop-library-ready",
+      "at": "2026-11-03T12:32:10.371Z"
+    },
+    {
+      "name": "request-main-import",
+      "at": "2026-11-03T12:32:10.371Z"
+    },
+    {
+      "name": "main-import-clicked",
+      "at": "2026-11-03T12:32:10.389Z"
+    },
+    {
+      "name": "waiting-editor-ready",
+      "at": "2026-11-03T12:32:10.389Z"
+    },
+    {
+      "name": "actual-main-import-baseline",
+      "at": "2026-11-03T12:32:11.566Z",
+      "counts": {
+        "objects": 1065,
+        "mains": 172,
+        "components": 172,
+        "variants": 170,
+        "variantSets": 14,
+        "nestedInstances": 5
+      },
+      "bindings": 254,
+      "documentId": "9bcba741-bc06-4d3d-a28b-20d3de113bcb"
+    },
+    {
+      "name": "assets-visual-audit",
+      "at": "2026-11-03T12:32:11.632Z",
+      "tiles": [
+        {
+          "id": "1715d5af-ef52-44cd-9be6-af109c1a0fee",
+          "label": "Button",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 305,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 232,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 305,
+              "width": 36.4609375,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "1253271b-a773-4226-abe9-fa96c90bbee4",
+          "label": "Icon button",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 305,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 232,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 305,
+              "width": 62.65625,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "10c6a3fb-e4be-4b62-8c30-8f9206d2aff2",
+          "label": "Text field",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 432.6953125,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 359.6953125,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 432.6953125,
+              "width": 49.2734375,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "9f213f9d-c906-4bc2-be84-78543f2284ba",
+          "label": "Checkbox",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 432.6953125,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 359.6953125,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 432.6953125,
+              "width": 52.84375,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "c38b541d-8385-403b-85c3-99cfba71898f",
+          "label": "Radio",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 560.390625,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 487.390625,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 560.390625,
+              "width": 30.6484375,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "f5ffb74a-2b8e-42c1-a45f-137db7ced509",
+          "label": "Switch",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 560.390625,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 487.390625,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 560.390625,
+              "width": 36.2109375,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "4776cc72-ee20-4dbc-876a-a6668022e720",
+          "label": "Navigation tab",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 688.0859375,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 615.0859375,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 688.0859375,
+              "width": 77.5703125,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "aab2e6f4-ede4-4d7f-bbb0-c6da311db000",
+          "label": "Badge",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 688.0859375,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 615.0859375,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 688.0859375,
+              "width": 34.0625,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "7a5682b6-c5c2-4185-93b0-28893dd5e9e2",
+          "label": "Select field",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 815.78125,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 742.78125,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 815.78125,
+              "width": 60.109375,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "d802f684-5189-4026-bf36-cb2f910e85aa",
+          "label": "Select menu",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 815.78125,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 742.78125,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 815.78125,
+              "width": 67.1953125,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "d5f41348-2376-479c-b19d-1bb125745694",
+          "label": "List row",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 943.4765625,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 870.4765625,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 943.4765625,
+              "width": 42.0390625,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "e994fa7d-e062-438a-9082-1d4c45c44e66",
+          "label": "Canvas card",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 943.4765625,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 870.4765625,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 943.4765625,
+              "width": 65.203125,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "20ada3e4-4d3a-475c-94e9-8a3223c51afd",
+          "label": "Tooltip",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 1071.171875,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 998.171875,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 1071.171875,
+              "width": 36.90625,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "81040f92-2dd3-4f5b-8b03-1d5409c117f0",
+          "label": "Dialog",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 1071.171875,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 998.171875,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 1071.171875,
+              "width": 33.78125,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "92b079e4-67af-40f6-9a0f-95f14c58a919",
+          "label": "Workspace toolbar",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 1224.8671875,
+            "width": 86,
+            "height": 32.390625
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 1151.8671875,
+            "width": 108,
+            "height": 116.390625
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 1224.8671875,
+              "width": 59.609375,
+              "height": 16
+            },
+            {
+              "x": 19,
+              "y": 1241.0625,
+              "width": 38.640625,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "6581f536-064d-4aa1-98d9-8366033b8ea1",
+          "label": "Create canvas dialog",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 1224.8671875,
+            "width": 86,
+            "height": 32.390625
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 1151.8671875,
+            "width": 108,
+            "height": 116.390625
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 1224.8671875,
+              "width": 75.59375,
+              "height": 16
+            },
+            {
+              "x": 134,
+              "y": 1241.0625,
+              "width": 32.6953125,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        }
+      ]
+    },
+    {
+      "name": "assets-composed-instance",
+      "at": "2026-11-03T12:32:12.511Z",
+      "id": "component-427933c5-0d16-4533-ae61-8b2af5601223",
+      "nested": 2,
+      "editableObjects": 10
+    },
+    {
+      "name": "ui-property-and-variant",
+      "at": "2026-11-03T12:32:14.621Z",
+      "instanceId": "component-1f5840ce-b326-482b-83bd-58472fa49c4b",
+      "componentId": "fe0dac04-88ad-429d-84ad-1217aab6ba55",
+      "label": "QA canvas"
+    },
+    {
+      "name": "ui-main-edit-propagation",
+      "at": "2026-11-03T12:32:15.692Z",
+      "mainId": "001e585e-2b5a-44cb-b0d4-21dbca2e440a",
+      "width": 149,
+      "instanceId": "component-1f5840ce-b326-482b-83bd-58472fa49c4b",
+      "overrideRetained": true
+    },
+    {
+      "name": "disk-save-and-process-close",
+      "at": "2026-11-03T12:32:16.600Z"
+    },
+    {
+      "name": "launch-start",
+      "at": "2026-11-03T12:32:16.600Z"
+    },
+    {
+      "name": "desktop-library-ready",
+      "at": "2026-11-03T12:32:17.186Z"
+    },
+    {
+      "name": "waiting-editor-ready",
+      "at": "2026-11-03T12:32:17.255Z"
+    },
+    {
+      "name": "fresh-process-reopen",
+      "at": "2026-11-03T12:32:18.527Z",
+      "counts": {
+        "objects": 1079,
+        "mains": 172,
+        "components": 172,
+        "variants": 170,
+        "variantSets": 14,
+        "nestedInstances": 9
+      },
+      "bindings": 260,
+      "instanceId": "component-1f5840ce-b326-482b-83bd-58472fa49c4b"
+    },
+    {
+      "name": "assets-visual-audit",
+      "at": "2026-11-03T12:32:18.618Z",
+      "tiles": [
+        {
+          "id": "1715d5af-ef52-44cd-9be6-af109c1a0fee",
+          "label": "Button",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 305,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 232,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 305,
+              "width": 36.4609375,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "1253271b-a773-4226-abe9-fa96c90bbee4",
+          "label": "Icon button",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 305,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 232,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 305,
+              "width": 62.65625,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "10c6a3fb-e4be-4b62-8c30-8f9206d2aff2",
+          "label": "Text field",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 432.6953125,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 359.6953125,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 432.6953125,
+              "width": 49.2734375,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "9f213f9d-c906-4bc2-be84-78543f2284ba",
+          "label": "Checkbox",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 432.6953125,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 359.6953125,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 432.6953125,
+              "width": 52.84375,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "c38b541d-8385-403b-85c3-99cfba71898f",
+          "label": "Radio",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 560.390625,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 487.390625,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 560.390625,
+              "width": 30.6484375,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "f5ffb74a-2b8e-42c1-a45f-137db7ced509",
+          "label": "Switch",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 560.390625,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 487.390625,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 560.390625,
+              "width": 36.2109375,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "4776cc72-ee20-4dbc-876a-a6668022e720",
+          "label": "Navigation tab",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 688.0859375,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 615.0859375,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 688.0859375,
+              "width": 77.5703125,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "aab2e6f4-ede4-4d7f-bbb0-c6da311db000",
+          "label": "Badge",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 688.0859375,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 615.0859375,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 688.0859375,
+              "width": 34.0625,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "7a5682b6-c5c2-4185-93b0-28893dd5e9e2",
+          "label": "Select field",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 815.78125,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 742.78125,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 815.78125,
+              "width": 60.109375,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "d802f684-5189-4026-bf36-cb2f910e85aa",
+          "label": "Select menu",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 815.78125,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 742.78125,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 815.78125,
+              "width": 67.1953125,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "d5f41348-2376-479c-b19d-1bb125745694",
+          "label": "List row",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 943.4765625,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 870.4765625,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 943.4765625,
+              "width": 42.0390625,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "e994fa7d-e062-438a-9082-1d4c45c44e66",
+          "label": "Canvas card",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 943.4765625,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 870.4765625,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 943.4765625,
+              "width": 65.203125,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "20ada3e4-4d3a-475c-94e9-8a3223c51afd",
+          "label": "Tooltip",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 1071.171875,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 998.171875,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 1071.171875,
+              "width": 36.90625,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "81040f92-2dd3-4f5b-8b03-1d5409c117f0",
+          "label": "Dialog",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 1071.171875,
+            "width": 86,
+            "height": 16.1953125
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 998.171875,
+            "width": 108,
+            "height": 120.6953125
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 1071.171875,
+              "width": 33.78125,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "92b079e4-67af-40f6-9a0f-95f14c58a919",
+          "label": "Workspace toolbar",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 19,
+            "y": 1224.8671875,
+            "width": 86,
+            "height": 32.390625
+          },
+          "tileBox": {
+            "x": 8,
+            "y": 1151.8671875,
+            "width": 108,
+            "height": 116.390625
+          },
+          "textRects": [
+            {
+              "x": 19,
+              "y": 1224.8671875,
+              "width": 59.609375,
+              "height": 16
+            },
+            {
+              "x": 19,
+              "y": 1241.0625,
+              "width": 38.640625,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        },
+        {
+          "id": "6581f536-064d-4aa1-98d9-8366033b8ea1",
+          "label": "Create canvas dialog",
+          "tileWidth": 106,
+          "scrollWidth": 106,
+          "labelWidth": 86,
+          "labelScrollWidth": 86,
+          "labelBox": {
+            "x": 134,
+            "y": 1224.8671875,
+            "width": 86,
+            "height": 32.390625
+          },
+          "tileBox": {
+            "x": 123,
+            "y": 1151.8671875,
+            "width": 108,
+            "height": 116.390625
+          },
+          "textRects": [
+            {
+              "x": 134,
+              "y": 1224.8671875,
+              "width": 75.59375,
+              "height": 16
+            },
+            {
+              "x": 134,
+              "y": 1241.0625,
+              "width": 32.6953125,
+              "height": 16
+            }
+          ],
+          "style": {
+            "display": "flow-root",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "whiteSpace": "normal",
+            "overflowWrap": "anywhere",
+            "webkitLineClamp": "2"
+          },
+          "realPreview": true
+        }
+      ]
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": [],
+  "screenshots": [
+    "docs/qa/independent-library-e2e/01-assets-library.png",
+    "docs/qa/independent-library-e2e/02-instance-property-variant.png",
+    "docs/qa/independent-library-e2e/03-main-edit-propagation.png",
+    "docs/qa/independent-library-e2e/04-reopened-library.png"
+  ],
+  "status": "passed",
+  "unhandledRejections": [],
+  "finishedAt": "2026-11-03T12:32:18.903Z"
+}

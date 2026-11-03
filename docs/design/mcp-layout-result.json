@@ -1,0 +1,128 @@
+{
+  "board": "a1",
+  "palette": "Icon blue / sky / lavender",
+  "edits": [
+    {
+      "tool": "update",
+      "args": {
+        "id": "ae",
+        "style": {
+          "background": "#2563eb"
+        }
+      }
+    },
+    {
+      "tool": "update",
+      "args": {
+        "id": "af",
+        "text": "Accent / #2563eb"
+      }
+    },
+    {
+      "tool": "update",
+      "args": {
+        "id": "ah",
+        "style": {
+          "background": "#2563eb"
+        }
+      }
+    },
+    {
+      "tool": "update",
+      "args": {
+        "id": "an",
+        "style": {
+          "background": "#eff6ff"
+        }
+      }
+    },
+    {
+      "tool": "update",
+      "args": {
+        "id": "ao",
+        "style": {
+          "color": "#1e40af"
+        }
+      }
+    },
+    {
+      "tool": "update",
+      "args": {
+        "id": "ar",
+        "style": {
+          "background": "#eff6ff"
+        }
+      }
+    },
+    {
+      "tool": "update",
+      "args": {
+        "id": "a10",
+        "style": {
+          "background": "#eff6ff"
+        }
+      }
+    }
+  ],
+  "result": {
+    "rev": 2,
+    "ops": [
+      {
+        "tool": "update",
+        "id": "ae"
+      },
+      {
+        "tool": "update",
+        "id": "af"
+      },
+      {
+        "tool": "update",
+        "id": "ah"
+      },
+      {
+        "tool": "update",
+        "id": "an"
+      },
+      {
+        "tool": "update",
+        "id": "ao"
+      },
+      {
+        "tool": "update",
+        "id": "ar"
+      },
+      {
+        "tool": "update",
+        "id": "a10"
+      }
+    ]
+  },
+  "added": {
+    "rev": 3,
+    "tool": "write_html",
+    "created": [
+      "a19",
+      "a1a",
+      "a1b"
+    ],
+    "nodes": 3
+  },
+  "createdVia": "Installed app MCP, official SDK stdio transport",
+  "supportingSwatches": {
+    "rev": 3,
+    "tool": "write_html",
+    "created": [
+      "a6",
+      "a7",
+      "a8"
+    ],
+    "nodes": 3,
+    "warnings": [
+      {
+        "id": "a2",
+        "kind": "overflow-x",
+        "detail": "+1"
+      }
+    ]
+  }
+}

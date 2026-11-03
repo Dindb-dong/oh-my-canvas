@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "variants": 170,
+  "families": 14,
+  "compositions": 2,
+  "components": 172,
+  "nestedInstances": 5,
+  "createdVia": "Actual Electron app public MCP, not a flattened import",
+  "at": "2026-11-03T03:01:35.722Z"
+}

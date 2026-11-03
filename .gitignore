@@ -1,0 +1,15 @@
+node_modules
+dist/
+release/
+work/
+.DS_Store
+*.log
+
+.omx/
+
+.worktrees/
+
+# Recreated from locked dependencies by the build.
+/public/canvaskit.wasm
+/public/fonts/*.woff
+/public/fonts/*.woff2

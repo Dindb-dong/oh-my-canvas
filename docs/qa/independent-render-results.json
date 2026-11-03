@@ -1,0 +1,432 @@
+{
+  "cases": [
+    {
+      "name": "native CSS flex directions, wrapping and distribution",
+      "requirements": [
+        "LAY-01"
+      ],
+      "pass": true,
+      "ms": 8
+    },
+    {
+      "name": "native CSS grid fixed tracks, spans and cell alignment",
+      "requirements": [
+        "LAY-02"
+      ],
+      "pass": true,
+      "ms": 1
+    },
+    {
+      "name": "browser measured baseline, auto sizing and stable repeated reflow",
+      "requirements": [
+        "LAY-01",
+        "TEXT-03"
+      ],
+      "pass": true,
+      "ms": 3
+    },
+    {
+      "name": "plain frame resizing constraints and percentages",
+      "requirements": [
+        "LAY-02"
+      ],
+      "pass": true,
+      "ms": 1
+    },
+    {
+      "name": "nested hug/fill/min-max reflow and rotated layout/constraints",
+      "requirements": [
+        "LAY-01",
+        "LAY-02",
+        "GEO-01"
+      ],
+      "pass": true,
+      "ms": 1
+    },
+    {
+      "name": "native CSS automatic grid intrinsic tracks",
+      "requirements": [
+        "LAY-02"
+      ],
+      "pass": true,
+      "ms": 0
+    },
+    {
+      "name": "imported absolute HTML remains draggable and responsive across parent moves/resizes",
+      "requirements": [
+        "FMT-01",
+        "GEO-02",
+        "LAY-02",
+        "HIST-01"
+      ],
+      "pass": true,
+      "ms": 20
+    },
+    {
+      "name": "fonts Unicode lazy loading, variable catalog, fallback and cleanup",
+      "requirements": [
+        "AST-01",
+        "TEXT-01"
+      ],
+      "pass": true,
+      "ms": 33
+    },
+    {
+      "name": "rich multiline CJK emoji content and measured SVG text positions",
+      "requirements": [
+        "TEXT-01",
+        "TEXT-03"
+      ],
+      "pass": true,
+      "ms": 62
+    },
+    {
+      "name": "rectangle clipping independent of path geometry and mask removal",
+      "requirements": [
+        "PAINT-02"
+      ],
+      "pass": true,
+      "ms": 20
+    },
+    {
+      "name": "alpha/luminance/vector/group/text masks actual raster coverage",
+      "requirements": [
+        "PAINT-02"
+      ],
+      "pass": true,
+      "ms": 136
+    },
+    {
+      "name": "ordered fills, gradients, stroke and shadow raster pixels",
+      "requirements": [
+        "PAINT-01"
+      ],
+      "pass": true,
+      "ms": 126
+    },
+    {
+      "name": "image fit crop tile and numerical adjustments",
+      "requirements": [
+        "PAINT-02"
+      ],
+      "pass": true,
+      "ms": 33
+    },
+    {
+      "name": "all sixteen blend modes against native canvas compositor",
+      "requirements": [
+        "PAINT-01"
+      ],
+      "pass": true,
+      "ms": 186
+    },
+    {
+      "name": "nested group vector mask silhouette and inner/background blur",
+      "requirements": [
+        "PAINT-02",
+        "PAINT-01"
+      ],
+      "pass": true,
+      "ms": 42
+    },
+    {
+      "name": "native leading trim and grapheme-safe truncation",
+      "requirements": [
+        "TEXT-01",
+        "TEXT-03"
+      ],
+      "pass": true,
+      "ms": 27
+    },
+    {
+      "name": "stroke alignment, dash gaps, endpoint decorations and independent corners",
+      "requirements": [
+        "PAINT-01"
+      ],
+      "pass": true,
+      "ms": 24
+    },
+    {
+      "name": "renderer lifecycle and unchanged hover/viewport DOM identity",
+      "requirements": [
+        "UI-01",
+        "TEXT-03"
+      ],
+      "pass": true,
+      "ms": 12
+    },
+    {
+      "name": "boolean analytic bounds and live operand cache invalidation",
+      "requirements": [
+        "VEC-02",
+        "GEO-01"
+      ],
+      "pass": true,
+      "ms": 79
+    },
+    {
+      "name": "SVG PNG JPEG WebP and PDF actual decoding and screenshot sizing",
+      "requirements": [
+        "EXP-01",
+        "TEXT-03"
+      ],
+      "pass": true,
+      "ms": 65
+    },
+    {
+      "name": "screenshot slices and resource failure diagnostics",
+      "requirements": [
+        "EXP-01",
+        "TEXT-03"
+      ],
+      "pass": true,
+      "ms": 24
+    },
+    {
+      "name": "cross-page source thumbnails share paints/text with unique SVG IDs and no editor mutation",
+      "requirements": [
+        "AST-01",
+        "CMP-01",
+        "PAINT-01",
+        "TEXT-03"
+      ],
+      "pass": true,
+      "ms": 14
+    },
+    {
+      "name": "native save adapter awaits completion, cancel and errors",
+      "requirements": [
+        "EXP-02"
+      ],
+      "pass": true,
+      "ms": 24
+    },
+    {
+      "name": "concurrent imported percent geometry survives Replica merge and parent resize",
+      "requirements": [
+        "LAYOUT-01"
+      ],
+      "pass": true,
+      "ms": 17
+    },
+    {
+      "name": "active SVG animation rejected at import and stripped from raw exported shapes",
+      "requirements": [
+        "EXP-01",
+        "PAINT-02"
+      ],
+      "pass": true,
+      "ms": 16
+    },
+    {
+      "name": "saved asset fonts load before initial layout and reopen, with projected Undo/Redo ownership",
+      "requirements": [
+        "TEXT-01",
+        "TEXT-03"
+      ],
+      "pass": true,
+      "ms": 41
+    },
+    {
+      "name": "native typography cache reuse, invalidation, isolation and bounded retention",
+      "requirements": [
+        "TEXT-01",
+        "TEXT-03"
+      ],
+      "pass": true,
+      "ms": 18
+    },
+    {
+      "name": "Actual browser screen pixels agree with self-contained exported PNG",
+      "requirements": [
+        "TEXT-03",
+        "EXP-01",
+        "PAINT-01"
+      ],
+      "pass": true
+    },
+    {
+      "name": "Actual main-process native-save disk write",
+      "pass": true,
+      "requirements": [
+        "EXP-02"
+      ]
+    },
+    {
+      "name": "Actual main-process native-save cancellation",
+      "pass": true,
+      "requirements": [
+        "EXP-02"
+      ]
+    },
+    {
+      "name": "Actual main-process native-save write error",
+      "pass": true,
+      "requirements": [
+        "EXP-02"
+      ]
+    },
+    {
+      "name": "Poppler pdfinfo and actual page rasterization",
+      "requirements": [
+        "EXP-01"
+      ],
+      "pass": true
+    }
+  ],
+  "assertions": 830,
+  "fonts": [
+    {
+      "family": "IBM Plex Sans",
+      "faces": [
+        {
+          "weight": 100,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 200,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 300,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 400,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 500,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 600,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 700,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 800,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 900,
+          "style": "normal",
+          "status": "loaded"
+        }
+      ]
+    },
+    {
+      "family": "Noto Sans KR",
+      "faces": [
+        {
+          "weight": 100,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 200,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 300,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 400,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 500,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 600,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 700,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 800,
+          "style": "normal",
+          "status": "loaded"
+        },
+        {
+          "weight": 900,
+          "style": "normal",
+          "status": "loaded"
+        }
+      ]
+    }
+  ],
+  "barrier": "f86e063",
+  "svgSecurity": {
+    "linksClicked": 5,
+    "sentinel": 0
+  },
+  "harnessSHA256": "215f04dc8764b5a59322ff04e9f7da682957f0fcd1eb9703bfb2034d59949493",
+  "canvasKitWasmSHA256": "aca7fa6019f95d3de98d4a49ae60a3d66a09e9d5ca74091fbc369b9be959f959",
+  "screenExport": {
+    "meanAbsoluteChannelError": 0,
+    "largeDifferencePixels": 0,
+    "largeDifferenceFraction": 0,
+    "textMissingInkPixels": 0,
+    "pass": true
+  },
+  "background": {
+    "pass": true,
+    "ms": 16,
+    "width": 380,
+    "height": 280
+  },
+  "native": [
+    {
+      "name": "Actual main-process native-save disk write",
+      "pass": true
+    },
+    {
+      "name": "Actual main-process native-save cancellation",
+      "pass": true
+    },
+    {
+      "name": "Actual main-process native-save write error",
+      "pass": true
+    }
+  ],
+  "pdfParser": {
+    "name": "Poppler pdfinfo and actual page rasterization",
+    "pass": true,
+    "info": "Custom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           1\nEncrypted:       no\nPage size:       380 x 280 pts\nPage rot:        0\nFile size:       11405 bytes\nOptimized:       no\nPDF version:     1.4\n",
+    "pixel": {
+      "width": 380,
+      "height": 280,
+      "pixel": [
+        30,
+        98,
+        57,
+        255
+      ]
+    }
+  },
+  "pageErrors": [],
+  "date": "2026-11-03T12:29:35.767Z",
+  "profile": "Task-owned temporary profile; removed after run"
+}

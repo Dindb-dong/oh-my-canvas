@@ -1,0 +1,636 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-11-03",
+  "scope": "Conservative native notice superset; not an exact linked-object SBOM, reproducible-build attestation, or legal-clearance assertion",
+  "binary": {
+    "package": "canvaskit-wasm",
+    "packageVersion": "0.42.0",
+    "packagePath": "node_modules/canvaskit-wasm/bin/full/canvaskit.wasm",
+    "bytes": 8242911,
+    "sha256": "aca7fa6019f95d3de98d4a49ae60a3d66a09e9d5ca74091fbc369b9be959f959"
+  },
+  "sourceMapping": {
+    "skiaTag": "canvaskit/0.42.0",
+    "skiaRevision": "e2def78fa232884d4aedcf3ad92d4a0dd673b898",
+    "emscriptenSdk": "4.0.7",
+    "basis": "Skia release tag and pinned DEPS/source configuration; SDK 4.0.7 notice set from matching official Emscripten release tag; no claim of reproduced npm build"
+  },
+  "licenseChoices": {
+    "freetype": "FTL",
+    "emscripten": "MIT"
+  },
+  "components": [
+    {
+      "name": "brotli",
+      "sourceRevisions": [
+        "6d03dfbedda1615c4cba1211f8d81735575209c8"
+      ],
+      "noticeFiles": [
+        "texts/brotli--LICENSE"
+      ],
+      "inclusionEvidence": "conservative candidate from Skia build configuration/DEPS or Emscripten SDK system libraries; exact object inclusion not established"
+    },
+    {
+      "name": "compiler-rt",
+      "sourceRevisions": [
+        "Emscripten SDK 4.0.7 bundled snapshot"
+      ],
+      "noticeFiles": [
+        "texts/emscripten--system__lib__compiler-rt__LICENSE.TXT"
+      ],
+      "inclusionEvidence": "conservative source/toolchain candidate; exact object inclusion not independently established"
+    },
+    {
+      "name": "emscripten",
+      "sourceRevisions": [
+        "4.0.7"
+      ],
+      "noticeFiles": [
+        "texts/emscripten--LICENSE",
+        "texts/emscripten--system__lib__compiler-rt__LICENSE.TXT",
+        "texts/emscripten--system__lib__libc__musl__COPYRIGHT",
+        "texts/emscripten--system__lib__libcxx__LICENSE.TXT",
+        "texts/emscripten--system__lib__libcxxabi__LICENSE.TXT"
+      ],
+      "inclusionEvidence": "conservative candidate from Skia build configuration/DEPS or Emscripten SDK system libraries; exact object inclusion not established"
+    },
+    {
+      "name": "freetype",
+      "sourceRevisions": [
+        "264b5fbf5b912b39f98d038bf75d39be0a73f21b"
+      ],
+      "noticeFiles": [
+        "texts/freetype--LICENSE.TXT",
+        "texts/freetype--docs__FTL.TXT",
+        "texts/freetype--src__base__fthash.c",
+        "texts/freetype--src__bdf__README",
+        "texts/freetype--src__gzip__zlib.h",
+        "texts/freetype--src__pcf__README",
+        "texts/freetype--src__sfnt__sfwoff2.c",
+        "texts/freetype--src__sfnt__woff2tags.c"
+      ],
+      "inclusionEvidence": "conservative candidate from Skia build configuration/DEPS or Emscripten SDK system libraries; exact object inclusion not established"
+    },
+    {
+      "name": "harfbuzz",
+      "sourceRevisions": [
+        "9cb1fee51069b206effb4736e443b038d230789d"
+      ],
+      "noticeFiles": [
+        "texts/harfbuzz--COPYING"
+      ],
+      "inclusionEvidence": "conservative candidate from Skia build configuration/DEPS or Emscripten SDK system libraries; exact object inclusion not established"
+    },
+    {
+      "name": "icu",
+      "sourceRevisions": [
+        "d578f2e8b7bd5938e21cfb6bf15c079e0aa5b738"
+      ],
+      "noticeFiles": [
+        "texts/icu--LICENSE"
+      ],
+      "inclusionEvidence": "conservative candidate from Skia build configuration/DEPS or Emscripten SDK system libraries; exact object inclusion not established"
+    },
+    {
+      "name": "libc++",
+      "sourceRevisions": [
+        "Emscripten SDK 4.0.7 bundled snapshot"
+      ],
+      "noticeFiles": [
+        "texts/emscripten--system__lib__libcxx__LICENSE.TXT"
+      ],
+      "inclusionEvidence": "conservative source/toolchain candidate; exact object inclusion not independently established"
+    },
+    {
+      "name": "libc++abi",
+      "sourceRevisions": [
+        "Emscripten SDK 4.0.7 bundled snapshot"
+      ],
+      "noticeFiles": [
+        "texts/emscripten--system__lib__libcxxabi__LICENSE.TXT"
+      ],
+      "inclusionEvidence": "conservative source/toolchain candidate; exact object inclusion not independently established"
+    },
+    {
+      "name": "libjpeg-turbo",
+      "sourceRevisions": [
+        "e14cbfaa85529d47f9f55b0f104a579c1061f9ad"
+      ],
+      "noticeFiles": [
+        "texts/libjpeg-turbo--LICENSE.md",
+        "texts/libjpeg-turbo--README.ijg"
+      ],
+      "inclusionEvidence": "conservative candidate from Skia build configuration/DEPS or Emscripten SDK system libraries; exact object inclusion not established"
+    },
+    {
+      "name": "libpng",
+      "sourceRevisions": [
+        "d5515b5b8be3901aac04e5bd8bd5c89f287bcd33"
+      ],
+      "noticeFiles": [
+        "texts/libpng--LICENSE"
+      ],
+      "inclusionEvidence": "conservative candidate from Skia build configuration/DEPS or Emscripten SDK system libraries; exact object inclusion not established"
+    },
+    {
+      "name": "libwebp",
+      "sourceRevisions": [
+        "845d5476a866141ba35ac133f856fa62f0b7445f"
+      ],
+      "noticeFiles": [
+        "texts/libwebp--COPYING",
+        "texts/libwebp--PATENTS"
+      ],
+      "inclusionEvidence": "conservative candidate from Skia build configuration/DEPS or Emscripten SDK system libraries; exact object inclusion not established"
+    },
+    {
+      "name": "musl",
+      "sourceRevisions": [
+        "Emscripten SDK 4.0.7 bundled snapshot"
+      ],
+      "noticeFiles": [
+        "texts/emscripten--system__lib__libc__musl__COPYRIGHT"
+      ],
+      "inclusionEvidence": "conservative source/toolchain candidate; exact object inclusion not independently established"
+    },
+    {
+      "name": "noto-mono",
+      "sourceRevisions": [
+        "Embedded Noto Mono Regular Version 1.00"
+      ],
+      "noticeFiles": [
+        "texts/noto-mono--OFL-1.1.txt"
+      ],
+      "inclusionEvidence": "embedded metadata observed in audited binary"
+    },
+    {
+      "name": "skcms",
+      "sourceRevisions": [
+        "Skia e2def78fa232884d4aedcf3ad92d4a0dd673b898"
+      ],
+      "noticeFiles": [
+        "texts/skia--modules__skcms__LICENSE"
+      ],
+      "inclusionEvidence": "conservative source/toolchain candidate; exact object inclusion not independently established"
+    },
+    {
+      "name": "skia",
+      "sourceRevisions": [
+        "e2def78fa232884d4aedcf3ad92d4a0dd673b898"
+      ],
+      "noticeFiles": [
+        "texts/skia--LICENSE",
+        "texts/skia--modules__skcms__LICENSE",
+        "texts/skia--modules__skcms__skcms.h",
+        "texts/skia--third_party__README"
+      ],
+      "inclusionEvidence": "primary npm package implementation and pinned source mapping"
+    },
+    {
+      "name": "wuffs",
+      "sourceRevisions": [
+        "e3f919ccfe3ef542cfc983a82146070258fb57f8"
+      ],
+      "noticeFiles": [
+        "texts/wuffs--LICENSE",
+        "texts/wuffs--README.md",
+        "texts/wuffs--copyright-header.txt"
+      ],
+      "inclusionEvidence": "conservative candidate from Skia build configuration/DEPS or Emscripten SDK system libraries; exact object inclusion not established"
+    },
+    {
+      "name": "zlib",
+      "sourceRevisions": [
+        "646b7f569718921d7d4b5b8e22572ff6c76f2596"
+      ],
+      "noticeFiles": [
+        "texts/zlib--LICENSE"
+      ],
+      "inclusionEvidence": "conservative candidate from Skia build configuration/DEPS or Emscripten SDK system libraries; exact object inclusion not established"
+    }
+  ],
+  "files": [
+    {
+      "file": "README.md",
+      "role": "audit-documentation",
+      "encoding": "locally authored UTF-8",
+      "sha256": "924a203651ce850b73b73fb6d4b06a3ee0114228b8fbe5b472d24b9ae7a18ff3",
+      "bytes": 3839
+    },
+    {
+      "file": "provenance/downloads.json",
+      "role": "audit-documentation",
+      "encoding": "locally authored UTF-8",
+      "sha256": "890348fe84fc9ea575f46fd5d1e251b66dd99ff4028caaf7da1c0e51f6a63754",
+      "bytes": 18827
+    },
+    {
+      "component": "libjpeg-turbo",
+      "revision": "e14cbfaa85529d47f9f55b0f104a579c1061f9ad",
+      "upstreamPath": "simd/nasm/jsimdext.inc",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/deps/libjpeg_turbo/+/e14cbfaa85529d47f9f55b0f104a579c1061f9ad/simd/nasm/jsimdext.inc?format=TEXT",
+      "file": "provenance/libjpeg-turbo--simd__nasm__jsimdext.inc",
+      "sha256": "000b2df5469d2f94ea20a1b3d638b94031dad296f006600e1dbff79eded5facb",
+      "bytes": 15399,
+      "encoding": "base64 decoded without text changes",
+      "role": "source-evidence"
+    },
+    {
+      "component": "skia",
+      "revision": "e2def78fa232884d4aedcf3ad92d4a0dd673b898",
+      "upstreamPath": "DEPS",
+      "sourceUrl": "https://raw.githubusercontent.com/google/skia/e2def78fa232884d4aedcf3ad92d4a0dd673b898/DEPS",
+      "file": "provenance/skia--DEPS",
+      "sha256": "2b5dc93b229ae782d82f42e0c5d0eb6c810285bd8ae65196badee3364f1687db",
+      "bytes": 10719,
+      "encoding": "original bytes",
+      "role": "source-evidence"
+    },
+    {
+      "component": "skia",
+      "revision": "e2def78fa232884d4aedcf3ad92d4a0dd673b898",
+      "upstreamPath": "modules/canvaskit/BUILD.gn",
+      "sourceUrl": "https://raw.githubusercontent.com/google/skia/e2def78fa232884d4aedcf3ad92d4a0dd673b898/modules/canvaskit/BUILD.gn",
+      "file": "provenance/skia--modules__canvaskit__BUILD.gn",
+      "sha256": "8cb2d97839b0c4b62386706b3c4b52d54e06d0ff610569f162d5682a12f86b6e",
+      "bytes": 10644,
+      "encoding": "original bytes",
+      "role": "source-evidence"
+    },
+    {
+      "component": "skia",
+      "revision": "e2def78fa232884d4aedcf3ad92d4a0dd673b898",
+      "upstreamPath": "modules/canvaskit/Makefile",
+      "sourceUrl": "https://raw.githubusercontent.com/google/skia/e2def78fa232884d4aedcf3ad92d4a0dd673b898/modules/canvaskit/Makefile",
+      "file": "provenance/skia--modules__canvaskit__Makefile",
+      "sha256": "b07b8967ace41879487ce8c6db9581d92a1ba8ba2ed73e2138a7decd8a31a880",
+      "bytes": 7339,
+      "encoding": "original bytes",
+      "role": "source-evidence"
+    },
+    {
+      "component": "skia",
+      "revision": "e2def78fa232884d4aedcf3ad92d4a0dd673b898",
+      "upstreamPath": "modules/canvaskit/compile.sh",
+      "sourceUrl": "https://raw.githubusercontent.com/google/skia/e2def78fa232884d4aedcf3ad92d4a0dd673b898/modules/canvaskit/compile.sh",
+      "file": "provenance/skia--modules__canvaskit__compile.sh",
+      "sha256": "8b88398fd494e3d2ff6049df97e5f4d3f687dd21b7872ec39034ad6f23120bb5",
+      "bytes": 8106,
+      "encoding": "original bytes",
+      "role": "source-evidence"
+    },
+    {
+      "component": "wuffs",
+      "revision": "e3f919ccfe3ef542cfc983a82146070258fb57f8",
+      "upstreamPath": "release/c/wuffs-v0.3.c",
+      "sourceUrl": "https://raw.githubusercontent.com/google/wuffs-mirror-release-c/e3f919ccfe3ef542cfc983a82146070258fb57f8/release/c/wuffs-v0.3.c",
+      "file": "provenance/wuffs-release-first-4096.txt",
+      "sha256": "a35b12df8269d297db4d017ac66cc74e3b41611ca925c6eeae71535aacfd3a02",
+      "bytes": 4096,
+      "encoding": "first 4096 source bytes, original bytes",
+      "role": "source-evidence"
+    },
+    {
+      "component": "brotli",
+      "revision": "6d03dfbedda1615c4cba1211f8d81735575209c8",
+      "upstreamPath": "LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/google/brotli/6d03dfbedda1615c4cba1211f8d81735575209c8/LICENSE",
+      "file": "texts/brotli--LICENSE",
+      "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+      "bytes": 1084,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "emscripten",
+      "revision": "4.0.7",
+      "upstreamPath": "LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/4.0.7/LICENSE",
+      "file": "texts/emscripten--LICENSE",
+      "sha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86",
+      "bytes": 5093,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "emscripten",
+      "revision": "4.0.7",
+      "upstreamPath": "system/lib/compiler-rt/LICENSE.TXT",
+      "sourceUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/4.0.7/system/lib/compiler-rt/LICENSE.TXT",
+      "file": "texts/emscripten--system__lib__compiler-rt__LICENSE.TXT",
+      "sha256": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+      "bytes": 16708,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "emscripten",
+      "revision": "4.0.7",
+      "upstreamPath": "system/lib/libc/musl/COPYRIGHT",
+      "sourceUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/4.0.7/system/lib/libc/musl/COPYRIGHT",
+      "file": "texts/emscripten--system__lib__libc__musl__COPYRIGHT",
+      "sha256": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+      "bytes": 6204,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "emscripten",
+      "revision": "4.0.7",
+      "upstreamPath": "system/lib/libcxx/LICENSE.TXT",
+      "sourceUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/4.0.7/system/lib/libcxx/LICENSE.TXT",
+      "file": "texts/emscripten--system__lib__libcxx__LICENSE.TXT",
+      "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+      "bytes": 16703,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "emscripten",
+      "revision": "4.0.7",
+      "upstreamPath": "system/lib/libcxxabi/LICENSE.TXT",
+      "sourceUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/4.0.7/system/lib/libcxxabi/LICENSE.TXT",
+      "file": "texts/emscripten--system__lib__libcxxabi__LICENSE.TXT",
+      "sha256": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c",
+      "bytes": 16706,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "freetype",
+      "revision": "264b5fbf5b912b39f98d038bf75d39be0a73f21b",
+      "upstreamPath": "LICENSE.TXT",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/src/third_party/freetype2/+/264b5fbf5b912b39f98d038bf75d39be0a73f21b/LICENSE.TXT?format=TEXT",
+      "file": "texts/freetype--LICENSE.TXT",
+      "sha256": "bd36c8b474855fa294c2ec5c184544478ef3720aad37d65a6296a4f264fd2d3b",
+      "bytes": 2149,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    },
+    {
+      "component": "freetype",
+      "revision": "264b5fbf5b912b39f98d038bf75d39be0a73f21b",
+      "upstreamPath": "docs/FTL.TXT",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/src/third_party/freetype2/+/264b5fbf5b912b39f98d038bf75d39be0a73f21b/docs/FTL.TXT?format=TEXT",
+      "file": "texts/freetype--docs__FTL.TXT",
+      "sha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f",
+      "bytes": 6743,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    },
+    {
+      "component": "freetype",
+      "revision": "264b5fbf5b912b39f98d038bf75d39be0a73f21b",
+      "upstreamPath": "src/base/fthash.c",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/src/third_party/freetype2/+/264b5fbf5b912b39f98d038bf75d39be0a73f21b/src/base/fthash.c?format=TEXT",
+      "file": "texts/freetype--src__base__fthash.c",
+      "sha256": "693e5a54b3ce30140975a94a3369dbe706eb1f280c69e80da426d39cc45b94ef",
+      "bytes": 8406,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    },
+    {
+      "component": "freetype",
+      "revision": "264b5fbf5b912b39f98d038bf75d39be0a73f21b",
+      "upstreamPath": "src/bdf/README",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/src/third_party/freetype2/+/264b5fbf5b912b39f98d038bf75d39be0a73f21b/src/bdf/README?format=TEXT",
+      "file": "texts/freetype--src__bdf__README",
+      "sha256": "7984455e7e5a9faba3797c8bf095fbe10cc846316b7320aff8c58402e22b82fe",
+      "bytes": 5972,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    },
+    {
+      "component": "freetype",
+      "revision": "264b5fbf5b912b39f98d038bf75d39be0a73f21b",
+      "upstreamPath": "src/gzip/zlib.h",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/src/third_party/freetype2/+/264b5fbf5b912b39f98d038bf75d39be0a73f21b/src/gzip/zlib.h?format=TEXT",
+      "file": "texts/freetype--src__gzip__zlib.h",
+      "sha256": "c86a25c27f74cb97b8fa07b175f479f063d5064ace9995b4684063643c81cf1b",
+      "bytes": 97499,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    },
+    {
+      "component": "freetype",
+      "revision": "264b5fbf5b912b39f98d038bf75d39be0a73f21b",
+      "upstreamPath": "src/pcf/README",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/src/third_party/freetype2/+/264b5fbf5b912b39f98d038bf75d39be0a73f21b/src/pcf/README?format=TEXT",
+      "file": "texts/freetype--src__pcf__README",
+      "sha256": "18d9782898d9eac04476e2f744678137b2a889689ed3e923e052fc396a86f86b",
+      "bytes": 3311,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    },
+    {
+      "component": "freetype",
+      "revision": "264b5fbf5b912b39f98d038bf75d39be0a73f21b",
+      "upstreamPath": "src/sfnt/sfwoff2.c",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/src/third_party/freetype2/+/264b5fbf5b912b39f98d038bf75d39be0a73f21b/src/sfnt/sfwoff2.c?format=TEXT",
+      "file": "texts/freetype--src__sfnt__sfwoff2.c",
+      "sha256": "9c67d2b0e2d0a88520bbfe132827252d0f7bd731bb735fba7a36575222d7cc72",
+      "bytes": 66531,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    },
+    {
+      "component": "freetype",
+      "revision": "264b5fbf5b912b39f98d038bf75d39be0a73f21b",
+      "upstreamPath": "src/sfnt/woff2tags.c",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/src/third_party/freetype2/+/264b5fbf5b912b39f98d038bf75d39be0a73f21b/src/sfnt/woff2tags.c?format=TEXT",
+      "file": "texts/freetype--src__sfnt__woff2tags.c",
+      "sha256": "02c3c39d125d366d4b73e270154c5d6be4165146a9e3201b43a3892aadbb8d4e",
+      "bytes": 4350,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    },
+    {
+      "component": "harfbuzz",
+      "revision": "9cb1fee51069b206effb4736e443b038d230789d",
+      "upstreamPath": "COPYING",
+      "sourceUrl": "https://raw.githubusercontent.com/harfbuzz/harfbuzz/9cb1fee51069b206effb4736e443b038d230789d/COPYING",
+      "file": "texts/harfbuzz--COPYING",
+      "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64",
+      "bytes": 1971,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "icu",
+      "revision": "d578f2e8b7bd5938e21cfb6bf15c079e0aa5b738",
+      "upstreamPath": "LICENSE",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/deps/icu/+/d578f2e8b7bd5938e21cfb6bf15c079e0aa5b738/LICENSE?format=TEXT",
+      "file": "texts/icu--LICENSE",
+      "sha256": "e55522d81edc687a341a4411e0776e54ca654e90147f354a90458aaced4116af",
+      "bytes": 27718,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    },
+    {
+      "component": "libjpeg-turbo",
+      "revision": "e14cbfaa85529d47f9f55b0f104a579c1061f9ad",
+      "upstreamPath": "LICENSE.md",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/deps/libjpeg_turbo/+/e14cbfaa85529d47f9f55b0f104a579c1061f9ad/LICENSE.md?format=TEXT",
+      "file": "texts/libjpeg-turbo--LICENSE.md",
+      "sha256": "96f5b328adbb78eeaaec6980d73fd558cb1e4d62560ed615646bc3cf5e532430",
+      "bytes": 5620,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    },
+    {
+      "component": "libjpeg-turbo",
+      "revision": "e14cbfaa85529d47f9f55b0f104a579c1061f9ad",
+      "upstreamPath": "README.ijg",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/deps/libjpeg_turbo/+/e14cbfaa85529d47f9f55b0f104a579c1061f9ad/README.ijg?format=TEXT",
+      "file": "texts/libjpeg-turbo--README.ijg",
+      "sha256": "75815e3bf6484201a3c3d17a1bbf10f2e8e3237f84df10a2357ea896db2a81d6",
+      "bytes": 12799,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    },
+    {
+      "component": "libpng",
+      "revision": "d5515b5b8be3901aac04e5bd8bd5c89f287bcd33",
+      "upstreamPath": "LICENSE",
+      "sourceUrl": "https://skia.googlesource.com/third_party/libpng/+/d5515b5b8be3901aac04e5bd8bd5c89f287bcd33/LICENSE?format=TEXT",
+      "file": "texts/libpng--LICENSE",
+      "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526",
+      "bytes": 5345,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    },
+    {
+      "component": "libwebp",
+      "revision": "845d5476a866141ba35ac133f856fa62f0b7445f",
+      "upstreamPath": "COPYING",
+      "sourceUrl": "https://raw.githubusercontent.com/webmproject/libwebp/845d5476a866141ba35ac133f856fa62f0b7445f/COPYING",
+      "file": "texts/libwebp--COPYING",
+      "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf",
+      "bytes": 1496,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "libwebp",
+      "revision": "845d5476a866141ba35ac133f856fa62f0b7445f",
+      "upstreamPath": "PATENTS",
+      "sourceUrl": "https://raw.githubusercontent.com/webmproject/libwebp/845d5476a866141ba35ac133f856fa62f0b7445f/PATENTS",
+      "file": "texts/libwebp--PATENTS",
+      "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c",
+      "bytes": 1436,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "file": "texts/noto-mono--OFL-1.1.txt",
+      "role": "license-notice",
+      "encoding": "embedded font copyright/name/version attribution followed by complete OFL 1.1 body; body copied without wording changes",
+      "sha256": "23dd5a5a3298badbb32f058842ef493ac7d852cf1dfe902d71cc1554eac4c1ba",
+      "bytes": 4149,
+      "component": "noto-mono",
+      "revision": "Embedded Noto Mono Regular Version 1.00",
+      "source": "Copyright/name/version from audited WASM UTF-16BE strings; complete common OFL 1.1 body from local licensed font package",
+      "licenseTextSource": {
+        "package": "@fontsource-variable/noto-sans-kr",
+        "version": "5.3.1",
+        "path": "node_modules/@fontsource-variable/noto-sans-kr/LICENSE",
+        "sha256": "18aabf190848725e2576eefb5c29ba06aac1029d02132252a7f312eac2e50cf3"
+      },
+      "binaryEvidence": {
+        "Copyright 2007 Google Inc. All Rights Reserved.": 6585508,
+        "Noto Mono": 6585602,
+        "Version 1.00": 6585710,
+        "encoding": "UTF-16BE",
+        "offsetUnit": "bytes"
+      }
+    },
+    {
+      "component": "skia",
+      "revision": "e2def78fa232884d4aedcf3ad92d4a0dd673b898",
+      "upstreamPath": "LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/google/skia/e2def78fa232884d4aedcf3ad92d4a0dd673b898/LICENSE",
+      "file": "texts/skia--LICENSE",
+      "sha256": "5f787c1dee3c56547f09ccc2906ab5f5293c4d8dd6c8654e573216c38e908dbd",
+      "bytes": 1507,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "skia",
+      "revision": "e2def78fa232884d4aedcf3ad92d4a0dd673b898",
+      "upstreamPath": "modules/skcms/LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/google/skia/e2def78fa232884d4aedcf3ad92d4a0dd673b898/modules/skcms/LICENSE",
+      "file": "texts/skia--modules__skcms__LICENSE",
+      "sha256": "e59bb5c5c6ba426a9ac4ba9fe667ad14c5166b12aa25be8af1d122b14fbe2e36",
+      "bytes": 1635,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "skia",
+      "revision": "e2def78fa232884d4aedcf3ad92d4a0dd673b898",
+      "upstreamPath": "modules/skcms/skcms.h",
+      "sourceUrl": "https://raw.githubusercontent.com/google/skia/e2def78fa232884d4aedcf3ad92d4a0dd673b898/modules/skcms/skcms.h",
+      "file": "texts/skia--modules__skcms__skcms.h",
+      "sha256": "f3431fe230076dda4dcad5c3b1cc4789ef6d71967f254c6fdac32a3b97bb94de",
+      "bytes": 207,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "skia",
+      "revision": "e2def78fa232884d4aedcf3ad92d4a0dd673b898",
+      "upstreamPath": "third_party/README",
+      "sourceUrl": "https://raw.githubusercontent.com/google/skia/e2def78fa232884d4aedcf3ad92d4a0dd673b898/third_party/README",
+      "file": "texts/skia--third_party__README",
+      "sha256": "1e905f1636252db992dd6e776816609b5646e72685ab7e3ff3a5d63bc064891b",
+      "bytes": 860,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "wuffs",
+      "revision": "e3f919ccfe3ef542cfc983a82146070258fb57f8",
+      "upstreamPath": "LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/google/wuffs-mirror-release-c/e3f919ccfe3ef542cfc983a82146070258fb57f8/LICENSE",
+      "file": "texts/wuffs--LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "wuffs",
+      "revision": "e3f919ccfe3ef542cfc983a82146070258fb57f8",
+      "upstreamPath": "README.md",
+      "sourceUrl": "https://raw.githubusercontent.com/google/wuffs-mirror-release-c/e3f919ccfe3ef542cfc983a82146070258fb57f8/README.md",
+      "file": "texts/wuffs--README.md",
+      "sha256": "097d5255b32cdda56ac586cd0d6f56777aab413941f1a10e66f0411134514182",
+      "bytes": 1316,
+      "encoding": "original bytes",
+      "role": "license-notice"
+    },
+    {
+      "component": "wuffs",
+      "revision": "e3f919ccfe3ef542cfc983a82146070258fb57f8",
+      "sourceUrl": "https://raw.githubusercontent.com/google/wuffs-mirror-release-c/e3f919ccfe3ef542cfc983a82146070258fb57f8/release/c/wuffs-v0.3.c",
+      "upstreamPath": "release/c/wuffs-v0.3.c",
+      "file": "texts/wuffs--copyright-header.txt",
+      "sha256": "d4953a44e4fd3c018bfff37f26ef6335e537a84ac1881c6114cbb55e55f68b40",
+      "bytes": 596,
+      "encoding": "verbatim complete copyright and license comment extracted from source prefix",
+      "role": "license-notice"
+    },
+    {
+      "component": "zlib",
+      "revision": "646b7f569718921d7d4b5b8e22572ff6c76f2596",
+      "upstreamPath": "LICENSE",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/src/third_party/zlib/+/646b7f569718921d7d4b5b8e22572ff6c76f2596/LICENSE?format=TEXT",
+      "file": "texts/zlib--LICENSE",
+      "sha256": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c",
+      "bytes": 910,
+      "encoding": "base64 decoded without text changes",
+      "role": "license-notice"
+    }
+  ]
+}

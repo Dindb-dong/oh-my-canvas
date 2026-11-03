@@ -1,0 +1,86 @@
+{
+  "name": "oh-my-canvas",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-first desktop design studio with local MCP and four-person collaboration",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "license": "MIT",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "start": "electron .",
+    "postinstall": "node node_modules/electron/install.js",
+    "test": "node --test tests/*.test.mjs",
+    "test:editor": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "node scripts/check.mjs && npm run typecheck",
+    "test:e2e": "node scripts/e2e.mjs",
+    "package": "npm run build && electron-builder --dir --publish never --config.electronDist=node_modules/electron/dist",
+    "dist:mac": "npm run build && electron-builder --mac zip --publish never --config.electronDist=node_modules/electron/dist",
+    "mcp": "node cli/mcp.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/ibm-plex-sans": "^5.3.0",
+    "@fontsource-variable/noto-sans-kr": "^5.3.1",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "canvaskit-wasm": "0.42.0",
+    "lucide": "0.563.0",
+    "selfsigned": "^3.0.1",
+    "ws": "^8.21.0",
+    "yjs": "^13.6.27"
+  },
+  "devDependencies": {
+    "@fontsource/noto-color-emoji": "^5.3.2",
+    "@types/node": "^24.0.0",
+    "electron": "^45.2.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.25.12",
+    "jsdom": "^28.1.0",
+    "playwright": "^1.56.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^4.0.18"
+  },
+  "build": {
+    "appId": "studio.ohmycanvas.desktop",
+    "productName": "Oh My Canvas",
+    "icon": "build/icon.png",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "core/**",
+      "cli/**",
+      "package.json",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "dist/mcp-cli.cjs",
+        "to": "mcp-cli.cjs"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "target": [
+        "zip"
+      ],
+      "identity": null
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
+  }
+}

@@ -1,0 +1,238 @@
+{
+  "createdAt": "2026-11-03T12:31:33.668Z",
+  "profile": "/var/folders/8m/7gwwb06j4hz969b93t9zt8zm0000gn/T/omc-independent-ui-Tw6vSl",
+  "rows": [
+    {
+      "id": "UI-tool-frame",
+      "name": "frame native gesture",
+      "status": "passed",
+      "ms": 417
+    },
+    {
+      "id": "UI-tool-rect",
+      "name": "rect native gesture",
+      "status": "passed",
+      "ms": 371
+    },
+    {
+      "id": "UI-tool-ellipse",
+      "name": "ellipse native gesture",
+      "status": "passed",
+      "ms": 366
+    },
+    {
+      "id": "UI-tool-polygon",
+      "name": "polygon native gesture",
+      "status": "passed",
+      "ms": 381
+    },
+    {
+      "id": "UI-tool-star",
+      "name": "star native gesture",
+      "status": "passed",
+      "ms": 369
+    },
+    {
+      "id": "UI-tool-line",
+      "name": "line native gesture",
+      "status": "passed",
+      "ms": 360
+    },
+    {
+      "id": "UI-tool-arrow",
+      "name": "arrow native gesture",
+      "status": "passed",
+      "ms": 349
+    },
+    {
+      "id": "UI-tool-pencil",
+      "name": "pencil native gesture",
+      "status": "passed",
+      "ms": 369
+    },
+    {
+      "id": "UI-tool-pen",
+      "name": "pen native gesture",
+      "status": "passed",
+      "ms": 286
+    },
+    {
+      "id": "UI-tool-text",
+      "name": "text native gesture",
+      "status": "passed",
+      "ms": 492
+    },
+    {
+      "id": "UI-tool-move",
+      "name": "move gesture and one durable step",
+      "status": "passed",
+      "ms": 384
+    },
+    {
+      "id": "UI-imported-html-drag",
+      "name": "public HTML absolute positioning survives native drag and durable Undo/Redo",
+      "status": "passed",
+      "ms": 476
+    },
+    {
+      "id": "UI-cancel-draw",
+      "name": "Escape cancels live drawing without a ghost",
+      "status": "passed",
+      "ms": 293
+    },
+    {
+      "id": "UI-cancel-tools",
+      "name": "every creation tool and move cancel without a durable ghost",
+      "status": "passed",
+      "ms": 3797
+    },
+    {
+      "id": "UI-resize",
+      "name": "native handle resize",
+      "status": "passed",
+      "ms": 356
+    },
+    {
+      "id": "UI-rotate",
+      "name": "native rotation handle changes oriented geometry",
+      "status": "passed",
+      "ms": 357
+    },
+    {
+      "id": "UI-path-nudge",
+      "name": "node edit and Arrow/Shift-Arrow move nodes rather than layer",
+      "status": "passed",
+      "ms": 383
+    },
+    {
+      "id": "UI-path-endpoint-drop",
+      "name": "compatible open endpoint drag joins two editable paths",
+      "status": "passed",
+      "ms": 455
+    },
+    {
+      "id": "UI-path-merge",
+      "name": "Mod-J merges selected first/last open nodes without deleting the path",
+      "status": "passed",
+      "ms": 364
+    },
+    {
+      "id": "UI-text-rich",
+      "name": "native rich typing preserves two styled runs",
+      "status": "passed",
+      "ms": 339
+    },
+    {
+      "id": "UI-text-range-history",
+      "name": "native range bold, local undo/redo and cancel",
+      "status": "passed",
+      "ms": 407
+    },
+    {
+      "id": "UI-ime-native",
+      "name": "Chromium IME composition commits one Hangul character with local undo/redo",
+      "status": "passed",
+      "ms": 407
+    },
+    {
+      "id": "UI-text-empty",
+      "name": "empty new text cancellation has no durable ghost or undo resurrection",
+      "status": "passed",
+      "ms": 271
+    },
+    {
+      "id": "UI-clipboard",
+      "name": "native OS clipboard shape paste creates fresh subtree IDs",
+      "status": "passed",
+      "ms": 317
+    },
+    {
+      "id": "UI-paste-here",
+      "name": "context Paste here honors the exact world pointer position",
+      "status": "passed",
+      "ms": 322
+    },
+    {
+      "id": "UI-files-atomic",
+      "name": "multi-image/SVG picker places side by side in one operation",
+      "status": "passed",
+      "ms": 367
+    },
+    {
+      "id": "UI-find",
+      "name": "case/whole word, cyclic reveal and replace all",
+      "status": "passed",
+      "ms": 375
+    },
+    {
+      "id": "UI-components",
+      "name": "create main, Assets linked instance and Add variant inspector",
+      "status": "passed",
+      "ms": 462
+    },
+    {
+      "id": "UI-guides",
+      "name": "rulers and guide creation through inspector",
+      "status": "passed",
+      "ms": 276
+    },
+    {
+      "id": "UI-mobile",
+      "name": "narrow bottom sheets and real duplicate action",
+      "status": "passed",
+      "ms": 415
+    },
+    {
+      "id": "UI-touch-native",
+      "name": "Chromium touch pointer pan and pinch update the real viewport",
+      "status": "passed",
+      "ms": 336
+    },
+    {
+      "id": "UI-pages-layers",
+      "name": "inline layer rename/flags plus page add/rename/clone/delete",
+      "status": "passed",
+      "ms": 765
+    },
+    {
+      "id": "UI-inspector-paint",
+      "name": "gradient stop limits, stroke details and effects update canonical paint and SVG",
+      "status": "passed",
+      "ms": 1665
+    },
+    {
+      "id": "UI-inspector-layout",
+      "name": "flex and grid inspector controls reconcile actual child positions",
+      "status": "passed",
+      "trace": "[{\"event\":\"focusin\",\"label\":\"Column gap\",\"value\":\"16\",\"connected\":true},{\"event\":\"input\",\"label\":\"Column gap\",\"value\":\"24\",\"connected\":true},{\"event\":\"keydown\",\"label\":\"Column gap\",\"value\":\"24\",\"key\":\"Tab\",\"connected\":true},{\"event\":\"change\",\"label\":\"Column gap\",\"value\":\"24\",\"connected\":true},{\"event\":\"after-change-context\",\"label\":\"Column gap\",\"context\":{\"ok\":true,\"revision\":4,\"page\":{\"id\":\"page\",\"name\":\"QA Page\"},\"pages\":[{\"id\":\"page\",\"name\":\"QA Page\"}],\"viewport\":{\"vport\":{\"width\":980,\"height\":828},\"vbox\":{\"x\":0,\"y\":0,\"width\":980,\"height\":828},\"zoom\":1},\"selection\":[\"n1\"],\"boards\":[\"n1\"],\"boardDetails\":[{\"id\":\"n1\",\"rawId\":\"board\",\"name\":\"board\",\"kind\":\"frame\",\"x\":0,\"y\":0,\"width\":1000,\"height\":800,\"hidden\":false,\"locked\":false,\"parent\":\"root\",\"layout\":{\"type\":\"flex\",\"direction\":\"row\",\"wrap\":false,\"justifyContent\":\"start\",\"alignItems\":\"start\",\"gap\":{\"row\":16,\"column\":16},\"padding\":{\"top\":0,\"right\":0,\"bottom\":0,\"left\":0}},\"fills\":[{\"color\":\"#fff\"}],\"childCount\":2}],\"editing\":null}},{\"event\":\"input\",\"label\":\"Direction\",\"value\":\"column\",\"connected\":true},{\"event\":\"change\",\"label\":\"Direction\",\"value\":\"column\",\"connected\":true},{\"event\":\"after-change-context\",\"label\":\"Direction\",\"context\":{\"ok\":true,\"revision\":8,\"page\":{\"id\":\"page\",\"name\":\"QA Page\"},\"pages\":[{\"id\":\"page\",\"name\":\"QA Page\"}],\"viewport\":{\"vport\":{\"width\":980,\"height\":828},\"vbox\":{\"x\":0,\"y\":0,\"width\":980,\"height\":828},\"zoom\":1},\"selection\":[\"n1\"],\"boards\":[\"n1\"],\"boardDetails\":[{\"id\":\"n1\",\"rawId\":\"board\",\"name\":\"board\",\"kind\":\"frame\",\"x\":0,\"y\":0,\"width\":1000,\"height\":800,\"hidden\":false,\"locked\":false,\"parent\":\"root\",\"layout\":{\"type\":\"flex\",\"direction\":\"column\",\"wrap\":false,\"justifyContent\":\"start\",\"alignItems\":\"start\",\"gap\":{\"row\":16,\"column\":24},\"padding\":{\"top\":0,\"right\":0,\"bottom\":0,\"left\":0}},\"fills\":[{\"color\":\"#fff\"}],\"childCount\":2}],\"editing\":null}},{\"event\":\"input\",\"label\":\"Layout\",\"value\":\"grid\",\"connected\":true},{\"event\":\"change\",\"label\":\"Layout\",\"value\":\"grid\",\"connected\":true},{\"event\":\"after-change-context\",\"label\":\"Layout\",\"context\":{\"ok\":true,\"revision\":11,\"page\":{\"id\":\"page\",\"name\":\"QA Page\"},\"pages\":[{\"id\":\"page\",\"name\":\"QA Page\"}],\"viewport\":{\"vport\":{\"width\":980,\"height\":828},\"vbox\":{\"x\":0,\"y\":0,\"width\":980,\"height\":828},\"zoom\":1},\"selection\":[\"n1\"],\"boards\":[\"n1\"],\"boardDetails\":[{\"id\":\"n1\",\"rawId\":\"board\",\"name\":\"board\",\"kind\":\"frame\",\"x\":0,\"y\":0,\"width\":1000,\"height\":800,\"hidden\":false,\"locked\":false,\"parent\":\"root\",\"layout\":{\"type\":\"grid\",\"rows\":[{\"type\":\"auto\"}],\"columns\":[{\"type\":\"auto\"},{\"type\":\"auto\"}],\"gap\":{\"row\":16,\"column\":16},\"padding\":{\"top\":0,\"right\":0,\"bottom\":0,\"left\":0}},\"fills\":[{\"color\":\"#fff\"}],\"childCount\":2}],\"editing\":null}},{\"event\":\"focusin\",\"label\":\"columns\",\"value\":\"auto auto\",\"connected\":true},{\"event\":\"input\",\"label\":\"columns\",\"value\":\"120 180\",\"connected\":true},{\"event\":\"keydown\",\"label\":\"columns\",\"value\":\"120 180\",\"key\":\"Tab\",\"connected\":true},{\"event\":\"change\",\"label\":\"columns\",\"value\":\"120 180\",\"connected\":true},{\"event\":\"after-change-context\",\"label\":\"columns\",\"context\":{\"ok\":true,\"revision\":13,\"page\":{\"id\":\"page\",\"name\":\"QA Page\"},\"pages\":[{\"id\":\"page\",\"name\":\"QA Page\"}],\"viewport\":{\"vport\":{\"width\":980,\"height\":828},\"vbox\":{\"x\":0,\"y\":0,\"width\":980,\"height\":828},\"zoom\":1},\"selection\":[\"n1\"],\"boards\":[\"n1\"],\"boardDetails\":[{\"id\":\"n1\",\"rawId\":\"board\",\"name\":\"board\",\"kind\":\"frame\",\"x\":0,\"y\":0,\"width\":1000,\"height\":800,\"hidden\":false,\"locked\":false,\"parent\":\"root\",\"layout\":{\"type\":\"grid\",\"rows\":[{\"type\":\"auto\"}],\"columns\":[{\"type\":\"auto\"},{\"type\":\"auto\"}],\"gap\":{\"row\":16,\"column\":16},\"padding\":{\"top\":0,\"right\":0,\"bottom\":0,\"left\":0}},\"fills\":[{\"color\":\"#fff\"}],\"childCount\":2}],\"editing\":null}},{\"event\":\"focusin\",\"label\":\"Pad left\",\"value\":\"0\",\"connected\":true},{\"event\":\"input\",\"label\":\"Pad left\",\"value\":\"12\",\"connected\":true},{\"event\":\"keydown\",\"label\":\"Pad left\",\"value\":\"12\",\"key\":\"Tab\",\"connected\":true},{\"event\":\"change\",\"label\":\"Pad left\",\"value\":\"12\",\"connected\":true},{\"event\":\"after-change-context\",\"label\":\"Pad left\",\"context\":{\"ok\":true,\"revision\":16,\"page\":{\"id\":\"page\",\"name\":\"QA Page\"},\"pages\":[{\"id\":\"page\",\"name\":\"QA Page\"}],\"viewport\":{\"vport\":{\"width\":980,\"height\":828},\"vbox\":{\"x\":0,\"y\":0,\"width\":980,\"height\":828},\"zoom\":1},\"selection\":[\"n1\"],\"boards\":[\"n1\"],\"boardDetails\":[{\"id\":\"n1\",\"rawId\":\"board\",\"name\":\"board\",\"kind\":\"frame\",\"x\":0,\"y\":0,\"width\":1000,\"height\":800,\"hidden\":false,\"locked\":false,\"parent\":\"root\",\"layout\":{\"type\":\"grid\",\"rows\":[{\"type\":\"auto\"}],\"columns\":[{\"type\":\"fixed\",\"size\":120},{\"type\":\"fixed\",\"size\":180}],\"gap\":{\"row\":16,\"column\":16},\"padding\":{\"top\":0,\"right\":0,\"bottom\":0,\"left\":0}},\"fills\":[{\"color\":\"#fff\"}],\"childCount\":2}],\"editing\":null}}]",
+      "ms": 561
+    },
+    {
+      "id": "UI-styles-crud",
+      "name": "local reusable paint style create/apply/edit sync/duplicate/delete",
+      "status": "passed",
+      "ms": 677
+    },
+    {
+      "id": "UI-component-properties",
+      "name": "component text/boolean/swap property dialogs create/edit/remove",
+      "status": "passed",
+      "ms": 808
+    },
+    {
+      "id": "UI-exports",
+      "name": "all layer file formats, native cancel and write error routes",
+      "status": "passed",
+      "ms": 1558
+    }
+  ],
+  "passed": 37,
+  "failed": 0,
+  "pageErrors": [],
+  "interrupted": false,
+  "gaps": [
+    "Real OS IME candidate composition and clipboard permissions remain platform-specific.",
+    "Native save dialogs use a test-side deterministic Electron dialog adapter; actual IPC, encoding and file writes execute.",
+    "Same-page remote text rebase is covered by the separate UI harness; exhaustive mixed subpath topology, paint/layout/style/property dialogs and physical device behavior still need additional UI evidence."
+  ]
+}

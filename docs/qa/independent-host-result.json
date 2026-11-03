@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "checks": [
+    "nonce/id/replay validation, remote-base retry, durable normalization and no phantom Undo",
+    "initialized document survives real editor mount and reopen",
+    "real stdio metadata retry deduplication/collision rejection and two-author Undo isolation",
+    "active native gesture survives incoming TLS projection, commits durably and author Undo preserves remote edit"
+  ],
+  "at": "2026-11-03T12:32:06.994Z"
+}

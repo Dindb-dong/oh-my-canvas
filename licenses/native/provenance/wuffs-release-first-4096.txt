@@ -1,0 +1,102 @@
+#ifndef WUFFS_INCLUDE_GUARD
+#define WUFFS_INCLUDE_GUARD
+
+// Wuffs ships as a "single file C library" or "header file library" as per
+// https://github.com/nothings/stb/blob/master/docs/stb_howto.txt
+//
+// To use that single file as a "foo.c"-like implementation, instead of a
+// "foo.h"-like header, #define WUFFS_IMPLEMENTATION before #include'ing or
+// compiling it.
+
+// Wuffs' C code is generated automatically, not hand-written. These warnings'
+// costs outweigh the benefits.
+//
+// The "elif defined(__clang__)" isn't redundant. While vanilla clang defines
+// __GNUC__, clang-cl (which mimics MSVC's cl.exe) does not.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#pragma GCC diagnostic ignored "-Wunreachable-code"
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#if defined(__cplusplus)
+#pragma GCC diagnostic ignored "-Wold-style-cast"
+#endif
+#elif defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wimplicit-fallthrough"
+#pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#pragma clang diagnostic ignored "-Wunreachable-code"
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#if defined(__cplusplus)
+#pragma clang diagnostic ignored "-Wold-style-cast"
+#endif
+#endif
+
+// Copyright 2017 The Wuffs Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef __cplusplus
+#if (__cplusplus >= 201103L) || defined(_MSC_VER)
+#include <memory>
+#define WUFFS_BASE__HAVE_EQ_DELETE
+#define WUFFS_BASE__HAVE_UNIQUE_PTR
+// The "defined(__clang__)" isn't redundant. While vanilla clang defines
+// __GNUC__, clang-cl (which mimics MSVC's cl.exe) does not.
+#elif defined(__GNUC__) || defined(__clang__)
+#warning "Wuffs' C++ code expects -std=c++11 or later"
+#endif
+
+extern "C" {
+#endif
+
+// ---------------- Version
+
+// WUFFS_VERSION is the major.minor.patch version, as per https://semver.org/,
+// as a uint64_t. The major number is the high 32 bits. The minor number is the
+// middle 16 bits. The patch number is the low 16 bits. The pre-release label
+// and build metadata are part of the string representation (such as
+// "1.2.3-beta+456.20181231") but not the uint64_t representation.
+//
+// WUFFS_VERSION_PRE_RELEASE_LABEL (such as "", "beta" or "rc.1") being
+// non-empty denotes a developer preview, not a release version, and has no
+// backwards or forwards compatibility guarantees.
+//
+// WUFFS_VERSION_BUILD_METADATA_XXX, if non-zero, are the number of commits and
+// the last commit date in the repository used to build this library. Within
+// each major.minor branch, the commit count should increase monotonically.
+//
+// WUFFS_VERSION was overridden by "wuffs gen -version" based on revision
+// 00d5e35865a2f2718f4bb2596adaaa54bd639bbe committed on 2023-04-08.
+#define WUFFS_VERSION 0x000030003
+#define WUFFS_VERSION_MAJOR 0
+#define WUFFS_VERSION_MINOR 3
+#define WUFFS_VERSION_PATCH 3
+#define WUFFS_VERSION_PRE_RELEASE_LABEL ""
+#define WUFFS_VERSION_BUILD_METADATA_COMMIT_COUNT 3399
+#define WUFFS_VERSION_BUILD_METADATA_COMMIT_DATE 20230408
+#define WUFFS_VERSION_STRING "0.3.3+3399.20230408"
+
+// ---------------- Configuration
+
+// Define WUFFS_CONFIG__AVOID_CPU_ARCH to avoid any code tied to a specific CPU
+// architecture, such as SSE SIMD for the x86 CPU family.
+#if defined(WUFFS_CONFIG__AVOID_CPU_ARCH)  // (

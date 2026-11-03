@@ -1,0 +1,1523 @@
+{
+  "name": "Oh My Canvas / Component Library",
+  "palette": {
+    "blue": "#2563eb",
+    "hover": "#1d4ed8",
+    "pressed": "#1e40af",
+    "sky": "#7dd3fc",
+    "lavender": "#c4b5fd",
+    "ink": "#202124",
+    "muted": "#64748b",
+    "line": "#e2e8f0",
+    "soft": "#eff6ff"
+  },
+  "families": [
+    {
+      "name": "Button",
+      "w": 1248,
+      "h": 1210,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "Style": "Primary",
+            "Size": "Small",
+            "State": "Default"
+          },
+          "name": "Style=Primary, Size=Small, State=Default"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "Style": "Primary",
+            "Size": "Small",
+            "State": "Hover"
+          },
+          "name": "Style=Primary, Size=Small, State=Hover"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "Style": "Primary",
+            "Size": "Small",
+            "State": "Pressed"
+          },
+          "name": "Style=Primary, Size=Small, State=Pressed"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "Style": "Primary",
+            "Size": "Small",
+            "State": "Disabled"
+          },
+          "name": "Style=Primary, Size=Small, State=Disabled"
+        },
+        {
+          "ref": "v4",
+          "props": {
+            "Style": "Primary",
+            "Size": "Medium",
+            "State": "Default"
+          },
+          "name": "Style=Primary, Size=Medium, State=Default"
+        },
+        {
+          "ref": "v5",
+          "props": {
+            "Style": "Primary",
+            "Size": "Medium",
+            "State": "Hover"
+          },
+          "name": "Style=Primary, Size=Medium, State=Hover"
+        },
+        {
+          "ref": "v6",
+          "props": {
+            "Style": "Primary",
+            "Size": "Medium",
+            "State": "Pressed"
+          },
+          "name": "Style=Primary, Size=Medium, State=Pressed"
+        },
+        {
+          "ref": "v7",
+          "props": {
+            "Style": "Primary",
+            "Size": "Medium",
+            "State": "Disabled"
+          },
+          "name": "Style=Primary, Size=Medium, State=Disabled"
+        },
+        {
+          "ref": "v8",
+          "props": {
+            "Style": "Primary",
+            "Size": "Large",
+            "State": "Default"
+          },
+          "name": "Style=Primary, Size=Large, State=Default"
+        },
+        {
+          "ref": "v9",
+          "props": {
+            "Style": "Primary",
+            "Size": "Large",
+            "State": "Hover"
+          },
+          "name": "Style=Primary, Size=Large, State=Hover"
+        },
+        {
+          "ref": "v10",
+          "props": {
+            "Style": "Primary",
+            "Size": "Large",
+            "State": "Pressed"
+          },
+          "name": "Style=Primary, Size=Large, State=Pressed"
+        },
+        {
+          "ref": "v11",
+          "props": {
+            "Style": "Primary",
+            "Size": "Large",
+            "State": "Disabled"
+          },
+          "name": "Style=Primary, Size=Large, State=Disabled"
+        },
+        {
+          "ref": "v12",
+          "props": {
+            "Style": "Secondary",
+            "Size": "Small",
+            "State": "Default"
+          },
+          "name": "Style=Secondary, Size=Small, State=Default"
+        },
+        {
+          "ref": "v13",
+          "props": {
+            "Style": "Secondary",
+            "Size": "Small",
+            "State": "Hover"
+          },
+          "name": "Style=Secondary, Size=Small, State=Hover"
+        },
+        {
+          "ref": "v14",
+          "props": {
+            "Style": "Secondary",
+            "Size": "Small",
+            "State": "Pressed"
+          },
+          "name": "Style=Secondary, Size=Small, State=Pressed"
+        },
+        {
+          "ref": "v15",
+          "props": {
+            "Style": "Secondary",
+            "Size": "Small",
+            "State": "Disabled"
+          },
+          "name": "Style=Secondary, Size=Small, State=Disabled"
+        },
+        {
+          "ref": "v16",
+          "props": {
+            "Style": "Secondary",
+            "Size": "Medium",
+            "State": "Default"
+          },
+          "name": "Style=Secondary, Size=Medium, State=Default"
+        },
+        {
+          "ref": "v17",
+          "props": {
+            "Style": "Secondary",
+            "Size": "Medium",
+            "State": "Hover"
+          },
+          "name": "Style=Secondary, Size=Medium, State=Hover"
+        },
+        {
+          "ref": "v18",
+          "props": {
+            "Style": "Secondary",
+            "Size": "Medium",
+            "State": "Pressed"
+          },
+          "name": "Style=Secondary, Size=Medium, State=Pressed"
+        },
+        {
+          "ref": "v19",
+          "props": {
+            "Style": "Secondary",
+            "Size": "Medium",
+            "State": "Disabled"
+          },
+          "name": "Style=Secondary, Size=Medium, State=Disabled"
+        },
+        {
+          "ref": "v20",
+          "props": {
+            "Style": "Secondary",
+            "Size": "Large",
+            "State": "Default"
+          },
+          "name": "Style=Secondary, Size=Large, State=Default"
+        },
+        {
+          "ref": "v21",
+          "props": {
+            "Style": "Secondary",
+            "Size": "Large",
+            "State": "Hover"
+          },
+          "name": "Style=Secondary, Size=Large, State=Hover"
+        },
+        {
+          "ref": "v22",
+          "props": {
+            "Style": "Secondary",
+            "Size": "Large",
+            "State": "Pressed"
+          },
+          "name": "Style=Secondary, Size=Large, State=Pressed"
+        },
+        {
+          "ref": "v23",
+          "props": {
+            "Style": "Secondary",
+            "Size": "Large",
+            "State": "Disabled"
+          },
+          "name": "Style=Secondary, Size=Large, State=Disabled"
+        },
+        {
+          "ref": "v24",
+          "props": {
+            "Style": "Ghost",
+            "Size": "Small",
+            "State": "Default"
+          },
+          "name": "Style=Ghost, Size=Small, State=Default"
+        },
+        {
+          "ref": "v25",
+          "props": {
+            "Style": "Ghost",
+            "Size": "Small",
+            "State": "Hover"
+          },
+          "name": "Style=Ghost, Size=Small, State=Hover"
+        },
+        {
+          "ref": "v26",
+          "props": {
+            "Style": "Ghost",
+            "Size": "Small",
+            "State": "Pressed"
+          },
+          "name": "Style=Ghost, Size=Small, State=Pressed"
+        },
+        {
+          "ref": "v27",
+          "props": {
+            "Style": "Ghost",
+            "Size": "Small",
+            "State": "Disabled"
+          },
+          "name": "Style=Ghost, Size=Small, State=Disabled"
+        },
+        {
+          "ref": "v28",
+          "props": {
+            "Style": "Ghost",
+            "Size": "Medium",
+            "State": "Default"
+          },
+          "name": "Style=Ghost, Size=Medium, State=Default"
+        },
+        {
+          "ref": "v29",
+          "props": {
+            "Style": "Ghost",
+            "Size": "Medium",
+            "State": "Hover"
+          },
+          "name": "Style=Ghost, Size=Medium, State=Hover"
+        },
+        {
+          "ref": "v30",
+          "props": {
+            "Style": "Ghost",
+            "Size": "Medium",
+            "State": "Pressed"
+          },
+          "name": "Style=Ghost, Size=Medium, State=Pressed"
+        },
+        {
+          "ref": "v31",
+          "props": {
+            "Style": "Ghost",
+            "Size": "Medium",
+            "State": "Disabled"
+          },
+          "name": "Style=Ghost, Size=Medium, State=Disabled"
+        },
+        {
+          "ref": "v32",
+          "props": {
+            "Style": "Ghost",
+            "Size": "Large",
+            "State": "Default"
+          },
+          "name": "Style=Ghost, Size=Large, State=Default"
+        },
+        {
+          "ref": "v33",
+          "props": {
+            "Style": "Ghost",
+            "Size": "Large",
+            "State": "Hover"
+          },
+          "name": "Style=Ghost, Size=Large, State=Hover"
+        },
+        {
+          "ref": "v34",
+          "props": {
+            "Style": "Ghost",
+            "Size": "Large",
+            "State": "Pressed"
+          },
+          "name": "Style=Ghost, Size=Large, State=Pressed"
+        },
+        {
+          "ref": "v35",
+          "props": {
+            "Style": "Ghost",
+            "Size": "Large",
+            "State": "Disabled"
+          },
+          "name": "Style=Ghost, Size=Large, State=Disabled"
+        }
+      ],
+      "property": "Label"
+    },
+    {
+      "name": "Icon button",
+      "w": 1248,
+      "h": 880,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "Style": "Filled",
+            "Size": "Small",
+            "State": "Default"
+          },
+          "name": "Style=Filled, Size=Small, State=Default"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "Style": "Filled",
+            "Size": "Small",
+            "State": "Hover"
+          },
+          "name": "Style=Filled, Size=Small, State=Hover"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "Style": "Filled",
+            "Size": "Small",
+            "State": "Pressed"
+          },
+          "name": "Style=Filled, Size=Small, State=Pressed"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "Style": "Filled",
+            "Size": "Small",
+            "State": "Disabled"
+          },
+          "name": "Style=Filled, Size=Small, State=Disabled"
+        },
+        {
+          "ref": "v4",
+          "props": {
+            "Style": "Filled",
+            "Size": "Medium",
+            "State": "Default"
+          },
+          "name": "Style=Filled, Size=Medium, State=Default"
+        },
+        {
+          "ref": "v5",
+          "props": {
+            "Style": "Filled",
+            "Size": "Medium",
+            "State": "Hover"
+          },
+          "name": "Style=Filled, Size=Medium, State=Hover"
+        },
+        {
+          "ref": "v6",
+          "props": {
+            "Style": "Filled",
+            "Size": "Medium",
+            "State": "Pressed"
+          },
+          "name": "Style=Filled, Size=Medium, State=Pressed"
+        },
+        {
+          "ref": "v7",
+          "props": {
+            "Style": "Filled",
+            "Size": "Medium",
+            "State": "Disabled"
+          },
+          "name": "Style=Filled, Size=Medium, State=Disabled"
+        },
+        {
+          "ref": "v8",
+          "props": {
+            "Style": "Filled",
+            "Size": "Large",
+            "State": "Default"
+          },
+          "name": "Style=Filled, Size=Large, State=Default"
+        },
+        {
+          "ref": "v9",
+          "props": {
+            "Style": "Filled",
+            "Size": "Large",
+            "State": "Hover"
+          },
+          "name": "Style=Filled, Size=Large, State=Hover"
+        },
+        {
+          "ref": "v10",
+          "props": {
+            "Style": "Filled",
+            "Size": "Large",
+            "State": "Pressed"
+          },
+          "name": "Style=Filled, Size=Large, State=Pressed"
+        },
+        {
+          "ref": "v11",
+          "props": {
+            "Style": "Filled",
+            "Size": "Large",
+            "State": "Disabled"
+          },
+          "name": "Style=Filled, Size=Large, State=Disabled"
+        },
+        {
+          "ref": "v12",
+          "props": {
+            "Style": "Outline",
+            "Size": "Small",
+            "State": "Default"
+          },
+          "name": "Style=Outline, Size=Small, State=Default"
+        },
+        {
+          "ref": "v13",
+          "props": {
+            "Style": "Outline",
+            "Size": "Small",
+            "State": "Hover"
+          },
+          "name": "Style=Outline, Size=Small, State=Hover"
+        },
+        {
+          "ref": "v14",
+          "props": {
+            "Style": "Outline",
+            "Size": "Small",
+            "State": "Pressed"
+          },
+          "name": "Style=Outline, Size=Small, State=Pressed"
+        },
+        {
+          "ref": "v15",
+          "props": {
+            "Style": "Outline",
+            "Size": "Small",
+            "State": "Disabled"
+          },
+          "name": "Style=Outline, Size=Small, State=Disabled"
+        },
+        {
+          "ref": "v16",
+          "props": {
+            "Style": "Outline",
+            "Size": "Medium",
+            "State": "Default"
+          },
+          "name": "Style=Outline, Size=Medium, State=Default"
+        },
+        {
+          "ref": "v17",
+          "props": {
+            "Style": "Outline",
+            "Size": "Medium",
+            "State": "Hover"
+          },
+          "name": "Style=Outline, Size=Medium, State=Hover"
+        },
+        {
+          "ref": "v18",
+          "props": {
+            "Style": "Outline",
+            "Size": "Medium",
+            "State": "Pressed"
+          },
+          "name": "Style=Outline, Size=Medium, State=Pressed"
+        },
+        {
+          "ref": "v19",
+          "props": {
+            "Style": "Outline",
+            "Size": "Medium",
+            "State": "Disabled"
+          },
+          "name": "Style=Outline, Size=Medium, State=Disabled"
+        },
+        {
+          "ref": "v20",
+          "props": {
+            "Style": "Outline",
+            "Size": "Large",
+            "State": "Default"
+          },
+          "name": "Style=Outline, Size=Large, State=Default"
+        },
+        {
+          "ref": "v21",
+          "props": {
+            "Style": "Outline",
+            "Size": "Large",
+            "State": "Hover"
+          },
+          "name": "Style=Outline, Size=Large, State=Hover"
+        },
+        {
+          "ref": "v22",
+          "props": {
+            "Style": "Outline",
+            "Size": "Large",
+            "State": "Pressed"
+          },
+          "name": "Style=Outline, Size=Large, State=Pressed"
+        },
+        {
+          "ref": "v23",
+          "props": {
+            "Style": "Outline",
+            "Size": "Large",
+            "State": "Disabled"
+          },
+          "name": "Style=Outline, Size=Large, State=Disabled"
+        }
+      ],
+      "property": "Label"
+    },
+    {
+      "name": "Text field",
+      "w": 1488,
+      "h": 700,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "Size": "Medium",
+            "State": "Default"
+          },
+          "name": "Size=Medium, State=Default"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "Size": "Medium",
+            "State": "Hover"
+          },
+          "name": "Size=Medium, State=Hover"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "Size": "Medium",
+            "State": "Focus"
+          },
+          "name": "Size=Medium, State=Focus"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "Size": "Medium",
+            "State": "Filled"
+          },
+          "name": "Size=Medium, State=Filled"
+        },
+        {
+          "ref": "v4",
+          "props": {
+            "Size": "Medium",
+            "State": "Error"
+          },
+          "name": "Size=Medium, State=Error"
+        },
+        {
+          "ref": "v5",
+          "props": {
+            "Size": "Medium",
+            "State": "Disabled"
+          },
+          "name": "Size=Medium, State=Disabled"
+        },
+        {
+          "ref": "v6",
+          "props": {
+            "Size": "Large",
+            "State": "Default"
+          },
+          "name": "Size=Large, State=Default"
+        },
+        {
+          "ref": "v7",
+          "props": {
+            "Size": "Large",
+            "State": "Hover"
+          },
+          "name": "Size=Large, State=Hover"
+        },
+        {
+          "ref": "v8",
+          "props": {
+            "Size": "Large",
+            "State": "Focus"
+          },
+          "name": "Size=Large, State=Focus"
+        },
+        {
+          "ref": "v9",
+          "props": {
+            "Size": "Large",
+            "State": "Filled"
+          },
+          "name": "Size=Large, State=Filled"
+        },
+        {
+          "ref": "v10",
+          "props": {
+            "Size": "Large",
+            "State": "Error"
+          },
+          "name": "Size=Large, State=Error"
+        },
+        {
+          "ref": "v11",
+          "props": {
+            "Size": "Large",
+            "State": "Disabled"
+          },
+          "name": "Size=Large, State=Disabled"
+        }
+      ],
+      "property": "Value"
+    },
+    {
+      "name": "Checkbox",
+      "w": 1268,
+      "h": 600,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "State": "Default"
+          },
+          "name": "State=Default"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "State": "Hover"
+          },
+          "name": "State=Hover"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "State": "Checked"
+          },
+          "name": "State=Checked"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "State": "Mixed"
+          },
+          "name": "State=Mixed"
+        },
+        {
+          "ref": "v4",
+          "props": {
+            "State": "Disabled"
+          },
+          "name": "State=Disabled"
+        },
+        {
+          "ref": "v5",
+          "props": {
+            "State": "Disabled checked"
+          },
+          "name": "State=Disabled checked"
+        }
+      ],
+      "property": "Label"
+    },
+    {
+      "name": "Radio",
+      "w": 1268,
+      "h": 600,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "State": "Default"
+          },
+          "name": "State=Default"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "State": "Hover"
+          },
+          "name": "State=Hover"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "State": "Checked"
+          },
+          "name": "State=Checked"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "State": "Mixed"
+          },
+          "name": "State=Mixed"
+        },
+        {
+          "ref": "v4",
+          "props": {
+            "State": "Disabled"
+          },
+          "name": "State=Disabled"
+        },
+        {
+          "ref": "v5",
+          "props": {
+            "State": "Disabled checked"
+          },
+          "name": "State=Disabled checked"
+        }
+      ],
+      "property": "Label"
+    },
+    {
+      "name": "Switch",
+      "w": 1268,
+      "h": 600,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "State": "Default"
+          },
+          "name": "State=Default"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "State": "Hover"
+          },
+          "name": "State=Hover"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "State": "Checked"
+          },
+          "name": "State=Checked"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "State": "Mixed"
+          },
+          "name": "State=Mixed"
+        },
+        {
+          "ref": "v4",
+          "props": {
+            "State": "Disabled"
+          },
+          "name": "State=Disabled"
+        },
+        {
+          "ref": "v5",
+          "props": {
+            "State": "Disabled checked"
+          },
+          "name": "State=Disabled checked"
+        }
+      ],
+      "property": "Label"
+    },
+    {
+      "name": "Navigation tab",
+      "w": 1408,
+      "h": 770,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "Destination": "Canvas",
+            "State": "Default"
+          },
+          "name": "Destination=Canvas, State=Default"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "Destination": "Canvas",
+            "State": "Hover"
+          },
+          "name": "Destination=Canvas, State=Hover"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "Destination": "Canvas",
+            "State": "Active"
+          },
+          "name": "Destination=Canvas, State=Active"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "Destination": "Canvas",
+            "State": "Disabled"
+          },
+          "name": "Destination=Canvas, State=Disabled"
+        },
+        {
+          "ref": "v4",
+          "props": {
+            "Destination": "Components",
+            "State": "Default"
+          },
+          "name": "Destination=Components, State=Default"
+        },
+        {
+          "ref": "v5",
+          "props": {
+            "Destination": "Components",
+            "State": "Hover"
+          },
+          "name": "Destination=Components, State=Hover"
+        },
+        {
+          "ref": "v6",
+          "props": {
+            "Destination": "Components",
+            "State": "Active"
+          },
+          "name": "Destination=Components, State=Active"
+        },
+        {
+          "ref": "v7",
+          "props": {
+            "Destination": "Components",
+            "State": "Disabled"
+          },
+          "name": "Destination=Components, State=Disabled"
+        },
+        {
+          "ref": "v8",
+          "props": {
+            "Destination": "MCP",
+            "State": "Default"
+          },
+          "name": "Destination=MCP, State=Default"
+        },
+        {
+          "ref": "v9",
+          "props": {
+            "Destination": "MCP",
+            "State": "Hover"
+          },
+          "name": "Destination=MCP, State=Hover"
+        },
+        {
+          "ref": "v10",
+          "props": {
+            "Destination": "MCP",
+            "State": "Active"
+          },
+          "name": "Destination=MCP, State=Active"
+        },
+        {
+          "ref": "v11",
+          "props": {
+            "Destination": "MCP",
+            "State": "Disabled"
+          },
+          "name": "Destination=MCP, State=Disabled"
+        },
+        {
+          "ref": "v12",
+          "props": {
+            "Destination": "Team",
+            "State": "Default"
+          },
+          "name": "Destination=Team, State=Default"
+        },
+        {
+          "ref": "v13",
+          "props": {
+            "Destination": "Team",
+            "State": "Hover"
+          },
+          "name": "Destination=Team, State=Hover"
+        },
+        {
+          "ref": "v14",
+          "props": {
+            "Destination": "Team",
+            "State": "Active"
+          },
+          "name": "Destination=Team, State=Active"
+        },
+        {
+          "ref": "v15",
+          "props": {
+            "Destination": "Team",
+            "State": "Disabled"
+          },
+          "name": "Destination=Team, State=Disabled"
+        },
+        {
+          "ref": "v16",
+          "props": {
+            "Destination": "Settings",
+            "State": "Default"
+          },
+          "name": "Destination=Settings, State=Default"
+        },
+        {
+          "ref": "v17",
+          "props": {
+            "Destination": "Settings",
+            "State": "Hover"
+          },
+          "name": "Destination=Settings, State=Hover"
+        },
+        {
+          "ref": "v18",
+          "props": {
+            "Destination": "Settings",
+            "State": "Active"
+          },
+          "name": "Destination=Settings, State=Active"
+        },
+        {
+          "ref": "v19",
+          "props": {
+            "Destination": "Settings",
+            "State": "Disabled"
+          },
+          "name": "Destination=Settings, State=Disabled"
+        }
+      ],
+      "property": "Label"
+    },
+    {
+      "name": "Badge",
+      "w": 1408,
+      "h": 600,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "Tone": "Neutral",
+            "Size": "Small"
+          },
+          "name": "Tone=Neutral, Size=Small"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "Tone": "Neutral",
+            "Size": "Medium"
+          },
+          "name": "Tone=Neutral, Size=Medium"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "Tone": "Blue",
+            "Size": "Small"
+          },
+          "name": "Tone=Blue, Size=Small"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "Tone": "Blue",
+            "Size": "Medium"
+          },
+          "name": "Tone=Blue, Size=Medium"
+        },
+        {
+          "ref": "v4",
+          "props": {
+            "Tone": "Sky",
+            "Size": "Small"
+          },
+          "name": "Tone=Sky, Size=Small"
+        },
+        {
+          "ref": "v5",
+          "props": {
+            "Tone": "Sky",
+            "Size": "Medium"
+          },
+          "name": "Tone=Sky, Size=Medium"
+        },
+        {
+          "ref": "v6",
+          "props": {
+            "Tone": "Lavender",
+            "Size": "Small"
+          },
+          "name": "Tone=Lavender, Size=Small"
+        },
+        {
+          "ref": "v7",
+          "props": {
+            "Tone": "Lavender",
+            "Size": "Medium"
+          },
+          "name": "Tone=Lavender, Size=Medium"
+        },
+        {
+          "ref": "v8",
+          "props": {
+            "Tone": "Warning",
+            "Size": "Small"
+          },
+          "name": "Tone=Warning, Size=Small"
+        },
+        {
+          "ref": "v9",
+          "props": {
+            "Tone": "Warning",
+            "Size": "Medium"
+          },
+          "name": "Tone=Warning, Size=Medium"
+        },
+        {
+          "ref": "v10",
+          "props": {
+            "Tone": "Danger",
+            "Size": "Small"
+          },
+          "name": "Tone=Danger, Size=Small"
+        },
+        {
+          "ref": "v11",
+          "props": {
+            "Tone": "Danger",
+            "Size": "Medium"
+          },
+          "name": "Tone=Danger, Size=Medium"
+        }
+      ],
+      "property": "Label"
+    },
+    {
+      "name": "Select field",
+      "w": 1408,
+      "h": 600,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "Size": "Compact",
+            "State": "Default"
+          },
+          "name": "Size=Compact, State=Default"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "Size": "Compact",
+            "State": "Hover"
+          },
+          "name": "Size=Compact, State=Hover"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "Size": "Compact",
+            "State": "Focus"
+          },
+          "name": "Size=Compact, State=Focus"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "Size": "Compact",
+            "State": "Disabled"
+          },
+          "name": "Size=Compact, State=Disabled"
+        },
+        {
+          "ref": "v4",
+          "props": {
+            "Size": "Regular",
+            "State": "Default"
+          },
+          "name": "Size=Regular, State=Default"
+        },
+        {
+          "ref": "v5",
+          "props": {
+            "Size": "Regular",
+            "State": "Hover"
+          },
+          "name": "Size=Regular, State=Hover"
+        },
+        {
+          "ref": "v6",
+          "props": {
+            "Size": "Regular",
+            "State": "Focus"
+          },
+          "name": "Size=Regular, State=Focus"
+        },
+        {
+          "ref": "v7",
+          "props": {
+            "Size": "Regular",
+            "State": "Disabled"
+          },
+          "name": "Size=Regular, State=Disabled"
+        }
+      ],
+      "property": "Label"
+    },
+    {
+      "name": "Select menu",
+      "w": 1488,
+      "h": 600,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "State": "Default"
+          },
+          "name": "State=Default"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "State": "Hover"
+          },
+          "name": "State=Hover"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "State": "Selected"
+          },
+          "name": "State=Selected"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "State": "Disabled"
+          },
+          "name": "State=Disabled"
+        }
+      ],
+      "property": "Label"
+    },
+    {
+      "name": "List row",
+      "w": 1568,
+      "h": 970,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "Status": "Draft",
+            "State": "Default"
+          },
+          "name": "Status=Draft, State=Default"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "Status": "Draft",
+            "State": "Hover"
+          },
+          "name": "Status=Draft, State=Hover"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "Status": "Draft",
+            "State": "Selected"
+          },
+          "name": "Status=Draft, State=Selected"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "Status": "Draft",
+            "State": "Disabled"
+          },
+          "name": "Status=Draft, State=Disabled"
+        },
+        {
+          "ref": "v4",
+          "props": {
+            "Status": "Ready",
+            "State": "Default"
+          },
+          "name": "Status=Ready, State=Default"
+        },
+        {
+          "ref": "v5",
+          "props": {
+            "Status": "Ready",
+            "State": "Hover"
+          },
+          "name": "Status=Ready, State=Hover"
+        },
+        {
+          "ref": "v6",
+          "props": {
+            "Status": "Ready",
+            "State": "Selected"
+          },
+          "name": "Status=Ready, State=Selected"
+        },
+        {
+          "ref": "v7",
+          "props": {
+            "Status": "Ready",
+            "State": "Disabled"
+          },
+          "name": "Status=Ready, State=Disabled"
+        },
+        {
+          "ref": "v8",
+          "props": {
+            "Status": "Syncing",
+            "State": "Default"
+          },
+          "name": "Status=Syncing, State=Default"
+        },
+        {
+          "ref": "v9",
+          "props": {
+            "Status": "Syncing",
+            "State": "Hover"
+          },
+          "name": "Status=Syncing, State=Hover"
+        },
+        {
+          "ref": "v10",
+          "props": {
+            "Status": "Syncing",
+            "State": "Selected"
+          },
+          "name": "Status=Syncing, State=Selected"
+        },
+        {
+          "ref": "v11",
+          "props": {
+            "Status": "Syncing",
+            "State": "Disabled"
+          },
+          "name": "Status=Syncing, State=Disabled"
+        },
+        {
+          "ref": "v12",
+          "props": {
+            "Status": "Error",
+            "State": "Default"
+          },
+          "name": "Status=Error, State=Default"
+        },
+        {
+          "ref": "v13",
+          "props": {
+            "Status": "Error",
+            "State": "Hover"
+          },
+          "name": "Status=Error, State=Hover"
+        },
+        {
+          "ref": "v14",
+          "props": {
+            "Status": "Error",
+            "State": "Selected"
+          },
+          "name": "Status=Error, State=Selected"
+        },
+        {
+          "ref": "v15",
+          "props": {
+            "Status": "Error",
+            "State": "Disabled"
+          },
+          "name": "Status=Error, State=Disabled"
+        }
+      ],
+      "property": "Label"
+    },
+    {
+      "name": "Canvas card",
+      "w": 1528,
+      "h": 1270,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "Kind": "Document",
+            "State": "Default"
+          },
+          "name": "Kind=Document, State=Default"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "Kind": "Document",
+            "State": "Hover"
+          },
+          "name": "Kind=Document, State=Hover"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "Kind": "Document",
+            "State": "Selected"
+          },
+          "name": "Kind=Document, State=Selected"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "Kind": "Document",
+            "State": "Loading"
+          },
+          "name": "Kind=Document, State=Loading"
+        },
+        {
+          "ref": "v4",
+          "props": {
+            "Kind": "Document",
+            "State": "Error"
+          },
+          "name": "Kind=Document, State=Error"
+        },
+        {
+          "ref": "v5",
+          "props": {
+            "Kind": "Document",
+            "State": "Empty"
+          },
+          "name": "Kind=Document, State=Empty"
+        },
+        {
+          "ref": "v6",
+          "props": {
+            "Kind": "Asset",
+            "State": "Default"
+          },
+          "name": "Kind=Asset, State=Default"
+        },
+        {
+          "ref": "v7",
+          "props": {
+            "Kind": "Asset",
+            "State": "Hover"
+          },
+          "name": "Kind=Asset, State=Hover"
+        },
+        {
+          "ref": "v8",
+          "props": {
+            "Kind": "Asset",
+            "State": "Selected"
+          },
+          "name": "Kind=Asset, State=Selected"
+        },
+        {
+          "ref": "v9",
+          "props": {
+            "Kind": "Asset",
+            "State": "Loading"
+          },
+          "name": "Kind=Asset, State=Loading"
+        },
+        {
+          "ref": "v10",
+          "props": {
+            "Kind": "Asset",
+            "State": "Error"
+          },
+          "name": "Kind=Asset, State=Error"
+        },
+        {
+          "ref": "v11",
+          "props": {
+            "Kind": "Asset",
+            "State": "Empty"
+          },
+          "name": "Kind=Asset, State=Empty"
+        }
+      ],
+      "property": "Label"
+    },
+    {
+      "name": "Tooltip",
+      "w": 1488,
+      "h": 600,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "Placement": "Top",
+            "Tone": "Dark"
+          },
+          "name": "Placement=Top, Tone=Dark"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "Placement": "Top",
+            "Tone": "Light"
+          },
+          "name": "Placement=Top, Tone=Light"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "Placement": "Bottom",
+            "Tone": "Dark"
+          },
+          "name": "Placement=Bottom, Tone=Dark"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "Placement": "Bottom",
+            "Tone": "Light"
+          },
+          "name": "Placement=Bottom, Tone=Light"
+        }
+      ],
+      "property": "Label"
+    },
+    {
+      "name": "Dialog",
+      "w": 1628,
+      "h": 880,
+      "entries": [
+        {
+          "ref": "v0",
+          "props": {
+            "State": "Default"
+          },
+          "name": "State=Default"
+        },
+        {
+          "ref": "v1",
+          "props": {
+            "State": "Loading"
+          },
+          "name": "State=Loading"
+        },
+        {
+          "ref": "v2",
+          "props": {
+            "State": "Error"
+          },
+          "name": "State=Error"
+        },
+        {
+          "ref": "v3",
+          "props": {
+            "State": "Success"
+          },
+          "name": "State=Success"
+        }
+      ],
+      "property": "Label"
+    }
+  ],
+  "variants": 170
+}

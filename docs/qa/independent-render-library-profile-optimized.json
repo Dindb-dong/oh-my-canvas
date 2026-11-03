@@ -1,0 +1,314 @@
+{
+  "timings": [
+    {
+      "phase": "fonts.create",
+      "ms": 8.200000002980232
+    },
+    {
+      "phase": "fonts.ensure",
+      "ms": 25.399999991059303
+    },
+    {
+      "phase": "fonts.subsetOracle",
+      "ms": 1,
+      "inputCodeUnits": 92713,
+      "uniqueCodePoints": 91,
+      "totalFaces": 125,
+      "expectedFaces": 13,
+      "loadedFaces": 13
+    },
+    {
+      "phase": "layout.initial",
+      "ms": 47.3999999910593
+    },
+    {
+      "phase": "editor.constructor",
+      "ms": 12.299999997019768
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 38.5
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 6.799999997019768,
+      "bytes": 730747
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 9.299999997019768
+    },
+    {
+      "phase": "renderer.constructor",
+      "ms": 55.20000000298023
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1.199999988079071
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 3.2999999970197678,
+      "bytes": 730747
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 8.800000011920929
+    },
+    {
+      "phase": "renderer.settled",
+      "ms": 39.29999999701977
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 31.299999997019768
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 5.0999999940395355,
+      "bytes": 730747
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 8.099999994039536
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 32.3999999910593
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 5.399999991059303,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 10
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1.2999999970197678
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 3.2000000029802322,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 8.699999988079071
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1.1000000089406967
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 2.7999999970197678,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 9.900000005960464
+    },
+    {
+      "phase": "facade.mount",
+      "ms": 341.30000001192093,
+      "nodes": 10109
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 4.299999997019768
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 3.7000000029802322,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 9.299999997019768
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1.4000000059604645
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 3.4000000059604645,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 9.700000002980232
+    },
+    {
+      "phase": "facade.rename",
+      "ms": 342.6000000089407,
+      "metricHits": 3891,
+      "metricMisses": 276
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 0.9000000059604645
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 3,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 8.799999997019768
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1.2000000029802322
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 2.7999999970197678,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 8.900000005960464
+    },
+    {
+      "phase": "facade.rename",
+      "ms": 212.70000000298023,
+      "metricHits": 3596,
+      "metricMisses": 0
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 2.7999999970197678,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 9.200000002980232
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1.4000000059604645
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 2.7000000029802322,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 8.900000005960464
+    },
+    {
+      "phase": "facade.rename",
+      "ms": 229.79999999701977,
+      "metricHits": 3596,
+      "metricMisses": 0
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 2.699999988079071,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 9.200000002980232
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1.0999999940395355
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 2.7000000029802322,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 8.600000008940697
+    },
+    {
+      "phase": "facade.rename",
+      "ms": 243,
+      "metricHits": 3596,
+      "metricMisses": 0
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 2.7000000029802322,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 8.799999997019768
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1.199999988079071
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 2.800000011920929,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 8.700000002980232
+    },
+    {
+      "phase": "facade.rename",
+      "ms": 260.29999999701977,
+      "metricHits": 3596,
+      "metricMisses": 0
+    },
+    {
+      "phase": "facade.renameSummary",
+      "ms": 0,
+      "samples": [
+        342.6000000089407,
+        212.6000000089407,
+        229.79999999701977,
+        242.90000000596046,
+        260.29999999701977
+      ],
+      "median": 242.90000000596046,
+      "cache": {
+        "revision": 6,
+        "entries": 552,
+        "bytes": 1438468,
+        "hits": 25800,
+        "misses": 1656
+      }
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1.2000000029802322
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 3,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 8.799999997019768
+    }
+  ],
+  "assertions": 8,
+  "objects": 1065
+}

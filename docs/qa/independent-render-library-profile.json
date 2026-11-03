@@ -1,0 +1,125 @@
+{
+  "timings": [
+    {
+      "phase": "fonts.create",
+      "ms": 6.100000008940697
+    },
+    {
+      "phase": "fonts.ensure",
+      "ms": 51428.79999999702
+    },
+    {
+      "phase": "layout.initial",
+      "ms": 274.29999999701977
+    },
+    {
+      "phase": "editor.constructor",
+      "ms": 26.400000005960464
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 138.3999999910593
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 8.299999997019768,
+      "bytes": 730747
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 13.599999994039536
+    },
+    {
+      "phase": "renderer.constructor",
+      "ms": 161.90000000596046
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 2.1000000089406967
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 4.5,
+      "bytes": 730747
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 18.900000005960464
+    },
+    {
+      "phase": "renderer.settled",
+      "ms": 56898
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 81.40000000596046
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 4,
+      "bytes": 730747
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 9.799999997019768
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 81.59999999403954
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 4,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 14.200000002980232
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1.2000000029802322
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 3.2999999970197678,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 10.5
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1.300000011920929
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 3.4000000059604645,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 11.299999997019768
+    },
+    {
+      "phase": "facade.mount",
+      "ms": 109584.70000000298,
+      "nodes": 10109
+    },
+    {
+      "phase": "render.measureText",
+      "ms": 1.4000000059604645
+    },
+    {
+      "phase": "render.serializeSvg",
+      "ms": 3.7999999970197678,
+      "bytes": 730745
+    },
+    {
+      "phase": "render.attachSvg",
+      "ms": 12.400000005960464
+    }
+  ],
+  "objects": 1065
+}

@@ -1,0 +1,2924 @@
+{
+  "schemaVersion": 1,
+  "at": "2026-11-03T12:32:28.485Z",
+  "passed": true,
+  "archive": "release/mac-arm64/Oh My Canvas.app/Contents/Resources/app.asar",
+  "archiveSha256": "58d3167828105ebd7230ea0090aa3bf24331cdcf3e076b5cf90e369b03acbef6",
+  "scope": "ASAR path inventory and exact current file bytes only. No compiled-code AST analysis, source-authorship proof, exhaustive restricted-source detection, legal clearance or reproducible-build claim.",
+  "indexedPaths": 7629,
+  "excludedPathPatterns": [
+    "vendor/** at any depth",
+    "apps/** at any depth",
+    "konva-fallback.*",
+    "synthetic.ts"
+  ],
+  "excludedPaths": [],
+  "unexpectedDistFiles": [],
+  "runtimePackageFields": [
+    "name",
+    "version",
+    "main",
+    "type",
+    "license",
+    "dependencies"
+  ],
+  "canvasKit": {
+    "package": "canvaskit-wasm",
+    "packageVersion": "0.42.0",
+    "packagePath": "node_modules/canvaskit-wasm/bin/full/canvaskit.wasm",
+    "bytes": 8242911,
+    "sha256": "aca7fa6019f95d3de98d4a49ae60a3d66a09e9d5ca74091fbc369b9be959f959"
+  },
+  "rootLicenseSha256": "4a5e5cccfd0d73f6917a0f00e93afbccaf9106a989af0803bf2a740698198e66",
+  "standaloneCli": {
+    "matchesCurrentDist": true,
+    "bytes": 613519,
+    "sha256": "4293582929d2f340d203d4d70151d3958717f87baa98ff15928b2eacd9c46981"
+  },
+  "groups": {
+    "dist": 178,
+    "core": 6,
+    "electron": 3,
+    "cli": 1,
+    "root": 2,
+    "native-original": 39,
+    "audited-wasm": 1,
+    "electron-original": 2,
+    "font-original": 127
+  },
+  "mismatches": [],
+  "checks": [
+    {
+      "target": "dist/app-icon.png",
+      "source": "dist/app-icon.png",
+      "group": "dist",
+      "bytes": 1141912,
+      "sha256": "8fb9514372409500286b416a48756f7ec2bc837c757ac4e6584901f92196e583",
+      "equal": true
+    },
+    {
+      "target": "dist/assets/canvaskit-DfnYRalq.js",
+      "source": "dist/assets/canvaskit-DfnYRalq.js",
+      "group": "dist",
+      "bytes": 123574,
+      "sha256": "153b82b4e484e723caba162ea7c5b77dc80373766ab5d01c4388a4260cf1dfb6",
+      "equal": true
+    },
+    {
+      "target": "dist/assets/index-Chzn4RzL.js",
+      "source": "dist/assets/index-Chzn4RzL.js",
+      "group": "dist",
+      "bytes": 451196,
+      "sha256": "08d7265a5ec697a2dc499c1925a762760d189696572d7e5b8376106670aba06c",
+      "equal": true
+    },
+    {
+      "target": "dist/assets/index-Dl-EOww4.css",
+      "source": "dist/assets/index-Dl-EOww4.css",
+      "group": "dist",
+      "bytes": 14265,
+      "sha256": "77b1ca140ff9b410821aab62284871d793953a38ad835d40d5fad9b0a4ced5f1",
+      "equal": true
+    },
+    {
+      "target": "dist/assets/raster-Cr28XtgW.js",
+      "source": "dist/assets/raster-Cr28XtgW.js",
+      "group": "dist",
+      "bytes": 1774,
+      "sha256": "43b1c4218e27ef8795fd1f300cada87af7b54467fbe99d2a496babc7f889d6d2",
+      "equal": true
+    },
+    {
+      "target": "dist/canvaskit.wasm",
+      "source": "dist/canvaskit.wasm",
+      "group": "dist",
+      "bytes": 8242911,
+      "sha256": "aca7fa6019f95d3de98d4a49ae60a3d66a09e9d5ca74091fbc369b9be959f959",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/IBM-Plex-Sans-LICENSE.txt",
+      "source": "dist/fonts/IBM-Plex-Sans-LICENSE.txt",
+      "group": "dist",
+      "bytes": 4429,
+      "sha256": "d0283623ef57e722fd0eb688a8041589670c608ab780cd3612d06ba6f153d3fd",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/Noto-Sans-KR-LICENSE.txt",
+      "source": "dist/fonts/Noto-Sans-KR-LICENSE.txt",
+      "group": "dist",
+      "bytes": 4314,
+      "sha256": "18aabf190848725e2576eefb5c29ba06aac1029d02132252a7f312eac2e50cf3",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-0-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-0-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 34708,
+      "sha256": "91aa276cc90e2b1a4d0a3f5a46e2f4004d6f42c6dfe2ed271643dbfd2e1cae3c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-1-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-1-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 56020,
+      "sha256": "10a4c7cc49065eaf78a3d94cf0955691b76b2f52858143bf4023c7da6a25ccae",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-10-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-10-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 20280,
+      "sha256": "562bef4f4aa557553d60ff3a9d94180debb6d8730b81b4232f60fb0fff48ea33",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-100-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-100-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 26300,
+      "sha256": "75b716ea45a402efa4bb7eb84afbea3c6e77c8c9bf55764a39eca7528014bd10",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-101-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-101-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 26060,
+      "sha256": "42fdd16baa93a8678b35077efa2466e414369442344eb7e50272c9d39ab62dcd",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-102-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-102-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 26336,
+      "sha256": "a1392a57c52e3f13f71d1f8881addb2bc46d24723d1f9644b9b19ad3dd40064a",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-103-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-103-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 24540,
+      "sha256": "ba28061072aa52d90e4e59047002ca690096f05761dc8c39e25e391382940452",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-104-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-104-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 29096,
+      "sha256": "00386be024448b786bec7250e6cdd4e4ca4dbce55ea81020f1deb9dcb46fd6a7",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-105-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-105-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 25312,
+      "sha256": "77b99af17900815d9a6c187f4fdf842300191183f79b8c9133973a165534121c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-106-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-106-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 24736,
+      "sha256": "40f74eafa4ab5b031e8ea319799c2d5582b1c4a26a430035821ea94aab71320b",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-107-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-107-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 18392,
+      "sha256": "0d27a2a224e4caae421ce9f3f7a28af5def8750d37b5b12cf6cf496dd60add3e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-108-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-108-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 19700,
+      "sha256": "46dfea3f360d34de0c6b543a17646608b7bef3beaef532747b39b27650fe29e9",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-109-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-109-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 17912,
+      "sha256": "e1be5f30719497b3460457d611fa8645149930e0b1755e259b7238503d1a23cd",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-11-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-11-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 19992,
+      "sha256": "058485e0c972ccbb1350a6612fa752a6626f89f5e8a48b5f173d544d44644678",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-110-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-110-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 17464,
+      "sha256": "9a71279b4e52c6b3edff0b577f79c121b92a9e0134ab0221a1654940145a26af",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-111-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-111-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 17392,
+      "sha256": "c098d730dbc3ed4266ce154084d915cf73f27d56d8cf1cff267231aaa6d12d42",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-112-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-112-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 16360,
+      "sha256": "9d2429a42f2f25d96fe8c367af405b8853d98a9d97e7ca7073ea33b267363715",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-113-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-113-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 16380,
+      "sha256": "e432f58c6b07476e1eb4edb9c55726aeb2fa361b5b494047f6670e92cee93cc5",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-114-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-114-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 16096,
+      "sha256": "a181067ee87266ad19b00287f7e2dbeac8d3c55a8581a95d8aa33b953bec71bc",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-115-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-115-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 16204,
+      "sha256": "8d152cfefe1ebc859d46e6d6020af7e4b712974ae07bdb143c1b4f9e9c57ac9f",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-116-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-116-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 16116,
+      "sha256": "554faa6e9030be693d0663e14170d38125f2dc47ab11eed86ab2cb3b8347be1a",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-117-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-117-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 14296,
+      "sha256": "d602fe02018943163f91e7418a82c71b6fbb37882d4089fbdb543534b4fb8c2e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-118-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-118-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 14564,
+      "sha256": "099e7ffea8d6d95de481f078370d72c22d4cd225607bd9f4acd9bf682424ef40",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-119-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-119-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 16568,
+      "sha256": "18e5aa97a223c7b5f62403bb20bffec9ebd2097a83fbaad5ec356eb563c89598",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-12-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-12-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 22572,
+      "sha256": "d1f61454a6542a100e5da343908a4a97bfcefa4eb7b4f1d3a0d424ccddae1ec8",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-13-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-13-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 22452,
+      "sha256": "f0ce22495d9d09da6cd8e5781bd0468117a63c8d8325f46dad2432f74695d5cd",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-14-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-14-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21932,
+      "sha256": "a6a04edd5d80b8a80e19c7426f6ebbc703b212dcaeb66506f8f3e74fd6ccd3d9",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-15-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-15-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 22596,
+      "sha256": "7e0af82b79aabc25814d54c3a8785218768262649a43d33fb6ffeee5f718ab78",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-16-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-16-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21420,
+      "sha256": "4318300fb26af0bd958f84197cf817149d09af7ed53848897d86c7709643e196",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-17-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-17-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 23408,
+      "sha256": "9043ae7e7aee92e1ebecd646a9db4716350f025f22bfff55e2d1aa6281599369",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-18-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-18-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21564,
+      "sha256": "1a6c6fd22ae04d76c2fecca37e955a4bff5e6cf984e737ff6773fe0e04adb5db",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-19-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-19-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 24932,
+      "sha256": "da54aa4e260c3cd81ff1b44fc9af08d79dfa51723fd242d7d2008c2b177f766a",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-2-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-2-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 35768,
+      "sha256": "d141c4cae5604c6fa073a2ceb2dbd7e6058392fd7d997466d43b9df9d60e9bea",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-20-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-20-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 25772,
+      "sha256": "9bb66ead8a0b281f1d4f6d3ce9c5c8bbe9d76cabf9646213c560e351aafd4071",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-21-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-21-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 22004,
+      "sha256": "25340e23c990b0d026b08fdee6e4c9d7d1c0c98989a68f519f7794a9cadf890c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-22-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-22-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 23380,
+      "sha256": "b280302e970c4cb6bcabdb2dada1d6d8512cea821fb339b0dd388048c1043f5b",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-23-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-23-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 23920,
+      "sha256": "2d00400319fa4e4a38d286c0427e23a9f058244da134af4608c09ab7aac2d9ef",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-24-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-24-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 25372,
+      "sha256": "6d9c5bcd8853a3c2c271e1de49ed50ca40931f4caca002ce06942e68f5c422f0",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-25-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-25-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 19672,
+      "sha256": "cebdef12870a7f51364375872a94fbf513df518cfa53b8f60d316030b4b174b8",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-26-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-26-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 25412,
+      "sha256": "8e25fc2ff893012ad4c11f28e4580e6f05982b753fc0147d963b098ff043bd01",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-27-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-27-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 24308,
+      "sha256": "7a2e5a857cecfd865efbc98c1ed990b37feda47b7b5712a3d2457974a5e9590e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-28-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-28-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21788,
+      "sha256": "4dd132bfc5d812bf615ea51e4fd1a40881b0f9e35df42d9a689cb235b102d659",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-29-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-29-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 22992,
+      "sha256": "886e3d96ac2210d7037cbe4a1add2664e35b10534a48e7cc11b9b5ef8c8c56e9",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-3-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-3-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 24668,
+      "sha256": "e192c11911121d5765478da4f949b97b3186d9db9ec73e2f2331763352c36047",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-30-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-30-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 23356,
+      "sha256": "21627d29241595cc9aa5d2ff9af1a89c8e9b46fd7cec7226fca029ef2c3a77a0",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-31-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-31-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 23436,
+      "sha256": "c5c0f181c992642b9dbd8f4a0933387390c53db8205ca3b793a114ba35d04b87",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-32-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-32-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 26184,
+      "sha256": "e9208c7e17742428baaeadb229da09043ccf4339c2b3b74b474513ace7900e07",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-33-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-33-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 24960,
+      "sha256": "2edf30aab177c3866ffcce22ff437da2f1f2a550565627fe7a4047d35660a226",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-34-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-34-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21384,
+      "sha256": "b16bdb65765f0a5be535ae3191835bf92c79281c5edfbcaa547127d3e343ce04",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-35-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-35-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21224,
+      "sha256": "2912380dfd7bc04dd0d77a80407961eb9df37f04da53c092ad8119ea8c4a78a6",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-36-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-36-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21164,
+      "sha256": "97e25fc68412ffb6d66e7a91d4f6ab1e1fdab6cbd51cce1bc4a740d0eaebe4bd",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-37-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-37-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21100,
+      "sha256": "319379894f6a04c3eff76245419a6e2f4cd6cda0ff014d03b16a06d91511b498",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-38-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-38-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 16496,
+      "sha256": "57a5b026ac57608831d8152db35c18f8a632918c44061b20124df6fa91809218",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-39-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-39-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21192,
+      "sha256": "2ef1384fc3ea74e39bcef4f7e975030e26e078ed5a694ab43e244070acada3cb",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-4-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-4-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 23104,
+      "sha256": "89a9d9b241b6e5e1663661fc37f3af8c4091c09525caf3ac7aec2a578640cbdc",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-40-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-40-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 20768,
+      "sha256": "43aeb94b27c5ade036be9553777d4a47c2c1e3f44b7789b23282609d621d55d6",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-41-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-41-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 17984,
+      "sha256": "88da9ec72f051b28c2dfec8ae3554093637ab4f5da64a48d621000b26fc0de5c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-42-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-42-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 20020,
+      "sha256": "237118f3c6ba41b827b32a61dc7887fa9d44338534dd2c68affc91a476d27094",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-43-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-43-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21292,
+      "sha256": "4790a1da4ef215b289d36745414c82ed4e9727c4560030a55a889dbea617a32f",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-44-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-44-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 18300,
+      "sha256": "aa5d6865fa63aae6f496c76c28221a4f7b10f45389cac2a8d1535bea7cec089c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-45-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-45-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 19472,
+      "sha256": "199bf26682ac8c3bde3ebd8beb45b6a2b4402e679bc2008ea9d4b9f4213c1bcc",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-46-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-46-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 20792,
+      "sha256": "f26c4f0c361f03094a7b5d55747873e2474c65d36a7ffc3383d86ca9c3328b18",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-47-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-47-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 22004,
+      "sha256": "443406f979e49cdc2bd60f5fc77e635a835ebbccc8e976346624e6ed2f1f32f9",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-48-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-48-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21248,
+      "sha256": "64007b2be6df970972a0b7c4574a2dd959afb65f858a2cee308be1e0a7d1ec97",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-49-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-49-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 22752,
+      "sha256": "f9064e2791af6e50738de7889591c4ed543dbaf28a68389f5e7f35c62524a8e2",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-5-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-5-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 20664,
+      "sha256": "bfb61f5704c50cfb4acce0597a566e77b4c2b9cca51536c40998addde6c0084e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-50-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-50-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21316,
+      "sha256": "84258d7398d09d1bbdcd235f599cf103efb3850f993cd0d51f7d8c98a1c01c85",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-51-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-51-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 19576,
+      "sha256": "a9eee4ca3df5f8b2d95a829d534bbd215391a5bf7fcc74beb975cc0d91c4333c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-52-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-52-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 22072,
+      "sha256": "bf46a73423af3e90d9a3c98dd739ad0390b992241fff9770db316bcd5b5a0ce4",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-53-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-53-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 20984,
+      "sha256": "aed6a1a55810a8ebdef01a3e0d9080add23a8b1d9542c9caab1d7245ae07e316",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-54-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-54-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 20876,
+      "sha256": "e005a153e14c3cbee35946ab1c04d38027201599fa9792cfb537f730a2765f1c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-55-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-55-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 20504,
+      "sha256": "06257a3de86a35670c0b16f1c4a063805477fc632be3e050ce0a606ac1b4a8db",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-56-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-56-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21252,
+      "sha256": "827a99438e3082a852d08b2aeec5c0d1ac9d3ba4e0ad4d46c51a191b379ff4e1",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-57-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-57-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21116,
+      "sha256": "da955ad6276b6a85ba46cf8cbf244dc079c79d13c5fceddf4309618c7380a51f",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-58-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-58-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21904,
+      "sha256": "b7f6f9483f1dafe7f14bc3c68af40b2f4f7b1d963a587aea2eebf42f961e9de0",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-59-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-59-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 25076,
+      "sha256": "bc77d2fe7bc7644bcb9632e5bb71a387fb8f3289367eb9a51c33348bcb3f133d",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-6-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-6-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 20420,
+      "sha256": "f056efc8518d4a9c6261be4b1adbf3bf19f6d3a642c32e3545d3a5e9ea263507",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-60-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-60-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 24340,
+      "sha256": "94e4aba73af7a43019551796c67a6b3f60e5da03413288236a9d4b7ad983d1d2",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-61-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-61-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 23672,
+      "sha256": "3bbbd150a9d00c08a093a354adb8060b0201a4c5ccf6577700c7ab40e0edf1c0",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-62-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-62-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21788,
+      "sha256": "3588ff46b0defe775f0f348ef84c2838d88906140455304dc247c16083229013",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-63-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-63-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 20896,
+      "sha256": "964bd2faa27132a7a26a28eeeb912b58bae9017422637a643040ed15d34b08c0",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-64-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-64-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 18384,
+      "sha256": "a54d82ae227a38509fc903198f74e278a9b389fe6c9e7533d02bc5f9aa3dfba8",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-65-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-65-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 64796,
+      "sha256": "84c8d4810d7722e29e91cdeb6c78e71ca1928a1be4f419feb37b43fe8103440b",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-66-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-66-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 55880,
+      "sha256": "3ea2cac8c3d7b8f57a898511b050f5dd9a6c14938e149ef7a8692f78f28048bf",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-67-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-67-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 48192,
+      "sha256": "1acfbc603177c98f692a04cc03e669c29af45cf401f2109ccca8e8bbc57e58cf",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-68-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-68-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 51696,
+      "sha256": "630a119c5ed8bb76c43371b20e1cefd82863727a7bba3e3f53e5d7055f915ed6",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-69-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-69-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 48236,
+      "sha256": "5587fd9193a24f22e9266789c950ed2eff16c641560d5f3c42257d2167b57985",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-7-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-7-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 20856,
+      "sha256": "c0aa2daa7efe28430628439d1f927d698fd9b98fce4ce8068a7251e34e75237e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-70-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-70-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 47984,
+      "sha256": "bb63ef23f89e85edf50db0056700089f79f0068e77c4e43859613df4daf5c558",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-71-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-71-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 57164,
+      "sha256": "023ee46bad2b51b02413090070af160b7e1f6a12bf2bcaed9888298bd5465bbc",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-72-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-72-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 45580,
+      "sha256": "ed7c93bdb8040c438b481bf5536e5f1fc6d630205b2c3ca2d05dc4e8b6cbd9a6",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-73-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-73-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 50272,
+      "sha256": "2b3b3bf563e3c8add1a9da14ba9132ca030d742b5bf0f557bad774974e7fe869",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-74-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-74-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 54260,
+      "sha256": "e9fb4398da6c2a84c47d7112c368cc41028a51321a1474f9a3f9c66eed0064d9",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-75-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-75-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 56660,
+      "sha256": "e4317b377de03f06c1dc7433c938254f6c27c42e408703711c216259c45052e6",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-76-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-76-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 48420,
+      "sha256": "e6a952c208a5c5096aa65cce48a9f0f014a777fcc1804aefe47bc642da313bf8",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-77-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-77-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 52860,
+      "sha256": "9ae8fd2772d7f4a5696ad7ef3d65bb61a1283bb3d9a11b0272822de1acb24152",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-78-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-78-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 48300,
+      "sha256": "d0ee3df1144c38df3747d3c1b1cae12cc8eb9831d1289d6fea1d70ebdb3b4866",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-79-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-79-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 60660,
+      "sha256": "7712cca201e92ae6231957e68d792e05942a4a9ade9c2cad7ece72c994184621",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-8-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-8-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 19580,
+      "sha256": "234189f7c6a13e5431ec16547a35eb47acd71d927746bf1bd34dbeac3e36c2fe",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-80-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-80-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 50796,
+      "sha256": "835eeaa05c54bf9cc44ba80a13ab80b5a744216874b282f55073f1e5245e0f51",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-81-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-81-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 47888,
+      "sha256": "889c6ad4919a6fd9b76100280c156dfd11d0df920fef897442dd54208ddb1e4b",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-82-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-82-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 50768,
+      "sha256": "263774ad3def3e73b618d39792f9bc1ec49bfec476febcb32c450fda33e561da",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-83-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-83-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 41500,
+      "sha256": "616b08ede9949cf216043aad6aedc237ae474bd9a716f1c90a7847d1f85d209d",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-84-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-84-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 54324,
+      "sha256": "5464b5ea691f67f5fb47a397c3dc594eca550e92a41b5949fc22bc818a453e9e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-85-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-85-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 52412,
+      "sha256": "a2d7b856c06f9f0dc5e037426efed0f7d7475c2e44eef0871152d0414685189d",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-86-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-86-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 51472,
+      "sha256": "f62d69028625acc5a1c0ccca24734b0f3f05a381e0fea992e9d15174300a705d",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-87-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-87-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 44752,
+      "sha256": "d77c4521e11e3638bb0ac5260dd5dcad1eca3bd3dfe7f507ab56cd444c8a919c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-88-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-88-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 46292,
+      "sha256": "60577355f788c18e83721a248378c4dc2a194dcdf9723f6466fff38c05d48045",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-89-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-89-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 45320,
+      "sha256": "6193f754c6e020b33e3b53710b917a595d4445d9b8b50cadd9a4fd88f7f07b3c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-9-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-9-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 22196,
+      "sha256": "92d216b5c91ae5bdf7abd62cdb2e01fc825976da70c1f10275b750c2b75760a9",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-90-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-90-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 41768,
+      "sha256": "c127e770573e3f240dcb3bf4448e2ee1763926875b7369a4243e0bfbc0ed26aa",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-91-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-91-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 45240,
+      "sha256": "937b565bc345c6adb8a87234b0b8a54d414c891e3c48a09c0f1daf67f16487ce",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-92-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-92-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 42492,
+      "sha256": "3fa3bb4676169eb81dd1cb9a5f5fe8023c1764b5f96c04d60735cc2075c8002e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-93-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-93-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 28936,
+      "sha256": "ee4e09ca8eed2c6104556ac196d930942a84f120b9a63a396197ffd465bdaf95",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-94-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-94-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 19256,
+      "sha256": "2346031bda22a84fad4dbdb7c3cfa5e5c6e3527d6f7a907e3eb8600f4485f6b2",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-95-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-95-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 53704,
+      "sha256": "c6b6b101cc6e1dd5de4a9f0957b60a3ecb53ac441e218a883f13bb010bfc4ed1",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-96-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-96-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 21124,
+      "sha256": "1471d3a42dc1116312c4a8f1337e72d1df056795fd528ebb1e2ec25cdaac4730",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-97-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-97-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 14032,
+      "sha256": "3e772734414c51dd5d901c80c8370256546a12370035409289e8cc6953fe770e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-98-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-98-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 12196,
+      "sha256": "cc4ea982856185c8a23b1bd32c7fd508a382cd844d61be143630e260d75cf44c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-99-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-99-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 16924,
+      "sha256": "0a1957b6479b991b28e7d13e20651813836772029bc9b2be5c7f872938f8a75d",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-cyrillic-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-cyrillic-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 9896,
+      "sha256": "5790c8b257e580d2147e0c92acba849f362217423c792613cb982afbe8746144",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-latin-ext-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-latin-ext-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 8308,
+      "sha256": "602c3ac6954b05484518f81083b332384ba1e72b9bca349d1d4eccd692c8e693",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-latin-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-latin-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 25880,
+      "sha256": "6ecf7205a09aea30481edc34156d1beba7be11f72d03e80bdb6bbf592594ba15",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-vietnamese-wght-normal.woff2",
+      "source": "dist/fonts/noto-sans-kr-vietnamese-wght-normal.woff2",
+      "group": "dist",
+      "bytes": 9040,
+      "sha256": "392c6900582a57497a2c91806bd0898767585af14accb0256ca9bf78b5f356d1",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/plex.woff2",
+      "source": "dist/fonts/plex.woff2",
+      "group": "dist",
+      "bytes": 45712,
+      "sha256": "e2291e842cf5af167122a22881a740c7f2dda7716f1e8cd76680264f4a859470",
+      "equal": true
+    },
+    {
+      "target": "dist/index.html",
+      "source": "dist/index.html",
+      "group": "dist",
+      "bytes": 3092,
+      "sha256": "f3192d3fd2d9bb8f1078f523fb4e665482456891122aeabab6f6c1b5c28b0360",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/electron-LICENSE",
+      "source": "dist/licenses/electron-LICENSE",
+      "group": "dist",
+      "bytes": 1096,
+      "sha256": "5154e165bd6c2cc0cfbcd8916498c7abab0497923bafcd5cb07673fe8480087d",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/electron-LICENSES.chromium.html",
+      "source": "dist/licenses/electron-LICENSES.chromium.html",
+      "group": "dist",
+      "bytes": 5598206,
+      "sha256": "214152f78cc0b611f63ff8faefcc6670c4605ffbff05f092bb671e6df80ce741",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/README.md",
+      "source": "dist/licenses/native/README.md",
+      "group": "dist",
+      "bytes": 3839,
+      "sha256": "924a203651ce850b73b73fb6d4b06a3ee0114228b8fbe5b472d24b9ae7a18ff3",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/manifest.json",
+      "source": "dist/licenses/native/manifest.json",
+      "group": "dist",
+      "bytes": 27057,
+      "sha256": "968adcf0705a717fdb5ab40b122bd8362a1c30fd774b9fd7d24d933be2535b97",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/downloads.json",
+      "source": "dist/licenses/native/provenance/downloads.json",
+      "group": "dist",
+      "bytes": 18827,
+      "sha256": "890348fe84fc9ea575f46fd5d1e251b66dd99ff4028caaf7da1c0e51f6a63754",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/libjpeg-turbo--simd__nasm__jsimdext.inc",
+      "source": "dist/licenses/native/provenance/libjpeg-turbo--simd__nasm__jsimdext.inc",
+      "group": "dist",
+      "bytes": 15399,
+      "sha256": "000b2df5469d2f94ea20a1b3d638b94031dad296f006600e1dbff79eded5facb",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/skia--DEPS",
+      "source": "dist/licenses/native/provenance/skia--DEPS",
+      "group": "dist",
+      "bytes": 10719,
+      "sha256": "2b5dc93b229ae782d82f42e0c5d0eb6c810285bd8ae65196badee3364f1687db",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/skia--modules__canvaskit__BUILD.gn",
+      "source": "dist/licenses/native/provenance/skia--modules__canvaskit__BUILD.gn",
+      "group": "dist",
+      "bytes": 10644,
+      "sha256": "8cb2d97839b0c4b62386706b3c4b52d54e06d0ff610569f162d5682a12f86b6e",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/skia--modules__canvaskit__Makefile",
+      "source": "dist/licenses/native/provenance/skia--modules__canvaskit__Makefile",
+      "group": "dist",
+      "bytes": 7339,
+      "sha256": "b07b8967ace41879487ce8c6db9581d92a1ba8ba2ed73e2138a7decd8a31a880",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/skia--modules__canvaskit__compile.sh",
+      "source": "dist/licenses/native/provenance/skia--modules__canvaskit__compile.sh",
+      "group": "dist",
+      "bytes": 8106,
+      "sha256": "8b88398fd494e3d2ff6049df97e5f4d3f687dd21b7872ec39034ad6f23120bb5",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/wuffs-release-first-4096.txt",
+      "source": "dist/licenses/native/provenance/wuffs-release-first-4096.txt",
+      "group": "dist",
+      "bytes": 4096,
+      "sha256": "a35b12df8269d297db4d017ac66cc74e3b41611ca925c6eeae71535aacfd3a02",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/brotli--LICENSE",
+      "source": "dist/licenses/native/texts/brotli--LICENSE",
+      "group": "dist",
+      "bytes": 1084,
+      "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/emscripten--LICENSE",
+      "source": "dist/licenses/native/texts/emscripten--LICENSE",
+      "group": "dist",
+      "bytes": 5093,
+      "sha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/emscripten--system__lib__compiler-rt__LICENSE.TXT",
+      "source": "dist/licenses/native/texts/emscripten--system__lib__compiler-rt__LICENSE.TXT",
+      "group": "dist",
+      "bytes": 16708,
+      "sha256": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/emscripten--system__lib__libc__musl__COPYRIGHT",
+      "source": "dist/licenses/native/texts/emscripten--system__lib__libc__musl__COPYRIGHT",
+      "group": "dist",
+      "bytes": 6204,
+      "sha256": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/emscripten--system__lib__libcxx__LICENSE.TXT",
+      "source": "dist/licenses/native/texts/emscripten--system__lib__libcxx__LICENSE.TXT",
+      "group": "dist",
+      "bytes": 16703,
+      "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/emscripten--system__lib__libcxxabi__LICENSE.TXT",
+      "source": "dist/licenses/native/texts/emscripten--system__lib__libcxxabi__LICENSE.TXT",
+      "group": "dist",
+      "bytes": 16706,
+      "sha256": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--LICENSE.TXT",
+      "source": "dist/licenses/native/texts/freetype--LICENSE.TXT",
+      "group": "dist",
+      "bytes": 2149,
+      "sha256": "bd36c8b474855fa294c2ec5c184544478ef3720aad37d65a6296a4f264fd2d3b",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--docs__FTL.TXT",
+      "source": "dist/licenses/native/texts/freetype--docs__FTL.TXT",
+      "group": "dist",
+      "bytes": 6743,
+      "sha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--src__base__fthash.c",
+      "source": "dist/licenses/native/texts/freetype--src__base__fthash.c",
+      "group": "dist",
+      "bytes": 8406,
+      "sha256": "693e5a54b3ce30140975a94a3369dbe706eb1f280c69e80da426d39cc45b94ef",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--src__bdf__README",
+      "source": "dist/licenses/native/texts/freetype--src__bdf__README",
+      "group": "dist",
+      "bytes": 5972,
+      "sha256": "7984455e7e5a9faba3797c8bf095fbe10cc846316b7320aff8c58402e22b82fe",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--src__gzip__zlib.h",
+      "source": "dist/licenses/native/texts/freetype--src__gzip__zlib.h",
+      "group": "dist",
+      "bytes": 97499,
+      "sha256": "c86a25c27f74cb97b8fa07b175f479f063d5064ace9995b4684063643c81cf1b",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--src__pcf__README",
+      "source": "dist/licenses/native/texts/freetype--src__pcf__README",
+      "group": "dist",
+      "bytes": 3311,
+      "sha256": "18d9782898d9eac04476e2f744678137b2a889689ed3e923e052fc396a86f86b",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--src__sfnt__sfwoff2.c",
+      "source": "dist/licenses/native/texts/freetype--src__sfnt__sfwoff2.c",
+      "group": "dist",
+      "bytes": 66531,
+      "sha256": "9c67d2b0e2d0a88520bbfe132827252d0f7bd731bb735fba7a36575222d7cc72",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--src__sfnt__woff2tags.c",
+      "source": "dist/licenses/native/texts/freetype--src__sfnt__woff2tags.c",
+      "group": "dist",
+      "bytes": 4350,
+      "sha256": "02c3c39d125d366d4b73e270154c5d6be4165146a9e3201b43a3892aadbb8d4e",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/harfbuzz--COPYING",
+      "source": "dist/licenses/native/texts/harfbuzz--COPYING",
+      "group": "dist",
+      "bytes": 1971,
+      "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/icu--LICENSE",
+      "source": "dist/licenses/native/texts/icu--LICENSE",
+      "group": "dist",
+      "bytes": 27718,
+      "sha256": "e55522d81edc687a341a4411e0776e54ca654e90147f354a90458aaced4116af",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/libjpeg-turbo--LICENSE.md",
+      "source": "dist/licenses/native/texts/libjpeg-turbo--LICENSE.md",
+      "group": "dist",
+      "bytes": 5620,
+      "sha256": "96f5b328adbb78eeaaec6980d73fd558cb1e4d62560ed615646bc3cf5e532430",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/libjpeg-turbo--README.ijg",
+      "source": "dist/licenses/native/texts/libjpeg-turbo--README.ijg",
+      "group": "dist",
+      "bytes": 12799,
+      "sha256": "75815e3bf6484201a3c3d17a1bbf10f2e8e3237f84df10a2357ea896db2a81d6",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/libpng--LICENSE",
+      "source": "dist/licenses/native/texts/libpng--LICENSE",
+      "group": "dist",
+      "bytes": 5345,
+      "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/libwebp--COPYING",
+      "source": "dist/licenses/native/texts/libwebp--COPYING",
+      "group": "dist",
+      "bytes": 1496,
+      "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/libwebp--PATENTS",
+      "source": "dist/licenses/native/texts/libwebp--PATENTS",
+      "group": "dist",
+      "bytes": 1436,
+      "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/noto-mono--OFL-1.1.txt",
+      "source": "dist/licenses/native/texts/noto-mono--OFL-1.1.txt",
+      "group": "dist",
+      "bytes": 4149,
+      "sha256": "23dd5a5a3298badbb32f058842ef493ac7d852cf1dfe902d71cc1554eac4c1ba",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/skia--LICENSE",
+      "source": "dist/licenses/native/texts/skia--LICENSE",
+      "group": "dist",
+      "bytes": 1507,
+      "sha256": "5f787c1dee3c56547f09ccc2906ab5f5293c4d8dd6c8654e573216c38e908dbd",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/skia--modules__skcms__LICENSE",
+      "source": "dist/licenses/native/texts/skia--modules__skcms__LICENSE",
+      "group": "dist",
+      "bytes": 1635,
+      "sha256": "e59bb5c5c6ba426a9ac4ba9fe667ad14c5166b12aa25be8af1d122b14fbe2e36",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/skia--modules__skcms__skcms.h",
+      "source": "dist/licenses/native/texts/skia--modules__skcms__skcms.h",
+      "group": "dist",
+      "bytes": 207,
+      "sha256": "f3431fe230076dda4dcad5c3b1cc4789ef6d71967f254c6fdac32a3b97bb94de",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/skia--third_party__README",
+      "source": "dist/licenses/native/texts/skia--third_party__README",
+      "group": "dist",
+      "bytes": 860,
+      "sha256": "1e905f1636252db992dd6e776816609b5646e72685ab7e3ff3a5d63bc064891b",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/wuffs--LICENSE",
+      "source": "dist/licenses/native/texts/wuffs--LICENSE",
+      "group": "dist",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/wuffs--README.md",
+      "source": "dist/licenses/native/texts/wuffs--README.md",
+      "group": "dist",
+      "bytes": 1316,
+      "sha256": "097d5255b32cdda56ac586cd0d6f56777aab413941f1a10e66f0411134514182",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/wuffs--copyright-header.txt",
+      "source": "dist/licenses/native/texts/wuffs--copyright-header.txt",
+      "group": "dist",
+      "bytes": 596,
+      "sha256": "d4953a44e4fd3c018bfff37f26ef6335e537a84ac1881c6114cbb55e55f68b40",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/zlib--LICENSE",
+      "source": "dist/licenses/native/texts/zlib--LICENSE",
+      "group": "dist",
+      "bytes": 910,
+      "sha256": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/npm-runtime.txt",
+      "source": "dist/licenses/npm-runtime.txt",
+      "group": "dist",
+      "bytes": 165278,
+      "sha256": "d26c0979ceadaed28f1c3b3462152c428f6e61e5bd3f44ed8f350e3c4da5b8d9",
+      "equal": true
+    },
+    {
+      "target": "dist/preload.cjs",
+      "source": "dist/preload.cjs",
+      "group": "dist",
+      "bytes": 930,
+      "sha256": "9f8e35fc02170bb8b7dbc60c3bf780309174b88f1cc4693ac4524575aaedfff6",
+      "equal": true
+    },
+    {
+      "target": "dist/tool-defs.mjs",
+      "source": "dist/tool-defs.mjs",
+      "group": "dist",
+      "bytes": 8188,
+      "sha256": "1dd89202711f8a30468da60c5b649b17f947d61eee1d5f98c2abc02df7882ab0",
+      "equal": true
+    },
+    {
+      "target": "core/collaboration.mjs",
+      "source": "core/collaboration.mjs",
+      "group": "core",
+      "bytes": 10346,
+      "sha256": "64fda967ddeffb8bb9e099426ec4de788aca150a52fd43f4f9f9c765fd1cf18f",
+      "equal": true
+    },
+    {
+      "target": "core/document.mjs",
+      "source": "core/document.mjs",
+      "group": "core",
+      "bytes": 8075,
+      "sha256": "79f47bdb9bd5d17c01254ac172a04decadd2f45036379c95cf680a75e73fb7cd",
+      "equal": true
+    },
+    {
+      "target": "core/export-file.mjs",
+      "source": "core/export-file.mjs",
+      "group": "core",
+      "bytes": 589,
+      "sha256": "619ccf7fe05d96f4c27ad7c1c69e27094c6c267719be014a5f2456ae3e432c9b",
+      "equal": true
+    },
+    {
+      "target": "core/geometry.mjs",
+      "source": "core/geometry.mjs",
+      "group": "core",
+      "bytes": 3255,
+      "sha256": "a25d8a8654bc37140a1d13be471074018c6b797fb79fcaa581f3e44343f201b0",
+      "equal": true
+    },
+    {
+      "target": "core/replica.mjs",
+      "source": "core/replica.mjs",
+      "group": "core",
+      "bytes": 5321,
+      "sha256": "2b9db9945339e52d4e2420afff07232192b3d1ff8a1e3f8f43f26ac5745145dc",
+      "equal": true
+    },
+    {
+      "target": "core/storage.mjs",
+      "source": "core/storage.mjs",
+      "group": "core",
+      "bytes": 4519,
+      "sha256": "7d7777af6a6518b2cf0ea0af3efff01c34c2b1567c04b32432cbcc8b1b8a2d8a",
+      "equal": true
+    },
+    {
+      "target": "electron/main.mjs",
+      "source": "electron/main.mjs",
+      "group": "electron",
+      "bytes": 14951,
+      "sha256": "3ef45f3f618bc8282d5f8bb874132d7e3c396815b8877b15f4c12038b1a4c14c",
+      "equal": true
+    },
+    {
+      "target": "electron/mcp-bridge.mjs",
+      "source": "electron/mcp-bridge.mjs",
+      "group": "electron",
+      "bytes": 1822,
+      "sha256": "78a0d1f179fde9bd7934a420f368e38938f5aea62db4ab22716f15c4d417a678",
+      "equal": true
+    },
+    {
+      "target": "electron/preload.cjs",
+      "source": "electron/preload.cjs",
+      "group": "electron",
+      "bytes": 854,
+      "sha256": "1569d8c08874cc90fa18fdc986a3b8d736ea3d585712deb2fb7957c4134f3b83",
+      "equal": true
+    },
+    {
+      "target": "cli/mcp.mjs",
+      "source": "cli/mcp.mjs",
+      "group": "cli",
+      "bytes": 2704,
+      "sha256": "455f11e718928d17509f93f5780393c1250450aeb38338e3e419c9c8191ede87",
+      "equal": true
+    },
+    {
+      "target": "LICENSE",
+      "source": "LICENSE",
+      "group": "root",
+      "bytes": 1064,
+      "sha256": "4a5e5cccfd0d73f6917a0f00e93afbccaf9106a989af0803bf2a740698198e66",
+      "equal": true
+    },
+    {
+      "target": "THIRD_PARTY_NOTICES.md",
+      "source": "THIRD_PARTY_NOTICES.md",
+      "group": "root",
+      "bytes": 3154,
+      "sha256": "135426cdbe0098d27b9ecea4646df65f74cd86207bf9d6b620e55d12b21fc84f",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/manifest.json",
+      "source": "licenses/native/manifest.json",
+      "group": "native-original",
+      "bytes": 27057,
+      "sha256": "968adcf0705a717fdb5ab40b122bd8362a1c30fd774b9fd7d24d933be2535b97",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/README.md",
+      "source": "licenses/native/README.md",
+      "group": "native-original",
+      "bytes": 3839,
+      "sha256": "924a203651ce850b73b73fb6d4b06a3ee0114228b8fbe5b472d24b9ae7a18ff3",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/downloads.json",
+      "source": "licenses/native/provenance/downloads.json",
+      "group": "native-original",
+      "bytes": 18827,
+      "sha256": "890348fe84fc9ea575f46fd5d1e251b66dd99ff4028caaf7da1c0e51f6a63754",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/libjpeg-turbo--simd__nasm__jsimdext.inc",
+      "source": "licenses/native/provenance/libjpeg-turbo--simd__nasm__jsimdext.inc",
+      "group": "native-original",
+      "bytes": 15399,
+      "sha256": "000b2df5469d2f94ea20a1b3d638b94031dad296f006600e1dbff79eded5facb",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/skia--DEPS",
+      "source": "licenses/native/provenance/skia--DEPS",
+      "group": "native-original",
+      "bytes": 10719,
+      "sha256": "2b5dc93b229ae782d82f42e0c5d0eb6c810285bd8ae65196badee3364f1687db",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/skia--modules__canvaskit__BUILD.gn",
+      "source": "licenses/native/provenance/skia--modules__canvaskit__BUILD.gn",
+      "group": "native-original",
+      "bytes": 10644,
+      "sha256": "8cb2d97839b0c4b62386706b3c4b52d54e06d0ff610569f162d5682a12f86b6e",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/skia--modules__canvaskit__Makefile",
+      "source": "licenses/native/provenance/skia--modules__canvaskit__Makefile",
+      "group": "native-original",
+      "bytes": 7339,
+      "sha256": "b07b8967ace41879487ce8c6db9581d92a1ba8ba2ed73e2138a7decd8a31a880",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/skia--modules__canvaskit__compile.sh",
+      "source": "licenses/native/provenance/skia--modules__canvaskit__compile.sh",
+      "group": "native-original",
+      "bytes": 8106,
+      "sha256": "8b88398fd494e3d2ff6049df97e5f4d3f687dd21b7872ec39034ad6f23120bb5",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/provenance/wuffs-release-first-4096.txt",
+      "source": "licenses/native/provenance/wuffs-release-first-4096.txt",
+      "group": "native-original",
+      "bytes": 4096,
+      "sha256": "a35b12df8269d297db4d017ac66cc74e3b41611ca925c6eeae71535aacfd3a02",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/brotli--LICENSE",
+      "source": "licenses/native/texts/brotli--LICENSE",
+      "group": "native-original",
+      "bytes": 1084,
+      "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/emscripten--LICENSE",
+      "source": "licenses/native/texts/emscripten--LICENSE",
+      "group": "native-original",
+      "bytes": 5093,
+      "sha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/emscripten--system__lib__compiler-rt__LICENSE.TXT",
+      "source": "licenses/native/texts/emscripten--system__lib__compiler-rt__LICENSE.TXT",
+      "group": "native-original",
+      "bytes": 16708,
+      "sha256": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/emscripten--system__lib__libc__musl__COPYRIGHT",
+      "source": "licenses/native/texts/emscripten--system__lib__libc__musl__COPYRIGHT",
+      "group": "native-original",
+      "bytes": 6204,
+      "sha256": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/emscripten--system__lib__libcxx__LICENSE.TXT",
+      "source": "licenses/native/texts/emscripten--system__lib__libcxx__LICENSE.TXT",
+      "group": "native-original",
+      "bytes": 16703,
+      "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/emscripten--system__lib__libcxxabi__LICENSE.TXT",
+      "source": "licenses/native/texts/emscripten--system__lib__libcxxabi__LICENSE.TXT",
+      "group": "native-original",
+      "bytes": 16706,
+      "sha256": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--LICENSE.TXT",
+      "source": "licenses/native/texts/freetype--LICENSE.TXT",
+      "group": "native-original",
+      "bytes": 2149,
+      "sha256": "bd36c8b474855fa294c2ec5c184544478ef3720aad37d65a6296a4f264fd2d3b",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--docs__FTL.TXT",
+      "source": "licenses/native/texts/freetype--docs__FTL.TXT",
+      "group": "native-original",
+      "bytes": 6743,
+      "sha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--src__base__fthash.c",
+      "source": "licenses/native/texts/freetype--src__base__fthash.c",
+      "group": "native-original",
+      "bytes": 8406,
+      "sha256": "693e5a54b3ce30140975a94a3369dbe706eb1f280c69e80da426d39cc45b94ef",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--src__bdf__README",
+      "source": "licenses/native/texts/freetype--src__bdf__README",
+      "group": "native-original",
+      "bytes": 5972,
+      "sha256": "7984455e7e5a9faba3797c8bf095fbe10cc846316b7320aff8c58402e22b82fe",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--src__gzip__zlib.h",
+      "source": "licenses/native/texts/freetype--src__gzip__zlib.h",
+      "group": "native-original",
+      "bytes": 97499,
+      "sha256": "c86a25c27f74cb97b8fa07b175f479f063d5064ace9995b4684063643c81cf1b",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--src__pcf__README",
+      "source": "licenses/native/texts/freetype--src__pcf__README",
+      "group": "native-original",
+      "bytes": 3311,
+      "sha256": "18d9782898d9eac04476e2f744678137b2a889689ed3e923e052fc396a86f86b",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--src__sfnt__sfwoff2.c",
+      "source": "licenses/native/texts/freetype--src__sfnt__sfwoff2.c",
+      "group": "native-original",
+      "bytes": 66531,
+      "sha256": "9c67d2b0e2d0a88520bbfe132827252d0f7bd731bb735fba7a36575222d7cc72",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/freetype--src__sfnt__woff2tags.c",
+      "source": "licenses/native/texts/freetype--src__sfnt__woff2tags.c",
+      "group": "native-original",
+      "bytes": 4350,
+      "sha256": "02c3c39d125d366d4b73e270154c5d6be4165146a9e3201b43a3892aadbb8d4e",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/harfbuzz--COPYING",
+      "source": "licenses/native/texts/harfbuzz--COPYING",
+      "group": "native-original",
+      "bytes": 1971,
+      "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/icu--LICENSE",
+      "source": "licenses/native/texts/icu--LICENSE",
+      "group": "native-original",
+      "bytes": 27718,
+      "sha256": "e55522d81edc687a341a4411e0776e54ca654e90147f354a90458aaced4116af",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/libjpeg-turbo--LICENSE.md",
+      "source": "licenses/native/texts/libjpeg-turbo--LICENSE.md",
+      "group": "native-original",
+      "bytes": 5620,
+      "sha256": "96f5b328adbb78eeaaec6980d73fd558cb1e4d62560ed615646bc3cf5e532430",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/libjpeg-turbo--README.ijg",
+      "source": "licenses/native/texts/libjpeg-turbo--README.ijg",
+      "group": "native-original",
+      "bytes": 12799,
+      "sha256": "75815e3bf6484201a3c3d17a1bbf10f2e8e3237f84df10a2357ea896db2a81d6",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/libpng--LICENSE",
+      "source": "licenses/native/texts/libpng--LICENSE",
+      "group": "native-original",
+      "bytes": 5345,
+      "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/libwebp--COPYING",
+      "source": "licenses/native/texts/libwebp--COPYING",
+      "group": "native-original",
+      "bytes": 1496,
+      "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/libwebp--PATENTS",
+      "source": "licenses/native/texts/libwebp--PATENTS",
+      "group": "native-original",
+      "bytes": 1436,
+      "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/noto-mono--OFL-1.1.txt",
+      "source": "licenses/native/texts/noto-mono--OFL-1.1.txt",
+      "group": "native-original",
+      "bytes": 4149,
+      "sha256": "23dd5a5a3298badbb32f058842ef493ac7d852cf1dfe902d71cc1554eac4c1ba",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/skia--LICENSE",
+      "source": "licenses/native/texts/skia--LICENSE",
+      "group": "native-original",
+      "bytes": 1507,
+      "sha256": "5f787c1dee3c56547f09ccc2906ab5f5293c4d8dd6c8654e573216c38e908dbd",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/skia--modules__skcms__LICENSE",
+      "source": "licenses/native/texts/skia--modules__skcms__LICENSE",
+      "group": "native-original",
+      "bytes": 1635,
+      "sha256": "e59bb5c5c6ba426a9ac4ba9fe667ad14c5166b12aa25be8af1d122b14fbe2e36",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/skia--modules__skcms__skcms.h",
+      "source": "licenses/native/texts/skia--modules__skcms__skcms.h",
+      "group": "native-original",
+      "bytes": 207,
+      "sha256": "f3431fe230076dda4dcad5c3b1cc4789ef6d71967f254c6fdac32a3b97bb94de",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/skia--third_party__README",
+      "source": "licenses/native/texts/skia--third_party__README",
+      "group": "native-original",
+      "bytes": 860,
+      "sha256": "1e905f1636252db992dd6e776816609b5646e72685ab7e3ff3a5d63bc064891b",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/wuffs--LICENSE",
+      "source": "licenses/native/texts/wuffs--LICENSE",
+      "group": "native-original",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/wuffs--README.md",
+      "source": "licenses/native/texts/wuffs--README.md",
+      "group": "native-original",
+      "bytes": 1316,
+      "sha256": "097d5255b32cdda56ac586cd0d6f56777aab413941f1a10e66f0411134514182",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/wuffs--copyright-header.txt",
+      "source": "licenses/native/texts/wuffs--copyright-header.txt",
+      "group": "native-original",
+      "bytes": 596,
+      "sha256": "d4953a44e4fd3c018bfff37f26ef6335e537a84ac1881c6114cbb55e55f68b40",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/native/texts/zlib--LICENSE",
+      "source": "licenses/native/texts/zlib--LICENSE",
+      "group": "native-original",
+      "bytes": 910,
+      "sha256": "e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c",
+      "equal": true
+    },
+    {
+      "target": "dist/canvaskit.wasm",
+      "source": "node_modules/canvaskit-wasm/bin/full/canvaskit.wasm",
+      "group": "audited-wasm",
+      "bytes": 8242911,
+      "sha256": "aca7fa6019f95d3de98d4a49ae60a3d66a09e9d5ca74091fbc369b9be959f959",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/electron-LICENSE",
+      "source": "node_modules/electron/dist/LICENSE",
+      "group": "electron-original",
+      "bytes": 1096,
+      "sha256": "5154e165bd6c2cc0cfbcd8916498c7abab0497923bafcd5cb07673fe8480087d",
+      "equal": true
+    },
+    {
+      "target": "dist/licenses/electron-LICENSES.chromium.html",
+      "source": "node_modules/electron/dist/LICENSES.chromium.html",
+      "group": "electron-original",
+      "bytes": 5598206,
+      "sha256": "214152f78cc0b611f63ff8faefcc6670c4605ffbff05f092bb671e6df80ce741",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/IBM-Plex-Sans-LICENSE.txt",
+      "source": "public/fonts/IBM-Plex-Sans-LICENSE.txt",
+      "group": "font-original",
+      "bytes": 4429,
+      "sha256": "d0283623ef57e722fd0eb688a8041589670c608ab780cd3612d06ba6f153d3fd",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/Noto-Sans-KR-LICENSE.txt",
+      "source": "public/fonts/Noto-Sans-KR-LICENSE.txt",
+      "group": "font-original",
+      "bytes": 4314,
+      "sha256": "18aabf190848725e2576eefb5c29ba06aac1029d02132252a7f312eac2e50cf3",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-0-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-0-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 34708,
+      "sha256": "91aa276cc90e2b1a4d0a3f5a46e2f4004d6f42c6dfe2ed271643dbfd2e1cae3c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-1-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-1-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 56020,
+      "sha256": "10a4c7cc49065eaf78a3d94cf0955691b76b2f52858143bf4023c7da6a25ccae",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-10-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-10-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 20280,
+      "sha256": "562bef4f4aa557553d60ff3a9d94180debb6d8730b81b4232f60fb0fff48ea33",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-100-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-100-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 26300,
+      "sha256": "75b716ea45a402efa4bb7eb84afbea3c6e77c8c9bf55764a39eca7528014bd10",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-101-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-101-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 26060,
+      "sha256": "42fdd16baa93a8678b35077efa2466e414369442344eb7e50272c9d39ab62dcd",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-102-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-102-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 26336,
+      "sha256": "a1392a57c52e3f13f71d1f8881addb2bc46d24723d1f9644b9b19ad3dd40064a",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-103-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-103-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 24540,
+      "sha256": "ba28061072aa52d90e4e59047002ca690096f05761dc8c39e25e391382940452",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-104-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-104-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 29096,
+      "sha256": "00386be024448b786bec7250e6cdd4e4ca4dbce55ea81020f1deb9dcb46fd6a7",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-105-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-105-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 25312,
+      "sha256": "77b99af17900815d9a6c187f4fdf842300191183f79b8c9133973a165534121c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-106-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-106-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 24736,
+      "sha256": "40f74eafa4ab5b031e8ea319799c2d5582b1c4a26a430035821ea94aab71320b",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-107-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-107-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 18392,
+      "sha256": "0d27a2a224e4caae421ce9f3f7a28af5def8750d37b5b12cf6cf496dd60add3e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-108-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-108-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 19700,
+      "sha256": "46dfea3f360d34de0c6b543a17646608b7bef3beaef532747b39b27650fe29e9",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-109-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-109-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 17912,
+      "sha256": "e1be5f30719497b3460457d611fa8645149930e0b1755e259b7238503d1a23cd",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-11-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-11-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 19992,
+      "sha256": "058485e0c972ccbb1350a6612fa752a6626f89f5e8a48b5f173d544d44644678",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-110-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-110-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 17464,
+      "sha256": "9a71279b4e52c6b3edff0b577f79c121b92a9e0134ab0221a1654940145a26af",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-111-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-111-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 17392,
+      "sha256": "c098d730dbc3ed4266ce154084d915cf73f27d56d8cf1cff267231aaa6d12d42",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-112-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-112-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 16360,
+      "sha256": "9d2429a42f2f25d96fe8c367af405b8853d98a9d97e7ca7073ea33b267363715",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-113-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-113-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 16380,
+      "sha256": "e432f58c6b07476e1eb4edb9c55726aeb2fa361b5b494047f6670e92cee93cc5",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-114-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-114-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 16096,
+      "sha256": "a181067ee87266ad19b00287f7e2dbeac8d3c55a8581a95d8aa33b953bec71bc",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-115-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-115-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 16204,
+      "sha256": "8d152cfefe1ebc859d46e6d6020af7e4b712974ae07bdb143c1b4f9e9c57ac9f",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-116-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-116-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 16116,
+      "sha256": "554faa6e9030be693d0663e14170d38125f2dc47ab11eed86ab2cb3b8347be1a",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-117-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-117-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 14296,
+      "sha256": "d602fe02018943163f91e7418a82c71b6fbb37882d4089fbdb543534b4fb8c2e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-118-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-118-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 14564,
+      "sha256": "099e7ffea8d6d95de481f078370d72c22d4cd225607bd9f4acd9bf682424ef40",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-119-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-119-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 16568,
+      "sha256": "18e5aa97a223c7b5f62403bb20bffec9ebd2097a83fbaad5ec356eb563c89598",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-12-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-12-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 22572,
+      "sha256": "d1f61454a6542a100e5da343908a4a97bfcefa4eb7b4f1d3a0d424ccddae1ec8",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-13-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-13-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 22452,
+      "sha256": "f0ce22495d9d09da6cd8e5781bd0468117a63c8d8325f46dad2432f74695d5cd",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-14-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-14-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21932,
+      "sha256": "a6a04edd5d80b8a80e19c7426f6ebbc703b212dcaeb66506f8f3e74fd6ccd3d9",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-15-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-15-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 22596,
+      "sha256": "7e0af82b79aabc25814d54c3a8785218768262649a43d33fb6ffeee5f718ab78",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-16-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-16-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21420,
+      "sha256": "4318300fb26af0bd958f84197cf817149d09af7ed53848897d86c7709643e196",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-17-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-17-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 23408,
+      "sha256": "9043ae7e7aee92e1ebecd646a9db4716350f025f22bfff55e2d1aa6281599369",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-18-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-18-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21564,
+      "sha256": "1a6c6fd22ae04d76c2fecca37e955a4bff5e6cf984e737ff6773fe0e04adb5db",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-19-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-19-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 24932,
+      "sha256": "da54aa4e260c3cd81ff1b44fc9af08d79dfa51723fd242d7d2008c2b177f766a",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-2-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-2-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 35768,
+      "sha256": "d141c4cae5604c6fa073a2ceb2dbd7e6058392fd7d997466d43b9df9d60e9bea",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-20-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-20-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 25772,
+      "sha256": "9bb66ead8a0b281f1d4f6d3ce9c5c8bbe9d76cabf9646213c560e351aafd4071",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-21-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-21-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 22004,
+      "sha256": "25340e23c990b0d026b08fdee6e4c9d7d1c0c98989a68f519f7794a9cadf890c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-22-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-22-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 23380,
+      "sha256": "b280302e970c4cb6bcabdb2dada1d6d8512cea821fb339b0dd388048c1043f5b",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-23-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-23-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 23920,
+      "sha256": "2d00400319fa4e4a38d286c0427e23a9f058244da134af4608c09ab7aac2d9ef",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-24-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-24-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 25372,
+      "sha256": "6d9c5bcd8853a3c2c271e1de49ed50ca40931f4caca002ce06942e68f5c422f0",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-25-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-25-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 19672,
+      "sha256": "cebdef12870a7f51364375872a94fbf513df518cfa53b8f60d316030b4b174b8",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-26-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-26-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 25412,
+      "sha256": "8e25fc2ff893012ad4c11f28e4580e6f05982b753fc0147d963b098ff043bd01",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-27-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-27-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 24308,
+      "sha256": "7a2e5a857cecfd865efbc98c1ed990b37feda47b7b5712a3d2457974a5e9590e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-28-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-28-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21788,
+      "sha256": "4dd132bfc5d812bf615ea51e4fd1a40881b0f9e35df42d9a689cb235b102d659",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-29-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-29-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 22992,
+      "sha256": "886e3d96ac2210d7037cbe4a1add2664e35b10534a48e7cc11b9b5ef8c8c56e9",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-3-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-3-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 24668,
+      "sha256": "e192c11911121d5765478da4f949b97b3186d9db9ec73e2f2331763352c36047",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-30-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-30-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 23356,
+      "sha256": "21627d29241595cc9aa5d2ff9af1a89c8e9b46fd7cec7226fca029ef2c3a77a0",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-31-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-31-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 23436,
+      "sha256": "c5c0f181c992642b9dbd8f4a0933387390c53db8205ca3b793a114ba35d04b87",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-32-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-32-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 26184,
+      "sha256": "e9208c7e17742428baaeadb229da09043ccf4339c2b3b74b474513ace7900e07",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-33-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-33-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 24960,
+      "sha256": "2edf30aab177c3866ffcce22ff437da2f1f2a550565627fe7a4047d35660a226",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-34-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-34-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21384,
+      "sha256": "b16bdb65765f0a5be535ae3191835bf92c79281c5edfbcaa547127d3e343ce04",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-35-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-35-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21224,
+      "sha256": "2912380dfd7bc04dd0d77a80407961eb9df37f04da53c092ad8119ea8c4a78a6",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-36-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-36-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21164,
+      "sha256": "97e25fc68412ffb6d66e7a91d4f6ab1e1fdab6cbd51cce1bc4a740d0eaebe4bd",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-37-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-37-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21100,
+      "sha256": "319379894f6a04c3eff76245419a6e2f4cd6cda0ff014d03b16a06d91511b498",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-38-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-38-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 16496,
+      "sha256": "57a5b026ac57608831d8152db35c18f8a632918c44061b20124df6fa91809218",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-39-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-39-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21192,
+      "sha256": "2ef1384fc3ea74e39bcef4f7e975030e26e078ed5a694ab43e244070acada3cb",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-4-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-4-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 23104,
+      "sha256": "89a9d9b241b6e5e1663661fc37f3af8c4091c09525caf3ac7aec2a578640cbdc",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-40-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-40-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 20768,
+      "sha256": "43aeb94b27c5ade036be9553777d4a47c2c1e3f44b7789b23282609d621d55d6",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-41-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-41-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 17984,
+      "sha256": "88da9ec72f051b28c2dfec8ae3554093637ab4f5da64a48d621000b26fc0de5c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-42-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-42-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 20020,
+      "sha256": "237118f3c6ba41b827b32a61dc7887fa9d44338534dd2c68affc91a476d27094",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-43-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-43-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21292,
+      "sha256": "4790a1da4ef215b289d36745414c82ed4e9727c4560030a55a889dbea617a32f",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-44-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-44-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 18300,
+      "sha256": "aa5d6865fa63aae6f496c76c28221a4f7b10f45389cac2a8d1535bea7cec089c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-45-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-45-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 19472,
+      "sha256": "199bf26682ac8c3bde3ebd8beb45b6a2b4402e679bc2008ea9d4b9f4213c1bcc",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-46-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-46-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 20792,
+      "sha256": "f26c4f0c361f03094a7b5d55747873e2474c65d36a7ffc3383d86ca9c3328b18",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-47-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-47-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 22004,
+      "sha256": "443406f979e49cdc2bd60f5fc77e635a835ebbccc8e976346624e6ed2f1f32f9",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-48-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-48-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21248,
+      "sha256": "64007b2be6df970972a0b7c4574a2dd959afb65f858a2cee308be1e0a7d1ec97",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-49-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-49-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 22752,
+      "sha256": "f9064e2791af6e50738de7889591c4ed543dbaf28a68389f5e7f35c62524a8e2",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-5-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-5-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 20664,
+      "sha256": "bfb61f5704c50cfb4acce0597a566e77b4c2b9cca51536c40998addde6c0084e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-50-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-50-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21316,
+      "sha256": "84258d7398d09d1bbdcd235f599cf103efb3850f993cd0d51f7d8c98a1c01c85",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-51-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-51-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 19576,
+      "sha256": "a9eee4ca3df5f8b2d95a829d534bbd215391a5bf7fcc74beb975cc0d91c4333c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-52-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-52-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 22072,
+      "sha256": "bf46a73423af3e90d9a3c98dd739ad0390b992241fff9770db316bcd5b5a0ce4",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-53-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-53-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 20984,
+      "sha256": "aed6a1a55810a8ebdef01a3e0d9080add23a8b1d9542c9caab1d7245ae07e316",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-54-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-54-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 20876,
+      "sha256": "e005a153e14c3cbee35946ab1c04d38027201599fa9792cfb537f730a2765f1c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-55-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-55-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 20504,
+      "sha256": "06257a3de86a35670c0b16f1c4a063805477fc632be3e050ce0a606ac1b4a8db",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-56-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-56-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21252,
+      "sha256": "827a99438e3082a852d08b2aeec5c0d1ac9d3ba4e0ad4d46c51a191b379ff4e1",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-57-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-57-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21116,
+      "sha256": "da955ad6276b6a85ba46cf8cbf244dc079c79d13c5fceddf4309618c7380a51f",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-58-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-58-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21904,
+      "sha256": "b7f6f9483f1dafe7f14bc3c68af40b2f4f7b1d963a587aea2eebf42f961e9de0",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-59-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-59-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 25076,
+      "sha256": "bc77d2fe7bc7644bcb9632e5bb71a387fb8f3289367eb9a51c33348bcb3f133d",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-6-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-6-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 20420,
+      "sha256": "f056efc8518d4a9c6261be4b1adbf3bf19f6d3a642c32e3545d3a5e9ea263507",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-60-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-60-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 24340,
+      "sha256": "94e4aba73af7a43019551796c67a6b3f60e5da03413288236a9d4b7ad983d1d2",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-61-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-61-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 23672,
+      "sha256": "3bbbd150a9d00c08a093a354adb8060b0201a4c5ccf6577700c7ab40e0edf1c0",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-62-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-62-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21788,
+      "sha256": "3588ff46b0defe775f0f348ef84c2838d88906140455304dc247c16083229013",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-63-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-63-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 20896,
+      "sha256": "964bd2faa27132a7a26a28eeeb912b58bae9017422637a643040ed15d34b08c0",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-64-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-64-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 18384,
+      "sha256": "a54d82ae227a38509fc903198f74e278a9b389fe6c9e7533d02bc5f9aa3dfba8",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-65-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-65-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 64796,
+      "sha256": "84c8d4810d7722e29e91cdeb6c78e71ca1928a1be4f419feb37b43fe8103440b",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-66-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-66-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 55880,
+      "sha256": "3ea2cac8c3d7b8f57a898511b050f5dd9a6c14938e149ef7a8692f78f28048bf",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-67-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-67-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 48192,
+      "sha256": "1acfbc603177c98f692a04cc03e669c29af45cf401f2109ccca8e8bbc57e58cf",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-68-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-68-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 51696,
+      "sha256": "630a119c5ed8bb76c43371b20e1cefd82863727a7bba3e3f53e5d7055f915ed6",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-69-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-69-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 48236,
+      "sha256": "5587fd9193a24f22e9266789c950ed2eff16c641560d5f3c42257d2167b57985",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-7-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-7-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 20856,
+      "sha256": "c0aa2daa7efe28430628439d1f927d698fd9b98fce4ce8068a7251e34e75237e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-70-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-70-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 47984,
+      "sha256": "bb63ef23f89e85edf50db0056700089f79f0068e77c4e43859613df4daf5c558",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-71-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-71-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 57164,
+      "sha256": "023ee46bad2b51b02413090070af160b7e1f6a12bf2bcaed9888298bd5465bbc",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-72-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-72-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 45580,
+      "sha256": "ed7c93bdb8040c438b481bf5536e5f1fc6d630205b2c3ca2d05dc4e8b6cbd9a6",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-73-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-73-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 50272,
+      "sha256": "2b3b3bf563e3c8add1a9da14ba9132ca030d742b5bf0f557bad774974e7fe869",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-74-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-74-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 54260,
+      "sha256": "e9fb4398da6c2a84c47d7112c368cc41028a51321a1474f9a3f9c66eed0064d9",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-75-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-75-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 56660,
+      "sha256": "e4317b377de03f06c1dc7433c938254f6c27c42e408703711c216259c45052e6",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-76-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-76-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 48420,
+      "sha256": "e6a952c208a5c5096aa65cce48a9f0f014a777fcc1804aefe47bc642da313bf8",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-77-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-77-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 52860,
+      "sha256": "9ae8fd2772d7f4a5696ad7ef3d65bb61a1283bb3d9a11b0272822de1acb24152",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-78-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-78-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 48300,
+      "sha256": "d0ee3df1144c38df3747d3c1b1cae12cc8eb9831d1289d6fea1d70ebdb3b4866",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-79-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-79-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 60660,
+      "sha256": "7712cca201e92ae6231957e68d792e05942a4a9ade9c2cad7ece72c994184621",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-8-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-8-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 19580,
+      "sha256": "234189f7c6a13e5431ec16547a35eb47acd71d927746bf1bd34dbeac3e36c2fe",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-80-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-80-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 50796,
+      "sha256": "835eeaa05c54bf9cc44ba80a13ab80b5a744216874b282f55073f1e5245e0f51",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-81-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-81-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 47888,
+      "sha256": "889c6ad4919a6fd9b76100280c156dfd11d0df920fef897442dd54208ddb1e4b",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-82-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-82-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 50768,
+      "sha256": "263774ad3def3e73b618d39792f9bc1ec49bfec476febcb32c450fda33e561da",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-83-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-83-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 41500,
+      "sha256": "616b08ede9949cf216043aad6aedc237ae474bd9a716f1c90a7847d1f85d209d",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-84-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-84-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 54324,
+      "sha256": "5464b5ea691f67f5fb47a397c3dc594eca550e92a41b5949fc22bc818a453e9e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-85-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-85-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 52412,
+      "sha256": "a2d7b856c06f9f0dc5e037426efed0f7d7475c2e44eef0871152d0414685189d",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-86-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-86-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 51472,
+      "sha256": "f62d69028625acc5a1c0ccca24734b0f3f05a381e0fea992e9d15174300a705d",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-87-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-87-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 44752,
+      "sha256": "d77c4521e11e3638bb0ac5260dd5dcad1eca3bd3dfe7f507ab56cd444c8a919c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-88-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-88-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 46292,
+      "sha256": "60577355f788c18e83721a248378c4dc2a194dcdf9723f6466fff38c05d48045",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-89-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-89-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 45320,
+      "sha256": "6193f754c6e020b33e3b53710b917a595d4445d9b8b50cadd9a4fd88f7f07b3c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-9-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-9-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 22196,
+      "sha256": "92d216b5c91ae5bdf7abd62cdb2e01fc825976da70c1f10275b750c2b75760a9",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-90-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-90-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 41768,
+      "sha256": "c127e770573e3f240dcb3bf4448e2ee1763926875b7369a4243e0bfbc0ed26aa",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-91-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-91-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 45240,
+      "sha256": "937b565bc345c6adb8a87234b0b8a54d414c891e3c48a09c0f1daf67f16487ce",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-92-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-92-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 42492,
+      "sha256": "3fa3bb4676169eb81dd1cb9a5f5fe8023c1764b5f96c04d60735cc2075c8002e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-93-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-93-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 28936,
+      "sha256": "ee4e09ca8eed2c6104556ac196d930942a84f120b9a63a396197ffd465bdaf95",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-94-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-94-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 19256,
+      "sha256": "2346031bda22a84fad4dbdb7c3cfa5e5c6e3527d6f7a907e3eb8600f4485f6b2",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-95-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-95-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 53704,
+      "sha256": "c6b6b101cc6e1dd5de4a9f0957b60a3ecb53ac441e218a883f13bb010bfc4ed1",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-96-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-96-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 21124,
+      "sha256": "1471d3a42dc1116312c4a8f1337e72d1df056795fd528ebb1e2ec25cdaac4730",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-97-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-97-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 14032,
+      "sha256": "3e772734414c51dd5d901c80c8370256546a12370035409289e8cc6953fe770e",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-98-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-98-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 12196,
+      "sha256": "cc4ea982856185c8a23b1bd32c7fd508a382cd844d61be143630e260d75cf44c",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-99-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-99-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 16924,
+      "sha256": "0a1957b6479b991b28e7d13e20651813836772029bc9b2be5c7f872938f8a75d",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-cyrillic-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-cyrillic-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 9896,
+      "sha256": "5790c8b257e580d2147e0c92acba849f362217423c792613cb982afbe8746144",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-latin-ext-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-latin-ext-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 8308,
+      "sha256": "602c3ac6954b05484518f81083b332384ba1e72b9bca349d1d4eccd692c8e693",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-latin-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-latin-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 25880,
+      "sha256": "6ecf7205a09aea30481edc34156d1beba7be11f72d03e80bdb6bbf592594ba15",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/noto-sans-kr-vietnamese-wght-normal.woff2",
+      "source": "public/fonts/noto-sans-kr-vietnamese-wght-normal.woff2",
+      "group": "font-original",
+      "bytes": 9040,
+      "sha256": "392c6900582a57497a2c91806bd0898767585af14accb0256ca9bf78b5f356d1",
+      "equal": true
+    },
+    {
+      "target": "dist/fonts/plex.woff2",
+      "source": "public/fonts/plex.woff2",
+      "group": "font-original",
+      "bytes": 45712,
+      "sha256": "e2291e842cf5af167122a22881a740c7f2dda7716f1e8cd76680264f4a859470",
+      "equal": true
+    }
+  ]
+}

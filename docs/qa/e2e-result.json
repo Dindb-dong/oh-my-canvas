@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "clients": 4,
+  "rendererErrors": [],
+  "checks": [
+    "sample editor",
+    "4 TLS clients",
+    "concurrent inserts",
+    "agent undo",
+    "embedded images",
+    "MCP stdio SDK",
+    "OMC/JSON/SVG/PNG exports",
+    "offline rejoin",
+    "local save/reopen",
+    "older portable-file merge"
+  ],
+  "at": "2026-11-03T12:31:21.712Z"
+}

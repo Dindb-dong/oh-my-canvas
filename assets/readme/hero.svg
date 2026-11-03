@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+<title id="title">Make room. Make it yours.</title><desc id="desc">A blue, sky and lavender canvas illustration connects reusable components, a local file, and an agent. Decorative illustration; actual app screenshots appear below.</desc>
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0b162c"/><stop offset="1" stop-color="#152952"/></linearGradient><linearGradient id="blue" x2="1" y2="1"><stop stop-color="#2563eb"/><stop offset="1" stop-color="#38bdf8"/></linearGradient><pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#cbd5e1" opacity=".55"/></pattern></defs>
+<rect width="1280" height="360" rx="24" fill="url(#bg)"/>
+<path d="M644 0v360" stroke="#b3cdff" stroke-opacity=".1"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="52" y="55" fill="#7dd3fc" font-size="13" letter-spacing="2.4">OH MY CANVAS / LOCAL DESIGN STUDIO</text>
+<text x="48" y="132" fill="#fff" font-size="66" font-weight="700" letter-spacing="-2">Make room.</text>
+<text x="48" y="203" fill="#bfcaff" font-size="66" font-weight="700" letter-spacing="-2">Make it yours.</text>
+<text x="52" y="251" fill="#c3d1e9" font-size="18">Build a system. Keep your files. Bring your agent.</text>
+<path d="M52 286h530" stroke="#b3cdff" stroke-opacity=".2"/>
+<text x="52" y="320" fill="#dbeafe" font-size="12" letter-spacing="1.1">LOCAL FILES</text><text x="173" y="320" fill="#7dd3fc" font-size="16">↔</text><text x="203" y="320" fill="#dbeafe" font-size="12" letter-spacing="1.1">EDITABLE CANVAS</text><text x="364" y="320" fill="#7dd3fc" font-size="16">↔</text><text x="395" y="320" fill="#dbeafe" font-size="12" letter-spacing="1.1">YOUR AGENT</text>
+<rect x="685" y="35" width="540" height="290" rx="16" fill="#f8fafc"/>
+<rect x="685" y="35" width="540" height="290" rx="16" fill="url(#grid)"/>
+<rect x="717" y="69" width="221" height="139" rx="3" fill="#fff" stroke="#2563eb" stroke-width="1.5"/>
+<path d="M717 69h221" stroke="#2563eb"/>
+<g fill="#fff" stroke="#2563eb" stroke-width="1.5"><rect x="713" y="65" width="8" height="8"/><rect x="934" y="65" width="8" height="8"/><rect x="713" y="204" width="8" height="8"/><rect x="934" y="204" width="8" height="8"/></g>
+<rect x="735" y="88" width="120" height="8" rx="4" fill="#1e293b"/>
+<rect x="735" y="108" width="163" height="5" rx="2.5" fill="#cbd5e1"/>
+<rect x="735" y="120" width="143" height="5" rx="2.5" fill="#e2e8f0"/>
+<rect x="735" y="146" width="55" height="43" rx="6" fill="url(#blue)"/><rect x="799" y="146" width="55" height="43" rx="6" fill="#7dd3fc"/><rect x="863" y="146" width="55" height="43" rx="6" fill="#c4b5fd"/>
+<path d="M938 138h42v-35h25M980 138v98h25" fill="none" stroke="#93b4f8" stroke-width="2"/>
+<rect x="1003" y="76" width="184" height="57" rx="10" fill="#fff" stroke="#dbeafe"/>
+<path d="m1022 104 8-8 8 8-8 8z" fill="none" stroke="#7c6ae6" stroke-width="2"/>
+<text x="1049" y="100" fill="#334155" font-size="12" font-weight="700">Reusable components</text><text x="1049" y="118" fill="#64748b" font-size="10">Main → variants → instances</text>
+<rect x="1003" y="211" width="184" height="57" rx="10" fill="#fff" stroke="#dbeafe"/>
+<path d="m1024 230-5 5 5 5m12-10 5 5-5 5" fill="none" stroke="#2563eb" stroke-width="2"/>
+<text x="1049" y="236" fill="#334155" font-size="12" font-weight="700">Local MCP</text><text x="1049" y="253" fill="#64748b" font-size="10">Read. Create. Edit. Undo.</text>
+<rect x="721" y="245" width="217" height="42" rx="9" fill="#fff" stroke="#dbeafe"/>
+<path d="M738 255h11l5 5v16h-16z" fill="none" stroke="#2563eb" stroke-width="1.5"/><text x="766" y="271" fill="#334155" font-size="12">your-next-idea.omc</text>
+</g></svg>

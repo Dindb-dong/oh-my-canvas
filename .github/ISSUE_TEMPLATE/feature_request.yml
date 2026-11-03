@@ -1,0 +1,37 @@
+name: Feature request
+description: Explain a concrete problem and the smallest useful change.
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        English, 한국어, 日本語 and 简体中文 are welcome. Describe the task and evidence before the implementation idea. Keep private designs, tokens and session invitations out of this report.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What task is difficult today?
+      description: Describe a concrete user, action and obstacle. Include the current workaround.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the smallest change that would solve the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and tradeoffs
+      description: Include existing app features or another workflow you considered.
+  - type: textarea
+    id: impact
+    attributes:
+      label: Storage, collaboration, MCP or permission impact
+      description: Note any new network service, account, paid API, format migration, permission or platform requirement. State none if not applicable.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Examples or design evidence
+      description: Use synthetic screenshots or diagrams and explain their relevance. A request does not establish that a feature exists or has a release date.
