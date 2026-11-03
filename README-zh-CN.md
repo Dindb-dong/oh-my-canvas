@@ -23,7 +23,7 @@
 
 ## 应用截图
 
-以下截图于 **2026-11-03** 拍摄，展示独立实现的 `editor/` 在 Electron 中运行合成本地文档。新的四客户端验收运行更新了编辑器、协作和文档列表图片。界面使用英文及部分韩文组件标签；四种语言的 README 不代表界面支持四种语言。
+以下截图展示独立实现的 `editor/` 在 Electron 中运行合成本地文档。编辑器画面在 **2026-11-04** 的 UI 布局检查中更新；协作和文档列表画面来自此前的四客户端验收运行。界面使用英文及部分韩文组件标签；四种语言的 README 不代表界面支持四种语言。
 
 <p align="center"><img src="docs/qa/editor.png" alt="Oh My Canvas 编辑器，包含图层、示例画板、设计属性面板和绘图工具" width="1200"></p>
 <p align="center"><em>左侧是图层，中间是画布，右侧是属性。</em></p>
@@ -136,7 +136,7 @@ npm run dist:mac
 | 网络边界 | TLS 身份验证、邀请认证、四人限制、拒绝 Origin 请求、隔离的本地 MCP |
 | 实际应用 | 四客户端协作、组件工作流、文字编辑、SVG 自动换行、原生导出、安装包内容核验 |
 
-当前运行通过 **12 个文件中的 340 项编辑器测试**、**38 项宿主测试**及**原生 UI 37/37 项、渲染器错误为零**。渲染检查覆盖 32 个场景、830 项断言，另有 8 项大型示例与缓存断言。实际组件库流程和当前应用包检查也已通过。这些是限定范围的本地结果，不表示每个功能记录都有单独测试。独立工程审核结论为 **APPROVE**，架构状态为 **WATCH**；干净历史源码候选的 manifest 和隐私检查也已通过。请参阅[最终审核](docs/independent/ASTRA_FINAL_REVIEW.md)和[验证记录](docs/independent/VERIFICATION.md)。
+当前运行通过 **14 个文件中的 353 项编辑器测试**、**40 项宿主测试**及**原生 UI 37/37 项、渲染器错误为零**。渲染检查覆盖 32 个场景、830 项断言，另有 8 项大型示例与缓存断言。实际组件库流程和当前应用包检查也已通过。这些是限定范围的本地结果，不表示每个功能记录都有单独测试。独立工程审核结论为 **APPROVE**，架构状态为 **WATCH**；干净历史源码候选的 manifest 和隐私检查也已通过。请参阅[最终审核](docs/independent/ASTRA_FINAL_REVIEW.md)和[验证记录](docs/independent/VERIFICATION.md)。
 
 [当前验证与限制（英文）→](docs/independent/VERIFICATION.md) · [检查步骤（英文）→](docs/TESTING.md)
 
@@ -151,7 +151,7 @@ npm run dist:mac
 - [缺陷报告表单（英文）](.github/ISSUE_TEMPLATE/bug_report.yml) · [功能建议表单（英文）](.github/ISSUE_TEMPLATE/feature_request.yml)
 - [架构（英文）](docs/ARCHITECTURE.md) · [安全（英文）](SECURITY.md) · [故障排查（英文）](docs/TROUBLESHOOTING.md)
 
-这些模板已为将来的 GitHub 仓库准备好。当前本地代码副本尚未配置 Issue 跟踪器、发布服务或远程上传地址。
+仓库以私有方式托管在 [Dindb-dong/oh-my-canvas](https://github.com/Dindb-dong/oh-my-canvas)。拥有访问权限的协作者可使用 Issue 表单和 PR 模板。这不表示已提供可下载的发行版或托管服务。
 
 ## 许可证与来源
 
@@ -159,4 +159,4 @@ npm run dist:mac
 
 当前编辑器实现在 `editor/` 中。此前引入的编辑器、辅助代码和复制的测试已从计划公开的源码中移除。规划参与者阅读过旧实现，因此不宣称这是未接触旧源码的净室实现。[实现来源](docs/independent/PROVENANCE.md)及[功能契约](docs/independent/behavior-contract.md)为英文。
 
-非公开 Git 的历史提交仍包含已移除的源码。未来仅拟公开单独审查过的发布快照；新许可证不会将历史上的公司代码重新授权为 MIT。尚未向远程上传。
+此仓库从已审查的独立实现源码快照开始，使用单独的 Git 历史，不包含已移除的公司代码历史。MIT 适用于符合条件的项目实现，不会改变公司代码或第三方作品的许可证。目前仓库访问范围为私有。

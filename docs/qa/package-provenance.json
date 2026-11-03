@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "at": "2026-11-03T16:18:15.973Z",
+  "at": "2026-11-03T16:49:39.438Z",
   "passed": true,
   "archive": "release/mac-arm64/Oh My Canvas.app/Contents/Resources/app.asar",
-  "archiveSha256": "a241c5db72d312d55355403147bddb96a5bc7c4df4bfd818b3041742ff24d272",
+  "archiveSha256": "119d9d79e72b5a6848c09f160904a65aa79b468b9afcb4b6cca3b23a115e9c60",
   "scope": "ASAR path inventory and exact current file bytes only. No compiled-code AST analysis, source-authorship proof, exhaustive restricted-source detection, legal clearance or reproducible-build claim.",
   "indexedPaths": 4260,
   "excludedPathPatterns": [
@@ -66,19 +66,19 @@
       "equal": true
     },
     {
-      "target": "dist/assets/index-CzXAXRpz.js",
-      "source": "dist/assets/index-CzXAXRpz.js",
+      "target": "dist/assets/index-0FT4fq2u.css",
+      "source": "dist/assets/index-0FT4fq2u.css",
       "group": "dist",
-      "bytes": 476551,
-      "sha256": "29ce92ea8f174e6fd4c587ac05f9c47d03001d44c91f4274f028ab0e49cff9a2",
+      "bytes": 14658,
+      "sha256": "807bce520d66b93d4b9c491701a31e867ab2fd476a04a68e1f28b07916c35d1e",
       "equal": true
     },
     {
-      "target": "dist/assets/index-jO7MDXYL.css",
-      "source": "dist/assets/index-jO7MDXYL.css",
+      "target": "dist/assets/index-COGAVhrj.js",
+      "source": "dist/assets/index-COGAVhrj.js",
       "group": "dist",
-      "bytes": 14565,
-      "sha256": "45f2d68ffb34b46005c1ed9a74bba87dbb9c1ba6a6edfb749fa10816f1bf69b7",
+      "bytes": 476764,
+      "sha256": "6260aa366b9b3bf3f947287b74f7557fe57d3f0a3f78b8e54fa55c037ba30876",
       "equal": true
     },
     {
@@ -1118,7 +1118,7 @@
       "source": "dist/index.html",
       "group": "dist",
       "bytes": 3329,
-      "sha256": "88b26fcc73a82270e26636a753ea4080ac5400ec026664f04244c87348692c24",
+      "sha256": "5108d8d712fb5547974b6d1d11d049a9e1ddb79fdc72a852ad06867fb56ec3f6",
       "equal": true
     },
     {
@@ -1589,8 +1589,8 @@
       "target": "THIRD_PARTY_NOTICES.md",
       "source": "THIRD_PARTY_NOTICES.md",
       "group": "root",
-      "bytes": 3604,
-      "sha256": "5e16b673546e95eef06cc061ef508437ca3c7e38d9b21e3fe14dbaf2790f7c3d",
+      "bytes": 3692,
+      "sha256": "d348cff31566f685ce20eec5e98d62bb63894703a67cbc5a3049a4ddf268c1c4",
       "equal": true
     },
     {

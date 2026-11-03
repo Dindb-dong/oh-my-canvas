@@ -23,7 +23,7 @@ Design interfaces, build a component library, and let an agent work on the same 
 
 ## App screenshots
 
-These screenshots show the independent `editor/` implementation running synthetic local documents in Electron on **2026-11-03**. The current four-client acceptance run regenerated the editor, collaboration, and document-browser images. The UI uses English with some Korean component labels; four README languages do not imply four-language UI support.
+These screenshots show the independent `editor/` implementation running synthetic local documents in Electron. The editor view was refreshed in the **2026-11-04** interface layout audit; the collaboration and document-browser views come from the earlier four-client acceptance run. The UI uses English with some Korean component labels; four README languages do not imply four-language UI support.
 
 <p align="center"><img src="docs/qa/editor.png" alt="Oh My Canvas editor with layers, a sample board, a design inspector, and drawing tools" width="1200"></p>
 <p align="center"><em>The editor: layers on the left, your canvas in the middle, properties on the right.</em></p>
@@ -136,7 +136,7 @@ The writer uses `.omc` v2 and reads v1 files. Old collaboration invitations/hand
 | Network boundaries | TLS identity, invite authentication, four-person limit, Origin rejection, isolated local MCP |
 | Actual application | Four-client collaboration, component workflows, text editing, SVG wrapping, native exports, installed-package readback |
 
-The current run passed **340 editor tests across 12 files**, **38 host tests**, and **37/37 native UI cases with zero renderer errors**. Rendering checks covered 32 scenarios with 830 assertions plus eight large-fixture/cache assertions. The real component-library journey and current package checks also passed. These are scoped local results, not a claim that every feature record has its own test. Independent engineering review is **APPROVE**, with architecture marked **WATCH**; the reviewed clean-history source candidate also passed its manifest and privacy audit. See the [final review](docs/independent/ASTRA_FINAL_REVIEW.md) and [verification record](docs/independent/VERIFICATION.md).
+The current run passed **353 editor tests across 14 files**, **40 host tests**, and **37/37 native UI cases with zero renderer errors**. Rendering checks covered 32 scenarios with 830 assertions plus eight large-fixture/cache assertions. The real component-library journey and current package checks also passed. These are scoped local results, not a claim that every feature record has its own test. Independent engineering review is **APPROVE**, with architecture marked **WATCH**; the reviewed clean-history source candidate also passed its manifest and privacy audit. See the [final review](docs/independent/ASTRA_FINAL_REVIEW.md) and [verification record](docs/independent/VERIFICATION.md).
 
 [Current verification and limits →](docs/independent/VERIFICATION.md) · [How to run checks →](docs/TESTING.md)
 
@@ -151,7 +151,7 @@ Reproducible bugs, focused fixes, useful component examples, and aligned transla
 - [Bug report form](.github/ISSUE_TEMPLATE/bug_report.yml) · [Feature request form](.github/ISSUE_TEMPLATE/feature_request.yml)
 - [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
 
-The templates are ready for a future GitHub repository. This local checkout has no issue tracker, release service, or remote upload configured.
+The repository is hosted privately at [Dindb-dong/oh-my-canvas](https://github.com/Dindb-dong/oh-my-canvas). Collaborators with repository access can use the issue forms and PR template. No downloadable release or hosted service is promised.
 
 ## License and provenance
 
@@ -159,4 +159,4 @@ The independently authored project implementation is licensed under [MIT](LICENS
 
 The active editor is implemented in `editor/`. The earlier inherited editor, helper and copied tests have been retired from the intended source tree. Planning participants inspected the old implementation; this is not described as an unexposed clean-room process. Read the [implementation provenance](docs/independent/PROVENANCE.md) and [feature contract](docs/independent/behavior-contract.md).
 
-The private historical Git repository still contains the retired source in earlier commits. Only the separately reviewed publication snapshot is intended for future public upload; a new license does not relicense that history. Nothing has been uploaded.
+This repository starts from the reviewed independent-source snapshot, with a separate Git history. The retired company-source history is not included. MIT covers the eligible project implementation and does not relicense company code or third-party materials. Repository access is currently private.

@@ -70,6 +70,8 @@ export const workspaceStyle = `
 }
 .file-name small {
   color:var(--muted);
+  flex:none;
+  white-space:nowrap;
 }
 #left {
   grid-column:1;
@@ -505,7 +507,8 @@ export const workspaceStyle = `
 }
 .context-menu kbd {
   color:#9299a8;
-  margin-left:20px;
+  margin-left:auto;
+  padding-left:20px;
   font:10px monospace;
 }
 .find-bar {
@@ -820,6 +823,7 @@ export const workspaceStyle = `
 .type-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; width:18px; }
 .type-icon .ui-icon { width:15px; height:15px; color:#8490a5; }
 .disclosure-placeholder { visibility:hidden; pointer-events:none; }
-.context-menu button { display:flex; align-items:center; gap:9px; }
+.context-menu button { display:flex; align-items:center; justify-content:flex-start; gap:9px; }
+.context-menu .menu-label { min-width:0; text-align:left; }
 .inspector-actions .icon-button { flex:1; }
 `;

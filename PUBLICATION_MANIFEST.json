@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "policy": "docs/independent/publication-policy.md",
   "source": "staged regular files only; no repository history",
-  "sourceDigest": "378acd27c8428de52ce6bc78d4076a5ea0f8a9a82ac9c68daff0c4d576fa125c",
-  "snapshotDigest": "516bc5193974aef37e24e3a39bea202147fc9925c55944d7349dc6e4ed761a22",
+  "sourceDigest": "b0f545976dabf979c0a6cc8cffdd4440c8275dc107dc2821cdda13903dc6266f",
+  "snapshotDigest": "695e6012dbdcd0ac0b296c1049db093ed3efb2c74bb3cdd1c5e30e76ef91beea",
   "explicitEvidence": [
     "docs/qa/collaboration.png",
     "docs/qa/e2e-result.json",
@@ -54,7 +54,89 @@
     "docs/qa/native-dialogs/usable-canvas.png",
     "docs/qa/package-provenance.json",
     "docs/qa/packaged-app.png",
-    "docs/qa/packaged-result.json"
+    "docs/qa/packaged-result.json",
+    "docs/qa/ui-layout/desktop-assets.png",
+    "docs/qa/ui-layout/desktop-collaborate-dialog.png",
+    "docs/qa/ui-layout/desktop-commands-dialog.png",
+    "docs/qa/ui-layout/desktop-context-menu.png",
+    "docs/qa/ui-layout/desktop-editor.png",
+    "docs/qa/ui-layout/desktop-export-dialog.png",
+    "docs/qa/ui-layout/desktop-file-actions-dialog.png",
+    "docs/qa/ui-layout/desktop-find.png",
+    "docs/qa/ui-layout/desktop-font-dialog.png",
+    "docs/qa/ui-layout/desktop-inspector-frame-bottom.png",
+    "docs/qa/ui-layout/desktop-inspector-frame-middle.png",
+    "docs/qa/ui-layout/desktop-inspector-frame.png",
+    "docs/qa/ui-layout/desktop-inspector-rect-bottom.png",
+    "docs/qa/ui-layout/desktop-inspector-rect-middle.png",
+    "docs/qa/ui-layout/desktop-inspector-rect.png",
+    "docs/qa/ui-layout/desktop-inspector-text-bottom.png",
+    "docs/qa/ui-layout/desktop-inspector-text-middle.png",
+    "docs/qa/ui-layout/desktop-inspector-text.png",
+    "docs/qa/ui-layout/desktop-join-dialog.png",
+    "docs/qa/ui-layout/desktop-library-empty.png",
+    "docs/qa/ui-layout/desktop-library-list.png",
+    "docs/qa/ui-layout/desktop-library-populated.png",
+    "docs/qa/ui-layout/desktop-long-title-four-peers.png",
+    "docs/qa/ui-layout/desktop-mcp-dialog.png",
+    "docs/qa/ui-layout/desktop-style-dialog.png",
+    "docs/qa/ui-layout/desktop-tools-2.png",
+    "docs/qa/ui-layout/desktop-tools-3.png",
+    "docs/qa/ui-layout/minimum-assets.png",
+    "docs/qa/ui-layout/minimum-collaborate-dialog.png",
+    "docs/qa/ui-layout/minimum-commands-dialog.png",
+    "docs/qa/ui-layout/minimum-context-menu.png",
+    "docs/qa/ui-layout/minimum-editor.png",
+    "docs/qa/ui-layout/minimum-export-dialog.png",
+    "docs/qa/ui-layout/minimum-file-actions-dialog.png",
+    "docs/qa/ui-layout/minimum-find.png",
+    "docs/qa/ui-layout/minimum-font-dialog.png",
+    "docs/qa/ui-layout/minimum-inspector-frame-bottom.png",
+    "docs/qa/ui-layout/minimum-inspector-frame-middle.png",
+    "docs/qa/ui-layout/minimum-inspector-frame.png",
+    "docs/qa/ui-layout/minimum-inspector-rect-bottom.png",
+    "docs/qa/ui-layout/minimum-inspector-rect-middle.png",
+    "docs/qa/ui-layout/minimum-inspector-rect.png",
+    "docs/qa/ui-layout/minimum-inspector-text-bottom.png",
+    "docs/qa/ui-layout/minimum-inspector-text-middle.png",
+    "docs/qa/ui-layout/minimum-inspector-text.png",
+    "docs/qa/ui-layout/minimum-join-dialog.png",
+    "docs/qa/ui-layout/minimum-library-empty.png",
+    "docs/qa/ui-layout/minimum-library-list.png",
+    "docs/qa/ui-layout/minimum-library-populated.png",
+    "docs/qa/ui-layout/minimum-long-title-four-peers.png",
+    "docs/qa/ui-layout/minimum-mcp-dialog.png",
+    "docs/qa/ui-layout/minimum-style-dialog.png",
+    "docs/qa/ui-layout/minimum-tools-2.png",
+    "docs/qa/ui-layout/minimum-tools-3.png",
+    "docs/qa/ui-layout/report.json",
+    "docs/qa/ui-layout/scaled-assets.png",
+    "docs/qa/ui-layout/scaled-collaborate-dialog.png",
+    "docs/qa/ui-layout/scaled-commands-dialog.png",
+    "docs/qa/ui-layout/scaled-context-menu.png",
+    "docs/qa/ui-layout/scaled-editor.png",
+    "docs/qa/ui-layout/scaled-export-dialog.png",
+    "docs/qa/ui-layout/scaled-file-actions-dialog.png",
+    "docs/qa/ui-layout/scaled-find.png",
+    "docs/qa/ui-layout/scaled-font-dialog.png",
+    "docs/qa/ui-layout/scaled-inspector-frame-bottom.png",
+    "docs/qa/ui-layout/scaled-inspector-frame-middle.png",
+    "docs/qa/ui-layout/scaled-inspector-frame.png",
+    "docs/qa/ui-layout/scaled-inspector-rect-bottom.png",
+    "docs/qa/ui-layout/scaled-inspector-rect-middle.png",
+    "docs/qa/ui-layout/scaled-inspector-rect.png",
+    "docs/qa/ui-layout/scaled-inspector-text-bottom.png",
+    "docs/qa/ui-layout/scaled-inspector-text-middle.png",
+    "docs/qa/ui-layout/scaled-inspector-text.png",
+    "docs/qa/ui-layout/scaled-join-dialog.png",
+    "docs/qa/ui-layout/scaled-library-empty.png",
+    "docs/qa/ui-layout/scaled-library-list.png",
+    "docs/qa/ui-layout/scaled-library-populated.png",
+    "docs/qa/ui-layout/scaled-long-title-four-peers.png",
+    "docs/qa/ui-layout/scaled-mcp-dialog.png",
+    "docs/qa/ui-layout/scaled-style-dialog.png",
+    "docs/qa/ui-layout/scaled-tools-2.png",
+    "docs/qa/ui-layout/scaled-tools-3.png"
   ],
   "files": [
     {
@@ -102,16 +184,16 @@
     {
       "path": "CONTRIBUTING.md",
       "mode": "0644",
-      "sourceSha256": "8167edae92f7b55c67e51844254effae973cf36c91de19f7ce2166af17e1b4c7",
-      "sha256": "8167edae92f7b55c67e51844254effae973cf36c91de19f7ce2166af17e1b4c7",
-      "size": 9051
+      "sourceSha256": "dcdc90398c6a8000f0e6dad60b92abd016b58962385492b2427a7f40b89e0eca",
+      "sha256": "dcdc90398c6a8000f0e6dad60b92abd016b58962385492b2427a7f40b89e0eca",
+      "size": 8985
     },
     {
       "path": "DESIGN.md",
       "mode": "0644",
-      "sourceSha256": "0a7769f78acf5db795a20bfd08199357d54fc8a5c3c2847d9ae9414729e451b6",
-      "sha256": "0a7769f78acf5db795a20bfd08199357d54fc8a5c3c2847d9ae9414729e451b6",
-      "size": 8202
+      "sourceSha256": "5c7cac0243f0be0d9f06593b382551b1fd075bb93e471ff67a3925c8652e0121",
+      "sha256": "5c7cac0243f0be0d9f06593b382551b1fd075bb93e471ff67a3925c8652e0121",
+      "size": 8415
     },
     {
       "path": "IMPLEMENTATION.md",
@@ -130,30 +212,30 @@
     {
       "path": "README-ja.md",
       "mode": "0644",
-      "sourceSha256": "cb12c29450e6f2d2b698809c79b912445fdaedea062fea577fdbc111514c80e1",
-      "sha256": "cb12c29450e6f2d2b698809c79b912445fdaedea062fea577fdbc111514c80e1",
-      "size": 17224
+      "sourceSha256": "b4b70ddd50f6294531851eac9b06e9c5d7006d558cc938989c4efd59e7959134",
+      "sha256": "b4b70ddd50f6294531851eac9b06e9c5d7006d558cc938989c4efd59e7959134",
+      "size": 17416
     },
     {
       "path": "README-ko.md",
       "mode": "0644",
-      "sourceSha256": "1981c2d1c8dc4e0a3feb420b0ae601c37c7407facda68e31c85ffec354919158",
-      "sha256": "1981c2d1c8dc4e0a3feb420b0ae601c37c7407facda68e31c85ffec354919158",
-      "size": 14427
+      "sourceSha256": "c9ef82c11cff32a921885b312ed728dcff78715dd0cc23fffb074a31835d383f",
+      "sha256": "c9ef82c11cff32a921885b312ed728dcff78715dd0cc23fffb074a31835d383f",
+      "size": 14658
     },
     {
       "path": "README-zh-CN.md",
       "mode": "0644",
-      "sourceSha256": "97f5f9b6f939061c1fa1aab2023d3c032a4f9d64529e5f4aaaa986eca93aff32",
-      "sha256": "97f5f9b6f939061c1fa1aab2023d3c032a4f9d64529e5f4aaaa986eca93aff32",
-      "size": 12269
+      "sourceSha256": "eae27b53ec58a60459dc028fec60e7dd9ce19b6d880e3f922027b438442854ac",
+      "sha256": "eae27b53ec58a60459dc028fec60e7dd9ce19b6d880e3f922027b438442854ac",
+      "size": 12444
     },
     {
       "path": "README.md",
       "mode": "0644",
-      "sourceSha256": "863cd56cd458f5d28b89447d63504f6825ceecfc48ba76385eb8f435f60bdd63",
-      "sha256": "863cd56cd458f5d28b89447d63504f6825ceecfc48ba76385eb8f435f60bdd63",
-      "size": 12678
+      "sourceSha256": "3a07db89e4f55b9f4b690ce157e3ec95d990b1ff0bd6973cdde57702343976f2",
+      "sha256": "3a07db89e4f55b9f4b690ce157e3ec95d990b1ff0bd6973cdde57702343976f2",
+      "size": 12868
     },
     {
       "path": "SECURITY.md",
@@ -172,9 +254,9 @@
     {
       "path": "THIRD_PARTY_NOTICES.md",
       "mode": "0644",
-      "sourceSha256": "5e16b673546e95eef06cc061ef508437ca3c7e38d9b21e3fe14dbaf2790f7c3d",
-      "sha256": "5e16b673546e95eef06cc061ef508437ca3c7e38d9b21e3fe14dbaf2790f7c3d",
-      "size": 3604
+      "sourceSha256": "d348cff31566f685ce20eec5e98d62bb63894703a67cbc5a3049a4ddf268c1c4",
+      "sha256": "d348cff31566f685ce20eec5e98d62bb63894703a67cbc5a3049a4ddf268c1c4",
+      "size": 3692
     },
     {
       "path": "assets/readme/badges.svg",
@@ -273,6 +355,13 @@
       "sourceSha256": "f317a22820b97c2ef5c44a2a44bc24d1345e71d3af4ac5fcc657584fb1b79ffe",
       "sha256": "f317a22820b97c2ef5c44a2a44bc24d1345e71d3af4ac5fcc657584fb1b79ffe",
       "size": 4856
+    },
+    {
+      "path": "docs/UI_ALIGNMENT_AUDIT.md",
+      "mode": "0644",
+      "sourceSha256": "e521fba3685156f6f2e6ba51359cc1ebb024fa2e3ab1f56ca7e43da17d31c300",
+      "sha256": "e521fba3685156f6f2e6ba51359cc1ebb024fa2e3ab1f56ca7e43da17d31c300",
+      "size": 3476
     },
     {
       "path": "docs/contributing/ja.md",
@@ -431,7 +520,7 @@
     {
       "path": "docs/design/system/component-library.omc",
       "mode": "0644",
-      "sourceSha256": "6efa82e810cfc3090d6d0b0341aa4d6812e907a765930b5c98fa99d747c9f10f",
+      "sourceSha256": "315ccbc0fc91bab9aad4785b06dcc8e85082837e5bcc59c3185b0f2d3e07fa95",
       "sha256": "315ccbc0fc91bab9aad4785b06dcc8e85082837e5bcc59c3185b0f2d3e07fa95",
       "size": 2610905,
       "transform": {
@@ -634,9 +723,9 @@
     {
       "path": "docs/qa/editor.png",
       "mode": "0644",
-      "sourceSha256": "cf9f822c9763b825efc73adf0355b6926a3c2316945d659cff979128a29bc1a1",
-      "sha256": "cf9f822c9763b825efc73adf0355b6926a3c2316945d659cff979128a29bc1a1",
-      "size": 194062
+      "sourceSha256": "51f67bfe9f9cd8aa299d104fc9a31b4200b69f34ecd426a1a7e9a23d1ca6275d",
+      "sha256": "51f67bfe9f9cd8aa299d104fc9a31b4200b69f34ecd426a1a7e9a23d1ca6275d",
+      "size": 366472
     },
     {
       "path": "docs/qa/four-peers.png",
@@ -802,16 +891,16 @@
     {
       "path": "docs/qa/independent-ui/desktop-pages.png",
       "mode": "0644",
-      "sourceSha256": "49d43a2096d750adba5b08acb4bcfac2e21676f91bd7f49f9adb4b7db1e1d62e",
-      "sha256": "49d43a2096d750adba5b08acb4bcfac2e21676f91bd7f49f9adb4b7db1e1d62e",
-      "size": 114749
+      "sourceSha256": "d04e8dbe94ea186523589e2a931974e779876a89451e74da8f1dda9b28902d52",
+      "sha256": "d04e8dbe94ea186523589e2a931974e779876a89451e74da8f1dda9b28902d52",
+      "size": 113862
     },
     {
       "path": "docs/qa/independent-ui/mobile.png",
       "mode": "0644",
-      "sourceSha256": "a7e2e63286d0bde6be73326ad82af84b40fd19f48b533de5a05e8bd1a48495ca",
-      "sha256": "a7e2e63286d0bde6be73326ad82af84b40fd19f48b533de5a05e8bd1a48495ca",
-      "size": 37481
+      "sourceSha256": "6d7d69f6094def64cb4795b8616f50a8cc9137b07b1162dea35a08ddb0b62599",
+      "sha256": "6d7d69f6094def64cb4795b8616f50a8cc9137b07b1162dea35a08ddb0b62599",
+      "size": 36758
     },
     {
       "path": "docs/qa/independent-ui/native-export.jpg",
@@ -851,9 +940,9 @@
     {
       "path": "docs/qa/independent-ui/report.json",
       "mode": "0644",
-      "sourceSha256": "913eef756a9e384be9089cb4b58c273c6611d940ff4ddd89a43379c3cd2c0400",
-      "sha256": "913eef756a9e384be9089cb4b58c273c6611d940ff4ddd89a43379c3cd2c0400",
-      "size": 13604
+      "sourceSha256": "67e2d22480d538ee7797a28912789dc0993b060cb398442fbc1ef4f921e29869",
+      "sha256": "67e2d22480d538ee7797a28912789dc0993b060cb398442fbc1ef4f921e29869",
+      "size": 11839
     },
     {
       "path": "docs/qa/library-populated.png",
@@ -935,8 +1024,8 @@
     {
       "path": "docs/qa/package-provenance.json",
       "mode": "0644",
-      "sourceSha256": "13ec05bab2bf69c9d9c269da2ea0aa4d26fa3564265117123912d20cdb14f68c",
-      "sha256": "13ec05bab2bf69c9d9c269da2ea0aa4d26fa3564265117123912d20cdb14f68c",
+      "sourceSha256": "c9c14723a6fad22f859092c49cb10d4ebc5fc88796a3794fda41b1c6b9cc97dd",
+      "sha256": "c9c14723a6fad22f859092c49cb10d4ebc5fc88796a3794fda41b1c6b9cc97dd",
       "size": 108811
     },
     {
@@ -949,9 +1038,583 @@
     {
       "path": "docs/qa/packaged-result.json",
       "mode": "0644",
-      "sourceSha256": "43909a7e9950f41cc20c91eebdb664e582b0e6677efed4ee421da37efc5e1e50",
-      "sha256": "43909a7e9950f41cc20c91eebdb664e582b0e6677efed4ee421da37efc5e1e50",
+      "sourceSha256": "84735504673187891e32e7acc735732287fe5b75cc6ac7bcbc5dda33bd6b24d0",
+      "sha256": "84735504673187891e32e7acc735732287fe5b75cc6ac7bcbc5dda33bd6b24d0",
       "size": 436
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-assets.png",
+      "mode": "0644",
+      "sourceSha256": "750a5c03fe1f47a6c512f7c9e2163199eb4e3dd10a47a6a5cc4d9d378cc5e590",
+      "sha256": "750a5c03fe1f47a6c512f7c9e2163199eb4e3dd10a47a6a5cc4d9d378cc5e590",
+      "size": 446633
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-collaborate-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "1860b1a28da9fdb939dba262145d2bacf2b01380f028e8d9fd0dab029f0f4304",
+      "sha256": "1860b1a28da9fdb939dba262145d2bacf2b01380f028e8d9fd0dab029f0f4304",
+      "size": 373386
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-commands-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "338b5aeae234580ea3fd8391babc94d52308c8cdc35381eb19695e436b8af2d7",
+      "sha256": "338b5aeae234580ea3fd8391babc94d52308c8cdc35381eb19695e436b8af2d7",
+      "size": 604524
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-context-menu.png",
+      "mode": "0644",
+      "sourceSha256": "947f321b9a4a68197c170fe37b0e9bb96092211c40913ffcf9aabec1e7716580",
+      "sha256": "947f321b9a4a68197c170fe37b0e9bb96092211c40913ffcf9aabec1e7716580",
+      "size": 535875
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-editor.png",
+      "mode": "0644",
+      "sourceSha256": "51f67bfe9f9cd8aa299d104fc9a31b4200b69f34ecd426a1a7e9a23d1ca6275d",
+      "sha256": "51f67bfe9f9cd8aa299d104fc9a31b4200b69f34ecd426a1a7e9a23d1ca6275d",
+      "size": 366472
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-export-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "7f542fb7636570b1ed3ab3419bcc015cb54f63cc7ca12367910788eb1a7d0f26",
+      "sha256": "7f542fb7636570b1ed3ab3419bcc015cb54f63cc7ca12367910788eb1a7d0f26",
+      "size": 548247
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-file-actions-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "ea41ed4ce3b90ff46ed21a63b2e57843f608bf5b6702479cc79bb8909f6a8bf7",
+      "sha256": "ea41ed4ce3b90ff46ed21a63b2e57843f608bf5b6702479cc79bb8909f6a8bf7",
+      "size": 409410
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-find.png",
+      "mode": "0644",
+      "sourceSha256": "d5722485ce67144bb8ff168d15ad0adfb6509c986df9fa72ac25d500a2d76457",
+      "sha256": "d5722485ce67144bb8ff168d15ad0adfb6509c986df9fa72ac25d500a2d76457",
+      "size": 483406
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-font-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "5b7d1ac99b10e55c2bbf4a9a03b5af17c4d9fa05bd00e39886fb085282dc7c15",
+      "sha256": "5b7d1ac99b10e55c2bbf4a9a03b5af17c4d9fa05bd00e39886fb085282dc7c15",
+      "size": 594172
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-inspector-frame-bottom.png",
+      "mode": "0644",
+      "sourceSha256": "7a8fd7a951425bb94e13024434b4e3db33d00e13bbb3e42aa1553459263f6a43",
+      "sha256": "7a8fd7a951425bb94e13024434b4e3db33d00e13bbb3e42aa1553459263f6a43",
+      "size": 438450
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-inspector-frame-middle.png",
+      "mode": "0644",
+      "sourceSha256": "de071ec36671df15f45e2164b2b6579bc9ea4af9b6c123a7fdfc77739447166a",
+      "sha256": "de071ec36671df15f45e2164b2b6579bc9ea4af9b6c123a7fdfc77739447166a",
+      "size": 437760
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-inspector-frame.png",
+      "mode": "0644",
+      "sourceSha256": "973c88cb518e61d67e71ea32d3517e79089feb2f80d3a4087c3857dc4f060355",
+      "sha256": "973c88cb518e61d67e71ea32d3517e79089feb2f80d3a4087c3857dc4f060355",
+      "size": 432707
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-inspector-rect-bottom.png",
+      "mode": "0644",
+      "sourceSha256": "df23c0e5c1b31c5d854e0615bb57c4cb6b9c4a547c14575970e7c7d4a5f51c4a",
+      "sha256": "df23c0e5c1b31c5d854e0615bb57c4cb6b9c4a547c14575970e7c7d4a5f51c4a",
+      "size": 446855
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-inspector-rect-middle.png",
+      "mode": "0644",
+      "sourceSha256": "01aec5b1f84cf7100aaa1e5a2f6192c30a6df37ff7a440d51a50cc21b3aefa73",
+      "sha256": "01aec5b1f84cf7100aaa1e5a2f6192c30a6df37ff7a440d51a50cc21b3aefa73",
+      "size": 446198
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-inspector-rect.png",
+      "mode": "0644",
+      "sourceSha256": "f63154c0fbb2f80efc4c6ca0b3a738a413a282832874a78083d312c5fd1a04dd",
+      "sha256": "f63154c0fbb2f80efc4c6ca0b3a738a413a282832874a78083d312c5fd1a04dd",
+      "size": 431045
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-inspector-text-bottom.png",
+      "mode": "0644",
+      "sourceSha256": "55a2356bdcf1d97ff2d112faa1d7fb525218875dacf02900d3d4af29c78ae6fa",
+      "sha256": "55a2356bdcf1d97ff2d112faa1d7fb525218875dacf02900d3d4af29c78ae6fa",
+      "size": 447318
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-inspector-text-middle.png",
+      "mode": "0644",
+      "sourceSha256": "b5a918770b55e16c0707d94f73d4d0f458b4345730b70c55d8cf54039071ca6e",
+      "sha256": "b5a918770b55e16c0707d94f73d4d0f458b4345730b70c55d8cf54039071ca6e",
+      "size": 461392
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-inspector-text.png",
+      "mode": "0644",
+      "sourceSha256": "1fcbb0a24b0401bf7856f4a42e36ebc7f36a9326d794d3d1114e96a9067003b6",
+      "sha256": "1fcbb0a24b0401bf7856f4a42e36ebc7f36a9326d794d3d1114e96a9067003b6",
+      "size": 463132
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-join-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "f0d96180b8ace58bf604b420b263d875926ddd376b8c14cf6210f88eb01d9c76",
+      "sha256": "f0d96180b8ace58bf604b420b263d875926ddd376b8c14cf6210f88eb01d9c76",
+      "size": 426916
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-library-empty.png",
+      "mode": "0644",
+      "sourceSha256": "7e909c1bd26f50404b5adad858da5ae0853839a2e5f11c26126d9d22a2c8c2e4",
+      "sha256": "7e909c1bd26f50404b5adad858da5ae0853839a2e5f11c26126d9d22a2c8c2e4",
+      "size": 322216
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-library-list.png",
+      "mode": "0644",
+      "sourceSha256": "b117a2156b53cd37015c03ddb1d3c21a3949566192b0dffbe3da642e062e62e9",
+      "sha256": "b117a2156b53cd37015c03ddb1d3c21a3949566192b0dffbe3da642e062e62e9",
+      "size": 277877
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-library-populated.png",
+      "mode": "0644",
+      "sourceSha256": "35bf3ac057158937604ea7388db0012fe6cc51907c3951c3ec60c50f4e4f4544",
+      "sha256": "35bf3ac057158937604ea7388db0012fe6cc51907c3951c3ec60c50f4e4f4544",
+      "size": 293047
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-long-title-four-peers.png",
+      "mode": "0644",
+      "sourceSha256": "60dd8445685920ea5255d7289c11c418be56fec598e7bbdfa1627fc822ce96e1",
+      "sha256": "60dd8445685920ea5255d7289c11c418be56fec598e7bbdfa1627fc822ce96e1",
+      "size": 467740
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-mcp-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "a288117c5a856d6d554312aab55ad7daca9cfb760a9528e97326c32f9f28675f",
+      "sha256": "a288117c5a856d6d554312aab55ad7daca9cfb760a9528e97326c32f9f28675f",
+      "size": 398409
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-style-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "d0d1515ac872df00df5b4f56b49a5a0a078040b041a716b552071b610263ab11",
+      "sha256": "d0d1515ac872df00df5b4f56b49a5a0a078040b041a716b552071b610263ab11",
+      "size": 530465
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-tools-2.png",
+      "mode": "0644",
+      "sourceSha256": "a1a1aa7a3765560046ce51e331f1722688c8f21000e80f654aaa5e55e25a97d3",
+      "sha256": "a1a1aa7a3765560046ce51e331f1722688c8f21000e80f654aaa5e55e25a97d3",
+      "size": 497797
+    },
+    {
+      "path": "docs/qa/ui-layout/desktop-tools-3.png",
+      "mode": "0644",
+      "sourceSha256": "fb74e775a5cb7d88b3bac0b2830f7a688a1dcdaa78d6b67ea8fe793d187f04b5",
+      "sha256": "fb74e775a5cb7d88b3bac0b2830f7a688a1dcdaa78d6b67ea8fe793d187f04b5",
+      "size": 483341
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-assets.png",
+      "mode": "0644",
+      "sourceSha256": "b33c039a0e4ef73c9f02612df12708fb8a04987abc667e027b10372e6ef1d116",
+      "sha256": "b33c039a0e4ef73c9f02612df12708fb8a04987abc667e027b10372e6ef1d116",
+      "size": 289189
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-collaborate-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "ee3296a39617813e534d6acee823b68d355e4e8006fbe32f012b202908a960ea",
+      "sha256": "ee3296a39617813e534d6acee823b68d355e4e8006fbe32f012b202908a960ea",
+      "size": 261830
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-commands-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "0bad4a614293b1fcf5f6be37179919885b27a1b055339a8aeed93d450d68ed1a",
+      "sha256": "0bad4a614293b1fcf5f6be37179919885b27a1b055339a8aeed93d450d68ed1a",
+      "size": 352646
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-context-menu.png",
+      "mode": "0644",
+      "sourceSha256": "e0a26f57dd9d442f80f102e89c049c92c13c257a3146b26b50bc952aedfb2f57",
+      "sha256": "e0a26f57dd9d442f80f102e89c049c92c13c257a3146b26b50bc952aedfb2f57",
+      "size": 345603
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-editor.png",
+      "mode": "0644",
+      "sourceSha256": "a75da082b29be37cef377281eb949e6b62377e330ce0fcca573f01521d47f5cf",
+      "sha256": "a75da082b29be37cef377281eb949e6b62377e330ce0fcca573f01521d47f5cf",
+      "size": 257053
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-export-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "598a14be23824c9293c26f720bd3dd1b69c09d631b5dcc931d521f7945098713",
+      "sha256": "598a14be23824c9293c26f720bd3dd1b69c09d631b5dcc931d521f7945098713",
+      "size": 335078
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-file-actions-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "686f72f61cdd4300c6c66dbcf9812e9958640494545c6e03c7c99d16c3b6a62c",
+      "sha256": "686f72f61cdd4300c6c66dbcf9812e9958640494545c6e03c7c99d16c3b6a62c",
+      "size": 289090
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-find.png",
+      "mode": "0644",
+      "sourceSha256": "77c4e1284123ab3e62b4422faef2deca5f51a51b2d7cb6e19dd93dcc02ed5d96",
+      "sha256": "77c4e1284123ab3e62b4422faef2deca5f51a51b2d7cb6e19dd93dcc02ed5d96",
+      "size": 315195
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-font-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "9b9507490f20b6b4bf4d959fca75f2d95c0c80e8d3f10330926a81484c506ace",
+      "sha256": "9b9507490f20b6b4bf4d959fca75f2d95c0c80e8d3f10330926a81484c506ace",
+      "size": 389755
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-inspector-frame-bottom.png",
+      "mode": "0644",
+      "sourceSha256": "b2abea5c4f402db2a2d12dc362afd1994d5982c9e94e7401d3bfd82027065681",
+      "sha256": "b2abea5c4f402db2a2d12dc362afd1994d5982c9e94e7401d3bfd82027065681",
+      "size": 279495
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-inspector-frame-middle.png",
+      "mode": "0644",
+      "sourceSha256": "6e82b2a7c53713122ef92388661f64cd526eaec6e32f1be38edaf955d744eb35",
+      "sha256": "6e82b2a7c53713122ef92388661f64cd526eaec6e32f1be38edaf955d744eb35",
+      "size": 281387
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-inspector-frame.png",
+      "mode": "0644",
+      "sourceSha256": "075bd12dae177067ff8c458097a1fef1e2dbd6d44fd5c5122132ccdb60e9950c",
+      "sha256": "075bd12dae177067ff8c458097a1fef1e2dbd6d44fd5c5122132ccdb60e9950c",
+      "size": 284071
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-inspector-rect-bottom.png",
+      "mode": "0644",
+      "sourceSha256": "ab72ae8da9ec1b01556b104dfd9faed76fef751082324383fd83e12b83e681b9",
+      "sha256": "ab72ae8da9ec1b01556b104dfd9faed76fef751082324383fd83e12b83e681b9",
+      "size": 288571
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-inspector-rect-middle.png",
+      "mode": "0644",
+      "sourceSha256": "c2149384b4235def2326aec9e30d030de1721f880cd1eb3b0d764098bee4d9cd",
+      "sha256": "c2149384b4235def2326aec9e30d030de1721f880cd1eb3b0d764098bee4d9cd",
+      "size": 283317
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-inspector-rect.png",
+      "mode": "0644",
+      "sourceSha256": "b170b77feb573989caeaf725664a724cb8a223bfb98a829546f5a8289978464d",
+      "sha256": "b170b77feb573989caeaf725664a724cb8a223bfb98a829546f5a8289978464d",
+      "size": 282241
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-inspector-text-bottom.png",
+      "mode": "0644",
+      "sourceSha256": "360df5b6da750ae8df2311ab7248facaf3a3e4f9a5cb0b35a4c2205e1ec63948",
+      "sha256": "360df5b6da750ae8df2311ab7248facaf3a3e4f9a5cb0b35a4c2205e1ec63948",
+      "size": 291486
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-inspector-text-middle.png",
+      "mode": "0644",
+      "sourceSha256": "aeb263284142865118e0e278dd6a911a5064535dd41185e04be7403cc9b4fc00",
+      "sha256": "aeb263284142865118e0e278dd6a911a5064535dd41185e04be7403cc9b4fc00",
+      "size": 290284
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-inspector-text.png",
+      "mode": "0644",
+      "sourceSha256": "575fdf7c3fadf00f97f282c4e192502b6d413e2eba0fd4fe7e5c47a5d13052d6",
+      "sha256": "575fdf7c3fadf00f97f282c4e192502b6d413e2eba0fd4fe7e5c47a5d13052d6",
+      "size": 289571
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-join-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "dbea1cab906126ffa2e952a64b0bc9f4810c69d7798c52f28f74153a49e3c4b5",
+      "sha256": "dbea1cab906126ffa2e952a64b0bc9f4810c69d7798c52f28f74153a49e3c4b5",
+      "size": 267657
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-library-empty.png",
+      "mode": "0644",
+      "sourceSha256": "c6902c7c12e8a6fdf3edc529904a0299d0e07d83503baa25e188c5356c609bfc",
+      "sha256": "c6902c7c12e8a6fdf3edc529904a0299d0e07d83503baa25e188c5356c609bfc",
+      "size": 198429
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-library-list.png",
+      "mode": "0644",
+      "sourceSha256": "bf4af38ab0430b841ee6d6821a5597669e37a224991a7ee27a967b186d60393b",
+      "sha256": "bf4af38ab0430b841ee6d6821a5597669e37a224991a7ee27a967b186d60393b",
+      "size": 195712
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-library-populated.png",
+      "mode": "0644",
+      "sourceSha256": "30d20b4076789aa91c5fdda073961edf5502051e0fb5c625ebb3dfb3b8e715e3",
+      "sha256": "30d20b4076789aa91c5fdda073961edf5502051e0fb5c625ebb3dfb3b8e715e3",
+      "size": 215088
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-long-title-four-peers.png",
+      "mode": "0644",
+      "sourceSha256": "df33bdeceef3644a2c0ddb1e9c6de4b13ed391cb0350e2b433406362b9305f87",
+      "sha256": "df33bdeceef3644a2c0ddb1e9c6de4b13ed391cb0350e2b433406362b9305f87",
+      "size": 305896
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-mcp-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "703d0deab74ae9f15e531affee42286fb80aa43f5888e24022cb2eb12e61861d",
+      "sha256": "703d0deab74ae9f15e531affee42286fb80aa43f5888e24022cb2eb12e61861d",
+      "size": 283292
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-style-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "f2817fd3041e435b514497b988869b8ce95a06f764c307931717f5ee495397df",
+      "sha256": "f2817fd3041e435b514497b988869b8ce95a06f764c307931717f5ee495397df",
+      "size": 339282
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-tools-2.png",
+      "mode": "0644",
+      "sourceSha256": "c0f3e6166071c2030ec81d87ffcacbc17a4a2ede162fe383d50dd439fda4806e",
+      "sha256": "c0f3e6166071c2030ec81d87ffcacbc17a4a2ede162fe383d50dd439fda4806e",
+      "size": 314066
+    },
+    {
+      "path": "docs/qa/ui-layout/minimum-tools-3.png",
+      "mode": "0644",
+      "sourceSha256": "1fc0df62bbc9984dc7ecc25718cb6adbb1984bbd39cfdc9e509b5226037340d0",
+      "sha256": "1fc0df62bbc9984dc7ecc25718cb6adbb1984bbd39cfdc9e509b5226037340d0",
+      "size": 310841
+    },
+    {
+      "path": "docs/qa/ui-layout/report.json",
+      "mode": "0644",
+      "sourceSha256": "ce5eac066d55d524695a80edd34b91be2d46293f978d97a4039d9a81f0f6efcc",
+      "sha256": "ce5eac066d55d524695a80edd34b91be2d46293f978d97a4039d9a81f0f6efcc",
+      "size": 24746
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-assets.png",
+      "mode": "0644",
+      "sourceSha256": "3bf1e14ab93f9ca133fcb7e96c0df564ff0d60ed53c1ea32d60188daa373e6b5",
+      "sha256": "3bf1e14ab93f9ca133fcb7e96c0df564ff0d60ed53c1ea32d60188daa373e6b5",
+      "size": 392316
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-collaborate-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "a7ff865d3f275f5242882e3406df74647636182e0e1805c0a633441311fc45eb",
+      "sha256": "a7ff865d3f275f5242882e3406df74647636182e0e1805c0a633441311fc45eb",
+      "size": 362210
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-commands-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "62399f19c9c57e895005b8026680b8163f86d38f2684826f7f39adb306a6048d",
+      "sha256": "62399f19c9c57e895005b8026680b8163f86d38f2684826f7f39adb306a6048d",
+      "size": 492856
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-context-menu.png",
+      "mode": "0644",
+      "sourceSha256": "46318cd350e6a585948efd9333eba2e41ecbd127c1ff5e7ccdf00bd34a410d57",
+      "sha256": "46318cd350e6a585948efd9333eba2e41ecbd127c1ff5e7ccdf00bd34a410d57",
+      "size": 471347
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-editor.png",
+      "mode": "0644",
+      "sourceSha256": "3152bfaabcaa82b5dc19e073fd48ffd3bc591cdc12599db6fe1b7645e7d1f859",
+      "sha256": "3152bfaabcaa82b5dc19e073fd48ffd3bc591cdc12599db6fe1b7645e7d1f859",
+      "size": 352657
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-export-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "4befdf30801652d685bf6ee6fb57e846e51c4984fc307a6ce7b3ff4c313e8312",
+      "sha256": "4befdf30801652d685bf6ee6fb57e846e51c4984fc307a6ce7b3ff4c313e8312",
+      "size": 446350
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-file-actions-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "1407f728fb67e54045a98052fd213ce425f53cc49612a80c1192de58260e9957",
+      "sha256": "1407f728fb67e54045a98052fd213ce425f53cc49612a80c1192de58260e9957",
+      "size": 377028
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-find.png",
+      "mode": "0644",
+      "sourceSha256": "c93c6d294cbfd506762f9452220e276fd39eaaaed4a07f864f6079bacce668a2",
+      "sha256": "c93c6d294cbfd506762f9452220e276fd39eaaaed4a07f864f6079bacce668a2",
+      "size": 425047
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-font-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "60df1448e3007b491065267e66783718389c9d8bf5784ff3c0f088b76f01744a",
+      "sha256": "60df1448e3007b491065267e66783718389c9d8bf5784ff3c0f088b76f01744a",
+      "size": 525170
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-inspector-frame-bottom.png",
+      "mode": "0644",
+      "sourceSha256": "12adbbdf5dfd63499ff13805d56fdaf39c530eedc6247a7b9d89477fc557560d",
+      "sha256": "12adbbdf5dfd63499ff13805d56fdaf39c530eedc6247a7b9d89477fc557560d",
+      "size": 377826
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-inspector-frame-middle.png",
+      "mode": "0644",
+      "sourceSha256": "782de300a732fafb720b4e771e83bb1ddc133e86f91da21ae94eec5fc0f4073a",
+      "sha256": "782de300a732fafb720b4e771e83bb1ddc133e86f91da21ae94eec5fc0f4073a",
+      "size": 380852
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-inspector-frame.png",
+      "mode": "0644",
+      "sourceSha256": "d7b07fd4c824aef38249d6213acd8210a495c2a13560ac76faacc64d598d573b",
+      "sha256": "d7b07fd4c824aef38249d6213acd8210a495c2a13560ac76faacc64d598d573b",
+      "size": 382295
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-inspector-rect-bottom.png",
+      "mode": "0644",
+      "sourceSha256": "e4e0f2177475465d288f7d6776b83e14aab574e1ecf4bbd943c84e9189620a49",
+      "sha256": "e4e0f2177475465d288f7d6776b83e14aab574e1ecf4bbd943c84e9189620a49",
+      "size": 390431
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-inspector-rect-middle.png",
+      "mode": "0644",
+      "sourceSha256": "e9d1235e4f203fba9c48d93e9be9dc823eda87d64ae084deffc7391818206979",
+      "sha256": "e9d1235e4f203fba9c48d93e9be9dc823eda87d64ae084deffc7391818206979",
+      "size": 381250
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-inspector-rect.png",
+      "mode": "0644",
+      "sourceSha256": "dfed12bb1c79b824b489089b6714d8fcb5c94a57a635409b1425b20793a42fd9",
+      "sha256": "dfed12bb1c79b824b489089b6714d8fcb5c94a57a635409b1425b20793a42fd9",
+      "size": 380802
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-inspector-text-bottom.png",
+      "mode": "0644",
+      "sourceSha256": "d60b7af01c9bd017650078f3e81f88bee078d8268fe057f37747b6b5bd115367",
+      "sha256": "d60b7af01c9bd017650078f3e81f88bee078d8268fe057f37747b6b5bd115367",
+      "size": 394599
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-inspector-text-middle.png",
+      "mode": "0644",
+      "sourceSha256": "f8fda84a2ccfc27100c7a791f427278784dc61ae3614a7cef7644240a1a1638a",
+      "sha256": "f8fda84a2ccfc27100c7a791f427278784dc61ae3614a7cef7644240a1a1638a",
+      "size": 391598
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-inspector-text.png",
+      "mode": "0644",
+      "sourceSha256": "1ed47e128f7e679a789abfb43611c1aa9e2d5e21fbee4aed1642650eb15bf83b",
+      "sha256": "1ed47e128f7e679a789abfb43611c1aa9e2d5e21fbee4aed1642650eb15bf83b",
+      "size": 389405
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-join-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "1db9a5cef5cfe2756b33b12b64a4e8a04353c451b4f1c94ed0e4f0a303cbcc64",
+      "sha256": "1db9a5cef5cfe2756b33b12b64a4e8a04353c451b4f1c94ed0e4f0a303cbcc64",
+      "size": 369778
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-library-empty.png",
+      "mode": "0644",
+      "sourceSha256": "d14645789e6181a3735577448ba14b8295369431266ddb507bce7039819a34f4",
+      "sha256": "d14645789e6181a3735577448ba14b8295369431266ddb507bce7039819a34f4",
+      "size": 272741
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-library-list.png",
+      "mode": "0644",
+      "sourceSha256": "f32b32edf1664ee1ce5ea567d5cbf0f7f945bb3baa83f779c5d9c811799b7a7c",
+      "sha256": "f32b32edf1664ee1ce5ea567d5cbf0f7f945bb3baa83f779c5d9c811799b7a7c",
+      "size": 259770
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-library-populated.png",
+      "mode": "0644",
+      "sourceSha256": "0ec03edd68382f55a813a7e29916a9986a89b6e5d7088b90f22159d58fb3cd08",
+      "sha256": "0ec03edd68382f55a813a7e29916a9986a89b6e5d7088b90f22159d58fb3cd08",
+      "size": 282558
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-long-title-four-peers.png",
+      "mode": "0644",
+      "sourceSha256": "29fa3de93f4e8a91ca7f902d1c1ed1ade8be4773af04957bb125c20c142db789",
+      "sha256": "29fa3de93f4e8a91ca7f902d1c1ed1ade8be4773af04957bb125c20c142db789",
+      "size": 412109
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-mcp-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "9eaa5936bfe63111dce3ad1ccc0ef9b081b507948a73793fe87905b320308df4",
+      "sha256": "9eaa5936bfe63111dce3ad1ccc0ef9b081b507948a73793fe87905b320308df4",
+      "size": 387743
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-style-dialog.png",
+      "mode": "0644",
+      "sourceSha256": "26ab3e4bb411ad80dbcb73a7ee577546beb42898b4f28dbd59dbd2569718c290",
+      "sha256": "26ab3e4bb411ad80dbcb73a7ee577546beb42898b4f28dbd59dbd2569718c290",
+      "size": 451793
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-tools-2.png",
+      "mode": "0644",
+      "sourceSha256": "b1a986946547e48a869ea6d6543cfe465195b9e768a6781cec4457bd1119f1a7",
+      "sha256": "b1a986946547e48a869ea6d6543cfe465195b9e768a6781cec4457bd1119f1a7",
+      "size": 423659
+    },
+    {
+      "path": "docs/qa/ui-layout/scaled-tools-3.png",
+      "mode": "0644",
+      "sourceSha256": "beebf482eec3334fba48b0c7982d98a775cb3b58623f1cfdea0c51af6f823883",
+      "sha256": "beebf482eec3334fba48b0c7982d98a775cb3b58623f1cfdea0c51af6f823883",
+      "size": 416996
     },
     {
       "path": "editor/__tests__/components.test.ts",
@@ -1845,9 +2508,9 @@
     {
       "path": "editor/ui/index.ts",
       "mode": "0644",
-      "sourceSha256": "0c6753ab0c7169a7f0e9e31dd8658b93404d16b23989438989f20f306b07051e",
-      "sha256": "0c6753ab0c7169a7f0e9e31dd8658b93404d16b23989438989f20f306b07051e",
-      "size": 65957
+      "sourceSha256": "21e89659314f903823794db07bc19dfc7bc8ba594291adb80c56f1286329d2e5",
+      "sha256": "21e89659314f903823794db07bc19dfc7bc8ba594291adb80c56f1286329d2e5",
+      "size": 66035
     },
     {
       "path": "editor/ui/inspector.ts",
@@ -1866,9 +2529,9 @@
     {
       "path": "editor/ui/style.ts",
       "mode": "0644",
-      "sourceSha256": "aae88add332b90cbf11b4206536d1ae62775120a02ebe80a6cafd17343b736b2",
-      "sha256": "aae88add332b90cbf11b4206536d1ae62775120a02ebe80a6cafd17343b736b2",
-      "size": 15115
+      "sourceSha256": "4f61b01a8bfd76db0d8d6be112367b38413772071db54d1f67f4657240497216",
+      "sha256": "4f61b01a8bfd76db0d8d6be112367b38413772071db54d1f67f4657240497216",
+      "size": 15259
     },
     {
       "path": "electron/file-dialogs.mjs",
@@ -2312,6 +2975,13 @@
       "size": 7466
     },
     {
+      "path": "scripts/check-upload-history.mjs",
+      "mode": "0644",
+      "sourceSha256": "b82a1144cd330a75870e9b09d0e29c0baa2f3c8cf7cfda44466c0236d3ff29e7",
+      "sha256": "b82a1144cd330a75870e9b09d0e29c0baa2f3c8cf7cfda44466c0236d3ff29e7",
+      "size": 2616
+    },
+    {
       "path": "scripts/check.mjs",
       "mode": "0644",
       "sourceSha256": "dc0228183d04d915fb3377219439d28e29870167d2672a3b9e34dc75bf1a0ef4",
@@ -2452,6 +3122,13 @@
       "size": 5225
     },
     {
+      "path": "scripts/ui-layout-e2e.mjs",
+      "mode": "0644",
+      "sourceSha256": "b44f34227ab783eeab91137422dc6a83cd5d33038f70b7f5e3f7821301debf6f",
+      "sha256": "b44f34227ab783eeab91137422dc6a83cd5d33038f70b7f5e3f7821301debf6f",
+      "size": 10534
+    },
+    {
       "path": "scripts/ui-smoke.mjs",
       "mode": "0644",
       "sourceSha256": "34910d4c1b50854442c87d49a98704b0a5b898e4355445b41ef976f3242d30b8",
@@ -2475,9 +3152,9 @@
     {
       "path": "src/main.js",
       "mode": "0644",
-      "sourceSha256": "b73b4ab2a382acf6c0b490e9b1dae0d9ed8a0ab0f21344711622cafefa8a6667",
-      "sha256": "b73b4ab2a382acf6c0b490e9b1dae0d9ed8a0ab0f21344711622cafefa8a6667",
-      "size": 25815
+      "sourceSha256": "bce9980b03b1c20cab8add7862a356e7619c29561d62bf5607bc9bf7943dd2dd",
+      "sha256": "bce9980b03b1c20cab8add7862a356e7619c29561d62bf5607bc9bf7943dd2dd",
+      "size": 25827
     },
     {
       "path": "src/sample.js",
@@ -2489,9 +3166,9 @@
     {
       "path": "src/style.css",
       "mode": "0644",
-      "sourceSha256": "ee750f8ce857b83201502d6d6b5c85601b8aa6d60868eb473c7986f486954852",
-      "sha256": "ee750f8ce857b83201502d6d6b5c85601b8aa6d60868eb473c7986f486954852",
-      "size": 14848
+      "sourceSha256": "ee5eb7a9bafe12e4c4464690712a2e7b96d1d47a088c6ccda41188e550dcfbac",
+      "sha256": "ee5eb7a9bafe12e4c4464690712a2e7b96d1d47a088c6ccda41188e550dcfbac",
+      "size": 14941
     },
     {
       "path": "tests/bootstrap.test.mjs",

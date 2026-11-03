@@ -16,7 +16,7 @@ Help make a dependable design studio: report a reproducible bug, improve a trans
 | Documentation or translation | Working links, accurate commands and matching limits in all affected languages |
 | Larger feature | Problem, concrete use case, scope and tradeoffs before implementation |
 
-The repository is currently maintained locally and has no configured public remote. The issue and PR templates are ready for a future hosted repository. Until then, use the same forms as local Markdown reports or handoff notes; do not assume a public issue tracker, releases page or automatic CI exists.
+The repository is currently private at [Dindb-dong/oh-my-canvas](https://github.com/Dindb-dong/oh-my-canvas). Collaborators with access can use the issue forms and PR template. Do not assume a downloadable release or automatic CI exists.
 
 ## Set up locally
 

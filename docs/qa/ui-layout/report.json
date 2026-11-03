@@ -1,0 +1,1306 @@
+{
+  "passed": true,
+  "scenes": 81,
+  "controlMeasurements": 2565,
+  "results": [
+    {
+      "name": "desktop-library-empty",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 8,
+      "failures": []
+    },
+    {
+      "name": "desktop-mcp-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 9,
+      "failures": []
+    },
+    {
+      "name": "desktop-collaborate-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 9,
+      "failures": []
+    },
+    {
+      "name": "desktop-join-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 9,
+      "failures": []
+    },
+    {
+      "name": "desktop-editor",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 38,
+      "failures": []
+    },
+    {
+      "name": "desktop-inspector-rect",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 54,
+      "failures": []
+    },
+    {
+      "name": "desktop-inspector-rect-middle",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 45,
+      "failures": []
+    },
+    {
+      "name": "desktop-inspector-rect-bottom",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 40,
+      "failures": []
+    },
+    {
+      "name": "desktop-inspector-text",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 47,
+      "failures": []
+    },
+    {
+      "name": "desktop-inspector-text-middle",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 44,
+      "failures": []
+    },
+    {
+      "name": "desktop-inspector-text-bottom",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 40,
+      "failures": []
+    },
+    {
+      "name": "desktop-font-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 48,
+      "failures": []
+    },
+    {
+      "name": "desktop-inspector-frame",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 54,
+      "failures": []
+    },
+    {
+      "name": "desktop-inspector-frame-middle",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 45,
+      "failures": []
+    },
+    {
+      "name": "desktop-inspector-frame-bottom",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 41,
+      "failures": []
+    },
+    {
+      "name": "desktop-long-title-four-peers",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 41,
+      "failures": []
+    },
+    {
+      "name": "desktop-context-menu",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 41,
+      "failures": []
+    },
+    {
+      "name": "desktop-find",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 44,
+      "failures": []
+    },
+    {
+      "name": "desktop-tools-2",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 47,
+      "failures": []
+    },
+    {
+      "name": "desktop-tools-3",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 43,
+      "failures": []
+    },
+    {
+      "name": "desktop-assets",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 23,
+      "failures": []
+    },
+    {
+      "name": "desktop-style-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 24,
+      "failures": []
+    },
+    {
+      "name": "desktop-commands-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 24,
+      "failures": []
+    },
+    {
+      "name": "desktop-export-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 24,
+      "failures": []
+    },
+    {
+      "name": "desktop-library-populated",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 10,
+      "failures": []
+    },
+    {
+      "name": "desktop-library-list",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 10,
+      "failures": []
+    },
+    {
+      "name": "desktop-file-actions-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1500,
+        "height": 980
+      },
+      "viewport": {
+        "width": 1500,
+        "height": 980,
+        "dpr": 2
+      },
+      "controls": 11,
+      "failures": []
+    },
+    {
+      "name": "minimum-library-empty",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 8,
+      "failures": []
+    },
+    {
+      "name": "minimum-mcp-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 9,
+      "failures": []
+    },
+    {
+      "name": "minimum-collaborate-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 9,
+      "failures": []
+    },
+    {
+      "name": "minimum-join-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 9,
+      "failures": []
+    },
+    {
+      "name": "minimum-editor",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 38,
+      "failures": []
+    },
+    {
+      "name": "minimum-inspector-rect",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 47,
+      "failures": []
+    },
+    {
+      "name": "minimum-inspector-rect-middle",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 45,
+      "failures": []
+    },
+    {
+      "name": "minimum-inspector-rect-bottom",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 39,
+      "failures": []
+    },
+    {
+      "name": "minimum-inspector-text",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 47,
+      "failures": []
+    },
+    {
+      "name": "minimum-inspector-text-middle",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 44,
+      "failures": []
+    },
+    {
+      "name": "minimum-inspector-text-bottom",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 39,
+      "failures": []
+    },
+    {
+      "name": "minimum-font-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 48,
+      "failures": []
+    },
+    {
+      "name": "minimum-inspector-frame",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 47,
+      "failures": []
+    },
+    {
+      "name": "minimum-inspector-frame-middle",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 44,
+      "failures": []
+    },
+    {
+      "name": "minimum-inspector-frame-bottom",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 40,
+      "failures": []
+    },
+    {
+      "name": "minimum-long-title-four-peers",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 40,
+      "failures": []
+    },
+    {
+      "name": "minimum-context-menu",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 40,
+      "failures": []
+    },
+    {
+      "name": "minimum-find",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 43,
+      "failures": []
+    },
+    {
+      "name": "minimum-tools-2",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 46,
+      "failures": []
+    },
+    {
+      "name": "minimum-tools-3",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 42,
+      "failures": []
+    },
+    {
+      "name": "minimum-assets",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 22,
+      "failures": []
+    },
+    {
+      "name": "minimum-style-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 23,
+      "failures": []
+    },
+    {
+      "name": "minimum-commands-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 23,
+      "failures": []
+    },
+    {
+      "name": "minimum-export-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 23,
+      "failures": []
+    },
+    {
+      "name": "minimum-library-populated",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 10,
+      "failures": []
+    },
+    {
+      "name": "minimum-library-list",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 10,
+      "failures": []
+    },
+    {
+      "name": "minimum-file-actions-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 960,
+        "height": 640
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2
+      },
+      "controls": 11,
+      "failures": []
+    },
+    {
+      "name": "scaled-library-empty",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 8,
+      "failures": []
+    },
+    {
+      "name": "scaled-mcp-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 9,
+      "failures": []
+    },
+    {
+      "name": "scaled-collaborate-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 9,
+      "failures": []
+    },
+    {
+      "name": "scaled-join-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 9,
+      "failures": []
+    },
+    {
+      "name": "scaled-editor",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 38,
+      "failures": []
+    },
+    {
+      "name": "scaled-inspector-rect",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 47,
+      "failures": []
+    },
+    {
+      "name": "scaled-inspector-rect-middle",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 45,
+      "failures": []
+    },
+    {
+      "name": "scaled-inspector-rect-bottom",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 39,
+      "failures": []
+    },
+    {
+      "name": "scaled-inspector-text",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 47,
+      "failures": []
+    },
+    {
+      "name": "scaled-inspector-text-middle",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 44,
+      "failures": []
+    },
+    {
+      "name": "scaled-inspector-text-bottom",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 39,
+      "failures": []
+    },
+    {
+      "name": "scaled-font-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 48,
+      "failures": []
+    },
+    {
+      "name": "scaled-inspector-frame",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 47,
+      "failures": []
+    },
+    {
+      "name": "scaled-inspector-frame-middle",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 44,
+      "failures": []
+    },
+    {
+      "name": "scaled-inspector-frame-bottom",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 40,
+      "failures": []
+    },
+    {
+      "name": "scaled-long-title-four-peers",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 40,
+      "failures": []
+    },
+    {
+      "name": "scaled-context-menu",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 40,
+      "failures": []
+    },
+    {
+      "name": "scaled-find",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 43,
+      "failures": []
+    },
+    {
+      "name": "scaled-tools-2",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 46,
+      "failures": []
+    },
+    {
+      "name": "scaled-tools-3",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 42,
+      "failures": []
+    },
+    {
+      "name": "scaled-assets",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 22,
+      "failures": []
+    },
+    {
+      "name": "scaled-style-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 23,
+      "failures": []
+    },
+    {
+      "name": "scaled-commands-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 23,
+      "failures": []
+    },
+    {
+      "name": "scaled-export-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 23,
+      "failures": []
+    },
+    {
+      "name": "scaled-library-populated",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 10,
+      "failures": []
+    },
+    {
+      "name": "scaled-library-list",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 10,
+      "failures": []
+    },
+    {
+      "name": "scaled-file-actions-dialog",
+      "nativeBounds": {
+        "x": 114,
+        "y": 33,
+        "width": 1200,
+        "height": 800
+      },
+      "viewport": {
+        "width": 960,
+        "height": 640,
+        "dpr": 2.5
+      },
+      "controls": 11,
+      "failures": []
+    }
+  ],
+  "errors": [],
+  "scope": "macOS desktop 1500x980, minimum 960x640, 1200x800 at 125% application zoom; synthetic local profiles and four-peer display fixture (not a connection test); native macOS captures avoid zoomed renderer-screenshot cropping; MCP configuration redacted; geometry plus screenshots",
+  "failures": []
+}

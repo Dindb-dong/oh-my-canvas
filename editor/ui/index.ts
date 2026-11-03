@@ -280,10 +280,11 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
             const entry = services.commands.get(id);
             if (!entry)
                 continue;
-            const item = button(entry.label ?? id, () => {
+            const item = button("", () => {
                 closeMenu();
                 run(id);
-            });
+            }, "", entry.label ?? id);
+            item.append(el("span", "menu-label", entry.label ?? id));
             const toolIcon = toolEntries.find(([tool]) => id === "tool." + tool)?.[1];
             if (toolIcon)
                 item.prepend(createIcon(toolIcon));
