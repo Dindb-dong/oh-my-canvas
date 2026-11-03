@@ -7,7 +7,7 @@ import urllib.request
 
 COMMIT = '6904efd245391ad396df17654738f52f6da8c40e'
 BASE = f'https://raw.githubusercontent.com/tabler/tabler-icons/{COMMIT}/'
-NAMES = '''pointer frame square circle hexagon star line arrow-up-right vector-bezier pencil typography layout-sidebar arrow-back-up arrow-forward-up command search components minus plus chevron-down copy trash chevron-right dots eye eye-off lock lock-open arrow-up arrow-down x box photo file stack diamond layout-grid adjustments-horizontal zoom-in zoom-out align-box-left-middle align-box-center-middle align-box-right-middle align-box-top-center align-box-bottom-center arrows-horizontal arrows-vertical flip-horizontal flip-vertical clock list external-link download upload check arrows-minimize arrows-maximize color-picker rotate-clockwise unlink select-all'''.split()
+NAMES = '''pointer frame square circle hexagon star line arrow-up-right vector-bezier ballpen pencil letter-t layout-sidebar arrow-back-up arrow-forward-up command search components minus plus chevron-down copy trash chevron-right dots eye eye-off lock lock-open arrow-up arrow-down x box photo file stack diamond layout-grid adjustments-horizontal zoom-in zoom-out align-box-left-middle align-box-center-middle align-box-right-middle align-box-top-center align-box-bottom-center arrows-horizontal arrows-vertical flip-horizontal flip-vertical clock list external-link download upload check arrows-minimize arrows-maximize color-picker rotate-clockwise unlink select-all'''.split()
 FOLDER = pathlib.Path(__file__).resolve().parent
 
 def fetch(name):

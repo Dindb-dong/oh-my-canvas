@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "at": "2026-11-03T15:05:47.623Z",
+  "at": "2026-11-03T16:10:19.658Z",
   "passed": true,
   "archive": "release/mac-arm64/Oh My Canvas.app/Contents/Resources/app.asar",
-  "archiveSha256": "2c69f8368d714dd86cab9e09d56925404659cb916408aedaba7989f49b7bec31",
+  "archiveSha256": "38c6f5a86d37cf3e8b38e417b2f29f5c79d536b9aa94501fe53dd4c087d43296",
   "scope": "ASAR path inventory and exact current file bytes only. No compiled-code AST analysis, source-authorship proof, exhaustive restricted-source detection, legal clearance or reproducible-build claim.",
   "indexedPaths": 4260,
   "excludedPathPatterns": [
@@ -66,11 +66,11 @@
       "equal": true
     },
     {
-      "target": "dist/assets/index-B_irvURN.js",
-      "source": "dist/assets/index-B_irvURN.js",
+      "target": "dist/assets/index-pYL9Zl4q.js",
+      "source": "dist/assets/index-pYL9Zl4q.js",
       "group": "dist",
-      "bytes": 476223,
-      "sha256": "f19b51bf096a2c44db450776a0e0e7b1b4302f95f33b94b54716ac6f25d57749",
+      "bytes": 476551,
+      "sha256": "29ce92ea8f174e6fd4c587ac05f9c47d03001d44c91f4274f028ab0e49cff9a2",
       "equal": true
     },
     {
@@ -1118,7 +1118,7 @@
       "source": "dist/index.html",
       "group": "dist",
       "bytes": 3329,
-      "sha256": "e0958fcd13a9db22187930fcaadbabad890bddcc26c77e003c997b91027ae0b6",
+      "sha256": "a52d33dc3f9b7a847ff54dad74f9adaaed69b633f4f9424a2cef8f16e348b374",
       "equal": true
     },
     {
@@ -1469,8 +1469,8 @@
       "target": "dist/licenses/tabler-icons/manifest.json",
       "source": "dist/licenses/tabler-icons/manifest.json",
       "group": "dist",
-      "bytes": 18537,
-      "sha256": "0c2965bf4650db8860c0938d6343842c3ae2b9e134719a62a9ab54da849522ee",
+      "bytes": 18818,
+      "sha256": "c3c8de8fa1d55bf6e1144d339a64ce16ea69509365a261c59ad685359612d96a",
       "equal": true
     },
     {
@@ -1605,8 +1605,8 @@
       "target": "dist/licenses/tabler-icons/manifest.json",
       "source": "editor/ui/icons/tabler/manifest.json",
       "group": "tabler-original",
-      "bytes": 18537,
-      "sha256": "0c2965bf4650db8860c0938d6343842c3ae2b9e134719a62a9ab54da849522ee",
+      "bytes": 18818,
+      "sha256": "c3c8de8fa1d55bf6e1144d339a64ce16ea69509365a261c59ad685359612d96a",
       "equal": true
     },
     {

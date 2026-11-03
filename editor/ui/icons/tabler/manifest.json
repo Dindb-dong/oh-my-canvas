@@ -103,6 +103,12 @@
       "bytes": 440
     },
     {
+      "file": "ballpen.svg",
+      "source": "https://raw.githubusercontent.com/tabler/tabler-icons/6904efd245391ad396df17654738f52f6da8c40e/icons/outline/ballpen.svg",
+      "sha256": "d70a7739dbb894d9be62e8fa95cbe44b26a021171ba4ab73b0e303d3631d31b1",
+      "bytes": 566
+    },
+    {
       "file": "box.svg",
       "source": "https://raw.githubusercontent.com/tabler/tabler-icons/6904efd245391ad396df17654738f52f6da8c40e/icons/outline/box.svg",
       "sha256": "9c41c0236687a8ffa1c00e7de7c6a1c55bef1073c8adaf2c277f6f36f4552a8f",
@@ -241,6 +247,12 @@
       "bytes": 452
     },
     {
+      "file": "letter-t.svg",
+      "source": "https://raw.githubusercontent.com/tabler/tabler-icons/6904efd245391ad396df17654738f52f6da8c40e/icons/outline/letter-t.svg",
+      "sha256": "09bba9f5f3142601b3bbe8e4df1d2a71235602ec83baf0f3dd9ff86fd6ce5183",
+      "bytes": 417
+    },
+    {
       "file": "line.svg",
       "source": "https://raw.githubusercontent.com/tabler/tabler-icons/6904efd245391ad396df17654738f52f6da8c40e/icons/outline/line.svg",
       "sha256": "560073b9b34b30f6c831d47ec0fde54f78550e3ab2ce5949638600e9aca9b26b",
@@ -337,12 +349,6 @@
       "bytes": 551
     },
     {
-      "file": "typography.svg",
-      "source": "https://raw.githubusercontent.com/tabler/tabler-icons/6904efd245391ad396df17654738f52f6da8c40e/icons/outline/typography.svg",
-      "sha256": "dbd02a0c7c4794f692ee17139b9c1b9672a9bf873bcf28d14caa5f2a3dbab896",
-      "bytes": 493
-    },
-    {
       "file": "unlink.svg",
       "source": "https://raw.githubusercontent.com/tabler/tabler-icons/6904efd245391ad396df17654738f52f6da8c40e/icons/outline/unlink.svg",
       "sha256": "f53fc177bb40baf7d31074f28d3a86572e96c66b298242bfed5f85baefb6c4e6",
@@ -381,7 +387,7 @@
   ],
   "generated": {
     "file": "runtime.js",
-    "sha256": "e6ceaadfda7d6fdd75e3861408481672caf7e6a8d47a636b9ac366c4fe24e382",
+    "sha256": "4a412b5462053298b0ac377fbd07a455498534a86cc268d2082245d6440db512",
     "description": "Inline SVG subset; unchanged upstream path geometry; SVG root size/stroke/class/decorative accessibility attributes set at use."
   }
 }

@@ -71,9 +71,9 @@ const toolEntries: [
     ["star", "star", ""],
     ["line", "line", "L"],
     ["arrow", "arrow-up-right", "\u21E7L"],
-    ["pen", "vector-bezier", "P"],
+    ["pen", "ballpen", "P"],
     ["pencil", "pencil", "\u21E7P"],
-    ["text", "typography", "T"]
+    ["text", "letter-t", "T"]
 ];
 const shortcutMap: Record<string, string> = {
     "mod+z": "edit.undo",
@@ -672,7 +672,7 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
                 n.setAttribute("aria-expanded", String(!collapsedNodes.has(id)));
             const typeIcon = el("span", "type-icon");
             typeIcon.append(createIcon(shape.isMain ? "components" : shape.isInstanceRoot ? "diamond" : ({
-                text: "typography",
+                text: "letter-t",
                 frame: "frame",
                 group: "box",
                 path: "vector-bezier",

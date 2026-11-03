@@ -1,6 +1,6 @@
 # Tabler control icon subset
 
-This directory vendors **61 outline SVGs** from official Tabler Icons **v3.50.0**, immutable commit `6904efd245391ad396df17654738f52f6da8c40e`. Each original SVG and the complete upstream MIT `LICENSE` remain byte-for-byte unchanged. `manifest.json` records each exact public source URL, byte length and SHA-256, plus the generated runtime hash.
+This directory vendors **62 outline SVGs** from official Tabler Icons **v3.50.0**, immutable commit `6904efd245391ad396df17654738f52f6da8c40e`. Each original SVG and the complete upstream MIT `LICENSE` remain byte-for-byte unchanged. `manifest.json` records each exact public source URL, byte length and SHA-256, plus the generated runtime hash.
 
 Official release: <https://github.com/tabler/tabler-icons/releases/tag/v3.50.0>.
 
@@ -22,3 +22,5 @@ Regeneration:
 python3 editor/ui/icons/tabler/fetch.py
 python3 editor/ui/icons/tabler/generate.py
 ```
+
+The text tool and text-layer badge use `letter-t`; the Pen tool uses `ballpen`, while the freehand Pencil tool retains `pencil`. Path layers retain the Bézier geometry icon.

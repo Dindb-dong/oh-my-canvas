@@ -85,6 +85,9 @@ it("all eleven tools and workspace navigation use decorative SVGs while preservi
     const tools = t.root.querySelectorAll<HTMLButtonElement>("#tools [data-tool]");
     expect(tools.length).toBe(11);
     tools.forEach(tool => assertIcon(tool));
+    assertIcon(t.root.querySelector<HTMLElement>('[data-tool="text"]')!, "letter-t");
+    assertIcon(t.root.querySelector<HTMLElement>('[data-tool="pen"]')!, "ballpen");
+    assertIcon(t.root.querySelector<HTMLElement>('[data-tool="pencil"]')!, "pencil");
     assertIcon(named(t.root, "Undo"), "arrow-back-up");
     assertIcon(named(t.root, "Redo"), "arrow-forward-up");
     assertIcon(named(t.root, "Find layers"), "search");
