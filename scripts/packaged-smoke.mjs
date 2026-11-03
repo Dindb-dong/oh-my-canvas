@@ -14,7 +14,7 @@ async function assertPortableLinks(directory){
       assert.ok(!path.isAbsolute(target)&&resolved.startsWith(path.resolve('release/mac-arm64/Oh My Canvas.app')+path.sep),`Bundle link escapes the app: ${file} -> ${target}`);
     }else if(entry.isDirectory())await assertPortableLinks(file);
   }
-} 
+}
 try{
   await assertPortableLinks(path.resolve('release/mac-arm64/Oh My Canvas.app'));
   app=await electron.launch({executablePath,args:[`--profile=${dir}`],timeout:30000});child=app.process();const page=await app.firstWindow();await page.locator('#start-sample').click();await page.waitForFunction(()=>!!window.lvMcp);

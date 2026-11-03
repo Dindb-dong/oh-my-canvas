@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "policy": "docs/independent/publication-policy.md",
   "source": "staged regular files only; no repository history",
-  "sourceDigest": "70843e47ca885dcd7b68da55422290e4a58e6488ed4c843ac4f9936fccf1a80d",
-  "snapshotDigest": "2f676e9979aec2eff8b6fec152d4c72d021a12409fd0011607481dc5858740ca",
+  "sourceDigest": "63617204afef38a2c2d3a6c65a4411b626c71e8e71f82b394e2200d5f1ce93e1",
+  "snapshotDigest": "e717cd3dbffbcdf9b13b5c37822889e9c16d9acaaf7a29f908583a2ad94610c9",
   "explicitEvidence": [
     "docs/qa/collaboration.png",
     "docs/qa/e2e-result.json",
@@ -1814,9 +1814,9 @@
     {
       "path": "scripts/packaged-smoke.mjs",
       "mode": "0644",
-      "sourceSha256": "a5491797d34a13e139b3998683635724e07923ea693f6abe7dd22b53ab66710c",
-      "sha256": "a5491797d34a13e139b3998683635724e07923ea693f6abe7dd22b53ab66710c",
-      "size": 3910
+      "sourceSha256": "330a79a4e193505948a0299c77c78e4cbb6dd48d15217fe2c27657098c354d01",
+      "sha256": "330a79a4e193505948a0299c77c78e4cbb6dd48d15217fe2c27657098c354d01",
+      "size": 3909
     },
     {
       "path": "scripts/prepare-publication.mjs",
