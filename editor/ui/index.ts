@@ -1419,7 +1419,7 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
             findBar = null;
             collapsedNodes.clear();
         }
-        if (!event.viewport && !event.hover && !event.deltas)
+        if (!event.viewport && !event.hover && (!event.deltas || event.projection))
             renderLeft();
         refreshToolbar();
     });

@@ -194,6 +194,7 @@ function findFixture() {
     const bar = root.querySelector<HTMLElement>(".find-bar[role=\"search\"]")!;
     return {
         editor,
+        root,
         bar,
         text: (id: string) => editor.page.objects[id].content.children.flatMap((paragraph: any) => paragraph.children).map((run: any) => run.text).join("")
     };
@@ -205,6 +206,22 @@ function findQuery(bar: HTMLElement, value: string) {
         bubbles: true
     }));
 }
+it("refreshes the layer tree for projected insertions, renames and removals without a selection change", () => {
+    const t = findFixture();
+    const names = () => [...t.root.querySelectorAll(".name")].map(node => node.textContent);
+    const remote = structuredClone(t.editor.doc), page = remote.pagesById[t.editor.pageId];
+    page.objects["free-name"].name = "Remote renamed layer";
+    insertShape(page, createShape("rect", {id: "remote-added", name: "Remote inserted layer"}));
+    t.editor.receiveDocument(remote);
+    expect(names()).toContain("Remote renamed layer");
+    expect(names()).toContain("Remote inserted layer");
+    const undone = structuredClone(remote), undonePage = undone.pagesById[t.editor.pageId];
+    undonePage.objects.root.childIds = undonePage.objects.root.childIds!.filter(id => id !== "remote-added");
+    delete undonePage.objects["remote-added"];
+    t.editor.receiveDocument(undone);
+    expect(names()).not.toContain("Remote inserted layer");
+    expect(names()).toContain("Remote renamed layer");
+});
 function replacement(bar: HTMLElement, value: string) {
     bar.querySelector<HTMLInputElement>("input[aria-label=\"Replacement\"]")!.value = value;
 }

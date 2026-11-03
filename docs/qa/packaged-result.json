@@ -1,7 +1,7 @@
 {
   "passed": true,
   "electron": "45.2.1",
-  "sourceSha256": "ea2fb6425863741a1b6dfa0a108fe7723579b2c055910ba451c1aa31bddc4236",
+  "sourceSha256": "57f6a48b080ebad8b7df1b3cce2fef0ac48f1bd8c7d69890eb1d40695d1ca030",
   "checks": [
     "portable bundle framework/dependency links",
     "packaged app launches",
@@ -10,5 +10,5 @@
     "bundled MCP CLI through Electron Node mode",
     "durable MCP edit"
   ],
-  "at": "2026-11-03T12:32:18.261Z"
+  "at": "2026-11-03T13:00:37.560Z"
 }

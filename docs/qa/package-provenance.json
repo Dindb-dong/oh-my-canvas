@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "at": "2026-11-03T12:32:28.485Z",
+  "at": "2026-11-03T13:00:37.824Z",
   "passed": true,
   "archive": "release/mac-arm64/Oh My Canvas.app/Contents/Resources/app.asar",
-  "archiveSha256": "58d3167828105ebd7230ea0090aa3bf24331cdcf3e076b5cf90e369b03acbef6",
+  "archiveSha256": "069a40ce4d8488442d79b94a453ecba8b86bc14b61fcdab8b634aa5d7ecfbc0a",
   "scope": "ASAR path inventory and exact current file bytes only. No compiled-code AST analysis, source-authorship proof, exhaustive restricted-source detection, legal clearance or reproducible-build claim.",
   "indexedPaths": 7629,
   "excludedPathPatterns": [
@@ -32,8 +32,8 @@
   "rootLicenseSha256": "4a5e5cccfd0d73f6917a0f00e93afbccaf9106a989af0803bf2a740698198e66",
   "standaloneCli": {
     "matchesCurrentDist": true,
-    "bytes": 613519,
-    "sha256": "4293582929d2f340d203d4d70151d3958717f87baa98ff15928b2eacd9c46981"
+    "bytes": 612469,
+    "sha256": "e76f3026e654a80ce96c68f2eba25f7ce918958d6f4d652d24667c45bd6c20ee"
   },
   "groups": {
     "dist": 178,
@@ -65,11 +65,11 @@
       "equal": true
     },
     {
-      "target": "dist/assets/index-Chzn4RzL.js",
-      "source": "dist/assets/index-Chzn4RzL.js",
+      "target": "dist/assets/index-BS1IF8Za.js",
+      "source": "dist/assets/index-BS1IF8Za.js",
       "group": "dist",
-      "bytes": 451196,
-      "sha256": "08d7265a5ec697a2dc499c1925a762760d189696572d7e5b8376106670aba06c",
+      "bytes": 451212,
+      "sha256": "4e6cefbcd56a83a995d910dd6e9a1eb1ae2488349a8c788a3530fcb8e14ea2eb",
       "equal": true
     },
     {
@@ -1117,7 +1117,7 @@
       "source": "dist/index.html",
       "group": "dist",
       "bytes": 3092,
-      "sha256": "f3192d3fd2d9bb8f1078f523fb4e665482456891122aeabab6f6c1b5c28b0360",
+      "sha256": "ca6a0a326c1d84609d024ad188962fe4fe216d2e3b88ea46cbce8f61bdfe8bf3",
       "equal": true
     },
     {

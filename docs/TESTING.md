@@ -67,7 +67,7 @@ Smaller synthetic tests do not substitute for the complete library journey. Meas
 
 ## Current evidence and limits
 
-The final current-source run passed 339 editor tests across 12 files and 38 host tests. Actual native UI acceptance passed 37/37 cases with zero renderer errors. Rendering coverage includes 32 scenarios and 830 assertions, plus eight large-fixture/cache assertions. The real library, four-client Electron/TLS plus official SDK/offline/export journey, packaged-app smoke and package-provenance checks passed; the current provenance report has no mismatches.
+The final current-source run passed 340 editor tests across 12 files and 38 host tests. Actual native UI acceptance passed 37/37 cases with zero renderer errors. Rendering coverage includes 32 scenarios and 830 assertions, plus eight large-fixture/cache assertions. The real library, four-client Electron/TLS plus official SDK/offline/export journey, packaged-app smoke and package-provenance checks passed; the current provenance report has no mismatches.
 
 On the actual 1,065-object document, durable MCP edits measured a **515.683 ms median** and **603.409 ms p95**, from ten warmed samples after one warm-up. The recorded startup comparison was **341.3 ms** versus **109,584.7 ms** in the measured baseline. These are local measurements for the tested fixture, source and environment; they are not a universal latency guarantee. Do not combine startup time with the durable MCP response interval.
 
