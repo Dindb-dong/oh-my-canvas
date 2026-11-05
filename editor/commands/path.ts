@@ -51,6 +51,7 @@ export function refreshPath(shape: Shape): void {
     if (segments.some(s => kind(s) !== 'close'))
         Object.assign(shape, orientedPathBox(segments, shape.transform));
     delete shape.primitive;
+    shape.pathContentVersion = 1;
     for (const key of ['d', 'pathData', 'path', 'segments'])
         delete shape[key];
     updateGeometry(shape);

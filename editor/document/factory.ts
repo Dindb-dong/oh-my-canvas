@@ -46,6 +46,7 @@ export function createShape(type: string, props: Data = {}): Shape {
         shape.autoResize ??= 'height';
         shape.fills = props.fills ?? [];
     }
+    normalizePathContent(shape);
     Object.assign(shape, boxGeometry(shape));
     return shape;
 }
@@ -57,7 +58,7 @@ export function createDocument(options: Data = {}): CanvasDocument {
         const doc = clone(options) as CanvasDocument;
         for (const page of Object.values(doc.pagesById))
             for (const shape of Object.values(page.objects))
-                normalizePathContent(shape);
+                normalizePathContent(shape, true);
         validateDocument(doc);
         return doc;
     }

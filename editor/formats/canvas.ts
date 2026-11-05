@@ -80,7 +80,7 @@ export function importCanvasJson(input: any, options: Data = {}): CanvasDocument
     if (raw.pagesById) {
         for (const page of Object.values(raw.pagesById) as Page[])
             for (const layer of Object.values(page.objects))
-                normalizePathContent(layer);
+                normalizePathContent(layer, true);
         assertFiniteDocument(raw);
         return raw;
     }
@@ -154,6 +154,7 @@ export function importCanvasJson(input: any, options: Data = {}): CanvasDocument
         if (type === 'path') {
             const d = rawLayer.editorPath?.content;
             if (Array.isArray(rawLayer.editorPath?.segments)) {
+                values.pathContentVersion = 1;
                 values.content = canonicalPathSegments(rawLayer.editorPath.segments).map(segment => {
                     for (const key of ['x', 'x1', 'x2'])
                         if (segment[key] !== undefined)
@@ -172,6 +173,7 @@ export function importCanvasJson(input: any, options: Data = {}): CanvasDocument
                 values.content = copy(rawLayer.content);
                 values.segments = copy(rawLayer.segments ?? rawLayer.content);
             }
+            normalizePathContent(values as Shape, true);
         }
         if (type === 'boolean') {
             values.booleanOperation = ext.booleanOperation ?? ext.operation ?? rawLayer.booleanOperation ?? 'union';

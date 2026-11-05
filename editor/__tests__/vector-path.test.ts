@@ -168,6 +168,59 @@ describe('canonical editable path persistence', () => {
         expect(shapePath(createDocument(doc).pagesById[page.id].objects.raw)).toBe('');
     });
 
+    it.each([
+        { d: 'M10 20 L30 40' },
+        { segments: [{ command: 'move', x: 10, y: 20 }, { command: 'line', x: 30, y: 40 }] },
+    ])('recovers baseline factory empty-content aliases from saved raw documents: %j', aliases => {
+        const doc = createDocument(), page = doc.pagesById[doc.pages[0]];
+        // Baseline abc7b84 createShape auto-added [] even when legacy geometry was supplied.
+        const old = createShape('path', { id: 'old', ...aliases });
+        old.content = [];
+        delete old.pathContentVersion;
+        insertShape(page, old);
+        const editor = new Editor(doc);
+        for (const loaded of [createDocument(doc), importCanvasJson(doc), editor.doc]) {
+            const recovered = loaded.pagesById[page.id].objects.old;
+            expect(shapePath(recovered)).toBe('M10 20 L30 40');
+            expect(recovered.pathContentVersion).toBe(1);
+        }
+        editor.destroy();
+    });
+
+    it('recovers the baseline portable d-only fixture while authoritative new empty segments stay empty', () => {
+        // Baseline exportCanvasJson kept d but serialized auto-added [] as an empty editorPath d.
+        const old = { editorPages: [{ id: 'saved' }], pages: [], editorRootLayers: { saved: [{
+            id: 'old', type: 'path', x: 0, y: 0, width: 100, height: 100,
+            d: 'M10 20 L30 40', editorPath: { content: '' }, editorText: { content: [] },
+            editorFrame: { fills: [{ color: '#000' }], strokes: [], opacity: 1 },
+            editorBool: { fills: [{ color: '#000' }], strokes: [] },
+        }] } };
+        expect(shapePath(importCanvasJson(old).pagesById.saved.objects.old)).toBe('M10 20 L30 40');
+        const modern = structuredClone(old);
+        Object.assign(modern.editorRootLayers.saved[0].editorPath, { segments: [] });
+        expect(shapePath(importCanvasJson(modern).pagesById.saved.objects.old)).toBe('');
+    });
+
+    it('retains native portable paths above the SVG import budget', () => {
+        const d = 'M0 0 ' + Array.from({ length: 10000 }, (_, i) => `L${i + 1} 0`).join(' ');
+        expect(parseSvgPath(d)).toHaveLength(10001);
+        const doc = importCanvasJson({ pages: [{ id: 'board', children: [{ id: 'long', type: 'path', editorPath: { content: d } }] }] });
+        expect(doc.pagesById[doc.pages[0]].objects.long.content).toHaveLength(10001);
+        expect(() => importSvg(`<svg><path d="${d}"/></svg>`)).toThrow('complex');
+        expect(() => parseSvgPath('M0 0 ' + 'L1 1 '.repeat(50000))).toThrow('complex');
+    });
+
+    it.each([
+        ['M1E2 0 L2E2 0', 'M100 0 L200 0'],
+        ['M.5e-2 0 L1 1', 'M0.005 0 L1 1'],
+    ])('normalizes valid exponent notation %s', (d, expected) => {
+        expect(shapePath(createShape('path', { d }))).toBe(expected);
+    });
+
+    it('rejects nonfinite legacy exponent coordinates', () => {
+        expect(() => createShape('path', { d: 'M1e999 0 L1 1' })).toThrow('number');
+    });
+
     it('preserves per-node handle modes through portable local coordinates and the next edit', () => {
         const path = createShape('path', { id: 'modes', x: 50, y: 30, content: [
             { command: 'move', x: 50, y: 30 },

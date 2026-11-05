@@ -95,7 +95,7 @@ export class Editor implements EditorStore {
         for (const pageId of doc.pages) {
             const page = doc.pagesById[pageId];
             for (const s of Object.values(page.objects)) {
-                normalizePathContent(s);
+                normalizePathContent(s, true);
                 reconcileShapeGeometry(before?.pagesById[pageId]?.objects[s.id], s);
             }
             refreshFrames(page);

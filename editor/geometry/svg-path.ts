@@ -34,13 +34,20 @@ export function canonicalPathSegments(segments: Data[]): Data[] {
     });
 }
 
-export function normalizePathContent(shape: Shape): void {
-    if (!['path', 'boolean'].includes(shape.type) || Array.isArray(shape.content))
+export function normalizePathContent(shape: Shape, migrateLegacyEmpty = false): void {
+    if (!['path', 'boolean'].includes(shape.type))
         return;
     const d = shape.d ?? shape.pathData ?? shape.path?.d;
-    const segments = typeof d === 'string' ? parseSvgPath(d) : shape.segments ?? shape.path?.segments ?? shape.content?.segments;
-    if (Array.isArray(segments))
+    const aliases = typeof d === 'string' && d.trim() || (shape.segments ?? shape.path?.segments)?.length;
+    if (Array.isArray(shape.content) && !(migrateLegacyEmpty && !shape.pathContentVersion && !shape.content.length && aliases)) {
+        shape.pathContentVersion = 1;
+        return;
+    }
+    const segments = typeof d === 'string' && d.trim() ? parseSvgPath(d) : shape.segments ?? shape.path?.segments ?? shape.content?.segments ?? (typeof d === 'string' ? parseSvgPath(d) : undefined);
+    if (Array.isArray(segments)) {
         shape.content = canonicalPathSegments(segments);
+        shape.pathContentVersion = 1;
+    }
 }
 
 function arc(from: Point, to: Point, rx: number, ry: number, angle: number, large: number, sweep: number): Data[] {
@@ -69,11 +76,11 @@ function arc(from: Point, to: Point, rx: number, ry: number, angle: number, larg
     return segments;
 }
 /** SVG path grammar interpreted into editable world-coordinate cubic segments. */
-export function parseSvgPath(value: string, maxSegments = 10000): Data[] {
-    if (value.length > 2000000 || !Number.isInteger(maxSegments) || maxSegments < 0 || maxSegments > 10000)
+export function parseSvgPath(value: string, maxSegments = 50000): Data[] {
+    if (value.length > 2000000 || !Number.isInteger(maxSegments) || maxSegments < 0 || maxSegments > 50000)
         throw new Error('SVG path too complex');
     const tokens: string[] = [], segments: Data[] = [];
-    for (const match of value.matchAll(/[a-zA-Z]|[-+]?(?:\d*\.\d+|\d+\.?\d*)(?:e[-+]?\d+)?/g)) {
+    for (const match of value.matchAll(/[a-zA-Z]|[-+]?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][-+]?\d+)?/g)) {
         if (tokens.length >= maxSegments * 8)
             throw new Error('SVG path too complex');
         tokens.push(match[0]);
@@ -86,7 +93,7 @@ export function parseSvgPath(value: string, maxSegments = 10000): Data[] {
     let index = 0, command = '', p: Point = { x: 0, y: 0 }, start = { ...p }, lastControl: Point | null = null, lastKind = '';
     const take = () => {
         const t = tokens[index++];
-        if (t === undefined || /[a-z]/i.test(t) && !/^[-+]?\d/.test(t))
+        if (t === undefined || /^[a-z]$/i.test(t))
             throw new Error('Invalid SVG path');
         const n = Number(t);
         if (!Number.isFinite(n))
