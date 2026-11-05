@@ -7,6 +7,7 @@ const arr = (items: Data, minItems?: number, maxItems?: number) => ({ type: 'arr
 const obj = (properties: Data = {}, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const enumeration = (values: string[]) => str({ enum: values });
 const position = enumeration(['before', 'after', 'first', 'last']);
+const point = obj({ x: num(), y: num() }, ['x', 'y']);
 const stringMap = { type: 'object', additionalProperties: { type: 'string' } };
 const batchNames = ['write_html', 'update', 'move', 'duplicate', 'delete', 'create_board'];
 const tool = (name: string, description: string, inputSchema: Data) => ({ name, description, inputSchema });
@@ -18,6 +19,12 @@ export const TOOLS = [
     tool('find', 'Search layer text, type, or name inside an optional subtree. Returns at most 50 matches.', { ...obj({ text: str(), kind: str(), name: str(), within: str() }), anyOf: [{ required: ['text'] }, { required: ['kind'] }, { required: ['name'] }] }),
     tool('screenshot', 'Capture a settled layer or page. Slice mode supports zero-based slices; overview fits the scene.', obj({ id: str(), mode: enumeration(['slice', 'overview']), slice: int({ minimum: 0 }) })),
     tool('write_html', 'Insert sanitized HTML with inline CSS relative to a target layer.', obj({ html: str(), target: str(), position: enumeration(['before', 'after', 'first', 'last', 'replace']) }, ['html', 'target', 'position'])),
+    tool('write_svg', 'Insert SVG as editable vector layers; unsupported elements are preserved as pictures with warnings. Standalone operation.', obj({ svg: str({ maxLength: 200000 }), target: str(), position: enumeration(['before', 'after', 'first', 'last', 'replace']) }, ['svg', 'target', 'position'])),
+    tool('get_path', 'Read native cubic path segments and node indices in world coordinates. Use the returned revision when editing.', obj({ id: str() }, ['id'])),
+    tool('edit_path', 'Edit native path nodes in world coordinates. Requires the revision from get_path; standalone atomic operation.', obj({ id: str(), revision: int({ minimum: 0 }), action: enumeration(['move_nodes', 'insert_node', 'delete_nodes', 'set_handle', 'convert_node', 'close', 'open']), indices: arr(int({ minimum: 0 }), 1, 1000), index: int({ minimum: 0 }), dx: num(), dy: num(), t: num(), handle: enumeration(['in', 'out']), point, mode: enumeration(['free', 'aligned', 'symmetric']), nodeKind: enumeration(['corner', 'smooth', 'symmetric']) }, ['id', 'revision', 'action'])),
+    tool('boolean', 'Combine ordered vector operands non-destructively. Subtract removes each later operand from the first; originals remain children. Standalone operation.', obj({ ids: arr(str(), 2, 200), operation: enumeration(['union', 'subtract', 'intersect', 'exclude']), revision: int({ minimum: 0 }) }, ['ids', 'operation', 'revision'])),
+    tool('outline', 'Convert strokes or text into editable paths while preserving hidden source layers. Standalone atomic operation.', obj({ ids: arr(str(), 1, 200), kind: enumeration(['stroke', 'text']), revision: int({ minimum: 0 }) }, ['ids', 'kind', 'revision'])),
+    tool('image', 'Remove an image background locally or restore its preserved original. Standalone atomic operation.', obj({ id: str(), action: enumeration(['remove_background', 'restore']), revision: int({ minimum: 0 }) }, ['id', 'action', 'revision'])),
     tool('update', 'Update a layer using CSS declarations, text, or supported attributes. An empty CSS value removes a property.', obj({ id: str(), style: stringMap, text: str(), attrs: stringMap }, ['id'])),
     tool('move', 'Move a layer before or after a sibling, or first or last inside a container.', obj({ id: str(), target: str(), position }, ['id', 'target', 'position'])),
     tool('duplicate', 'Duplicate a subtree, optionally positioning the copy relative to a target.', obj({ id: str(), target: str(), position }, ['id'])),
@@ -25,7 +32,7 @@ export const TOOLS = [
     tool('batch', 'Apply 1–100 supported writes atomically as one agent operation.', obj({ ops: arr(obj({ tool: enumeration(batchNames), args: { type: 'object', additionalProperties: true } }, ['tool', 'args']), 1, 100) }, ['ops'])),
     tool('create_board', 'Create a vertically laid-out board to the right of existing boards. Height hugs content when omitted.', obj({ width: num({ minimum: 1 }), height: num({ minimum: 1 }), name: str() }, ['width'])),
     tool('assets', 'Search configured local or optional asset providers. Unconfigured providers return no records.', obj({ query: str(), kind: enumeration(['brand', 'upload', 'stock']) })),
-    tool('get_guide', 'Read practical guidance for HTML, layout, text, visual review, or reusable components.', obj({ topic: enumeration(['html', 'layout', 'text', 'review', 'components']) })),
+    tool('get_guide', 'Read practical guidance for layout, text, review, components, vector authoring, or local image editing.', obj({ topic: enumeration(['html', 'layout', 'text', 'review', 'components', 'vector', 'image']) })),
     tool('undo', 'Undo the latest edit only when it belongs to this agent.', obj()),
     tool('components', 'Search reusable components, with pages of at most 200 records.', obj({ query: str(), offset: int({ minimum: 0 }) })),
     tool('component', 'Create or modify reusable components, variants, instances, and typed properties atomically.', obj({ action: enumeration(['create', 'add_variant', 'combine', 'instance', 'variant', 'property', 'edit_property', 'remove_property', 'bind', 'set_property', 'reset', 'detach']), id: str(), ids: arr(str(), 1, 200), source: str(), parent: str(), layer: str(), name: str(), property: str(), propertyType: enumeration(['text', 'boolean', 'swap']), value: str(), x: num(), y: num() }, ['action'])),
@@ -75,8 +82,12 @@ export function validateToolArgs(name: string, args: unknown): string | null {
                     return error;
             }
         }
-        if (schema.type === 'string' && typeof value !== 'string')
-            return `${path} must be a string`;
+        if (schema.type === 'string') {
+            if (typeof value !== 'string')
+                return `${path} must be a string`;
+            if (schema.maxLength !== undefined && value.length > schema.maxLength)
+                return `${path} is too long`;
+        }
         if (schema.type === 'number' || schema.type === 'integer') {
             if (typeof value !== 'number' || !Number.isFinite(value) || schema.type === 'integer' && !Number.isInteger(value))
                 return `${path} must be a finite ${schema.type}`;
@@ -90,6 +101,17 @@ export function validateToolArgs(name: string, args: unknown): string | null {
     const error = check(definition.inputSchema, args, 'args');
     if (error)
         return error;
+    if (name === 'edit_path') {
+        const v = args as Data;
+        const required: Record<string, string[]> = { move_nodes: ['indices', 'dx', 'dy'], insert_node: ['index'], delete_nodes: ['indices'], set_handle: ['index', 'handle', 'point'], convert_node: ['index', 'nodeKind'] };
+        for (const key of required[v.action] ?? [])
+            if (v[key] === undefined)
+                return `${v.action} requires ${key}`;
+        if (v.t !== undefined && (v.t <= 0 || v.t >= 1))
+            return 't must be between 0 and 1';
+    }
+    if (name === 'boolean' && new Set((args as Data).ids).size !== (args as Data).ids.length)
+        return 'Boolean operands must be unique';
     if (name === 'component') {
         const value = args as Data;
         if (value.action !== 'instance' && !value.id && !value.ids?.length)

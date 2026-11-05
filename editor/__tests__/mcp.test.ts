@@ -86,6 +86,7 @@ function fixture(options: Data = {}) {
     };
 }
 const valid: Record<string, Data> = {
+    image: { id: 'x', action: 'restore', revision: 0 }, outline: { ids: ['a'], kind: 'stroke', revision: 0 }, write_svg: { svg: '<svg/>', target: 'x', position: 'last' }, get_path: { id: 'x' }, edit_path: { id: 'x', revision: 0, action: 'move_nodes', indices: [0], dx: 1, dy: 2 }, boolean: { ids: ['a', 'b'], operation: 'union', revision: 0 },
     get_context: {}, get_tree: {}, get_html: { id: 'x' }, get_styles: { ids: ['x'] }, find: { text: 'x' }, screenshot: {}, write_html: {
         html: '<div/>', target: 'x', position: 'replace'
     }, update: { id: 'x' }, move: {
@@ -93,12 +94,12 @@ const valid: Record<string, Data> = {
     }, duplicate: { id: 'x' }, delete: { ids: ['x'] }, batch: { ops: [{ tool: 'update', args: { id: 'x', text: 'Y' } }] }, create_board: { width: 1 }, assets: {}, get_guide: {}, undo: {}, components: {}, component: { action: 'instance', source: 'component' }, fonts: {}
 };
 const names = [
-    'get_context', 'get_tree', 'get_html', 'get_styles', 'find', 'screenshot', 'write_html', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'assets', 'get_guide', 'undo', 'components', 'component', 'fonts'
+    'get_context', 'get_tree', 'get_html', 'get_styles', 'find', 'screenshot', 'write_html', 'write_svg', 'get_path', 'edit_path', 'boolean', 'outline', 'image', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'assets', 'get_guide', 'undo', 'components', 'component', 'fonts'
 ];
 describe('MCP-01 frozen schemas', () => {
-    it('exposes exactly the 19 names with closed argument objects', () => {
+    it('exposes the vector and existing names with closed argument objects', () => {
         expect(TOOLS.map(t => t.name)).toEqual(names);
-        expect(new Set(TOOLS.map(t => t.name)).size).toBe(19);
+        expect(new Set(TOOLS.map(t => t.name)).size).toBe(25);
         for (const t of TOOLS)
             expect(t.inputSchema.additionalProperties).toBe(false);
     });
@@ -176,7 +177,7 @@ describe('MCP-01 all tools and measured envelopes', () => {
         expect((await run('components')).components).toHaveLength(1);
         await run('undo');
         expect(f.editor.page.objects.box.isMain).not.toBe(true);
-        expect(seen).toEqual(new Set(names));
+        expect(seen).toEqual(new Set(names.filter(name => !['write_svg', 'get_path', 'edit_path', 'boolean', 'outline', 'image'].includes(name))));
         expect(f.afterWrite).toHaveBeenCalled();
         expect(f.onHighlight).toHaveBeenCalled();
         validateDocument(f.editor.doc);
@@ -697,5 +698,95 @@ describe('MCP typed component property transport', () => {
         });
         expect(descendants(f.editor.page, root).find(s => s.isInstanceRoot)?.componentId).toBe(one.componentId);
         expect(f.editor.page.objects[nested.rawSelection[0]].componentId).toBe(two.componentId);
+    });
+});
+
+ describe('vector MCP editing', () => {
+    it('imports native editable paths, edits world nodes, rejects stale revisions and undoes once', async () => {
+        const { ok, call, editor, events } = fixture();
+        const inserted = await ok('write_svg', { svg: '<svg width="24" height="24"><path d="M0 0 C2 0 4 6 8 8 Z" fill="black"/></svg>', target: 'board', position: 'last' });
+        const paths = Object.values(editor.page.objects).filter(s => s.type === 'path');
+        expect(paths).toHaveLength(1);
+        const id = paths[0].id, before = structuredClone(paths[0].content);
+        const path = await ok('get_path', { id });
+        expect(path.coordinateSpace).toBe('world');
+        expect(path.segments[0]).toMatchObject({ command: 'move', x: 100, y: 200, index: 0 });
+        const edit = { id, revision: path.revision, action: 'move_nodes', indices: [0], dx: 2, dy: 3 };
+        await ok('edit_path', edit);
+        expect(editor.page.objects[id].content[0]).toMatchObject({ x: 102, y: 203 });
+        expect((await call('edit_path', edit)).structuredContent?.error.code).toBe('stale_revision');
+        await ok('undo');
+        expect(editor.page.objects[id].content).toEqual(before);
+        expect(events.filter(e => e.operation?.author === 'alpha')).toHaveLength(3);
+        expect(inserted.warnings).toEqual([]);
+    });
+    it('rejects invalid node operations and vector writes inside batch without edits', async () => {
+        const { call, ok, editor } = fixture();
+        await ok('write_svg', { svg: '<svg><path d="M0 0 L2 2"/></svg>', target: 'board', position: 'last' });
+        const shape = Object.values(editor.page.objects).find(s => s.type === 'path')!;
+        const context = await ok('get_path', { id: shape.id });
+        const snapshot = editor.doc;
+        for (const args of [
+            { action: 'move_nodes', indices: [999], dx: 1, dy: 1 },
+            { action: 'set_handle', index: 0, handle: 'out', point: { x: Infinity, y: 0 } },
+            { action: 'insert_node', index: 1, t: 0 },
+        ]) expect((await call('edit_path', { id: shape.id, revision: context.revision, ...args })).isError).toBe(true);
+        expect((await call('batch', { ops: [{ tool: 'write_svg', args: { svg: '<svg/>', target: 'board', position: 'last' } }] })).isError).toBe(true);
+        expect(editor.doc).toBe(snapshot);
+    });
+    it('combines operands in caller order, retains originals, and owns undo', async () => {
+        const combinePaths = vi.fn(async (_shapes: Data[], _operation: string, _options: Data) => ({ segments: [{ command: 'move', x: 0, y: 0 }, { command: 'line', x: 10, y: 10 }], bounds: { x: 0, y: 0, width: 10, height: 10 }, fillRule: 'evenodd' }));
+        const { editor, ok } = fixture({ services: { combinePaths } });
+        editor.transact('Add operand', doc => insertShape(doc.pagesById[editor.pageId], createShape('ellipse', { id: 'circle', x: 0, y: 0, width: 20, height: 20 }), 'board'));
+        const context = await ok('get_context');
+        const result = await ok('boolean', { ids: ['circle', 'box'], operation: 'subtract', revision: context.revision });
+        expect(combinePaths.mock.calls[0][0].map((s: Data) => s.id)).toEqual(['circle', 'box']);
+        expect(editor.page.objects[result.rawId].childIds).toEqual(['circle', 'box']);
+        expect(editor.page.objects.circle.parentId).toBe(result.rawId);
+        await ok('undo');
+        expect(editor.page.objects.circle.parentId).toBe('board');
+        expect(editor.page.objects.box.parentId).toBe('board');
+        expect(editor.page.objects[result.rawId]).toBeUndefined();
+    });
+    it('returns explicit SVG fallback warnings and rejects oversized input', async () => {
+        const { ok, call, editor } = fixture();
+        const result = await ok('write_svg', { svg: '<svg width="80" height="40"><defs><clipPath id="clip"><rect width="20" height="20"/></clipPath></defs><g clip-path="url(#clip)"><rect width="40" height="20"/></g></svg>', target: 'board', position: 'last' });
+        expect(result.warnings.length).toBeGreaterThan(0);
+        expect(result.rawIds.some((id: string) => editor.page.objects[id].type === 'svg')).toBe(true);
+        expect((await call('write_svg', { svg: 'x'.repeat(200001), target: 'board', position: 'last' })).structuredContent?.error.code).toBe('bad_args');
+    });
+    it('dispatches outline with agent ownership and cancellation context outside transactions', async () => {
+        const commands = { run: vi.fn((_name, args) => { expect(args.author).toBe('alpha'); expect(args.signal).toBeInstanceOf(AbortSignal); return true; }) };
+        const { ok, call } = fixture({ services: { commands } });
+        await ok('outline', { ids: ['box'], kind: 'stroke', revision: 0 });
+        expect(commands.run).toHaveBeenCalledWith('path.outline-stroke', expect.objectContaining({ ids: ['box'], operationId: expect.any(String) }));
+        expect((await call('outline', { ids: ['box'], kind: 'text', revision: 999 })).structuredContent?.error.code).toBe('stale_revision');
+        expect(commands.run).toHaveBeenCalledTimes(1);
+    });
+    it('does not commit asynchronous geometry after the document changes', async () => {
+        const ready = deferred();
+        const combinePaths = vi.fn(async () => { await ready.promise; return { segments: [], bounds: { x: 0, y: 0, width: 0, height: 0 } }; });
+        const { editor, ok, call } = fixture({ services: { combinePaths } });
+        editor.transact('Add operand', doc => insertShape(doc.pagesById[editor.pageId], createShape('ellipse', { id: 'circle' }), 'board'));
+        const context = await ok('get_context');
+        const request = call('boolean', { ids: ['box', 'circle'], operation: 'union', revision: context.revision });
+        await vi.waitFor(() => expect(combinePaths).toHaveBeenCalled());
+        editor.transact('Concurrent edit', doc => { doc.pagesById[editor.pageId].objects.box.name = 'Changed'; });
+        ready.resolve();
+        expect((await request).structuredContent?.error.code).toBe('stale_revision');
+        expect(editor.page.objects.box.parentId).toBe('board');
+    });
+});
+
+describe('image MCP integration', () => {
+    it('forwards local removal/restoration with agent operation and rejects stale image edits', async () => {
+        const images = { removeBackground: vi.fn(async (_id, operation, signal) => { expect(operation.author).toBe('alpha'); expect(signal).toBeInstanceOf(AbortSignal); }), restore: vi.fn() };
+        const { ok, call } = fixture({ services: { images } });
+        await ok('image', { id: 'box', action: 'remove_background', revision: 0 });
+        expect(images.removeBackground).toHaveBeenCalledWith('box', expect.objectContaining({ label: 'agent:alpha' }), expect.any(AbortSignal));
+        await ok('image', { id: 'box', action: 'restore', revision: 0 });
+        expect(images.restore).toHaveBeenCalledWith('box', expect.objectContaining({ author: 'alpha' }));
+        expect((await call('image', { id: 'box', action: 'restore', revision: 1 })).structuredContent?.error.code).toBe('stale_revision');
+        expect(images.restore).toHaveBeenCalledTimes(1);
     });
 });

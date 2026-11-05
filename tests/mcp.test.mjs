@@ -62,7 +62,9 @@ async function httpFixture(t,options={}) {
 const initialize=id=>({jsonrpc:'2.0',id,method:'initialize',params:{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'same',version:'1'}}});
 test('HTTP SDK clients list all tools, isolate identical client identities and terminate agents',async t=>{
   const f=await httpFixture(t),a=await f.connect(),b=await f.connect();
-  assert.equal((await a.client.listTools()).tools.length,19);
+  const listed=(await a.client.listTools()).tools,expected=await sourceTools();
+  assert.deepEqual(listed,expected);
+  for(const name of ['write_svg','get_path','edit_path','boolean','outline','image'])assert.ok(listed.some(tool=>tool.name===name),name);
   const call=client=>client.callTool({name:'get_context',arguments:{}}),[one,two]=await Promise.all([call(a.client),call(b.client)]);
   assert.match(one.structuredContent.agent,/^mcp-http-[a-f0-9-]{36}$/);assert.notEqual(one.structuredContent.agent,two.structuredContent.agent);
   assert.equal((await call(a.client)).structuredContent.agent,one.structuredContent.agent);
@@ -172,7 +174,8 @@ test('a long-lived HTTP session reclaims successful SDK response streams',async 
   const transports=new Set(),original=StreamableHTTPServerTransport.prototype.handleRequest;
   t.mock.method(StreamableHTTPServerTransport.prototype,'handleRequest',function(...args){transports.add(this);return original.apply(this,args);});
   const f=await httpFixture(t),{client}=await f.connect();
-  for(let i=0;i<200;i++)assert.equal((await client.listTools()).tools.length,19);
+  const expectedNames=(await sourceTools()).map(tool=>tool.name);
+  for(let i=0;i<200;i++)assert.deepEqual((await client.listTools()).tools.map(tool=>tool.name),expectedNames);
   assert.equal(transports.size,1);
   // Read pinned SDK bookkeeping to detect leaks; production never modifies SDK internals.
   for(const transport of transports){
