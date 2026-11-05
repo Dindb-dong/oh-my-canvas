@@ -1342,6 +1342,8 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
                                         setPathHandle(target, index, handle, point, mode === "smooth" ? "aligned" : mode === "corner" ? "free" : mode);
                                     });
                                 }, "number");
+                                if (field === "angle" || field === "length")
+                                    control.querySelector(".field-label")!.textContent = `${handle === "in" ? "In" : "Out"} ${field === "angle" ? "angle°" : "length"}`;
                                 if (field === "length")
                                     control.querySelector("input")!.min = "0";
                                 if (field === "angle")
