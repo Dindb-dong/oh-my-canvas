@@ -35,7 +35,9 @@ The core suite uses real loopback TLS/HTTPS sockets. An environment that prohibi
 | Complete desktop journey | `npm run build` | `npm run test:e2e`; the four `independent-*-e2e.mjs` scripts above |
 | Packaging | `npm run build`; `node scripts/package-local.mjs` | `node scripts/packaged-smoke.mjs`; `node scripts/check-package-provenance.mjs` |
 
-Build before renderer/HTTP/stdio E2E. The focused commands above are entry points, not a replacement for a broader run after changing a shared contract. E2E scripts may refresh tracked screenshots and JSON evidence in `docs/qa`; inspect the diff and retain only intentional evidence changes. They create and clean up their own temporary profiles.
+Build before renderer/HTTP/stdio E2E. The focused commands above are entry points, not a replacement for a broader run after changing a shared contract. E2E scripts may refresh tracked screenshots and JSON evidence in `docs/qa`; inspect the diff and retain only intentional evidence changes. They create and clean up their own temporary profiles. Automated Electron launches set `OMC_TEST_BACKGROUND=1`; with an isolated profile the app creates hidden windows and suppresses Dock activation before startup. Do not remove this flag or run tests against an older executable that does not honor it. `npm run dev` remains a normal visible development launch.
+
+The HTTP smoke intentionally obstructs its temporary profile's `documents` path to test a failed native close. Its expected `EEXIST`/`ENOTDIR` save error is injected and followed by directory restoration and same-session replay/alias/Undo checks; it does not touch a real user profile.
 
 ### Packaging and installed profiles
 

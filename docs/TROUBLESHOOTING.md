@@ -11,6 +11,7 @@ Use a copy of your document while investigating. Include the app version/source 
 - Launch the app and open a document in the editor. A library-only screen has no active editable canvas.
 - Re-copy **MCP → Copy configuration** from this app/profile. The default is the app-owned HTTPS URL; supply the private bearer in the client environment. Check [MCP credentials and rollback](MCP.md), particularly GUI environment inheritance. Rebuild a source checkout before using its bundled CLI.
 - Trust the profile's specific public TLS certificate through the client's supported trust or pinning mechanism. The app does not install OS trust. Never disable certificate verification or downgrade to plain HTTP; a port impostor must not receive the bearer. Codex GUI trust setup remains unverified.
+- An older pre-TLS stdio relay reports an invalid runtime after migration. Restart that client connection with the current bundled relay. The version-2 descriptor intentionally contains no token, and the old exposed token is replaced by the separate private `mcp-token-v2` credential; do not restore an old descriptor or downgrade to HTTP.
 - The installed app uses its own Electron Node mode; a separate Node runtime is unnecessary. Keep the quoted executable path intact if it contains spaces.
 - Refresh the MCP client connection after installing a new binary. An already-open Codex chat may need a new chat to discover newly registered tools.
 - `busy` while typing/scrubbing is expected. Finish that user transaction, then retry the write. Read tools remain available.

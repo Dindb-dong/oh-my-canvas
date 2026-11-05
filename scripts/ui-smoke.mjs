@@ -1,7 +1,7 @@
 import {_electron as electron} from 'playwright';
 import {promises as fs} from 'node:fs';import os from 'node:os';import path from 'node:path';import assert from 'node:assert/strict';
 const profile=await fs.mkdtemp(path.join(os.tmpdir(),'omc-ui-'));let app;const errors=[];
-const launch=async()=>{app=await electron.launch({args:[process.cwd(),`--profile=${profile}`]});const p=await app.firstWindow();p.setDefaultTimeout(15000);p.on('pageerror',e=>{errors.push(e.message);console.error(e.message);});await p.locator('#new').waitFor();return p;};
+const launch=async()=>{app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},args:[process.cwd(),`--profile=${profile}`]});const p=await app.firstWindow();p.setDefaultTimeout(15000);p.on('pageerror',e=>{errors.push(e.message);console.error(e.message);});await p.locator('#new').waitFor();return p;};
 const stop=async()=>{await app.evaluate(({app})=>app.exit(0));await new Promise(r=>app.process().exitCode!==null?r():app.process().once('exit',r));app=null;};
 try{
 let p=await launch();console.log('UI launched');await p.locator('#start-sample').click();await p.locator('#export').waitFor();await p.locator('#home').click();await p.locator('[data-star]').click();await p.locator('[data-section=starred]').click();assert.equal(await p.locator('.document-card').count(),1);

@@ -15,13 +15,17 @@ const call=(client,name,args={},meta)=>client.callTool({name,arguments:args,...m
 const snapshot=()=>page.evaluate(()=>window.omc.invoke('snapshot'));
 const count=(snap,name)=>Object.values(snap.document.pagesById).flatMap(p=>Object.values(p.objects)).filter(s=>s.name===name).length;
 async function launch(){
-  app=await electron.launch({executablePath:process.env.OMC_TEST_EXECUTABLE,args:[...process.env.OMC_TEST_EXECUTABLE?[]:[process.cwd()],`--profile=${dir}`,`--mcp-port=${port??0}`],timeout:30000});
-  page=await app.firstWindow();page.on('pageerror',error=>errors.push(error.message));
+  app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath:process.env.OMC_TEST_EXECUTABLE,args:[...process.env.OMC_TEST_EXECUTABLE?[]:[process.cwd()],`--profile=${dir}`,`--mcp-port=${port??0}`],timeout:30000});
+  page=await app.firstWindow();
+  assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),false,'Synthetic MCP test window must start hidden');
+  page.on('pageerror',error=>errors.push(error.message));
   await page.locator('#new').waitFor();
   if(documentId)await page.locator(`[data-open="${documentId}"]`).click();else await page.locator('#start-sample').click();
   await page.waitForFunction(()=>!!window.lvMcp,null,{timeout:30000});
   const runtime=JSON.parse(await fs.readFile(path.join(dir,'mcp-runtime.json'),'utf8'));
-  if(port!==undefined){assert.equal(runtime.port,port);assert.equal(runtime.token,token);}else{port=runtime.port;token=runtime.token;}
+  assert.equal(runtime.version,2);assert.equal('token' in runtime,false);
+  const currentToken=await fs.readFile(path.join(dir,'mcp-token-v2'),'utf8');
+  if(port!==undefined){assert.equal(runtime.port,port);assert.equal(currentToken,token);}else{port=runtime.port;token=currentToken;}
   const currentCertificate=await fs.readFile(runtime.certFile,'utf8');
   if(certificate!==undefined)assert.equal(currentCertificate,certificate);else certificate=currentCertificate;
   mcpFetch=createMcpFetch(certificate);
@@ -50,8 +54,10 @@ try{
   const info=await page.evaluate(()=>window.omc.invoke('mcp-info'));
   assert.equal(info.available,true);assert.ok(!JSON.stringify(info).includes(token));
   assert.deepEqual(JSON.parse(info.config).mcpServers['oh-my-canvas'],{url:`https://127.0.0.1:${port}/mcp`,bearer_token_env_var:'OMC_MCP_TOKEN'});
-  conflictApp=await electron.launch({executablePath:process.env.OMC_TEST_EXECUTABLE,args:[...process.env.OMC_TEST_EXECUTABLE?[]:[process.cwd()],`--profile=${path.join(dir,'conflict')}`,`--mcp-port=${port}`],timeout:30000});
-  const conflictPage=await conflictApp.firstWindow();await conflictPage.locator('#new').waitFor();
+  conflictApp=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath:process.env.OMC_TEST_EXECUTABLE,args:[...process.env.OMC_TEST_EXECUTABLE?[]:[process.cwd()],`--profile=${path.join(dir,'conflict')}`,`--mcp-port=${port}`],timeout:30000});
+  const conflictPage=await conflictApp.firstWindow();
+  assert.equal(await conflictApp.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),false,'Synthetic conflict test window must start hidden');
+  await conflictPage.locator('#new').waitFor();
   assert.equal((await conflictPage.evaluate(()=>window.omc.invoke('mcp-info'))).available,false);
   await conflictPage.locator('#start-sample').click();await conflictPage.waitForFunction(()=>!!window.lvMcp,null,{timeout:30000});
   await gracefulClose(conflictApp);

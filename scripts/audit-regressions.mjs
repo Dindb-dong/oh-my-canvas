@@ -3,7 +3,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';import {StdioCl
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-audit-fixes-'));let app,child;const clients=[],errors=[];
 const wait=async f=>{for(let i=0;i<200;i++){if(await f())return;await new Promise(r=>setTimeout(r,50));}throw Error('Audit condition timed out');};
 try{
- app=await electron.launch({executablePath:process.argv.includes('--installed')?'/Applications/Oh My Canvas.app/Contents/MacOS/Oh My Canvas':undefined,args:[process.cwd(),`--profile=${dir}`]});child=app.process();const p=await app.firstWindow();p.setDefaultTimeout(20000);p.on('pageerror',e=>errors.push(e.message));await p.locator('#new').click();await p.waitForFunction(()=>!!window.lvMcp);
+ app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath:process.argv.includes('--installed')?'/Applications/Oh My Canvas.app/Contents/MacOS/Oh My Canvas':undefined,args:[process.cwd(),`--profile=${dir}`]});child=app.process();const p=await app.firstWindow();p.setDefaultTimeout(20000);p.on('pageerror',e=>errors.push(e.message));await p.locator('#new').click();await p.waitForFunction(()=>!!window.lvMcp);
  const tool=async(name,args={})=>{const r=await p.evaluate(({name,args})=>window.lvMcp.handleToolCall('audit-fixture',name,args),{name,args});assert.ok(!r.isError,JSON.stringify(r));await p.evaluate(()=>window.omc.invoke('flush'));return r.structuredContent;};
  const snapshot=()=>p.evaluate(()=>window.omc.invoke('snapshot'));const text=async()=>JSON.stringify((await snapshot()).document);
  const context=await tool('get_context'),board=context.boards[0];

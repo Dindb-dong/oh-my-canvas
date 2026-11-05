@@ -7,7 +7,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';import {StdioCl
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-independent-host-'));let app,guest,replica;const clients=[],checks=[];
 const record=name=>{checks.push(name);console.log('PASS '+name);};
 try{
- app=await _electron.launch({executablePath:process.env.OMC_TEST_EXECUTABLE,args:[...process.env.OMC_TEST_EXECUTABLE?[]:[process.cwd()],`--profile=${dir}`],timeout:30000});const p=await app.firstWindow();await p.locator('#new').waitFor();
+ app=await _electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath:process.env.OMC_TEST_EXECUTABLE,args:[...process.env.OMC_TEST_EXECUTABLE?[]:[process.cwd()],`--profile=${dir}`],timeout:30000});const p=await app.firstWindow();await p.locator('#new').waitFor();
  const invoke=(action,data)=>p.evaluate(({action,data})=>window.omc.invoke(action,data),{action,data});
  const initial=await invoke('create',{title:'Initialization proof',document:documentFixture()});
  await assert.rejects(invoke('bootstrap',{id:'wrong',nonce:initial.bootstrapNonce,changes:[]}));

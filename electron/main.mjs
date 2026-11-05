@@ -16,6 +16,8 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 app.setName('oh-my-canvas');
 const profile=process.argv.find(x=>x.startsWith('--profile='))?.slice(10);
 if(profile)app.setPath('userData',path.resolve(profile));
+const backgroundTest=!!profile&&process.env.OMC_TEST_BACKGROUND==='1';
+if(backgroundTest&&process.platform==='darwin')app.setActivationPolicy('accessory');
 // Separate profiles permit independent local clients for collaborative acceptance tests.
 if(!app.requestSingleInstanceLock()){app.quit();}else{
 protocol.registerSchemesAsPrivileged([{scheme:'omc',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true,stream:true}}]);
@@ -192,7 +194,7 @@ protocol.handle('omc',async req=>{
   if(!file.startsWith(base+path.sep))return new Response('Forbidden',{status:403});
   try{return new Response(await fs.readFile(file),{headers:{'Content-Type':mime[path.extname(file)]||'application/octet-stream','Content-Security-Policy':"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'"}});}catch{return new Response('Not found',{status:404});}
 });
-win=new BrowserWindow({width:1500,height:980,minWidth:960,minHeight:640,title:'Oh My Canvas',backgroundColor:'#ffffff',titleBarStyle:'hiddenInset',trafficLightPosition:{x:18,y:20},webPreferences:{preload:path.join(root,'dist/preload.cjs'),backgroundThrottling:false,contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}});
+win=new BrowserWindow({show:!backgroundTest,width:1500,height:980,minWidth:960,minHeight:640,title:'Oh My Canvas',backgroundColor:'#ffffff',titleBarStyle:'hiddenInset',trafficLightPosition:{x:18,y:20},webPreferences:{preload:path.join(root,'dist/preload.cjs'),backgroundThrottling:false,contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}});
 win.webContents.on('render-process-gone',()=>{cancelTools('Editor renderer stopped');void bridge?.resetSessions?.().catch(()=>{});});
 win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
 win.webContents.on('will-navigate',(event,url)=>{if(url!=='omc://canvas/index.html')event.preventDefault();});
@@ -206,7 +208,7 @@ Menu.setApplicationMenu(Menu.buildFromTemplate([
 ]));
 await win.loadURL('omc://canvas/index.html');
 if(bridgeError)send({type:'error',message:'MCP unavailable: '+bridgeError});
-app.on('second-instance',()=>{win?.show();win?.focus();});
+app.on('second-instance',()=>{if(!backgroundTest){win?.show();win?.focus();}});
 win.on('close',event=>{if(!quitting){event.preventDefault();bridge?.stopAccepting();cancelTools('Editor is closing');send({type:'closing'});}});
 ipcMain.handle('omc:ready-to-close',async event=>{trusted(event);if(quitting)return;quitting=true;bridge?.stopAccepting();cancelTools('Editor is closing');try{await operations;await save();await stopSession();await bridge?.close();app.quit();}catch(e){quitting=false;bridge?.resumeAccepting?.();send({type:'close-cancelled'});send({type:'error',message:'Could not save before closing: '+e.message});}});
 app.on('window-all-closed',()=>app.quit());

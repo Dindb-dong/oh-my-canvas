@@ -15,7 +15,7 @@ const output=path.join(root,'docs/qa');
 let app;
 try{
  const bundle=await build({entryPoints:[path.join(root,'editor/__tests__/render-browser.ts')],bundle:true,format:'iife',globalName:'IndependentRenderQA',platform:'browser',external:['fs','path'],write:false,logLevel:'silent'});
- app=await electron.launch({args:[root,`--profile=${path.join(temporary,'profile')}`],env:{...process.env,ELECTRON_DISABLE_SECURITY_WARNINGS:'true'},timeout:45000});
+ app=await electron.launch({args:[root,`--profile=${path.join(temporary,'profile')}`],env:{...process.env,OMC_TEST_BACKGROUND:'1',ELECTRON_DISABLE_SECURITY_WARNINGS:'true'},timeout:45000});
  const page=await app.firstWindow();
  page.on('console',message=>{if(message.text().startsWith('RENDER_PROFILE'))console.log(message.text());});
  const errors=[];page.on('pageerror',error=>errors.push(String(error)));

@@ -19,7 +19,7 @@ async function assertPortableLinks(directory){
 }
 try{
   await assertPortableLinks(path.resolve('release/mac-arm64/Oh My Canvas.app'));
-  app=await electron.launch({executablePath,args:[`--profile=${dir}`],timeout:30000});child=app.process();const page=await app.firstWindow();await page.locator('#start-sample').click();await page.waitForFunction(()=>!!window.lvMcp);
+  app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath,args:[`--profile=${dir}`],timeout:30000});child=app.process();const page=await app.firstWindow();assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),false,'Packaged synthetic test window must start hidden');await page.locator('#start-sample').click();await page.waitForFunction(()=>!!window.lvMcp);
   const runtime=await app.evaluate(()=>process.versions.electron),expected=JSON.parse(await fs.readFile('node_modules/electron/package.json','utf8')).version;assert.equal(runtime,expected);
   const archive=path.resolve('release/mac-arm64/Oh My Canvas.app/Contents/Resources/app.asar'),hash=createHash('sha256');
   for(const directory of ['core','electron','dist/assets'])for(const name of (await fs.readdir(directory)).sort()){
@@ -34,8 +34,10 @@ try{
   const result=await client.callTool({name:'create_board',arguments:{name:'Packaged MCP',width:320,height:200}});assert.ok(!result.isError,JSON.stringify(result));
   await client.close();client=null;
   const descriptor=JSON.parse(await fs.readFile(path.join(dir,'mcp-runtime.json'),'utf8'));
+  assert.equal(descriptor.version,2);assert.equal('token' in descriptor,false);
+  const token=await fs.readFile(path.join(dir,'mcp-token-v2'),'utf8');
   client=new Client({name:'packaged-http-smoke',version:'1'},{capabilities:{}});
-  const transport=new StreamableHTTPClientTransport(new URL(`https://127.0.0.1:${descriptor.port}/mcp`),{fetch:createMcpFetch(await fs.readFile(descriptor.certFile,'utf8')),requestInit:{headers:{Authorization:`Bearer ${descriptor.token}`}}});
+  const transport=new StreamableHTTPClientTransport(new URL(`https://127.0.0.1:${descriptor.port}/mcp`),{fetch:createMcpFetch(await fs.readFile(descriptor.certFile,'utf8')),requestInit:{headers:{Authorization:`Bearer ${token}`}}});
   await client.connect(transport);assert.equal((await client.listTools()).tools.length,19);
   assert.ok(!(await client.callTool({name:'get_context',arguments:{}})).isError);
   await transport.terminateSession();await client.close();client=null;

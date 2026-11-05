@@ -1,7 +1,7 @@
 import {_electron as electron} from 'playwright';import {promises as fs} from 'node:fs';import path from 'node:path';import os from 'node:os';import assert from 'node:assert/strict';
 const profile=await fs.mkdtemp(path.join(os.tmpdir(),'omc-library-'));let app,child;const errors=[];
 try{
- app=await electron.launch({executablePath:process.argv.includes('--installed')?'/Applications/Oh My Canvas.app/Contents/MacOS/Oh My Canvas':undefined,args:[process.cwd(),`--profile=${profile}`]});child=app.process();const p=await app.firstWindow();p.setDefaultTimeout(20000);p.on('pageerror',e=>errors.push(e.message));await p.locator('#import').waitFor();
+ app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath:process.argv.includes('--installed')?'/Applications/Oh My Canvas.app/Contents/MacOS/Oh My Canvas':undefined,args:[process.cwd(),`--profile=${profile}`]});child=app.process();const p=await app.firstWindow();p.setDefaultTimeout(20000);p.on('pageerror',e=>errors.push(e.message));await p.locator('#import').waitFor();
  await app.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},path.resolve('docs/design/system/component-library.omc'));
  await p.locator('#import').click();await p.waitForFunction(()=>!!window.lvMcp);
  const call=async(name,args={})=>{const r=await p.evaluate(({name,args})=>window.lvMcp.handleToolCall('library-qa',name,args),{name,args});assert.ok(!r.isError,JSON.stringify(r));return r;};

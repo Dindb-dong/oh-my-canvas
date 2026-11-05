@@ -83,7 +83,7 @@ async function layerDrag(source,target,placement) {
   return async()=>page.mouse.up();
 }
 try {
-  app=await electron.launch({args:[root,`--profile=${profile}`],env:{...process.env,ELECTRON_DISABLE_SECURITY_WARNINGS:'true'},timeout:30000});
+  app=await electron.launch({args:[root,`--profile=${profile}`],env:{...process.env,OMC_TEST_BACKGROUND:'1',ELECTRON_DISABLE_SECURITY_WARNINGS:'true'},timeout:30000});
   page=await app.firstWindow();page.setDefaultTimeout(8000);
   page.on('pageerror',error=>errors.push(error.message));
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1500,980));

@@ -1,6 +1,6 @@
 import {_electron as electron} from 'playwright';import {promises as fs} from 'node:fs';import path from 'node:path';import os from 'node:os';import assert from 'node:assert/strict';
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-components-')),apps=[];const errors=[];let total=0;
-async function launch(index){const app=await electron.launch({args:[process.cwd(),`--profile=${path.join(dir,String(index))}`]});const child=app.process(),p=await app.firstWindow();apps.push({app,child,p});p.setDefaultTimeout(20000);p.on('pageerror',e=>errors.push(e.message));await p.locator('#new').waitFor();return {app,p};}
+async function launch(index){const app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},args:[process.cwd(),`--profile=${path.join(dir,String(index))}`]});const child=app.process(),p=await app.firstWindow();apps.push({app,child,p});p.setDefaultTimeout(20000);p.on('pageerror',e=>errors.push(e.message));await p.locator('#new').waitFor();return {app,p};}
 async function tool(p,name,args={}){const r=await p.evaluate(({name,args})=>window.lvMcp.handleToolCall('component-e2e',name,args),{name,args});assert.ok(!r.isError,JSON.stringify(r));await p.evaluate(()=>window.omc.invoke('flush'));total++;return r.structuredContent;}
 async function text(p,id){return p.evaluate(async id=>JSON.stringify(await window.lvMcp.handleToolCall('component-e2e','get_tree',{id,depth:4})),id);}
 const wait=async f=>{for(let i=0;i<100;i++){if(await f())return;await new Promise(r=>setTimeout(r,100));}throw Error('Component convergence timed out');};
