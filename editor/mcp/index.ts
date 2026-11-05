@@ -164,7 +164,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         if (name === 'edit_path') {
             const id = resolve(agent, args.id, page), shape = page.objects[id];
             if (shape.type !== 'path' || !Array.isArray(shape.content))
-                throw new McpError('invalid', 'Choose an editable path; flatten a Boolean result before node editing');
+                throw new McpError('invalid', 'Choose an editable path; use boolean with operation flatten before node editing');
             if (!isEditable(page, id))
                 throw new McpError('invalid', 'Path is locked or hidden');
             const indices = args.indices ?? (args.index === undefined ? [] : [args.index]);
@@ -180,13 +180,17 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             return { id: alias(agent, id), rawId: id };
         }
         if (name === 'boolean') {
-            const ids = args.ids.map((id: string) => resolve(agent, id, page)), first = page.objects[ids[0]], prepared = args.prepared;
+            const ids = args.ids.map((id: string) => resolve(agent, id, page)), first = page.objects[ids[0]], prepared = args.prepared, flatten = args.operation === 'flatten';
             const parentId = ids.every((id: string) => page.objects[id].parentId === first.parentId) ? first.parentId : 'root';
-            const shape = createShape('boolean', { ...Object.fromEntries(['fills', 'strokes', 'strokeWidth', 'strokeAlignment', 'strokeCap', 'strokeJoin', 'strokeDashArray', 'opacity', 'blendMode', 'effects'].filter(key => key in first).map(key => [key, structuredClone(first[key])])), id: options.newId?.() ?? uid(), type: 'boolean', childIds: [], name: `Boolean ${args.operation}`, ...(prepared.bounds ?? pathBounds(prepared.segments)), transform: identity(), inverseTransform: identity(), rotation: 0, flipX: false, flipY: false, content: prepared.segments, fillRule: prepared.fillRule, booleanOperation: args.operation });
+            const shape = createShape(flatten ? 'path' : 'boolean', { ...Object.fromEntries(['fills', 'strokes', 'strokeWidth', 'strokeAlignment', 'strokeCap', 'strokeJoin', 'strokeDashArray', 'opacity', 'blendMode', 'effects', 'shadows', 'blur', 'backgroundBlur', ...(flatten ? ['absolute', 'layoutPositioning', 'layoutChild', 'hSizing', 'vSizing', 'widthSizing', 'heightSizing', 'layoutSizing', 'alignSelf', 'gridCell', 'constraints', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'] : [])].filter(key => key in first).map(key => [key, structuredClone(first[key])])), id: options.newId?.() ?? uid(), type: flatten ? 'path' : 'boolean', ...(flatten ? { flattenSourceIds: [...ids] } : { childIds: [], booleanOperation: args.operation }), name: flatten ? 'Flattened path' : `Boolean ${args.operation}`, ...(prepared.bounds ?? pathBounds(prepared.segments)), transform: identity(), inverseTransform: identity(), rotation: 0, flipX: false, flipY: false, content: prepared.segments, fillRule: prepared.fillRule });
             delete shape.primitive;
             insertShape(page, shape, parentId, page.objects[parentId].childIds!.indexOf(first.id));
-            reparentShapes(page, ids, shape.id);
-            shape.childIds = [...ids];
+            if (flatten)
+                for (const id of ids) page.objects[id].hidden = true;
+            else {
+                reparentShapes(page, ids, shape.id);
+                shape.childIds = [...ids];
+            }
             affected.add(shape.id);
             return { id: alias(agent, shape.id), rawId: shape.id, operands: ids.map((id: string) => alias(agent, id)) };
         }

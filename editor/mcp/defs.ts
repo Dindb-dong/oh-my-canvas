@@ -22,7 +22,7 @@ export const TOOLS = [
     tool('write_svg', 'Insert SVG as editable vector layers; unsupported elements are preserved as pictures with warnings. Standalone operation.', obj({ svg: str({ maxLength: 200000 }), target: str(), position: enumeration(['before', 'after', 'first', 'last', 'replace']) }, ['svg', 'target', 'position'])),
     tool('get_path', 'Read native cubic path segments and node indices in world coordinates. Use the returned revision when editing.', obj({ id: str() }, ['id'])),
     tool('edit_path', 'Edit native path nodes in world coordinates. Requires the revision from get_path; standalone atomic operation.', obj({ id: str(), revision: int({ minimum: 0 }), action: enumeration(['move_nodes', 'insert_node', 'delete_nodes', 'set_handle', 'convert_node', 'close', 'open']), indices: arr(int({ minimum: 0 }), 1, 1000), index: int({ minimum: 0 }), dx: num(), dy: num(), t: num(), handle: enumeration(['in', 'out']), point, mode: enumeration(['free', 'aligned', 'symmetric']), nodeKind: enumeration(['corner', 'smooth', 'symmetric']) }, ['id', 'revision', 'action'])),
-    tool('boolean', 'Combine ordered vector operands non-destructively. Subtract removes each later operand from the first; originals remain children. Standalone operation.', obj({ ids: arr(str(), 2, 200), operation: enumeration(['union', 'subtract', 'intersect', 'exclude']), revision: int({ minimum: 0 }) }, ['ids', 'operation', 'revision'])),
+    tool('boolean', 'Combine ordered vector operands non-destructively. Subtract removes later operands from the first. Flatten creates an editable path and hides preserved sources; other operations retain source children. Standalone operation.', obj({ ids: arr(str(), 1, 200), operation: enumeration(['union', 'subtract', 'intersect', 'exclude', 'flatten']), revision: int({ minimum: 0 }) }, ['ids', 'operation', 'revision'])),
     tool('outline', 'Convert strokes or text into editable paths while preserving hidden source layers. Standalone atomic operation.', obj({ ids: arr(str(), 1, 200), kind: enumeration(['stroke', 'text']), revision: int({ minimum: 0 }) }, ['ids', 'kind', 'revision'])),
     tool('image', 'Remove an image background locally or restore its preserved original. Standalone atomic operation.', obj({ id: str(), action: enumeration(['remove_background', 'restore']), revision: int({ minimum: 0 }) }, ['id', 'action', 'revision'])),
     tool('update', 'Update a layer using CSS declarations, text, or supported attributes. An empty CSS value removes a property.', obj({ id: str(), style: stringMap, text: str(), attrs: stringMap }, ['id'])),
@@ -110,8 +110,13 @@ export function validateToolArgs(name: string, args: unknown): string | null {
         if (v.t !== undefined && (v.t <= 0 || v.t >= 1))
             return 't must be between 0 and 1';
     }
-    if (name === 'boolean' && new Set((args as Data).ids).size !== (args as Data).ids.length)
-        return 'Boolean operands must be unique';
+    if (name === 'boolean') {
+        const value = args as Data;
+        if (new Set(value.ids).size !== value.ids.length)
+            return 'Boolean operands must be unique';
+        if (value.operation !== 'flatten' && value.ids.length < 2)
+            return 'Boolean operations require at least two operands';
+    }
     if (name === 'component') {
         const value = args as Data;
         if (value.action !== 'instance' && !value.id && !value.ids?.length)

@@ -748,6 +748,29 @@ describe('MCP typed component property transport', () => {
         expect(editor.page.objects.box.parentId).toBe('board');
         expect(editor.page.objects[result.rawId]).toBeUndefined();
     });
+    it('flattens a Boolean into editable nodes while preserving and undoing its source', async () => {
+        const combinePaths = vi.fn(async (_shapes: Data[], _operation: string, _options: Data) => ({ segments: [{ command: 'move', x: 0, y: 0 }, { command: 'line', x: 10, y: 10 }, { command: 'close' }], bounds: { x: 0, y: 0, width: 10, height: 10 }, fillRule: 'evenodd' }));
+        const { editor, ok, call } = fixture({ services: { combinePaths } });
+        editor.transact('Add operand', doc => insertShape(doc.pagesById[editor.pageId], createShape('ellipse', { id: 'circle', x: 0, y: 0, width: 20, height: 20 }), 'board'));
+        const context = await ok('get_context');
+        const combined = await ok('boolean', { ids: ['box', 'circle'], operation: 'subtract', revision: context.revision });
+        const flat = await ok('boolean', { ids: [combined.id], operation: 'flatten', revision: combined.revision });
+        expect(combinePaths.mock.calls[1][1]).toBe('flatten');
+        expect(editor.page.objects[flat.rawId]).toMatchObject({ type: 'path', parentId: 'board', flattenSourceIds: [combined.rawId] });
+        expect(editor.page.objects[flat.rawId].childIds).toBeUndefined();
+        expect(editor.page.objects[combined.rawId].hidden).toBe(true);
+        expect(editor.page.objects[combined.rawId].childIds).toEqual(['box', 'circle']);
+        const path = await ok('get_path', { id: flat.id });
+        expect(path.editable).toBe(true);
+        await ok('edit_path', { id: flat.id, revision: path.revision, action: 'move_nodes', indices: [1], dx: 2, dy: 1 });
+        expect(editor.page.objects[flat.rawId].content[1]).toMatchObject({ x: 12, y: 11 });
+        expect(editor.undoStep()).toBe(true);
+        expect(editor.page.objects[flat.rawId].content[1]).toMatchObject({ x: 10, y: 10 });
+        await ok('undo');
+        expect(editor.page.objects[flat.rawId]).toBeUndefined();
+        expect(editor.page.objects[combined.rawId].hidden).toBeFalsy();
+        expect((await call('boolean', { ids: [combined.id], operation: 'union', revision: (await ok('get_context')).revision })).structuredContent?.error.code).toBe('bad_args');
+    });
     it('returns explicit SVG fallback warnings and rejects oversized input', async () => {
         const { ok, call, editor } = fixture();
         const result = await ok('write_svg', { svg: '<svg width="80" height="40"><defs><clipPath id="clip"><rect width="20" height="20"/></clipPath></defs><g clip-path="url(#clip)"><rect width="40" height="20"/></g></svg>', target: 'board', position: 'last' });
