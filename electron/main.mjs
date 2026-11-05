@@ -89,7 +89,7 @@ const dispatch=async(action,data)=>{
       await save();return snapshot();
     }
     case 'commit':{requireCurrent();if(data.id!==current.id)throw Error('Document changed');if(!Number.isSafeInteger(data.seq))throw Error('Invalid edit sequence');if(data.seq<=seq)return snapshot();current.replica.patch(data.changes,data.label,data.group);await save();seq=data.seq;return snapshot();}
-    case 'undo':{const r=requireCurrent().replica;if(data?.agent&&r.undo.undoStack.at(-1)?.meta.get('label')!==`agent:${data.agent}`)return false;r.history('undo');await save();return snapshot();}
+    case 'undo':{if(data?.requestId&&pendingTools.get(data.requestId)?.agent!==data.agent)throw Error('MCP Undo request cancelled');const r=requireCurrent().replica;if(data?.agent&&r.undo.undoStack.at(-1)?.meta.get('label')!==`agent:${data.agent}`)return false;r.history('undo');await save();return snapshot();}
     case 'redo':requireCurrent().replica.history('redo');await save();return snapshot();
     case 'flush':await save();return true;
     case 'thumbnail':{requireCurrent();if(typeof data.src==='string'&&data.src.startsWith('data:image/')&&data.src.length<500000){current.thumbnail=data.src;dirty();}return true;}
@@ -130,7 +130,7 @@ const dispatch=async(action,data)=>{
         :{url:bridge.url,bearer_token_env_var:'OMC_MCP_TOKEN'};
       const text=JSON.stringify({mcpServers:{'oh-my-canvas':entry}},null,2);
       if(data?.copy)clipboard.writeText(text);
-      return {available:true,config:text,port:bridge.port,url:bridge.url,runtime:bridge.file};
+      return {available:true,config:text,port:bridge.port,url:bridge.url,runtime:bridge.file,certificatePath:bridge.certFile};
     }
     case 'host':{
       requireCurrent();await stopSession();const c=new Collaboration({replica:current.replica,id:current.id,title:current.title,name:prefs.name});bindSession(c);
@@ -208,7 +208,7 @@ await win.loadURL('omc://canvas/index.html');
 if(bridgeError)send({type:'error',message:'MCP unavailable: '+bridgeError});
 app.on('second-instance',()=>{win?.show();win?.focus();});
 win.on('close',event=>{if(!quitting){event.preventDefault();bridge?.stopAccepting();cancelTools('Editor is closing');send({type:'closing'});}});
-ipcMain.handle('omc:ready-to-close',async event=>{trusted(event);if(quitting)return;quitting=true;bridge?.stopAccepting();cancelTools('Editor is closing');send({type:'tool-session-end'});try{await operations;await save();await stopSession();await bridge?.close();app.quit();}catch(e){quitting=false;bridge?.resumeAccepting?.();send({type:'close-cancelled'});send({type:'error',message:'Could not save before closing: '+e.message});}});
+ipcMain.handle('omc:ready-to-close',async event=>{trusted(event);if(quitting)return;quitting=true;bridge?.stopAccepting();cancelTools('Editor is closing');try{await operations;await save();await stopSession();await bridge?.close();app.quit();}catch(e){quitting=false;bridge?.resumeAccepting?.();send({type:'close-cancelled'});send({type:'error',message:'Could not save before closing: '+e.message});}});
 app.on('window-all-closed',()=>app.quit());
 }).catch(error=>{console.error(error);dialog.showErrorBox('Oh My Canvas could not start',error.message);app.exit(1);});
 }

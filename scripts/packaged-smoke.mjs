@@ -3,6 +3,7 @@ import {promises as fs} from 'node:fs';
 import os from 'node:os';import path from 'node:path';import assert from 'node:assert/strict';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {createMcpFetch} from '../core/mcp-fetch.mjs';
 import {extractFile} from '@electron/asar';import {createHash} from 'node:crypto';
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-packaged-'));
 const executablePath=path.resolve('release/mac-arm64/Oh My Canvas.app/Contents/MacOS/Oh My Canvas');
@@ -34,7 +35,7 @@ try{
   await client.close();client=null;
   const descriptor=JSON.parse(await fs.readFile(path.join(dir,'mcp-runtime.json'),'utf8'));
   client=new Client({name:'packaged-http-smoke',version:'1'},{capabilities:{}});
-  const transport=new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${descriptor.port}/mcp`),{requestInit:{headers:{Authorization:`Bearer ${descriptor.token}`}}});
+  const transport=new StreamableHTTPClientTransport(new URL(`https://127.0.0.1:${descriptor.port}/mcp`),{fetch:createMcpFetch(await fs.readFile(descriptor.certFile,'utf8')),requestInit:{headers:{Authorization:`Bearer ${descriptor.token}`}}});
   await client.connect(transport);assert.equal((await client.listTools()).tools.length,19);
   assert.ok(!(await client.callTool({name:'get_context',arguments:{}})).isError);
   await transport.terminateSession();await client.close();client=null;

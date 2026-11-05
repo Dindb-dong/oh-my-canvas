@@ -399,6 +399,60 @@ describe('MCP-02 atomicity, author and lifetime boundaries', () => {
         expect(textValue(f.editor.page.objects.title)).toBe('Committed');
         expect(f.events).toHaveLength(1);
     });
+    it('forwards cancellation to Undo held in the host queue before it can apply', async () => {
+        const gate = deferred(), entered = deferred(), controller = new AbortController();
+        let applied = 0, hostWork!: Promise<boolean>;
+        const pending = new Set(['queued-undo']);
+        const f = fixture({ undo: (_agent: string, signal?: AbortSignal, requestId?: string) => {
+            entered.resolve();
+            hostWork = gate.promise.then(() => {
+                signal?.throwIfAborted();
+                if (!requestId || !pending.has(requestId))
+                    throw Error('Undo request ended before application');
+                applied++;
+                return f.editor.undoStep();
+            });
+            return hostWork;
+        } });
+        await f.ok('update', { id: 'title', text: 'Keep this edit' });
+        const undo = f.call('undo', {}, 'alpha', { signal: controller.signal, requestId: 'queued-undo' });
+        await entered.promise;
+        pending.delete('queued-undo');
+        controller.abort();
+        expect((await undo).structuredContent?.error.code).toBe('cancelled');
+        expect(applied).toBe(0);
+        gate.resolve();
+        await expect(hostWork).rejects.toBeDefined();
+        await f.ok('get_context');
+        expect(applied).toBe(0);
+        expect(textValue(f.editor.page.objects.title)).toBe('Keep this edit');
+        expect(f.events).toHaveLength(1);
+    });
+    it('does not invoke Undo for an already cancelled request', async () => {
+        const undo = vi.fn(() => true), f = fixture({ undo }), controller = new AbortController();
+        controller.abort();
+        expect((await f.call('undo', {}, 'alpha', { signal: controller.signal })).structuredContent?.error.code).toBe('cancelled');
+        await f.ok('get_context');
+        expect(undo).not.toHaveBeenCalled();
+    });
+    it('does not roll back Undo already applied before cancellation', async () => {
+        const acknowledged = deferred(), applied = deferred(), controller = new AbortController();
+        const f = fixture({ undo: (_agent: string, signal?: AbortSignal) => {
+            signal?.throwIfAborted();
+            const result = f.editor.undoStep();
+            applied.resolve();
+            return acknowledged.promise.then(() => result);
+        } });
+        await f.ok('update', { id: 'title', text: 'Undo this edit' });
+        const undo = f.call('undo', {}, 'alpha', { signal: controller.signal });
+        await applied.promise;
+        controller.abort();
+        expect((await undo).structuredContent?.error.code).toBe('cancelled');
+        acknowledged.resolve();
+        await f.ok('get_context');
+        expect(textValue(f.editor.page.objects.title)).toBe('Hello');
+        expect(f.events).toHaveLength(2);
+    });
     it('rechecks busy after font preparation and awaits host durability before success', async () => {
         const gate = deferred(), saved = deferred(), f = fixture({ afterWrite: () => saved.promise });
         f.fonts.ensure.mockImplementationOnce(() => gate.promise);
@@ -569,14 +623,14 @@ describe('HIST-01 host-authoritative Undo', () => {
         await f.ok('update', { id: 'title', text: 'Saved' });
         f.editor.receiveDocument(structuredClone(f.editor.doc));
         expect((await f.call('undo')).isError).not.toBe(true);
-        expect(undo).toHaveBeenCalledExactlyOnceWith('alpha');
+        expect(undo).toHaveBeenCalledExactlyOnceWith('alpha', expect.any(AbortSignal), undefined);
     });
     it('still refuses when authoritative host reports another latest author', async () => {
         const undo = vi.fn(async () => false), f = fixture({ undo });
         await f.ok('update', { id: 'title', text: 'Saved' });
         f.editor.receiveDocument(structuredClone(f.editor.doc));
         expect((await f.call('undo')).structuredContent?.error.code).toBe('nothing_to_undo');
-        expect(undo).toHaveBeenCalledExactlyOnceWith('alpha');
+        expect(undo).toHaveBeenCalledExactlyOnceWith('alpha', expect.any(AbortSignal), undefined);
     });
 });
 describe('MCP installation resource boundary', () => {

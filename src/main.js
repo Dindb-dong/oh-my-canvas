@@ -25,7 +25,7 @@ $('#dialog').addEventListener('close',()=>dialogFocus?.focus?.());
 $('#dialog').addEventListener('click',e=>{if(e.target===$('#dialog')){const b=e.target.getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)e.target.close();}});
 function setTitle(){ const file=$('#editor .file-name b');if(file&&active)file.textContent=active.title;$('#document-title').textContent=libraryVisible?'Your canvases':active?.title||'Untitled canvas';$('#export').hidden=libraryVisible;$('#components').hidden=libraryVisible;$('#toggle-layers').hidden=libraryVisible;$('#save-state').textContent=libraryVisible?'Local workspace':'Stored on this computer'; }
 async function settle(flushEditor=true){if(mounting&&flushEditor)throw Error('Wait for the canvas to finish opening');if(flushEditor)await handle?.flush?.();await queue;for(const item of [...pending])project(await api.invoke('commit',{id:active.id,...item}));await api.invoke('flush');}
-function history(action,agent){const task=queue.then(()=>api.invoke(action,{agent})).then(snap=>{if(snap)project(snap);return !!snap;});queue=task.catch(()=>{});return task;}
+function history(action,agent,signal,requestId){const task=queue.then(()=>{signal?.throwIfAborted();return api.invoke(action,{agent,requestId});}).then(snap=>{if(snap)project(snap);return !!snap;});queue=task.catch(()=>{});return task;}
 function project(snap){
   if(!handle||snap.id!==active?.id||mounting)return;
   pending=pending.filter(p=>p.seq>snap.ack);
@@ -59,7 +59,7 @@ async function openSnapshot(snap){
   lastDoc=handle.editor.doc;
   handle.editor.undoStep=()=>{if(handle.editor.undo.blocked)return false;void run(()=>history('undo'))();return true;};
   handle.editor.redoStep=()=>{if(handle.editor.undo.blocked)return false;void run(()=>history('redo'))();return true;};
-  mcp=installLvMcp(handle.editor,handle.view,{services:handle.services,afterWrite:()=>settle(false),fonts:()=>handle.fonts.catalog(),editing:()=>navigating?'navigation':handle.editingText(),onHighlight:handle.highlightAgent,undo:agent=>history('undo',agent)});
+  mcp=installLvMcp(handle.editor,handle.view,{services:handle.services,afterWrite:()=>settle(false),fonts:()=>handle.fonts.catalog(),editing:()=>navigating?'navigation':handle.editingText(),onHighlight:handle.highlightAgent,undo:(agent,signal,requestId)=>history('undo',agent,signal,requestId)});
   unsubscribe=handle.editor.on(event=>{
     if(event.projection)return;
     if(event.changes){
@@ -150,7 +150,7 @@ const toolRequests=new Map();
 async function mcpDialog(){
   const info=await api.invoke('mcp-info');
   if(!info.available){toast('MCP unavailable: '+info.error,true);return;}
-  modal('Connect your agent',`<p>Use a local MCP client to edit the open canvas. No account, API key or credits are needed.</p><label for="mcp-config">MCP client configuration</label><textarea id="mcp-config" readonly rows="9">${esc(info.config)}</textarea><p class="hint">The HTTP server talks only on loopback. Supply OMC_MCP_TOKEN from the private mcp-token file in your app data directory to your client environment, then restart the client. The configuration contains no secret. Keep this app and a canvas open. Reconnect after an app restart and read get_context before editing; do not automatically retry writes.</p><div class="actions right"><button id="copy-mcp" class="primary">Copy configuration</button></div>`);
+  modal('Connect your agent',`<p>Use a local MCP client to edit the open canvas. No account, API key or credits are needed.</p><label for="mcp-config">MCP client configuration</label><textarea id="mcp-config" readonly rows="9">${esc(info.config)}</textarea><p class="hint">The HTTPS server talks only on loopback. Trust this profile's public certificate in your client before connecting; never disable TLS verification. Supply OMC_MCP_TOKEN from the private mcp-token file in your app data directory to your client environment, then restart the client. The configuration contains no secret. Public certificate: ${esc(info.certificatePath)}. Keep this app and a canvas open. Reconnect after an app restart and read get_context before editing; do not automatically retry writes.</p><div class="actions right"><button id="copy-mcp" class="primary">Copy configuration</button></div>`);
   $('#copy-mcp').onclick=run(async()=>{await api.invoke('mcp-info',{copy:true});toast('MCP configuration copied');});
 }
 function slots(){return Array.from({length:4},(_,i)=>{const p=session.peers?.[i];return `<div class="slot ${p?'active':''}" title="${esc(p?.name||'Available')}">${esc(p?p.name:'Available')}${p?.host?'<br><small>Host</small>':''}</div>`;}).join('');}
@@ -222,14 +222,14 @@ api.on(message=>{
     mcp?.endSession(message.agent);
   }else if(message.type==='tool'){
     const controller=new AbortController();toolRequests.set(message.id,controller);
-    void (async()=>{try{if(closing)throw Error('Editor is closing');if(mounting||navigating)throw Error('Canvas is busy opening');if(!mcp||libraryVisible)throw Error('Open a canvas in the editor first');const before=nextSeq;const result=await mcp.handleToolCall(message.call.agent,message.call.name,message.call.args,{...message.call.context,signal:controller.signal});await settle(false);if(lastRejected?.seq>before)throw Error(lastRejected.message);api.toolResult(message.id,result);}catch(e){api.toolResult(message.id,{isError:true,content:[{type:'text',text:e.message}],structuredContent:{ok:false,revision:null,error:{code:/busy|opening/i.test(e.message)?'busy':/invalid|exceeds|too large/i.test(e.message)?'bad_args':'failed',message:e.message},documentId:active?.id??null,durableSequence:nextSeq}});}finally{toolRequests.delete(message.id);}})();
+    void (async()=>{try{if(closing)throw Error('Editor is closing');if(mounting||navigating)throw Error('Canvas is busy opening');if(!mcp||libraryVisible)throw Error('Open a canvas in the editor first');const before=nextSeq;const result=await mcp.handleToolCall(message.call.agent,message.call.name,message.call.args,{...message.call.context,signal:controller.signal,requestId:message.id});await settle(false);if(lastRejected?.seq>before)throw Error(lastRejected.message);api.toolResult(message.id,result);}catch(e){api.toolResult(message.id,{isError:true,content:[{type:'text',text:e.message}],structuredContent:{ok:false,revision:null,error:{code:/busy|opening/i.test(e.message)?'busy':/invalid|exceeds|too large/i.test(e.message)?'bad_args':'failed',message:e.message},documentId:active?.id??null,durableSequence:nextSeq}});}finally{toolRequests.delete(message.id);}})();
   }else if(message.type==='command'){
     const actions={new:()=>newCanvas(),import:importFile,library,undo:()=>nativeHistory(false),redo:()=>nativeHistory(true)};void run(actions[message.name]||(()=>{}))();
   }else if(message.type==='close-cancelled'){
     closing=false;
   }else if(message.type==='closing'){
     closing=true;
-    for(const controller of toolRequests.values())controller.abort();mcp?.endSession();
+    for(const controller of toolRequests.values())controller.abort();
     void run(async()=>{try{await settle();await api.readyToClose();}catch(error){await api.invoke('cancel-close');throw error;}})();
   }
 });

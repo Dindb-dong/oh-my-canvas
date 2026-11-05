@@ -1,4 +1,4 @@
-import http from 'node:http';
+import https from 'node:https';
 import {randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
@@ -6,10 +6,12 @@ import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/st
 import {isInitializeRequest} from '@modelcontextprotocol/sdk/types.js';
 import {atomicWrite} from '../core/storage.mjs';
 import {createMcpServer} from './mcp-server.mjs';
+import {loadMcpIdentity} from '../core/mcp-tls.mjs';
 export const MCP_PORT=47831;
-export const MCP_LIMITS=Object.freeze({sessions:32,requests:8,bodyBytes:1024*1024,idleMs:30*60*1000,bodyMs:10000,requestMs:63000});
+export const MCP_LIMITS=Object.freeze({sessions:32,requests:8,connections:64,bodyBytes:1024*1024,idleMs:30*60*1000,bodyMs:10000,requestMs:63000});
 export async function startMcpBridge({dir,dispatch,endSession=()=>{},port=MCP_PORT,tools,limits={}}) {
   const budget={...MCP_LIMITS,...limits};
+  const {key,cert,certFile}=await loadMcpIdentity(dir);
   if(!Number.isInteger(port)||port<0||port>65535)throw Error('Invalid MCP port');
   const tokenFile=path.join(dir,'mcp-token'),file=path.join(dir,'mcp-runtime.json');
   let token;
@@ -22,6 +24,9 @@ export async function startMcpBridge({dir,dispatch,endSession=()=>{},port=MCP_PO
     if(session.closed)return;
     session.closed=true;sessions.delete(session.id);
     for(const controller of session.controllers)controller.abort(Error('MCP session ended'));
+    // Finish pending exchanges before the SDK closes streams and suppresses late replies.
+    await Promise.allSettled([...session.requests].map(id=>session.transport.send({jsonrpc:'2.0',id,error:{code:-32000,message:'MCP session ended; inspect the document before retrying'}})));
+    for(const releaseSlot of session.slots)releaseSlot();session.slots.clear();
     await Promise.allSettled([Promise.resolve().then(()=>endSession(session.agent)),session.server?.close()]);
   }
   async function invoke(call,{signal}={},session) {
@@ -35,7 +40,7 @@ export async function startMcpBridge({dir,dispatch,endSession=()=>{},port=MCP_PO
       return await Promise.race([Promise.resolve().then(()=>{controller.signal.throwIfAborted();return dispatch(call,{signal:controller.signal});}),aborted]);
     }finally{clearTimeout(timer);controllers.delete(controller);session?.controllers.delete(controller);signal?.removeEventListener('abort',abort);}
   }
-  const server=http.createServer(async(req,res)=>{
+  const server=https.createServer({key,cert,handshakeTimeout:budget.bodyMs},async(req,res)=>{
     const reply=(status,value)=>{if(res.headersSent||res.destroyed)return;res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
     const auth=req.headers.authorization||'',expected=`Bearer ${token}`;
     if(req.headers.origin!==undefined||![`127.0.0.1:${actualPort}`,`localhost:${actualPort}`].includes(req.headers.host)||Buffer.byteLength(auth)!==Buffer.byteLength(expected)||!timingSafeEqual(Buffer.from(auth),Buffer.from(expected)))return reply(403,{error:'Forbidden'});
@@ -45,7 +50,7 @@ export async function startMcpBridge({dir,dispatch,endSession=()=>{},port=MCP_PO
     if(req.url==='/rpc'&&req.method!=='POST')return reply(405,{error:'Method not allowed'});
     if(reading>=budget.requests+8)return reply(429,{error:'Too many incoming MCP requests'});
     reading++;
-    let bodyTimer,session,created=false,counted=false,readingBody=true;
+    let bodyTimer,session,created=false,counted=false,readingBody=true,releaseSlot,requestId;
     try {
       let body;
       if(req.method==='POST') {
@@ -75,11 +80,11 @@ export async function startMcpBridge({dir,dispatch,endSession=()=>{},port=MCP_PO
       else {
         if(req.method!=='POST'||!isInitializeRequest(body))return reply(400,{error:'Initialize an MCP session first'});
         if(sessions.size+legacy.size>=budget.sessions)return reply(429,{error:'Too many MCP sessions'});
-        session={id:randomUUID(),agent:`mcp-http-${randomUUID()}`,controllers:new Set(),touched:Date.now(),closed:false};
-        const transport=new StreamableHTTPServerTransport({sessionIdGenerator:()=>session.id,enableJsonResponse:true,maxRequestBodySize:budget.bodyBytes});
+        session={id:randomUUID(),agent:`mcp-http-${randomUUID()}`,controllers:new Set(),slots:new Set(),requests:new Set(),touched:Date.now(),closed:false};
+        const transport=new StreamableHTTPServerTransport({sessionIdGenerator:()=>session.id,enableJsonResponse:false,onsessionclosed:()=>release(session),maxRequestBodySize:budget.bodyBytes});
         session.transport=transport;sessions.set(session.id,session);created=true;
         session.server=createMcpServer({tools:tools??(await import('../dist/tool-defs.mjs')).TOOLS,agent:session.agent,onCancel:id=>{
-          // The SDK suppresses cancelled replies; settle its JSON response stream to release request state.
+          // The SDK suppresses cancelled replies; settle its response stream to release request state.
           void transport.send({jsonrpc:'2.0',id,error:{code:-32800,message:'Request cancelled; inspect the document before retrying'}}).catch(()=>{});
         },dispatch:(call,extra)=>invoke(call,extra,session)});
         if(session.closed||!accepting){await session.server.close();throw Error('MCP session ended during initialization');}
@@ -87,11 +92,15 @@ export async function startMcpBridge({dir,dispatch,endSession=()=>{},port=MCP_PO
         await session.server.connect(transport);
       }
       session.touched=Date.now();
+      releaseSlot=()=>{if(counted){active--;counted=false;}session.slots.delete(releaseSlot);};
+      if(counted)session.slots.add(releaseSlot);
+      if(body?.method&&(typeof body.id==='number'||typeof body.id==='string')){requestId=body.id;session.requests.add(requestId);}
       await session.transport.handleRequest(req,res,body);
       if(created&&!session.transport.sessionId)await release(session);
     }catch(e){reply(e.status??400,{error:e.message});if(created&&session)await release(session);}
-    finally{clearTimeout(bodyTimer);if(counted)active--;if(readingBody)reading--;}
+    finally{clearTimeout(bodyTimer);releaseSlot?.();if(requestId!==undefined)session?.requests.delete(requestId);if(counted)active--;if(readingBody)reading--;}
   });
+  server.maxConnections=budget.connections;
   server.requestTimeout=budget.bodyMs;server.headersTimeout=budget.bodyMs;server.timeout=budget.requestMs+budget.bodyMs;
   server.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));});
   const sweep=setInterval(()=>{
@@ -118,7 +127,7 @@ export async function startMcpBridge({dir,dispatch,endSession=()=>{},port=MCP_PO
   try {
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
     actualPort=server.address().port;
-    await atomicWrite(file,JSON.stringify({port:actualPort,token,pid:process.pid}),{backup:false});
+    await atomicWrite(file,JSON.stringify({port:actualPort,token,pid:process.pid,certFile}),{backup:false});
   }catch(e){clearInterval(sweep);if(server.listening)await close();throw e;}
-  return {file,port:actualPort,url:`http://127.0.0.1:${actualPort}/mcp`,stopAccepting,resumeAccepting(){if(!closing)accepting=true;},resetSessions,close};
+  return {file,certFile,port:actualPort,url:`https://127.0.0.1:${actualPort}/mcp`,stopAccepting,resumeAccepting(){if(!closing)accepting=true;},resetSessions,close};
 }

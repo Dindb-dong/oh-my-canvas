@@ -11,7 +11,7 @@ export { TOOLS };
 export interface McpOptions extends Data {
     services?: Partial<EditorServices>;
     fonts?: () => Data[];
-    undo?: (agent: string) => boolean | Promise<boolean>;
+    undo?: (agent: string, signal?: AbortSignal, requestId?: string) => boolean | Promise<boolean>;
     editing?: () => string | null;
     onHighlight?: (agent: string, ids: string[]) => void;
     afterWrite?: () => void | Promise<void>;
@@ -282,7 +282,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         await waiting((async () => { await view.settled(); await options.afterWrite?.(); })(), signal);
     }
     function diagnostics(ids: string[]) { const measured = view.measure(ids.filter(id => editor.page.objects[id])); return [...measured].map(([id, m]) => ({ id, bounds: { x: m.x, y: m.y, width: m.w, height: m.h }, clippedText: m.clippedText, overflowParent: m.overflowParent, ...m.fontFallback ? { fontFallback: m.fontFallback } : {}, ...m.imageFailed ? { imageFailed: true } : {} })); }
-    async function execute(agent: string, name: string, args: Data, signal: AbortSignal): Promise<ToolResult> {
+    async function execute(agent: string, name: string, args: Data, signal: AbortSignal, requestId?: string): Promise<ToolResult> {
         check(signal);
         if (!TOOLS.some(t => t.name === name))
             throw new McpError('unknown_tool', `Unknown tool: ${name}`);
@@ -295,7 +295,8 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             const last = latest ?? editor.lastOperation;
             if (!options.undo && last?.label !== `agent:${agent}` && last?.author !== agent)
                 throw new McpError('nothing_to_undo', 'The latest edit does not belong to this agent');
-            const ok = options.undo ? await waiting(options.undo(agent), signal) : editor.undoStep();
+            check(signal);
+            const ok = options.undo ? await waiting(options.undo(agent, signal, requestId), signal) : editor.undoStep();
             if (!ok)
                 throw new McpError('nothing_to_undo', 'There is no eligible agent edit');
             latest = { id: uid(), label: 'Undo' };
@@ -445,6 +446,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
     function handleToolCall(agent: string, name: string, args: Data = {}, context: {
         idempotencyKey?: string;
         signal?: AbortSignal;
+        requestId?: string;
     } = {}): Promise<ToolResult> {
         if (typeof agent !== 'string' || !agent.trim() || agent.length > 200)
             return Promise.resolve(failure(new McpError('bad_args', 'Invalid agent identifier')));
@@ -473,7 +475,8 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         const signal = AbortSignal.any([session.signal, request.signal, ...context.signal ? [context.signal] : []]);
         const timer = setTimeout(() => request.abort(new McpError('timeout', 'Tool response exceeded its time limit; inspect revision before retrying')), Math.min(60000, Math.max(1, options.timeoutMs ?? 60000)));
         state(agent);
-        const work = queue.then(() => execute(agent, name, args, signal));
+        const requestId = context.requestId;
+        const work = queue.then(() => execute(agent, name, args, signal, requestId));
         queue = work.then(() => { }, () => { });
         const task = waiting(work, signal).catch(error => failure(signal.aborted && !(signal.reason instanceof McpError) ? new McpError('cancelled', 'Tool cancelled; applied changes are not rolled back; inspect revision before retrying') : error)).finally(() => clearTimeout(timer));
         if (key) {
