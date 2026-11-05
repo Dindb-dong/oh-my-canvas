@@ -79,6 +79,19 @@ describe('outline transactions',()=>{
         expect(editor.page.objects[ids[0]].childIds).toHaveLength(1);
         editor.undoStep();expect(editor.page.objects.source.hidden).not.toBe(true);expect(editor.page.objects[ids[0]]).toBeUndefined();
     });
+    it('preserves a first-child vector mask while keeping the original editable',async()=>{
+        const {editor,commands}=fixture(async()=>parts);
+        editor.transact('Mask',doc=>{
+            const page=doc.pagesById[editor.pageId],mask=createShape('group',{id:'mask',childIds:[],isMaskGroup:true,maskType:'vector'});
+            insertShape(page,mask);
+            page.objects.root.childIds=page.objects.root.childIds!.filter(id=>id!=='source');
+            page.objects.source.parentId='mask';mask.childIds=['source'];
+        });
+        const ids=await commands.run('text.outline',{id:'source'}) as string[];
+        expect(editor.page.objects.mask.childIds).toEqual([ids[0],'source']);
+        expect(editor.page.objects[ids[0]].type).toBe('group');
+        expect(editor.page.objects.source.hidden).toBe(true);
+    });
     it('does not commit stale, cancelled, locked or active-session requests',async()=>{
         const {editor,commands}=fixture(async()=>{editor.transact('Concurrent change',doc=>{doc.name='Changed';});return parts;});
         await expect(commands.run('text.outline')).rejects.toThrow('Document changed');expect(editor.page.objects.source.hidden).not.toBe(true);
