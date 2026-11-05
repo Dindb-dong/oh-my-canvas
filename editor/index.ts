@@ -2,10 +2,12 @@
 import type {Data,EditorServices,MountOptions} from './contracts';
 import {Editor} from './document';
 import {createCommands} from './commands';
+import {outlineStroke,outlineText} from './render/outline';
 import {createComponentService,reconcileComponents,duplicateComponentMain} from './components';
 import {createStyleService,reconcileStyles} from './styles';
 import {createAssetService,createLibraryService,normalizeLibraries,reconcileLibraries} from './assets';
 import {createFontCatalog} from './fonts';
+import {createImageService} from './images';
 import {createRenderer,combinePaths} from './render';
 import {createExporter} from './export';
 import {applyLayout} from './layout';
@@ -50,6 +52,8 @@ export async function mountEditor(root:HTMLElement,options:MountOptions) {
     validate(draft){assertDocument(draft);},
   });
   cleanup.push(()=>editor.destroy());
+  const images=createImageService(editor,options);
+  cleanup.push(()=>images.destroy());
   let projectedAssets=editor.doc.assets;
   cleanup.push(editor.on(event=>{
     if(!(event.changes||event.projection||event.deltas)||projectedAssets===editor.doc.assets)return;
@@ -63,8 +67,16 @@ export async function mountEditor(root:HTMLElement,options:MountOptions) {
   cleanup.push(()=>view.destroy());
   const exporter=createExporter(editor,view,{...options,fonts,fontCatalog:fonts,saveFile:options.exportFile});
   const registry={
-    editor,fonts,components,styles,assets,libraries,view,export:exporter,
+    editor,fonts,components,styles,assets,libraries,images,view,export:exporter,
     duplicateComponentMain,
+    async outline(shape:any,kind:string,operation:any={}) {
+      if(kind==='stroke') {
+        await view.settled();
+        return outlineStroke(shape.type==='boolean' ? view.projectedShape?.(shape.id)??shape : shape,{wasmUrl:options.wasmUrl,...operation});
+      }
+      await view.settled();
+      return outlineText(shape,view.textFragments(shape.id),fonts.sources(),operation);
+    },
     formats:{importCanvasJson,exportCanvasJson,importSvg,importHtml,exportHtml},
     boolean:(operation:string,shapes:any[])=>combinePaths(shapes,operation as any,{wasmUrl:options.wasmUrl,objects:editor.page.objects}),
     combinePaths:(shapes:any[],operation:string)=>combinePaths(shapes,operation as any,{wasmUrl:options.wasmUrl,objects:editor.page.objects}),

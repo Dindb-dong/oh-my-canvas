@@ -8,6 +8,16 @@ const sha256 = data => createHash('sha256').update(data).digest('hex');
 const readJson = async file => JSON.parse(await readFile(file,'utf8'));
 const exists = async file => !!await stat(file).catch(()=>null);
 const noticeName = name => /^(licen[sc]e|copying|notice)([.-]|$)/i.test(name);
+// Retain upstream notices omitted by npm packages and their embedded decoders.
+const supplementalNotices = new Map([
+  ['node_modules/brotli',{version:'1.3.3',files:['docs/licensing/brotli-NOTICE.txt']}],
+  ['node_modules/fontkit',{version:'2.0.4',files:['docs/licensing/fontkit-NOTICE.txt']}],
+  ['node_modules/dfa',{version:'1.2.0',files:['docs/licensing/dfa-NOTICE.txt']}],
+  ['node_modules/wawoff2',{version:'2.0.1',files:['docs/licensing/wawoff2-NOTICE.txt']}],
+  ['node_modules/guid-typescript',{version:'1.0.9',files:['docs/licensing/guid-typescript-NOTICE.txt']}],
+  ['node_modules/onnxruntime-common',{version:'1.24.3',files:['docs/licensing/onnxruntime-common-NOTICE.txt']}],
+  ['node_modules/onnxruntime-web',{version:'1.24.3',files:['docs/licensing/onnxruntime-web-NOTICE.txt','docs/licensing/onnxruntime-ThirdPartyNotices.txt']}],
+]);
 
 export async function collectDependencyEvidence() {
   const lock = await readJson('package-lock.json');
@@ -21,11 +31,14 @@ export async function collectDependencyEvidence() {
     if (actual && actual.version !== entry.version) throw Error(`Lock/install version mismatch: ${location}`);
     const files = installed ? (await readdir(location)).filter(noticeName).sort() : [];
     const licenseFiles = [];
-    for (const file of files) {
-      const source = path.join(location,file);
+    const supplemental = supplementalNotices.get(location);
+    if (supplemental && supplemental.version!==entry.version) throw Error(`Review supplemental license evidence after upgrading ${location}`);
+    const sources = [...files.map(file=>({file,source:path.join(location,file),origin:'package'})),
+      ...(supplemental?.files??[]).map(file=>({file,source:file,origin:'repository'}))];
+    for (const {file,source,origin} of sources) {
       if (!(await stat(source)).isFile()) continue;
       const bytes = await readFile(source);
-      licenseFiles.push({file,sha256:sha256(bytes),bytes:bytes.length});
+      licenseFiles.push({file,source,origin,sha256:sha256(bytes),bytes:bytes.length});
       if (!entry.dev) notices.push({location,name,version:entry.version,file,text:bytes.toString('utf8')});
     }
     if (!entry.dev && (!installed || !licenseFiles.length)) throw Error(`Runtime license evidence missing: ${location}`);
