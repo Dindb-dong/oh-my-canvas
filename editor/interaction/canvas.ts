@@ -633,7 +633,8 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                 stage.setPointerCapture(event.pointerId);
                 if (!event.shiftKey)
                     nodeSelection.clear();
-                nodeSelection.add(index);
+                nodeSelection.add(xkey === "x1" ? index - 1 : index);
+                callbacks.changed();
                 if (editor.begin("Edit path node"))
                     gesture = {
                         kind: "node",
@@ -650,7 +651,8 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                 if (!interactive || !isEditable(editor.page, shape.id))
                     return;
                 event.stopPropagation();
-                editor.transact("Change node handles", doc => convertPathNode(doc.pagesById[editor.pageId].objects[shape.id], index, event.shiftKey ? "symmetric" : shape.content[index].command === "curve" ? "corner" : "smooth"));
+                const owner = xkey === "x1" ? index - 1 : index;
+                editor.transact("Change node handles", doc => convertPathNode(doc.pagesById[editor.pageId].objects[shape.id], owner, event.shiftKey ? "symmetric" : shape.content[owner].command === "curve" ? "corner" : "smooth"));
             };
             overlay.append(n);
         }
@@ -1022,11 +1024,13 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                 shape.content = clone(g.base);
                 if (g.xkey === "x")
                     movePathNodes(shape, [...nodeSelection], dx, dy);
-                else
-                    setPathHandle(shape, g.xkey === "x1" ? g.index - 1 : g.index, g.xkey === "x1" ? "out" : "in", {
+                else {
+                    const index = g.xkey === "x1" ? g.index - 1 : g.index, mode = shape.content[index].handleMode ?? shape.handleMode ?? "free";
+                    setPathHandle(shape, index, g.xkey === "x1" ? "out" : "in", {
                         x: g.base[g.index][g.xkey] + dx,
                         y: g.base[g.index][g.ykey] + dy
-                    }, event.shiftKey ? "symmetric" : shape.handleMode ?? "free");
+                    }, event.shiftKey ? "symmetric" : mode === "smooth" ? "aligned" : mode === "corner" ? "free" : mode);
+                }
             });
             return;
         }
@@ -1341,11 +1345,11 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         else {
             if (g.kind === "node" && g.xkey === "x" && nodeSelection.size === 1) {
                 const index = [...nodeSelection][0], active = editor.page.objects[g.ids[0]], last = active.content.findLastIndex((node: Data) => node.command !== "close");
-                if (index === 0 || index === last) {
+                if ((index === 0 || index === last) && active.content.filter((node: Data) => node.command === "move").length === 1 && !active.content.some((node: Data) => node.command === "close")) {
                     const endpoint = active.content[index];
                     let joined = false;
                     for (const other of Object.values(editor.page.objects)) {
-                        if (other.type !== "path" || other.locked || other.hidden || !Array.isArray(other.content))
+                        if (other.type !== "path" || !isEditable(editor.page, other.id) || !Array.isArray(other.content) || other.content.filter((node: Data) => node.command === "move").length !== 1 || other.content.some((node: Data) => node.command === "close"))
                             continue;
                         const otherLast = other.content.findLastIndex((node: Data) => node.command !== "close");
                         for (const otherIndex of [0, otherLast]) {
@@ -1750,6 +1754,10 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             marquee = null;
             nodeSelection.clear();
         }
+        if (pathId && (editor.selection.length !== 1 || editor.selection[0] !== pathId)) {
+            pathId = null;
+            nodeSelection.clear();
+        }
         if (event.tool) {
             pathId = null;
             nodeSelection.clear();
@@ -1798,6 +1806,21 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             nodeSelection.clear();
             editor.setSelection([id]);
             renderOverlays();
+            callbacks.changed();
+        },
+        selectPathNode(index: number) {
+            const node = pathId && editor.page.objects[pathId]?.content?.[index];
+            if (!node || node.command === "close")
+                return;
+            nodeSelection = new Set([index]);
+            renderOverlays();
+            callbacks.changed();
+        },
+        get selectedPathNodes() {
+            return [...nodeSelection].filter(index => {
+                const node = pathId && editor.page.objects[pathId]?.content?.[index];
+                return node && node.command !== "close";
+            });
         },
         editGradient(id: string, field: string, index: number) {
             selectedGradient = {
