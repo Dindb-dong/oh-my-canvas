@@ -1,7 +1,7 @@
 import type { Data, EditorServices, Point, Shape, Tool } from "../contracts";
-import { createShape, cloneShapes, topLevelIds, removeShapes } from "../document";
+import { createShape, cloneShapes, topLevelIds, removeShapes, isEditable } from "../document";
 import { setPathHandle, movePathNodes, insertPathNode as splitPathNode, deletePathNodes, refreshPath, joinPathEnds, closePath, convertPathNode } from "../commands";
-import { hitTest, moveShape, resizeShape, setShapeOrientation, transformShapes, unorientPoint, orientedPoint, multiply, inverse } from "../geometry";
+import { hitTest, moveShape, resizeShape, setShapeOrientation, transformShapes, unorientPoint, orientedPoint, multiply, inverse, intersects } from "../geometry";
 import { el, clone, toast } from "../ui/dom";
 import type { createTextSession } from "./text";
 type TextSession = ReturnType<typeof createTextSession>;
@@ -66,7 +66,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         x: (p.x - editor.viewport.vbox.x) * editor.viewport.zoom,
         y: (p.y - editor.viewport.vbox.y) * editor.viewport.zoom
     });
-    const editable = () => topLevelIds(editor.page, editor.selection).map(id => editor.page.objects[id]).filter(s => s && !s.locked);
+    const editable = () => topLevelIds(editor.page, editor.selection).map(id => editor.page.objects[id]).filter(s => s && isEditable(editor.page, s.id));
     const bounds = (shapes: Shape[]) => {
         const points = shapes.flatMap(s => s.corners?.length ? s.corners : [{
                 x: s.x,
@@ -338,7 +338,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             }
             if (selection.length === 1)
                 outline.append(el("span", "selection-label", selection[0].name ?? selection[0].type));
-            if (!text.active && !pathId) {
+            if (!text.active && !pathId && !pen && editor.tool === "move" && editable().length) {
                 for (const name of handles) {
                     const h = el("div", "transform-handle");
                     h.dataset.handle = name;
@@ -358,6 +358,17 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             }
             overlay.append(outline);
         }
+        if (selection.length > 1)
+            for (const shape of selection) {
+                const p = screen(shape), m = shape.transform, outline = el("div", "selection-outline selection-member");
+                outline.dataset.id = shape.id;
+                Object.assign(outline.style, {
+                    left: `${p.x}px`, top: `${p.y}px`,
+                    width: `${shape.width * editor.viewport.zoom}px`, height: `${shape.height * editor.viewport.zoom}px`,
+                    transform: `matrix(${m.a},${m.b},${m.c},${m.d},0,0)`, pointerEvents: "none"
+                });
+                overlay.append(outline);
+            }
         for (const [agent, ids] of agents) {
             for (const id of ids) {
                 const s = editor.page.objects[id];
@@ -394,8 +405,10 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                 width: "100%",
                 cursor: "ns-resize"
             });
+            n.style.pointerEvents = editor.tool === "move" ? "auto" : "none";
             n.onpointerdown = event => {
                 event.stopPropagation();
+                stage.setPointerCapture(event.pointerId);
                 if (editor.begin("Move guide"))
                     gesture = {
                         kind: "guide",
@@ -408,9 +421,11 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         }
         if (editor.showRulers)
             drawRulers();
-        if (pathId)
+        if (pen)
+            drawPen();
+        else if (pathId && editor.tool === "move")
             drawPathNodes();
-        if (selectedGradient)
+        if (selectedGradient && editor.tool === "move")
             drawGradient();
         stage.style.cursor = space ? "grab" : editor.tool === "move" ? "default" : editor.tool === "text" ? "text" : "crosshair";
     }
@@ -438,9 +453,11 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                     width: `${frame.width * zoom}px`,
                     cursor: "ns-resize"
                 });
+                line.style.pointerEvents = editor.tool === "move" ? "auto" : "none";
                 line.onpointerdown = event => {
                     event.preventDefault();
                     event.stopPropagation();
+                    stage.setPointerCapture(event.pointerId);
                     if (editor.begin("Move frame guide"))
                         gesture = {
                             kind: "guide",
@@ -519,6 +536,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             ruler.onpointerdown = event => {
                 event.preventDefault();
                 event.stopPropagation();
+                stage.setPointerCapture(event.pointerId);
                 if (editor.begin("Add guide")) {
                     const p = world(local(event)), selection = editor.selection.length === 1 ? editor.page.objects[editor.selection[0]] : null;
                     const frame = selection?.type === "frame" && selection.id !== "root" && !selection.flipX && !selection.flipY && Math.abs(selection.rotation % 360) < 0.000001 ? selection : null;
@@ -544,6 +562,8 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         }
     }
     async function beginHandle(event: PointerEvent, kind: string) {
+        if (editor.tool !== "move" || pen)
+            return;
         event.preventDefault();
         event.stopPropagation();
         await text.exit();
@@ -564,8 +584,8 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         };
         stage.setPointerCapture(event.pointerId);
     }
-    function drawPathNodes() {
-        const shape = editor.page.objects[pathId!];
+    function drawPathNodes(id = pathId, interactive = true) {
+        const shape = editor.page.objects[id!];
         if (!shape || !Array.isArray(shape.content)) {
             pathId = null;
             return;
@@ -604,9 +624,13 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                 left: `${point.x}px`,
                 top: `${point.y}px`
             });
+            n.style.pointerEvents = interactive && isEditable(editor.page, shape.id) ? "auto" : "none";
             n.onpointerdown = event => {
+                if (editor.tool !== "move" || !isEditable(editor.page, shape.id))
+                    return;
                 event.stopPropagation();
                 event.preventDefault();
+                stage.setPointerCapture(event.pointerId);
                 if (!event.shiftKey)
                     nodeSelection.clear();
                 nodeSelection.add(index);
@@ -623,11 +647,43 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                 renderOverlays();
             };
             n.ondblclick = event => {
+                if (!interactive || !isEditable(editor.page, shape.id))
+                    return;
                 event.stopPropagation();
                 editor.transact("Change node handles", doc => convertPathNode(doc.pagesById[editor.pageId].objects[shape.id], index, event.shiftKey ? "symmetric" : shape.content[index].command === "curve" ? "corner" : "smooth"));
             };
             overlay.append(n);
         }
+    }
+    function drawPen() {
+        const shape = editor.page.objects[pen!.id];
+        if (!shape)
+            return;
+        drawPathNodes(shape.id, false);
+        const last = shape.content.at(-1), from = screen(last);
+        if (pen!.outgoing) {
+            const to = screen(pen!.outgoing), line = el("div", "path-line"), control = el("div", "path-node path-control");
+            Object.assign(line.style, {
+                left: `${from.x}px`, top: `${from.y}px`, width: `${Math.hypot(to.x - from.x, to.y - from.y)}px`,
+                transform: `rotate(${Math.atan2(to.y - from.y, to.x - from.x)}rad)`, pointerEvents: "none"
+            });
+            Object.assign(control.style, {left: `${to.x}px`, top: `${to.y}px`, pointerEvents: "none"});
+            overlay.append(line, control);
+        }
+        if (!pen!.hover)
+            return;
+        const to = screen(pen!.hover), control = pen!.outgoing ? screen(pen!.outgoing) : null;
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"), path = document.createElementNS(svg.namespaceURI, "path");
+        svg.setAttribute("width", "100%");
+        svg.setAttribute("height", "100%");
+        Object.assign(svg.style, {position: "absolute", inset: "0", pointerEvents: "none", overflow: "visible"});
+        svg.dataset.penPreview = "true";
+        path.setAttribute("d", `M ${from.x} ${from.y} ` + (control ? `C ${control.x} ${control.y} ${to.x} ${to.y} ${to.x} ${to.y}` : `L ${to.x} ${to.y}`));
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "#2563eb");
+        path.setAttribute("stroke-width", "1");
+        svg.append(path);
+        overlay.append(svg);
     }
     function drawGradient() {
         const shape = editor.page.objects[selectedGradient!.id];
@@ -648,6 +704,9 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             n.onpointerdown = event => {
                 event.preventDefault();
                 event.stopPropagation();
+                if (!isEditable(editor.page, shape.id))
+                    return;
+                stage.setPointerCapture(event.pointerId);
                 if (editor.begin("Edit gradient"))
                     gesture = {
                         kind: "gradient",
@@ -664,9 +723,14 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         const p = local(event);
         pointers.set(event.pointerId, p);
         if (pointers.size === 2) {
-            if (gesture && gesture.kind !== "pan")
+            if (pen || gesture && gesture.kind !== "pan") {
+                pen = null;
+                gesture = null;
                 editor.cancelSession();
+            }
             gesture = null;
+            marquee?.remove();
+            marquee = null;
             const [a, b] = Array.from(pointers.values());
             pinch = {
                 distance: Math.hypot(a.x - b.x, a.y - b.y),
@@ -791,9 +855,14 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             return;
         }
         const shape = hit(point, event.metaKey || event.ctrlKey || event.altKey);
-        if (shape) {
+        if (shape && !(shape.type === "frame" && !editor.selection.includes(shape.id))) {
             if (event.shiftKey || editor.multiSelect) {
-                editor.setSelection(editor.selection.includes(shape.id) ? editor.selection.filter(id => id !== shape.id) : [...editor.selection, shape.id]);
+                const removing = editor.selection.includes(shape.id);
+                editor.setSelection(removing ? editor.selection.filter(id => id !== shape.id) : [...editor.selection, shape.id]);
+                if (removing) {
+                    event.preventDefault();
+                    return;
+                }
             }
             else if (!editor.selection.includes(shape.id))
                 editor.setSelection([shape.id]);
@@ -821,12 +890,17 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             }
         }
         else {
-            if (!event.shiftKey)
+            const additive = event.shiftKey || editor.multiSelect;
+            const initial = additive ? [...editor.selection] : [];
+            if (!shape && !additive)
                 editor.setSelection([]);
             gesture = {
                 kind: "marquee",
                 start: point,
-                initial: [...editor.selection]
+                initial,
+                frame: shape?.id,
+                additive,
+                moved: false
             };
             marquee = el("div", "marquee");
             overlay.append(marquee);
@@ -856,6 +930,10 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         }
         const g = gesture;
         if (!g) {
+            if (pen) {
+                pen.hover = world(p);
+                renderOverlays();
+            }
             if (editor.tool === "move")
                 editor.setHover(hit(world(p))?.id ?? null);
             return;
@@ -867,6 +945,9 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         }
         let point = world(p);
         if (g.kind === "marquee") {
+            if (!g.moved && Math.hypot(point.x - g.start.x, point.y - g.start.y) * editor.viewport.zoom < 4)
+                return;
+            g.moved = true;
             const x = Math.min(point.x, g.start.x), y = Math.min(point.y, g.start.y), w = Math.abs(point.x - g.start.x), h = Math.abs(point.y - g.start.y), a = screen({
                 x,
                 y
@@ -878,8 +959,17 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                     width: `${w * editor.viewport.zoom}px`,
                     height: `${h * editor.viewport.zoom}px`
                 });
-            const ids = Object.values(editor.page.objects).filter(s => s.id !== "root" && !s.locked && !s.hidden && s.corners.every(p => p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h) && ancestorEditable(s)).map(s => s.id);
-            editor.setSelection([...new Set([...g.initial, ...ids])]);
+            const ids: string[] = [];
+            const collect = (id: string) => {
+                const shape = editor.page.objects[id];
+                if (!shape || !isEditable(editor.page, id))
+                    return;
+                if (intersects(bounds([shape]), {x, y, width: w, height: h}))
+                    ids.push(id);
+            };
+            for (const id of editor.page.objects[g.frame ?? "root"]?.childIds ?? [])
+                collect(id);
+            editor.setSelection(topLevelIds(editor.page, [...g.initial, ...ids]));
             return;
         }
         if (g.kind === "guide") {
@@ -941,6 +1031,9 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             return;
         }
         if (g.kind === "pen-handle") {
+            if (!g.moved && Math.hypot(point.x - g.start.x, point.y - g.start.y) * editor.viewport.zoom < 3)
+                return;
+            g.moved = true;
             const previous = g.index > 0 ? editor.page.objects[g.id].content[g.index - 1] : null;
             const incoming = {
                 x: point.x,
@@ -966,6 +1059,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                     node.y2 = node.y - (point.y - node.y);
                     refreshPath(doc.pagesById[editor.pageId].objects[g.id]);
                 });
+            renderOverlays();
             return;
         }
         if (g.kind === "draw") {
@@ -1035,6 +1129,9 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         }
         if (g.kind === "move") {
             let dx = point.x - g.start.x, dy = point.y - g.start.y;
+            if (!g.moved && Math.hypot(dx, dy) * editor.viewport.zoom < 4)
+                return;
+            g.moved = true;
             if (event.shiftKey) {
                 if (Math.abs(dx) > Math.abs(dy))
                     dy = 0;
@@ -1047,7 +1144,6 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             }, g.ids);
             dx = snapped.point.x - g.bounds.x;
             dy = snapped.point.y - g.bounds.y;
-            g.moved = Math.abs(dx) + Math.abs(dy) > 1;
             editor.preview(doc => {
                 for (const id of g.ids)
                     transformTree(doc, id, g.base, (s, b) => {
@@ -1177,7 +1273,12 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         marquee = null;
         if (!g)
             return;
-        if (g.kind === "marquee" || g.kind === "pan")
+        if (g.kind === "marquee") {
+            if (!g.moved && g.frame)
+                editor.setSelection(g.additive ? [...new Set([...g.initial, g.frame])] : [g.frame]);
+            return;
+        }
+        if (g.kind === "pan")
             return;
         if (g.kind === "pen-handle")
             return;
@@ -1324,14 +1425,16 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
     }
     function penDown(event: PointerEvent, point: Point) {
         let previousOutgoing: Point | undefined;
+        if (pen)
+            delete pen.hover;
         if (!pen) {
             if (!editor.begin("Draw pen path"))
                 return;
             const parentId = parentAt(point), id = addShape("path", {
                 x: point.x,
                 y: point.y,
-                width: 1,
-                height: 1,
+                width: 0,
+                height: 0,
                 parentId,
                 enclosingFrameId: parentId,
                 name: "Pen",
@@ -1374,20 +1477,23 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                 return;
             }
             previousOutgoing = pen.outgoing;
-            editor.preview(doc => doc.pagesById[editor.pageId].objects[pen!.id].content.push(previousOutgoing ? {
-                command: "curve",
-                x1: previousOutgoing.x,
-                y1: previousOutgoing.y,
-                x2: point.x,
-                y2: point.y,
-                ...point
-            } : {
-                command: "line",
-                ...point
-            }));
+            editor.preview(doc => {
+                const target = doc.pagesById[editor.pageId].objects[pen!.id];
+                target.content.push(previousOutgoing ? {
+                    command: "curve",
+                    x1: previousOutgoing.x,
+                    y1: previousOutgoing.y,
+                    x2: point.x,
+                    y2: point.y,
+                    ...point
+                } : {
+                    command: "line",
+                    ...point
+                });
+                refreshPath(target);
+            });
             delete pen.outgoing;
         }
-        editor.preview(doc => refreshPath(doc.pagesById[editor.pageId].objects[pen!.id]));
         const index = editor.page.objects[pen.id].content.length - 1;
         gesture = {
             kind: "pen-handle",
@@ -1398,8 +1504,9 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         };
         stage.setPointerCapture(event.pointerId);
         event.preventDefault();
+        renderOverlays();
     }
-    function finishPen() {
+    function finishPen(tool: Tool = "move") {
         if (!pen)
             return;
         const id = pen.id;
@@ -1410,8 +1517,8 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             editor.cancelSession();
         else
             editor.commitSession();
-        editor.setTool("move");
-        pathId = editor.page.objects[id] ? id : null;
+        editor.setTool(tool);
+        pathId = tool === "move" && editor.page.objects[id] ? id : null;
         renderOverlays();
     }
     function insertPathNode(point: Point) {
@@ -1446,7 +1553,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         });
     }
     function deleteNodes() {
-        if (!pathId || !nodeSelection.size)
+        if (!pathId || !nodeSelection.size || !isEditable(editor.page, pathId))
             return false;
         editor.transact("Delete path nodes", doc => {
             const s = doc.pagesById[editor.pageId].objects[pathId!];
@@ -1456,16 +1563,24 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         renderOverlays();
         return true;
     }
+    function cancelInteraction() {
+        pen = null;
+        gesture = null;
+        pathId = null;
+        drawId = null;
+        pointers.clear();
+        pinch = null;
+        marquee?.remove();
+        marquee = null;
+        overlay.querySelectorAll(".snap-line").forEach(n => n.remove());
+        nodeSelection.clear();
+        editor.cancelSession();
+        renderOverlays();
+    }
     function nodeKey(event: KeyboardEvent) {
         if (event.key === "Escape" && (pen || gesture || pathId)) {
             event.preventDefault();
-            if (pen || gesture)
-                editor.cancelSession();
-            pen = null;
-            gesture = null;
-            pathId = null;
-            nodeSelection.clear();
-            renderOverlays();
+            cancelInteraction();
             return true;
         }
         if (event.key === "Enter" && pen) {
@@ -1473,7 +1588,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             finishPen();
             return true;
         }
-        if (!pathId || text.active)
+        if (!pathId || text.active || !isEditable(editor.page, pathId))
             return false;
         if (["Delete", "Backspace"].includes(event.key) && nodeSelection.size) {
             event.preventDefault();
@@ -1498,7 +1613,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
     }
     stage.addEventListener("pointerdown", event => {
         down(event).catch(error => {
-            editor.cancelSession();
+            cancelInteraction();
             toast(String(error), "error");
         });
     }, {
@@ -1509,8 +1624,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             move(event);
         }
         catch (error) {
-            editor.cancelSession();
-            gesture = null;
+            cancelInteraction();
             toast(String(error), "error");
         }
     }, {
@@ -1521,21 +1635,14 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             up(event);
         }
         catch (error) {
-            editor.cancelSession();
-            gesture = null;
+            cancelInteraction();
             toast(String(error), "error");
         }
     }, {
         signal
     });
     stage.addEventListener("pointercancel", () => {
-        pointers.clear();
-        pinch = null;
-        if (gesture) {
-            editor.cancelSession();
-            gesture = null;
-        }
-        marquee?.remove();
+        cancelInteraction();
     }, {
         signal
     });
@@ -1552,6 +1659,14 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
     stage.addEventListener("dblclick", event => {
         const point = world(local(event)), shape = hit(point, true);
         if (editor.tool === "pen") {
+            if (pen)
+                editor.preview(doc => {
+                    const target = doc.pagesById[editor.pageId].objects[pen!.id], nodes = target.content;
+                    // The second click of a double-click has already appended its endpoint.
+                    while (nodes.length > 1 && nodes.at(-1).command === "line" && nodes.at(-1).x === nodes.at(-2).x && nodes.at(-1).y === nodes.at(-2).y)
+                        nodes.pop();
+                    refreshPath(target);
+                });
             finishPen();
             return;
         }
@@ -1600,21 +1715,8 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             stage.style.cursor = "grab";
             event.preventDefault();
         }
-        if (event.key === "Escape") {
-            if (pen) {
-                editor.cancelSession();
-                pen = null;
-            }
-            else if (gesture) {
-                editor.cancelSession();
-                gesture = null;
-            }
-            else if (pathId) {
-                pathId = null;
-                nodeSelection.clear();
-            }
-            renderOverlays();
-        }
+        if (event.key === "Escape")
+            cancelInteraction();
         if (event.key === "Enter" && pen) {
             finishPen();
             event.preventDefault();
@@ -1634,7 +1736,36 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
     }, {
         signal
     });
-    const unsubscribe = editor.on(() => renderOverlays());
+    let interactionPage = editor.pageId;
+    const unsubscribe = editor.on(event => {
+        if (editor.pageId !== interactionPage) {
+            interactionPage = editor.pageId;
+            pen = null;
+            gesture = null;
+            pathId = null;
+            selectedGradient = null;
+            pointers.clear();
+            pinch = null;
+            marquee?.remove();
+            marquee = null;
+            nodeSelection.clear();
+        }
+        if (event.tool) {
+            pathId = null;
+            nodeSelection.clear();
+            selectedGradient = null;
+            if (pen && editor.tool !== "pen")
+                finishPen(editor.tool);
+            else if (gesture)
+                cancelInteraction();
+        }
+        if (pen && !editor.page.objects[pen.id]) {
+            pen = null;
+            gesture = null;
+            editor.cancelSession();
+        }
+        renderOverlays();
+    });
     const offRender = services.view.onRender?.(() => renderOverlays()) ?? (() => {
     });
     renderOverlays();
