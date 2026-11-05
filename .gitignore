@@ -9,6 +9,9 @@ work/
 
 .worktrees/
 
+# Local plans, internal reviews and task evidence live only in the primary checkout.
+/internal/docs/
+
 # Recreated from locked dependencies by the build.
 /public/canvaskit.wasm
 /public/fonts/*.woff

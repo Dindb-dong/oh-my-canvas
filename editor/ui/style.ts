@@ -127,6 +127,33 @@ export const workspaceStyle = `
 .row:hover,.page-row:hover {
   background:#f0f4fc;
 }
+.row.selected,.row.selected:hover {
+  background:#eff6ff;
+  color:#1e40af;
+}
+.layers .row {
+  position:relative;
+}
+.layers .row[hidden] {
+  display:none;
+}
+.row[data-drop=before]::before,.row[data-drop=after]::after {
+  content:"";
+  position:absolute;
+  left:0;
+  right:0;
+  height:2px;
+  background:var(--accent);
+  z-index:1;
+  pointer-events:none;
+}
+.row[data-drop=before]::before { top:0; }
+.row[data-drop=after]::after { bottom:0; }
+.row[data-drop=inside] {
+  outline:2px solid var(--accent);
+  outline-offset:-2px;
+  background:#eff6ff;
+}
 .row .name,.page-row .name {
   flex:1;
   overflow:hidden;

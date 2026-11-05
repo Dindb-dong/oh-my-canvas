@@ -35,6 +35,12 @@ Desktop-first Electron, minimum 960 × 640. Main content scrolls independently o
 ## Interaction and content
 Use concrete language: New canvas, Open file, Export, Starred. Show actual local dates and file counts. Search and sort act immediately; view and stars persist locally. Saved means persistence succeeded. A failed edit shows an actionable error. Collaboration shows host, guests, capacity, reconnecting and offline conditions. Local MCP does not remove the AI client's own costs or limits.
 
+### Selection and layer movement (2026-11-05)
+
+Canvas selections show each included shape plus aggregate transform bounds. Selected layer rows remain visibly selected on hover. A 2 px blue line indicates sibling insertion; a container outline indicates insertion inside. These states reuse the existing selection colors and map to `editor/interaction/canvas.ts` and `editor/ui/index.ts` / `style.ts`.
+
+Canvas Shift-click toggles individual membership. Layer Shift-click uses a visible-row anchor range; Ctrl/Meta-click toggles individual rows. Empty unselected frame interior supports marquee, with partial intersection selecting eligible group units. Moving layers preserves relative order and canvas geometry. Pen input has unobstructed anchors and a live next-segment preview.
+
 ## Implementation constraints
 Reuse the existing editor and Electron bridge. No new UI framework or network service. Never connect a cosmetic control to fake data. Preferences are device-local and independently validated. Preserve existing library/import/new/export selectors for regression tests. Keep offline fonts and CanvasKit assets. No uploads, analytics, or external fonts.
 

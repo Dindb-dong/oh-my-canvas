@@ -1,5 +1,5 @@
 import type { Data, EditorServices, MountOptions, Point, Tool, WorkspaceHandle } from "../contracts";
-import { createShape, remapReferences, isEditable, ancestors } from "../document";
+import { createShape, remapReferences, isEditable, ancestors, topLevelIds, reparentShapes } from "../document";
 import { el, button, iconButton, labeledIconButton, input, select, check, section, row, clone, toast, askName, modal, jsonEditor } from "./dom";
 import { workspaceStyle } from "./style";
 import { createIcon } from "./icons";
@@ -183,6 +183,19 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
     const thumbnailCache = new WeakMap<object, Map<string, Promise<string>>>();
     let destroyed = false, leftTab = "layers", assetQuery = "", layerQuery = "", collapsedNodes = new Set<string>(), menu: HTMLElement | null = null, findBar: HTMLElement | null = null, findIndex = 0, findMatches: string[] = [], inspector: ReturnType<typeof createInspector> | null = null;
     let dragged: Data | null = null;
+    let layerAnchor: string | null = null, layerRangeBase: string[] = [];
+    function clearLayerDrop() {
+        left.querySelectorAll("[data-drop]").forEach(node => node.removeAttribute("data-drop"));
+    }
+    function endDrag() {
+        clearLayerDrop();
+        dragged = null;
+    }
+    window.addEventListener("dragend", endDrag, { signal });
+    window.addEventListener("drop", endDrag, { signal });
+    window.addEventListener("keydown", event => {
+        if (event.key === "Escape") endDrag();
+    }, { signal });
     const clipboard = createClipboard(stage, services, options);
     const text = createTextSession(stage, services, () => inspector?.refresh());
     const canvas = createCanvasInteraction(stage, overlays, services, text, {
@@ -563,6 +576,11 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
             return;
         if (!force && left.contains(document.activeElement) && document.activeElement?.matches("input,[contenteditable=true]"))
             return;
+        if (layerAnchor && !editor.page.objects[layerAnchor]) {
+            layerAnchor = null;
+            layerRangeBase = [];
+        }
+        const scrollTop = left.scrollTop;
         left.replaceChildren();
         const tabs = el("div", "ltabs");
         for (const [tab, label] of [["layers", "Layers"], ["assets", "Assets"]]) {
@@ -638,6 +656,7 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
         const tree = el("div", "layers");
         tree.setAttribute("role", "tree");
         tree.setAttribute("aria-label", "Layers");
+        tree.setAttribute("aria-multiselectable", "true");
         const heading = el("div", "panel-heading", "Layers");
         tree.append(heading);
         const matchesLayer = (id: string): boolean => {
@@ -699,8 +718,21 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
             n.onclick = async (event) => {
                 if ((event.target as HTMLElement).closest("button,[contenteditable=true]"))
                     return;
+                const pageId = editor.pageId;
                 await text.exit();
-                editor.setSelection(event.shiftKey ? [...new Set([...editor.selection, id])] : [id]);
+                if (editor.pageId !== pageId || !editor.page.objects[id]) return;
+                const visible = Array.from(tree.querySelectorAll<HTMLElement>(".row[data-id]")).filter(row => !row.hidden).map(row => row.dataset.id!);
+                const anchor = layerAnchor ? visible.indexOf(layerAnchor) : -1, target = visible.indexOf(id);
+                if (event.shiftKey && anchor !== -1) {
+                    const range = visible.slice(Math.min(anchor, target), Math.max(anchor, target) + 1);
+                    editor.setSelection([...new Set([...layerRangeBase.filter(key => visible.includes(key)), ...range])]);
+                }
+                else {
+                    const selection = event.metaKey || event.ctrlKey ? editor.selection.includes(id) ? editor.selection.filter(key => key !== id) : [...editor.selection, id] : event.shiftKey ? [...editor.selection, id] : [id];
+                    layerAnchor = id;
+                    layerRangeBase = [...selection];
+                    editor.setSelection(selection);
+                }
             };
             name.ondblclick = async (event) => {
                 event.stopPropagation();
@@ -742,52 +774,60 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
             n.oncontextmenu = event => {
                 event.preventDefault();
                 event.stopPropagation();
-                editor.setSelection([id]);
+                if (!editor.selection.includes(id)) editor.setSelection([id]);
                 showContext(event);
             };
+            const dropAt = (event: DragEvent) => {
+                if (dragged?.kind !== "layer" || dragged.pageId !== editor.pageId) return null;
+                const page = editor.page, target = page.objects[id], box = n.getBoundingClientRect();
+                if (!target || !isEditable(page, id)) return null;
+                const inside = !!target.childIds && event.clientX > box.left + 45 && event.clientY > box.top + 7 && event.clientY < box.bottom - 7;
+                const position = inside ? "inside" : event.clientY < box.top + box.height / 2 ? "before" : "after";
+                const parentId = inside ? id : target.parentId;
+                if (parentId !== "root" && !isEditable(page, parentId)) return null;
+                const ids = topLevelIds(page, dragged.ids).filter(key => isEditable(page, key));
+                if (!ids.length || ids.includes(id) || ids.some(key => parentId === key || ancestors(page, parentId).some(parent => parent.id === key))) return null;
+                const remaining = page.objects[parentId].childIds!.filter(key => !ids.includes(key));
+                const index = inside ? remaining.length : remaining.indexOf(id) + (position === "before" ? 1 : 0);
+                return { ids, parentId, position, index };
+            };
             n.ondragstart = event => {
+                if ((event.target as HTMLElement).closest("button,[contenteditable=true]") || !isEditable(editor.page, id)) {
+                    event.preventDefault();
+                    return;
+                }
                 dragged = {
                     kind: "layer",
-                    ids: editor.selection.includes(id) ? editor.selection : [id]
+                    pageId: editor.pageId,
+                    ids: topLevelIds(editor.page, editor.selection.includes(id) ? editor.selection : [id])
                 };
                 event.dataTransfer?.setData("text/plain", id);
+                if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
             };
             n.ondragover = event => {
-                if (dragged?.kind === "layer") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                }
+                if (dragged?.kind !== "layer") return;
+                event.stopPropagation();
+                clearLayerDrop();
+                const destination = dropAt(event);
+                if (event.dataTransfer) event.dataTransfer.dropEffect = destination ? "move" : "none";
+                if (!destination) return;
+                event.preventDefault();
+                n.dataset.drop = destination.position;
+            };
+            n.ondragleave = event => {
+                if (!n.contains(event.relatedTarget as Node | null)) n.removeAttribute("data-drop");
             };
             n.ondrop = event => {
+                if (dragged?.kind !== "layer") return;
                 event.preventDefault();
                 event.stopPropagation();
-                if (dragged?.kind !== "layer")
-                    return;
-                const ids = dragged.ids as string[], box = n.getBoundingClientRect(), inside = !!shape.childIds && event.clientX > box.left + 45 && event.clientY > box.top + 7 && event.clientY < box.bottom - 7, parentId = inside ? id : shape.parentId;
+                const destination = dropAt(event);
+                endDrag();
+                if (!destination) return;
                 editor.transact("Move layers", doc => {
-                    const page = doc.pagesById[editor.pageId];
-                    for (const childId of ids) {
-                        if (childId === id)
-                            continue;
-                        let p = page.objects[parentId];
-                        while (p && p.id !== "root") {
-                            if (p.id === childId)
-                                throw Error("A layer cannot contain itself");
-                            p = page.objects[p.parentId];
-                        }
-                        const s = page.objects[childId];
-                        if (!isEditable(page, childId) || !isEditable(page, parentId) && parentId !== "root")
-                            continue;
-                        const old = page.objects[s.parentId];
-                        old.childIds = old.childIds?.filter(c => c !== childId);
-                        const parent = page.objects[parentId];
-                        const index = inside ? parent.childIds!.length : parent.childIds!.indexOf(id) + (event.clientY > box.top + box.height / 2 ? 1 : 0);
-                        parent.childIds!.splice(index, 0, childId);
-                        s.parentId = parentId;
-                        s.enclosingFrameId = parentId;
-                    }
+                    reparentShapes(doc.pagesById[editor.pageId], destination.ids, destination.parentId, destination.index);
                 });
-                dragged = null;
+                editor.setSelection(destination.ids);
             };
             tree.append(n);
             if (layerQuery || !collapsedNodes.has(id))
@@ -799,6 +839,7 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
         if (!editor.page.objects.root?.childIds?.length)
             tree.append(el("div", "empty-state", "Draw a shape or place an image to begin."));
         left.append(tree);
+        left.scrollTop = scrollTop;
         filter.oninput = () => {
             layerQuery = filter.value;
             const cursor = filter.selectionStart;
@@ -1417,12 +1458,15 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
     }
     const unsubscribe = editor.on(event => {
         if (event.page) {
+            layerAnchor = null;
+            layerRangeBase = [];
+            endDrag();
             text.exit();
             findBar?.remove();
             findBar = null;
             collapsedNodes.clear();
         }
-        if (!event.viewport && !event.hover && (!event.deltas || event.projection))
+        if (event.page || !event.viewport && !event.hover && (!event.deltas || event.projection))
             renderLeft();
         refreshToolbar();
     });
