@@ -55,4 +55,6 @@ Expand each independent bullet/subfeature into lane feature records before imple
 
 All new mutations are standalone atomic operations; they are intentionally excluded from `batch` to avoid nested transactions and asynchronous mutation inside a synchronous batch. `get_guide(vector)` describes the workflow and limitations.
 
+Outlines require the actual font face for text and supported centered solid strokes. Unsupported text decorations, synthetic fonts, non-normal per-paint blending and mask combinations fail before changing the source. Direct unclipped vector text masks retain their glyph contours; alpha/luminance mask sources, nested mask sources and vector stroke masks require another editing approach. Disabled blur effects remain disabled. Portable path interchange preserves per-node handle modes as well as geometry.
+
 `image(id,action,revision)` exposes local background removal and restoration through the shared image service. Actions are `remove_background` and `restore`; the removal preserves the original and supports cancellation before commit. The tool records agent ownership for undo. `get_guide(image)` explains the local workflow and segmentation limitations.

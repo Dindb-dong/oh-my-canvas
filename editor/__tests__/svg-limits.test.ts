@@ -24,7 +24,7 @@ describe('SVG import resource limits',()=>{
         expect(importSvg(input.replace('<use href="#p"/>','')).shapes).toHaveLength(10);
     });
     it('bounds token scans and checks segment growth for close, curve, and arc commands',()=>{
-        expect(()=>parseSvgPath('M0 0'+'Z'.repeat(10000))).toThrow(/complex|segment/i);
+        expect(()=>parseSvgPath('M0 0'+'Z'.repeat(10000),10000)).toThrow(/complex|segment/i);
         expect(()=>parseSvgPath('M0 0 C1 1 2 2 3 3',1)).toThrow(/complex|segment|token/i);
         expect(()=>parseSvgPath('M0 0 A10 10 0 1 1 20 0',2)).toThrow(/complex|segment/i);
         expect(()=>parseSvgPath('M0 0'+'0 '.repeat(100000))).toThrow(/complex/i);
