@@ -82,14 +82,14 @@ export async function combinePaths(shapes: Shape[], operation: 'union' | 'subtra
             result = merged;
         }
         if (operation === 'flatten') {
-            const simplified = result.makeSimplified();
+            const simplified = kit.Path.MakeFromOp(result, result, kit.PathOp.Union);
             if (!simplified)
                 throw new Error('CanvasKit could not simplify the path');
             result.delete();
             result = simplified;
         }
         const tight = result.computeTightBounds();
-        return { segments: canonicalSegments(kit, result.toCmds()), fillRule: 'nonzero', bounds: { x: tight[0], y: tight[1], width: Math.max(0, tight[2] - tight[0]), height: Math.max(0, tight[3] - tight[1]) } };
+        return { segments: canonicalSegments(kit, result.toCmds()), fillRule: result.getFillType() === kit.FillType.EvenOdd ? 'evenodd' : 'nonzero', bounds: { x: tight[0], y: tight[1], width: Math.max(0, tight[2] - tight[0]), height: Math.max(0, tight[3] - tight[1]) } };
     }
     finally {
         result?.delete();
