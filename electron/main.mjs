@@ -10,7 +10,7 @@ import {Replica} from '../core/replica.mjs';
 import {exportFileData} from '../core/export-file.mjs';
 import {assertDocument,same,MAX_ENVELOPE_BYTES} from '../core/document.mjs';
 import {Collaboration,parseInvite} from '../core/collaboration.mjs';
-import {startMcpBridge} from './mcp-bridge.mjs';
+import {startMcpBridge,MCP_PORT} from './mcp-bridge.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 app.setName('oh-my-canvas');
@@ -22,10 +22,18 @@ protocol.registerSchemesAsPrivileged([{scheme:'omc',privileges:{standard:true,se
 app.whenReady().then(async()=>{
 const fileDialogs=createFileDialogs(dialog);
 const dir=app.getPath('userData'),store=new Store(path.join(dir,'documents'));
-let win,current,collab,bridge,saveTimer,quitting=false,seq=0;
+let win,current,collab,bridge,bridgeError,saveTimer,quitting=false,seq=0;
 let prefs={name:os.userInfo().username},prefsWork=Promise.resolve();
 try{prefs={...prefs,...JSON.parse(await fs.readFile(path.join(dir,'preferences.json'),'utf8'))};}catch{}
 const pendingTools=new Map();
+function cancelTools(reason,agent){
+  for(const [id,pending] of pendingTools){
+    if(agent&&pending.agent!==agent)continue;
+    pending.cancel(reason);
+  }
+}
+function endAgent(agent){cancelTools('MCP session ended',agent);send({type:'tool-session-end',agent});}
+
 const send=m=>{if(win&&!win.isDestroyed())win.webContents.send('omc:event',m);};
 const snapshot=ack=>current&&({id:current.id,title:current.title,document:current.replica.document,ack:ack??seq});
 let saveWork=Promise.resolve();
@@ -34,6 +42,7 @@ function dirty(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>save().catch(e
 async function stopSession(){if(collab){const previous=collab;collab=null;await previous.close();}send({type:'session',status:{mode:'offline',peers:[]}});}
 async function open(record){
   const recovered=!!record.recovered;
+  cancelTools('Document changed');await bridge?.resetSessions?.();
   await save();await stopSession();current?.unsubscribe?.();current?.replica.destroy();
   current=record;seq=0;current.bootstrapNonce=randomUUID();current.bootstrapBase=current.replica.document;
   current.unsubscribe=current.replica.onUpdate(()=>{dirty();send({type:'document',...snapshot()});});
@@ -67,7 +76,7 @@ const dispatch=async(action,data)=>{
     case 'open':return open(await store.load(data.id));
     case 'rename':{requireCurrent();current.title=limitedTitle(data.title);await save();return snapshot();}
     case 'duplicate':{const original=await store.load(data.id);const record={id:randomUUID(),title:original.title+' copy',createdAt:new Date().toISOString(),replica:new Replica({document:original.replica.document}),thumbnail:original.thumbnail};original.replica.destroy();return open(record);}
-    case 'delete':{if(current?.id===data.id){await save();await stopSession();current.unsubscribe?.();current.replica.destroy();current=null;}await store.remove(data.id);return true;}
+    case 'delete':{if(current?.id===data.id){cancelTools('Document closed');await bridge?.resetSessions?.();await save();await stopSession();current.unsubscribe?.();current.replica.destroy();current=null;}await store.remove(data.id);return true;}
     case 'bootstrap':{
       requireCurrent();
       if(data.id!==current.id||seq!==0||typeof data.nonce!=='string'||data.nonce!==current.bootstrapNonce)throw Error('Invalid canvas initialization');
@@ -113,9 +122,15 @@ const dispatch=async(action,data)=>{
       if(format==='png')content=Buffer.from(content.replace(/^data:image\/png;base64,/,''),'base64');
       await atomicWrite(result.filePath,content);return true;
     }
+    case 'cancel-close':if(!quitting){bridge?.resumeAccepting?.();send({type:'close-cancelled'});}return true;
     case 'mcp-info':{
-      const config={mcpServers:{'oh-my-canvas':{command:process.execPath,args:[app.isPackaged?path.join(process.resourcesPath,'mcp-cli.cjs'):path.join(root,'dist/mcp-cli.cjs'),'--runtime',bridge.file],env:{ELECTRON_RUN_AS_NODE:'1'}}}};
-      const text=JSON.stringify(config,null,2);if(data?.copy)clipboard.writeText(text);return {config:text,port:bridge.port,runtime:bridge.file};
+      if(!bridge)return {available:false,error:bridgeError||'MCP is disabled',config:''};
+      const entry=data?.transport==='stdio'
+        ?{command:process.execPath,args:[app.isPackaged?path.join(process.resourcesPath,'mcp-cli.cjs'):path.join(root,'dist/mcp-cli.cjs'),'--runtime',bridge.file],env:{ELECTRON_RUN_AS_NODE:'1'}}
+        :{url:bridge.url,bearer_token_env_var:'OMC_MCP_TOKEN'};
+      const text=JSON.stringify({mcpServers:{'oh-my-canvas':entry}},null,2);
+      if(data?.copy)clipboard.writeText(text);
+      return {available:true,config:text,port:bridge.port,url:bridge.url,runtime:bridge.file};
     }
     case 'host':{
       requireCurrent();await stopSession();const c=new Collaboration({replica:current.replica,id:current.id,title:current.title,name:prefs.name});bindSession(c);
@@ -136,7 +151,7 @@ const dispatch=async(action,data)=>{
       try{
         // Do not expose an uninitialized replica to the renderer or autosave.
         await c.join(data.invite);
-        await save();current?.unsubscribe?.();current?.replica.destroy();current=record;seq=0;current.bootstrapNonce=randomUUID();current.bootstrapBase=current.replica.document;
+        cancelTools('Document changed');await bridge?.resetSessions?.();await save();current?.unsubscribe?.();current?.replica.destroy();current=record;seq=0;current.bootstrapNonce=randomUUID();current.bootstrapBase=current.replica.document;
         current.unsubscribe=current.replica.onUpdate(()=>{dirty();send({type:'document',...snapshot()});});bindSession(c);await save();send({type:'session',status:c.status()});return {...snapshot(),bootstrapNonce:current.bootstrapNonce};
       }catch(e){await c.close();record.replica.destroy();throw e;}
     }
@@ -148,11 +163,27 @@ const dispatch=async(action,data)=>{
 let operations=Promise.resolve();
 ipcMain.handle('omc:invoke',async(event,action,data)=>{trusted(event);if(action==='pick-files')return fileDialogs.pick(data);if(action==='cursor')return dispatch(action,data);const result=operations.then(()=>dispatch(action,data));operations=result.catch(()=>{});return result;});
 ipcMain.on('omc:tool-result',(event,id,result)=>{trusted(event);const pending=pendingTools.get(id);if(pending){clearTimeout(pending.timer);pendingTools.delete(id);pending.resolve(result);}});
-bridge=await startMcpBridge({dir,dispatch:call=>{
-  if(!current)throw Error('Open a document in Oh My Canvas first');
-  if(pendingTools.size>=8)throw Error('Too many pending MCP requests');
-  return new Promise((resolve,reject)=>{const id=randomUUID();const timer=setTimeout(()=>{pendingTools.delete(id);reject(Error('Editor tool timed out'));},63000);pendingTools.set(id,{resolve,reject,timer});send({type:'tool',id,call});});
-}});
+if(!process.argv.includes('--mcp-disabled'))try{
+  const override=process.argv.find(arg=>arg.startsWith('--mcp-port='))?.slice(11);
+  const port=override===undefined?(profile?0:MCP_PORT):Number(override);
+  if(!Number.isInteger(port)||port<0||port>65535)throw Error('Invalid MCP port');
+  bridge=await startMcpBridge({dir,port,endSession:endAgent,dispatch:(call,{signal}={})=>{
+    if(quitting)throw Error('Editor is closing');
+    if(!current)throw Error('Open a document in Oh My Canvas first');
+    if(!win||win.isDestroyed()||win.webContents.isDestroyed())throw Error('Editor is unavailable');
+    if(pendingTools.size>=8)throw Error('Too many pending MCP requests');
+    if(signal?.aborted)throw Error('MCP request cancelled');
+    return new Promise((resolve,reject)=>{
+      const id=randomUUID();
+      const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);pendingTools.delete(id);};
+      const cancel=reason=>{cleanup();send({type:'tool-cancel',id});reject(Error(reason));};
+      const abort=()=>cancel('MCP request cancelled; inspect the document before retrying');
+      const timer=setTimeout(()=>cancel('Editor tool timed out; inspect the document before retrying'),63000);
+      pendingTools.set(id,{agent:call.agent,timer,cancel,resolve:result=>{cleanup();resolve(result);}});
+      signal?.addEventListener('abort',abort,{once:true});send({type:'tool',id,call});
+    });
+  }});
+}catch(error){bridgeError=error.code==='EADDRINUSE'?'MCP port is already in use. Close the other listener or choose --mcp-port.':error.message;}
 const mime={'.html':'text/html','.js':'application/javascript','.css':'text/css','.wasm':'application/wasm','.woff2':'font/woff2','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'};
 protocol.handle('omc',async req=>{
   const u=new URL(req.url);if(u.hostname!=='canvas')return new Response('Not found',{status:404});
@@ -162,6 +193,7 @@ protocol.handle('omc',async req=>{
   try{return new Response(await fs.readFile(file),{headers:{'Content-Type':mime[path.extname(file)]||'application/octet-stream','Content-Security-Policy':"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'"}});}catch{return new Response('Not found',{status:404});}
 });
 win=new BrowserWindow({width:1500,height:980,minWidth:960,minHeight:640,title:'Oh My Canvas',backgroundColor:'#ffffff',titleBarStyle:'hiddenInset',trafficLightPosition:{x:18,y:20},webPreferences:{preload:path.join(root,'dist/preload.cjs'),backgroundThrottling:false,contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}});
+win.webContents.on('render-process-gone',()=>{cancelTools('Editor renderer stopped');void bridge?.resetSessions?.().catch(()=>{});});
 win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
 win.webContents.on('will-navigate',(event,url)=>{if(url!=='omc://canvas/index.html')event.preventDefault();});
 win.webContents.session.setPermissionRequestHandler((_,__,cb)=>cb(false));
@@ -173,9 +205,10 @@ Menu.setApplicationMenu(Menu.buildFromTemplate([
   {label:'View',submenu:[{role:'togglefullscreen'},...(process.argv.includes('--debug-ui')?[{role:'toggleDevTools'}]:[])]}
 ]));
 await win.loadURL('omc://canvas/index.html');
+if(bridgeError)send({type:'error',message:'MCP unavailable: '+bridgeError});
 app.on('second-instance',()=>{win?.show();win?.focus();});
-win.on('close',event=>{if(!quitting){event.preventDefault();send({type:'closing'});}});
-ipcMain.handle('omc:ready-to-close',async event=>{trusted(event);if(quitting)return;quitting=true;try{await operations;await save();await stopSession();await bridge.close();app.quit();}catch(e){quitting=false;send({type:'error',message:'Could not save before closing: '+e.message});}});
+win.on('close',event=>{if(!quitting){event.preventDefault();bridge?.stopAccepting();cancelTools('Editor is closing');send({type:'closing'});}});
+ipcMain.handle('omc:ready-to-close',async event=>{trusted(event);if(quitting)return;quitting=true;bridge?.stopAccepting();cancelTools('Editor is closing');send({type:'tool-session-end'});try{await operations;await save();await stopSession();await bridge?.close();app.quit();}catch(e){quitting=false;bridge?.resumeAccepting?.();send({type:'close-cancelled'});send({type:'error',message:'Could not save before closing: '+e.message});}});
 app.on('window-all-closed',()=>app.quit());
 }).catch(error=>{console.error(error);dialog.showErrorBox('Oh My Canvas could not start',error.message);app.exit(1);});
 }

@@ -15,7 +15,7 @@ try{
  await app.evaluate(({dialog})=>{dialog.showSaveDialog=async()=>({canceled:true});});await p.locator('.export-btn').click();await wait(async()=>!(await p.locator('.export-btn').isDisabled()));assert.equal(await p.locator('.export-error').isVisible(),false);
  await app.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:file});},dir);await p.locator('.export-btn').click();await p.locator('.export-error[role="alert"]').waitFor({state:'visible'});
  // Each real stdio process keeps its own Undo identity in the actual app.
- const config=JSON.parse((await p.evaluate(()=>window.omc.invoke('mcp-info'))).config).mcpServers['oh-my-canvas'];
+ const config=JSON.parse((await p.evaluate(()=>window.omc.invoke('mcp-info',{transport:'stdio'}))).config).mcpServers['oh-my-canvas'];
  for(const name of ['A','B']){const c=new Client({name,version:'1'},{capabilities:{}});clients.push(c);await c.connect(new StdioClientTransport(config));}
  for(const [i,c] of clients.entries()){const r=await c.callTool({name:'create_board',arguments:{name:`Agent ${i} isolation`,width:200,height:100}});assert.ok(!r.isError,JSON.stringify(r));}
  const denied=await clients[0].callTool({name:'undo',arguments:{}});assert.equal(denied.isError,true);assert.match(await text(),/Agent 1 isolation/);assert.ok(!(await clients[1].callTool({name:'undo',arguments:{}})).isError);assert.doesNotMatch(await text(),/Agent 1 isolation/);assert.match(await text(),/Agent 0 isolation/);
