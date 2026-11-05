@@ -82,7 +82,7 @@ async function ready() {
 }
 async function launch() {
     stage('launch-start');
-    const env = { ...process.env };
+    const env = { ...process.env, OMC_TEST_BACKGROUND: '1' };
     delete env.ELECTRON_RUN_AS_NODE;
     app = await electron.launch({ executablePath: electronExecutable, args: [root, `--profile=${profile}`], cwd: root, env, timeout: 60000 });
     page = await app.firstWindow();

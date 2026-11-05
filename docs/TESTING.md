@@ -17,7 +17,7 @@ npm run test:e2e
 
 `check` runs JavaScript syntax checks and `tsc`. The TypeScript configuration does not enable comprehensive `checkJs` checking for the app's JS/MJS modules; core/runtime tests remain necessary. There is no `npm run lint` command in this repository.
 
-The core suite uses real loopback TLS/HTTP sockets. An environment that prohibits socket listening must permit isolated local test sockets; do not count an `EPERM` run as a passing network test. Existing dependencies include the Electron/Playwright test runner; no separate browser download is required.
+The core suite uses real loopback TLS/HTTPS sockets. An environment that prohibits socket listening must permit isolated local test sockets; do not count an `EPERM` run as a passing network test. Existing dependencies include the Electron/Playwright test runner; no separate browser download is required.
 
 `node scripts/check-docs.mjs` checks repository links, anchors, images, shared README commands, issue-form YAML and SVG assets without starting the app or accessing the network.
 
@@ -28,20 +28,22 @@ The core suite uses real loopback TLS/HTTP sockets. An environment that prohibit
 | README, translations, issue/PR forms | `node scripts/check-docs.mjs`; rendered preview | No application rebuild for prose-only changes |
 | Document, commands and geometry | `npx vitest run editor/__tests__/foundation.document.test.ts editor/__tests__/foundation.commands.test.ts editor/__tests__/foundation.geometry.test.ts` | `node --test tests/replica.test.mjs tests/storage.test.mjs`; actual save/reopen |
 | Collaboration, bootstrap and protocol | `node --test tests/collaboration.test.mjs tests/bootstrap.test.mjs` | `npm run test:e2e`; `node scripts/independent-host-e2e.mjs` |
-| MCP and author isolation | `node --test tests/mcp.test.mjs`; `npx vitest run editor/__tests__/mcp.test.ts` | `node scripts/independent-host-e2e.mjs` |
+| MCP and author isolation | `node --test tests/mcp.test.mjs`; `npx vitest run editor/__tests__/mcp.test.ts` | `node scripts/mcp-http-e2e.mjs`; retained stdio `node scripts/independent-host-e2e.mjs` |
 | Text, gestures, clipboard and Undo | `npx vitest run editor/__tests__/ui-text-session.test.ts editor/__tests__/ui-canvas-geometry.test.ts editor/__tests__/ui-clipboard-atomic.test.ts` | `node scripts/independent-ui-e2e.mjs` |
 | Components, variants, styles and libraries | `npx vitest run editor/__tests__/components.test.ts editor/__tests__/styles-library.test.ts` | `node scripts/independent-ui-e2e.mjs`; `node scripts/independent-library-e2e.mjs` |
 | Rendering, formats and native exports | `npx vitest run editor/__tests__/formats.test.ts`; `node --test tests/export-file.test.mjs` | `node scripts/independent-render-e2e.mjs` |
 | Complete desktop journey | `npm run build` | `npm run test:e2e`; the four `independent-*-e2e.mjs` scripts above |
 | Packaging | `npm run build`; `node scripts/package-local.mjs` | `node scripts/packaged-smoke.mjs`; `node scripts/check-package-provenance.mjs` |
 
-Build before renderer/stdio E2E. The focused commands above are entry points, not a replacement for a broader run after changing a shared contract. E2E scripts may refresh tracked screenshots and JSON evidence in `docs/qa`; inspect the diff and retain only intentional evidence changes. They create and clean up their own temporary profiles.
+Build before renderer/HTTP/stdio E2E. The focused commands above are entry points, not a replacement for a broader run after changing a shared contract. E2E scripts may refresh tracked screenshots and JSON evidence in `docs/qa`; inspect the diff and retain only intentional evidence changes. They create and clean up their own temporary profiles. Automated Electron launches set `OMC_TEST_BACKGROUND=1`; with an isolated profile the app creates hidden windows and suppresses Dock activation before startup. Do not remove this flag or run tests against an older executable that does not honor it. `npm run dev` remains a normal visible development launch.
+
+The HTTP smoke intentionally obstructs its temporary profile's `documents` path to test a failed native close. Its expected `EEXIST`/`ENOTDIR` save error is injected and followed by directory restoration and same-session replay/alias/Undo checks; it does not touch a real user profile.
 
 ### Packaging and installed profiles
 
 `node scripts/package-local.mjs` copies the current source/build and locked runtime dependencies into task-owned `work/package-stage` as real files, then uses the already installed Electron runtime and electron-builder to write the local `release/` directory. It performs no dependency installation, publication, signing or installed-app replacement. `--prepare-only` stops after staging. Build first; the helper does not compile the editor.
 
-Use `node scripts/packaged-smoke.mjs` to test that fresh local package with an isolated temporary profile, then `node scripts/check-package-provenance.mjs` for current-byte checks of source/build assets, native notices, WASM, fonts, Electron notices and the standalone CLI. The provenance check also rejects retired vendor/apps/fallback paths in the ASAR index; it does not inspect compiled-code ASTs or establish legal clearance. Packaging directly through a shared `node_modules` symlink can omit runtime packages; the staging helper avoids that problem.
+Use `node scripts/packaged-smoke.mjs` to test that fresh local package, certificate-pinned HTTPS endpoint and bundled stdio CLI with an isolated temporary profile, then `node scripts/check-package-provenance.mjs` for current-byte checks of source/build assets, native notices, WASM, fonts, Electron notices and the standalone CLI. The provenance check also rejects retired vendor/apps/fallback paths in the ASAR index; it does not inspect compiled-code ASTs or establish legal clearance. Packaging directly through a shared `node_modules` symlink can omit runtime packages; the staging helper avoids that problem.
 
 Legacy `--installed` modes and default-profile scripts are not the current independent-engine acceptance route. Some target an existing `/Applications/Oh My Canvas.app` and its active document. Keep them outside routine checks; an installation check requires explicit scope and a review of its profile/data behavior. Do not replace the installed application or edit global MCP configuration merely to run a source regression.
 
@@ -49,7 +51,7 @@ Legacy `--installed` modes and default-profile scripts are not the current indep
 
 - **Geometry:** actual editor-generated geometry remains consistent after concurrent X/Y, move/resize, rotation, flip and path changes. Check render bounds, not only scalar properties.
 - **Undo:** explicit current author and user transaction survive the editor → IPC → replica connection. Cancellation does not resurrect an empty layer. Agents cannot mutate inside a live user transaction.
-- **MCP:** two actual stdio processes retain separate authors; one cannot Undo the other's work.
+- **MCP:** official SDK HTTP clients with identical names retain separate sessions/authors; one cannot Undo the other's work. Check a port impostor cannot receive a bearer, persistent credentials/certificate and the same HTTPS URL after restart, failed-close replay/alias/Undo preservation, stale-session rejection, cancellation before mutation, and durable readback. Retain two-process stdio coverage for rollout compatibility.
 - **Export:** compare wrapped SVG text to measured lines. Click both native export routes; verify a real file, cancellation, and a visible write error.
 - **Import/storage:** reject malformed metadata before overwrite; list/reopen with damaged files and valid backups. Oversized edits must leave live state unchanged.
 - **Validation cache:** repeated remote replacements do not retain irrelevant old payloads until a false capacity failure; local Undo still works afterward.

@@ -339,6 +339,120 @@ describe('MCP-02 atomicity, author and lifetime boundaries', () => {
         expect((await pending).isError).toBe(true);
         expect(h.events).toHaveLength(0);
     });
+    it('cancels a stalled preflight without blocking another agent or applying late changes', async () => {
+        const gate = deferred(), entered = deferred(), f = fixture(), controller = new AbortController();
+        f.fonts.ensure.mockImplementationOnce(() => { entered.resolve(); return gate.promise; });
+        const cancelled = f.call('update', { id: 'title', text: 'Never applied' }, 'alpha', { signal: controller.signal });
+        await entered.promise;
+        const other = f.call('update', { id: 'title', text: 'Beta applied' }, 'beta');
+        controller.abort();
+        expect((await cancelled).structuredContent?.error.code).toBe('cancelled');
+        expect((await other).isError).not.toBe(true);
+        gate.resolve();
+        await Promise.resolve();
+        expect(textValue(f.editor.page.objects.title)).toBe('Beta applied');
+        expect(f.events).toHaveLength(1);
+    });
+    it('skips requests cancelled in the queue and releases an expired font wait', async () => {
+        const gate = deferred(), entered = deferred(), f = fixture(), controller = new AbortController();
+        f.fonts.ensure.mockImplementationOnce(() => { entered.resolve(); return gate.promise; });
+        const first = f.call('update', { id: 'title', text: 'First' });
+        await entered.promise;
+        const queued = f.call('update', { id: 'title', text: 'Cancelled' }, 'beta', { signal: controller.signal });
+        controller.abort();
+        expect((await queued).structuredContent?.error.code).toBe('cancelled');
+        gate.resolve();
+        await first;
+        await f.ok('get_context');
+        expect(textValue(f.editor.page.objects.title)).toBe('First');
+        expect(f.events).toHaveLength(1);
+        const g = fixture({ timeoutMs: 15 });
+        g.fonts.ensure.mockImplementationOnce(() => new Promise(() => {}));
+        expect((await g.call('update', { id: 'title', text: 'Expired' })).structuredContent?.error.code).toBe('timeout');
+        await g.ok('update', { id: 'title', text: 'After deadline' }, 'beta');
+        expect(textValue(g.editor.page.objects.title)).toBe('After deadline');
+    });
+    it('ends stalled sessions immediately and keeps a new session independent of old work', async () => {
+        const gate = deferred(), entered = deferred(), f = fixture();
+        f.fonts.ensure.mockImplementationOnce(() => { entered.resolve(); return gate.promise; });
+        const ended = f.call('update', { id: 'title', text: 'Old session' }, 'alpha', { idempotencyKey: 'write' });
+        await entered.promise;
+        f.api.endSession('alpha');
+        expect((await ended).structuredContent?.error.code).toBe('failed');
+        const fresh = await f.call('update', { id: 'title', text: 'New session' }, 'alpha', { idempotencyKey: 'write' });
+        expect(fresh.isError).not.toBe(true);
+        gate.resolve();
+        await Promise.resolve();
+        expect(textValue(f.editor.page.objects.title)).toBe('New session');
+        expect(f.events).toHaveLength(1);
+        expect(f.onHighlight).toHaveBeenCalledWith('alpha', []);
+    });
+    it('keeps committed changes and durability when cancellation arrives during settling', async () => {
+        const saved = deferred(), entered = deferred(), controller = new AbortController();
+        const f = fixture({ afterWrite: () => { entered.resolve(); return saved.promise; } });
+        const task = f.call('update', { id: 'title', text: 'Committed' }, 'alpha', { signal: controller.signal });
+        await entered.promise;
+        controller.abort();
+        expect((await task).structuredContent?.error.code).toBe('cancelled');
+        saved.resolve();
+        await Promise.resolve();
+        expect(textValue(f.editor.page.objects.title)).toBe('Committed');
+        expect(f.events).toHaveLength(1);
+    });
+    it('forwards cancellation to Undo held in the host queue before it can apply', async () => {
+        const gate = deferred(), entered = deferred(), controller = new AbortController();
+        let applied = 0, hostWork!: Promise<boolean>;
+        const pending = new Set(['queued-undo']);
+        const f = fixture({ undo: (_agent: string, signal?: AbortSignal, requestId?: string) => {
+            entered.resolve();
+            hostWork = gate.promise.then(() => {
+                signal?.throwIfAborted();
+                if (!requestId || !pending.has(requestId))
+                    throw Error('Undo request ended before application');
+                applied++;
+                return f.editor.undoStep();
+            });
+            return hostWork;
+        } });
+        await f.ok('update', { id: 'title', text: 'Keep this edit' });
+        const undo = f.call('undo', {}, 'alpha', { signal: controller.signal, requestId: 'queued-undo' });
+        await entered.promise;
+        pending.delete('queued-undo');
+        controller.abort();
+        expect((await undo).structuredContent?.error.code).toBe('cancelled');
+        expect(applied).toBe(0);
+        gate.resolve();
+        await expect(hostWork).rejects.toBeDefined();
+        await f.ok('get_context');
+        expect(applied).toBe(0);
+        expect(textValue(f.editor.page.objects.title)).toBe('Keep this edit');
+        expect(f.events).toHaveLength(1);
+    });
+    it('does not invoke Undo for an already cancelled request', async () => {
+        const undo = vi.fn(() => true), f = fixture({ undo }), controller = new AbortController();
+        controller.abort();
+        expect((await f.call('undo', {}, 'alpha', { signal: controller.signal })).structuredContent?.error.code).toBe('cancelled');
+        await f.ok('get_context');
+        expect(undo).not.toHaveBeenCalled();
+    });
+    it('does not roll back Undo already applied before cancellation', async () => {
+        const acknowledged = deferred(), applied = deferred(), controller = new AbortController();
+        const f = fixture({ undo: (_agent: string, signal?: AbortSignal) => {
+            signal?.throwIfAborted();
+            const result = f.editor.undoStep();
+            applied.resolve();
+            return acknowledged.promise.then(() => result);
+        } });
+        await f.ok('update', { id: 'title', text: 'Undo this edit' });
+        const undo = f.call('undo', {}, 'alpha', { signal: controller.signal });
+        await applied.promise;
+        controller.abort();
+        expect((await undo).structuredContent?.error.code).toBe('cancelled');
+        acknowledged.resolve();
+        await f.ok('get_context');
+        expect(textValue(f.editor.page.objects.title)).toBe('Hello');
+        expect(f.events).toHaveLength(2);
+    });
     it('rechecks busy after font preparation and awaits host durability before success', async () => {
         const gate = deferred(), saved = deferred(), f = fixture({ afterWrite: () => saved.promise });
         f.fonts.ensure.mockImplementationOnce(() => gate.promise);
@@ -509,14 +623,14 @@ describe('HIST-01 host-authoritative Undo', () => {
         await f.ok('update', { id: 'title', text: 'Saved' });
         f.editor.receiveDocument(structuredClone(f.editor.doc));
         expect((await f.call('undo')).isError).not.toBe(true);
-        expect(undo).toHaveBeenCalledExactlyOnceWith('alpha');
+        expect(undo).toHaveBeenCalledExactlyOnceWith('alpha', expect.any(AbortSignal), undefined);
     });
     it('still refuses when authoritative host reports another latest author', async () => {
         const undo = vi.fn(async () => false), f = fixture({ undo });
         await f.ok('update', { id: 'title', text: 'Saved' });
         f.editor.receiveDocument(structuredClone(f.editor.doc));
         expect((await f.call('undo')).structuredContent?.error.code).toBe('nothing_to_undo');
-        expect(undo).toHaveBeenCalledExactlyOnceWith('alpha');
+        expect(undo).toHaveBeenCalledExactlyOnceWith('alpha', expect.any(AbortSignal), undefined);
     });
 });
 describe('MCP installation resource boundary', () => {

@@ -11,7 +11,7 @@ export { TOOLS };
 export interface McpOptions extends Data {
     services?: Partial<EditorServices>;
     fonts?: () => Data[];
-    undo?: (agent: string) => boolean | Promise<boolean>;
+    undo?: (agent: string, signal?: AbortSignal, requestId?: string) => boolean | Promise<boolean>;
     editing?: () => string | null;
     onHighlight?: (agent: string, ids: string[]) => void;
     afterWrite?: () => void | Promise<void>;
@@ -29,7 +29,7 @@ interface AgentState {
 }
 export function installLvMcp(editor: EditorStore, view: RenderView, options: McpOptions = {}) {
     let disposed = false, revision = 0, queue: Promise<unknown> = Promise.resolve(), latest = editor.lastOperation;
-    const generations = new Map<string, number>();
+    const sessions = new Map<string, AbortController>();
     const agents = new Map<string, AgentState>(), cache = new Map<string, {
         signature: string;
         result: Promise<ToolResult>;
@@ -261,24 +261,29 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         }
         throw new McpError('unknown_tool', `Unsupported write tool: ${name}`);
     }
-    async function settled(deadline: number) {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0)
-            throw new McpError('timeout', 'Tool response exceeded its time limit');
-        let timer: ReturnType<typeof setTimeout> | undefined;
+    function check(signal: AbortSignal) {
+        if (signal.aborted)
+            throw signal.reason;
+    }
+    async function waiting<T>(work: Promise<T> | T, signal: AbortSignal): Promise<T> {
+        check(signal);
+        let abort!: () => void;
         try {
-            await Promise.race([(async () => { await view.settled(); await options.afterWrite?.(); })(), new Promise((_, reject) => { timer = setTimeout(() => reject(new McpError('timeout', 'Tool response exceeded its time limit')), remaining); })]);
+            return await Promise.race([work, new Promise<never>((_, reject) => {
+                abort = () => reject(signal.reason);
+                signal.addEventListener('abort', abort, { once: true });
+            })]);
         }
         finally {
-            clearTimeout(timer);
+            signal.removeEventListener('abort', abort);
         }
     }
+    async function settled(signal: AbortSignal) {
+        await waiting((async () => { await view.settled(); await options.afterWrite?.(); })(), signal);
+    }
     function diagnostics(ids: string[]) { const measured = view.measure(ids.filter(id => editor.page.objects[id])); return [...measured].map(([id, m]) => ({ id, bounds: { x: m.x, y: m.y, width: m.w, height: m.h }, clippedText: m.clippedText, overflowParent: m.overflowParent, ...m.fontFallback ? { fontFallback: m.fontFallback } : {}, ...m.imageFailed ? { imageFailed: true } : {} })); }
-    async function execute(agent: string, name: string, args: Data, deadline: number, generation: number): Promise<ToolResult> {
-        if (disposed || generation !== (generations.get(agent) ?? 0))
-            throw new McpError('failed', 'MCP session has ended');
-        if (Date.now() >= deadline)
-            throw new McpError('timeout', 'Tool expired in the queue');
+    async function execute(agent: string, name: string, args: Data, signal: AbortSignal, requestId?: string): Promise<ToolResult> {
+        check(signal);
         if (!TOOLS.some(t => t.name === name))
             throw new McpError('unknown_tool', `Unknown tool: ${name}`);
         const invalid = validateToolArgs(name, args);
@@ -290,11 +295,12 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             const last = latest ?? editor.lastOperation;
             if (!options.undo && last?.label !== `agent:${agent}` && last?.author !== agent)
                 throw new McpError('nothing_to_undo', 'The latest edit does not belong to this agent');
-            const ok = options.undo ? await options.undo(agent) : editor.undoStep();
+            check(signal);
+            const ok = options.undo ? await waiting(options.undo(agent, signal, requestId), signal) : editor.undoStep();
             if (!ok)
                 throw new McpError('nothing_to_undo', 'There is no eligible agent edit');
             latest = { id: uid(), label: 'Undo' };
-            await settled(deadline);
+            await settled(signal);
             return response({ ok: true, revision });
         }
         if (writes.has(name)) {
@@ -308,11 +314,8 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
                 }
                 catch { /* A reference created by an earlier batch write is represented in the HTML arguments. */ }
             }
-            await services.fonts?.ensure?.(preflightText);
-            if (disposed || generation !== (generations.get(agent) ?? 0))
-                throw new McpError('failed', 'MCP session ended while preparing the write');
-            if (Date.now() >= deadline)
-                throw new McpError('timeout', 'Font loading exceeded the tool time limit');
+            await waiting(services.fonts?.ensure?.(preflightText), signal);
+            check(signal);
             if (busy())
                 throw new McpError('busy', 'A user edit started while fonts were loading');
             const s = state(agent), saved = { aliases: new Map(s.aliases), reverse: new Map(s.reverse), counter: s.counter }, affected = new Set<string>(), warnings: string[] = [];
@@ -334,7 +337,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
                     throw error;
                 throw new McpError('invalid', (error as Error).message);
             }
-            await settled(deadline);
+            await settled(signal);
             const ids = [...affected].filter(id => editor.page.objects[id]);
             options.onHighlight?.(agent, ids);
             const measuredIds = [...new Set(ids.flatMap(id => descendants(editor.page, id, true).map(s => s.id)))], measured = diagnostics(measuredIds);
@@ -356,7 +359,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             return response({ ok: true, revision, page: { id: page.id, name: page.name }, pages: editor.doc.pages.map(id => ({ id, name: editor.doc.pagesById[id].name })), viewport: editor.viewport, selection: editor.selection.map(id => alias(agent, id)), boards: (page.objects.root.childIds ?? []).map(id => alias(agent, id)), boardDetails: (page.objects.root.childIds ?? []).map(id => describe(agent, page.objects[id], true)), editing: options.editing?.() ?? null });
         if (name === 'get_tree') {
             if (args.detail === 'detailed')
-                await settled(deadline);
+                await settled(signal);
             const id = args.id ? resolve(agent, args.id) : 'root', depth = args.depth ?? 4;
             let count = 0, truncated = false;
             const walk = (key: string, level: number): Data | null => {
@@ -383,7 +386,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             return response({ ok: true, revision, matches: matches.slice(0, 50).map(s => describe(agent, s, true)), truncated: matches.length > 50 });
         }
         if (name === 'get_html') {
-            await settled(deadline);
+            await settled(signal);
             const id = resolve(agent, args.id);
             let html: string;
             try {
@@ -395,13 +398,13 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             return response({ ok: true, revision, html });
         }
         if (name === 'get_styles') {
-            await settled(deadline);
+            await settled(signal);
             return response({ ok: true, revision, styles: args.ids.map((key: string) => { const id = resolve(agent, key); return { id: alias(agent, id), rawId: id, style: view.computedStyle(id, args.keys) }; }) });
         }
         if (name === 'screenshot') {
-            await settled(deadline);
+            await settled(signal);
             const id = args.id ? resolve(agent, args.id) : undefined;
-            const shot = await view.screenshot(id, { mode: args.mode ?? 'slice', slice: args.slice ?? 0 });
+            const shot = await waiting(view.screenshot(id, { mode: args.mode ?? 'slice', slice: args.slice ?? 0 }), signal);
             if (!shot?.data || !shot.mimeType)
                 throw new McpError('failed', 'Renderer returned no screenshot');
             return response({ ok: true, revision, ...shot.slices !== undefined ? { slices: shot.slices } : {} }, [{ type: 'image', data: shot.data, mimeType: shot.mimeType }]);
@@ -422,14 +425,14 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             let result: Data[] = [];
             if (provider) {
                 if (typeof provider === 'function')
-                    result = await provider(args);
+                    result = await waiting(provider(args), signal);
                 else if (typeof provider.search === 'function')
-                    result = await provider.search(args.query ?? '', args.kind);
+                    result = await waiting(provider.search(args.query ?? '', args.kind), signal);
                 else if (typeof provider.list === 'function')
-                    result = await provider.list(args.query ?? '');
+                    result = await waiting(provider.list(args.query ?? ''), signal);
             }
             for (const source of sources) {
-                const rows = typeof source.search === 'function' ? await source.search(args.query ?? '') : typeof source.list === 'function' ? await source.list(args.query ?? '') : [];
+                const rows = await waiting(typeof source.search === 'function' ? source.search(args.query ?? '') : typeof source.list === 'function' ? source.list(args.query ?? '') : [], signal);
                 result.push(...rows);
             }
             return response({ ok: true, revision, assets: result, configured: !!provider || sources.length > 0 });
@@ -442,9 +445,13 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
     }
     function handleToolCall(agent: string, name: string, args: Data = {}, context: {
         idempotencyKey?: string;
+        signal?: AbortSignal;
+        requestId?: string;
     } = {}): Promise<ToolResult> {
         if (typeof agent !== 'string' || !agent.trim() || agent.length > 200)
             return Promise.resolve(failure(new McpError('bad_args', 'Invalid agent identifier')));
+        if (disposed)
+            return Promise.resolve(failure(new McpError('failed', 'MCP session has ended')));
         const key = context.idempotencyKey ? `${agent}\0${context.idempotencyKey}` : null;
         let signature: string;
         try {
@@ -459,13 +466,19 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             if (previous)
                 return previous.signature === signature ? previous.result : Promise.resolve(failure(new McpError('bad_args', 'Idempotency key was already used for a different request')));
         }
-        const deadline = Date.now() + Math.min(60000, Math.max(1, options.timeoutMs ?? 60000));
-        const generation = generations.get(agent) ?? 0;
+        let session = sessions.get(agent);
+        if (!session) {
+            session = new AbortController();
+            sessions.set(agent, session);
+        }
+        const request = new AbortController();
+        const signal = AbortSignal.any([session.signal, request.signal, ...context.signal ? [context.signal] : []]);
+        const timer = setTimeout(() => request.abort(new McpError('timeout', 'Tool response exceeded its time limit; inspect revision before retrying')), Math.min(60000, Math.max(1, options.timeoutMs ?? 60000)));
         state(agent);
-        const work = queue.then(() => execute(agent, name, args, deadline, generation));
+        const requestId = context.requestId;
+        const work = queue.then(() => execute(agent, name, args, signal, requestId));
         queue = work.then(() => { }, () => { });
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const task = Promise.race([work, new Promise<ToolResult>((_, reject) => { timer = setTimeout(() => reject(new McpError('timeout', 'Tool response exceeded its time limit; inspect revision before retrying')), Math.max(0, deadline - Date.now())); })]).catch(failure).finally(() => clearTimeout(timer));
+        const task = waiting(work, signal).catch(error => failure(signal.aborted && !(signal.reason instanceof McpError) ? new McpError('cancelled', 'Tool cancelled; applied changes are not rolled back; inspect revision before retrying') : error)).finally(() => clearTimeout(timer));
         if (key) {
             const entry = { signature, result: task, bytes: signature.length * 2 };
             cache.set(key, entry);
@@ -485,7 +498,8 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
     const globalTarget: Data | undefined = options.target ?? (typeof window !== 'undefined' ? window : undefined);
     const api = { tools: () => TOOLS.map(t => structuredClone(t)), handleToolCall, endSession(agent?: string) {
             if (agent) {
-                generations.set(agent, (generations.get(agent) ?? 0) + 1);
+                sessions.get(agent)?.abort(new McpError('failed', 'MCP session has ended'));
+                sessions.delete(agent);
                 agents.delete(agent);
                 for (const key of cache.keys())
                     if (key.startsWith(`${agent}\0`))
@@ -494,9 +508,10 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             }
             else {
                 for (const name of agents.keys()) {
-                    generations.set(name, (generations.get(name) ?? 0) + 1);
+                    sessions.get(name)?.abort(new McpError('failed', 'MCP session has ended'));
                     options.onHighlight?.(name, []);
                 }
+                sessions.clear();
                 agents.clear();
                 cache.clear();
                 cacheBytes = 0;

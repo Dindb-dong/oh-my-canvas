@@ -13,7 +13,7 @@ const profile=await fs.mkdtemp(path.join(os.tmpdir(),'omc-native-regression-'));
 let app;const rows=[];
 const wait=async fn=>{for(let i=0;i<200;i++){if(await fn())return;await new Promise(r=>setTimeout(r,75));}throw Error('Native dialog wait timed out');};
 try{
- app=await _electron.launch({args:[root,`--profile=${profile}`]});
+ app=await _electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},args:[root,`--profile=${profile}`]});
  await app.evaluate(({app})=>app.setAccessibilitySupportEnabled(true));
  const page=await app.firstWindow();await page.locator('#start-sample').click();await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor').inert);
  const info=await app.evaluate(({BrowserWindow})=>({pid:process.pid,id:BrowserWindow.getAllWindows()[0].getMediaSourceId().split(':')[1]}));

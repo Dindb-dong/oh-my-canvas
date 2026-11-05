@@ -7,7 +7,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';import {StdioCl
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-independent-host-'));let app,guest,replica;const clients=[],checks=[];
 const record=name=>{checks.push(name);console.log('PASS '+name);};
 try{
- app=await _electron.launch({executablePath:process.env.OMC_TEST_EXECUTABLE,args:[...process.env.OMC_TEST_EXECUTABLE?[]:[process.cwd()],`--profile=${dir}`],timeout:30000});const p=await app.firstWindow();await p.locator('#new').waitFor();
+ app=await _electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath:process.env.OMC_TEST_EXECUTABLE,args:[...process.env.OMC_TEST_EXECUTABLE?[]:[process.cwd()],`--profile=${dir}`],timeout:30000});const p=await app.firstWindow();await p.locator('#new').waitFor();
  const invoke=(action,data)=>p.evaluate(({action,data})=>window.omc.invoke(action,data),{action,data});
  const initial=await invoke('create',{title:'Initialization proof',document:documentFixture()});
  await assert.rejects(invoke('bootstrap',{id:'wrong',nonce:initial.bootstrapNonce,changes:[]}));
@@ -30,7 +30,7 @@ try{
  await p.locator('#home').click();await p.locator(`[data-open="${initial.id}"]`).click();await p.waitForFunction(()=>!!window.lvMcp,null,{timeout:30000});
  const snap=await invoke('snapshot');assert.equal(snap.document.pagesById.page.objects.label.y,222);
  record('initialized document survives real editor mount and reopen');
- const config=JSON.parse((await invoke('mcp-info')).config).mcpServers['oh-my-canvas'];
+ const config=JSON.parse((await invoke('mcp-info',{transport:'stdio'})).config).mcpServers['oh-my-canvas'];
  for(let i=0;i<2;i++){const c=new Client({name:'independent-host-'+i,version:'1'},{capabilities:{}});clients.push(c);await c.connect(new StdioClientTransport(config));}
  const call={name:'create_board',arguments:{name:'Idempotent board',width:120,height:90},_meta:{'oh-my-canvas/idempotency-key':'retry-once'}};
  const first=await clients[0].callTool(call),second=await clients[0].callTool(call);assert.ok(!first.isError,JSON.stringify(first));assert.deepEqual(second,first);
@@ -45,6 +45,8 @@ try{
  const unclamped=await p.evaluate(id=>window.lvMcp.handleToolCall('preview-fixture','update',{id,style:{left:'',top:''}}),dragShape.id);assert.ok(!unclamped.isError,JSON.stringify(unclamped));dragShape=(await invoke('snapshot')).document.pagesById.page.objects[dragShape.id];
  const info=await invoke('host',{port:0}),remoteInvite=await invoke('invite',{address:`127.0.0.1:${info.port}`});replica=new Replica();guest=new Collaboration({replica,id:initial.id,title:initial.title,name:'Preview remote'});await guest.join(remoteInvite);
  await p.locator('#editor [data-tool="move"]').click();const box=await p.locator(`[data-shape-id="${dragShape.id}"]`).first().boundingBox();assert.ok(box);
+ // Frames must be selected before the move tool starts a drag.
+ await p.mouse.click(box.x+box.width/2,box.y+box.height/2);
  await p.mouse.move(box.x+box.width/2,box.y+box.height/2);await p.mouse.down();await p.mouse.move(box.x+box.width/2+40,box.y+box.height/2+20,{steps:6});
  assert.equal((await invoke('snapshot')).document.pagesById.page.objects[dragShape.id].x,dragShape.x,'Live gesture must remain nondurable');
  const live=await p.evaluate(id=>window.lvMcp.handleToolCall('preview-reader','get_tree',{id,depth:1,detail:'detailed'}),dragShape.id);assert.equal(live.structuredContent.tree.x,dragShape.x+40,'Live preview should follow the pointer before remote projection');

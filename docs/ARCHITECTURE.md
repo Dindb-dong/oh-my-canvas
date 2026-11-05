@@ -6,8 +6,9 @@ Oh My Canvas uses an independently authored DOM/SVG editor inside an Electron ap
 
 ```mermaid
 flowchart LR
-  Agent[Local MCP client] -->|stdio| CLI[Bundled MCP CLI]
-  CLI -->|Authenticated loopback| Bridge[MCP bridge]
+  Agent[Local MCP client] -->|Streamable HTTP over pinned TLS + bearer| Bridge[App-owned MCP listener]
+  Legacy[Stdio client] --> CLI[Bundled MCP CLI]
+  CLI -->|Official SDK HTTPS client /mcp| Bridge
   Bridge --> Renderer[Sandboxed editor renderer]
   Renderer -->|Validated IPC| Main[Electron main]
   Main --> Replica[Yjs replica and Undo]
@@ -50,9 +51,11 @@ Containment uses parent links and deterministic sibling ranks. Materialization r
 
 ## Separate network boundaries
 
-MCP uses stdio plus an authenticated loopback bridge; it never becomes the collaboration server. The collaboration listener is a separate pinned-certificate TLS WebSocket endpoint for invitation holders. There is no discovery service, relay, hosted backend, automatic NAT traversal, automatic host election, or shared asset server. Images travel inside the document.
+MCP defaults to an authenticated app-owned Streamable HTTP listener at `https://127.0.0.1:47831/mcp`. A persistent per-profile self-signed TLS identity protects the bearer from a different process reusing the port. Clients must trust that specific certificate; the app does not install OS trust. Node SDK consumers and the current bundled stdio relay use the certificate-pinned fetch helper. The stdio relay forwards cancellation through the official SDK HTTP client; the runtime descriptor contains no bearer. The installed SDK negotiates the 2025-11-25 protocol family, with one server, transport, and server-generated agent per session. It does not implement the later sessionless protocol. The current bundled stdio relay remains available during rollout; old pre-TLS relays fail closed on the version-2 descriptor and require a client restart; neither endpoint becomes the collaboration server. The collaboration listener is a separate pinned-certificate TLS WebSocket endpoint for invitation holders. There is no discovery service, relay, hosted backend, automatic NAT traversal, automatic host election, or shared asset server. Images travel inside the document.
 
 The trust model is a local user and trusted invited editors. It is not a multi-tenant service or a permission system for mutually hostile participants. Read [SECURITY.md](../SECURITY.md) for what reports and screenshots must exclude.
+
+Each HTTP session keeps its own aliases, Undo ownership, and bounded in-memory idempotency cache. DELETE, idle expiry, and app shutdown end that agent. Request cancellation crosses main/renderer IPC; queued and font-preflight writes stop before mutation. Cancellation after a committed write does not undo it. A disconnected HTTP request alone is not cancellation. Restart or document replacement discards aliases and cached results; reconnect with `get_context` and read back uncertain changes before issuing another mutation. See [MCP setup and recovery](MCP.md).
 
 ## Export paths
 

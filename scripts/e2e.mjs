@@ -13,7 +13,7 @@ async function launch(index){
   const profile=path.join(dir,String(index));
   await fs.mkdir(profile,{recursive:true});
   await fs.writeFile(path.join(profile,'preferences.json'),JSON.stringify({name:index===0?'Host':`Peer ${index}`}));
-  const app=await electron.launch({args:[root,`--profile=${profile}`],env:{...process.env,ELECTRON_DISABLE_SECURITY_WARNINGS:'true'},timeout:30000});
+  const app=await electron.launch({args:[root,`--profile=${profile}`],env:{...process.env,OMC_TEST_BACKGROUND:'1',ELECTRON_DISABLE_SECURITY_WARNINGS:'true'},timeout:30000});
   apps.push(app);const page=await app.firstWindow();pages.push(page);
   page.on('pageerror',e=>{errors.push(e.message);console.error('Renderer error:',e.message);});
   page.on('console',m=>{if(m.type()==='error')console.error('Renderer console:',m.text().slice(0,350));});

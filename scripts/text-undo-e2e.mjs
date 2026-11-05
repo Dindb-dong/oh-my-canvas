@@ -4,7 +4,7 @@ import {promises as fs} from 'node:fs';import path from 'node:path';import os fr
 const profile=await fs.mkdtemp(path.join(os.tmpdir(),'omc-text-undo-'));
 const agent='text-undo-agent';let app,child;const errors=[];
 try{
-  app=await electron.launch({executablePath:process.argv.includes('--installed')?'/Applications/Oh My Canvas.app/Contents/MacOS/Oh My Canvas':undefined,args:[process.cwd(),`--profile=${profile}`]});child=app.process();
+  app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath:process.argv.includes('--installed')?'/Applications/Oh My Canvas.app/Contents/MacOS/Oh My Canvas':undefined,args:[process.cwd(),`--profile=${profile}`]});child=app.process();
   const p=await app.firstWindow();p.setDefaultTimeout(15000);p.on('pageerror',e=>errors.push(e.message));
   await p.locator('#new').click();await p.waitForFunction(()=>!!window.lvMcp);
   const tool=async(name,args={})=>p.evaluate(({agent,name,args})=>window.lvMcp.handleToolCall(agent,name,args),{agent,name,args});

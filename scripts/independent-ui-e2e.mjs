@@ -255,6 +255,7 @@ try {
         args: [root, `--profile=${profile}`],
         env: {
             ...process.env,
+            OMC_TEST_BACKGROUND: '1',
             ELECTRON_DISABLE_SECURITY_WARNINGS: "true"
         },
         timeout: 30000

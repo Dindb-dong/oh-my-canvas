@@ -80,11 +80,11 @@ The writer emits `.omc` v2 and reads v1. Existing files are not a license to ope
 3. Register that JSON in your MCP client. Keep the application and document open.
 4. Start with `get_context` and `get_guide` before editing.
 
-The generated command runs the bundled Electron executable in Node mode with the bundled CLI. Installed users do not need a separate Node runtime. Source checkouts need to be built first. Configuration includes the runtime path appropriate to that app/profile; do not copy an unrelated test profile's path.
+The default configuration connects directly to the app-owned Streamable HTTP URL at `https://127.0.0.1:47831/mcp`. Privately supply the persistent bearer through the client's `OMC_MCP_TOKEN` environment; GUI clients must actually inherit it. The client must trust this profile's public TLS certificate before sending its bearer; the app does not configure OS trust. No secret appears in the copied configuration. See [credential setup, profiles, restart recovery, and stdio rollback](MCP.md).
 
-The app does not automatically modify global client settings. In the configured user environment, Codex was registered explicitly. A chat that loaded its tools before registration may need a new chat to discover them.
+The app does not automatically modify global client settings. A chat that loaded its tools before registration may need a new chat to discover them. Legacy bundled stdio remains available during rollout; installed users do not need a separate Node runtime for that path.
 
-There are 19 tools. Every stdio process has a separate author identity. Component actions run outside `batch`; use returned selection aliases after switching variants. During a live user text/scrub transaction, agent writes and agent Undo return `busy`; reads remain available. Finish the gesture and retry. See [troubleshooting](TROUBLESHOOTING.md#mcp) and [security](../SECURITY.md).
+There are 19 tools. Every HTTP session and legacy stdio process has a separate author identity. Component actions run outside `batch`; use returned selection aliases after switching variants. During a live user text/scrub transaction, agent writes and agent Undo return `busy`; reads remain available. After timeout or restart, read back the document before deciding whether another mutation is needed. Never automatically replay an uncertain write. See [troubleshooting](TROUBLESHOOTING.md#mcp) and [security](../SECURITY.md).
 
 <a id="collaboration"></a>
 

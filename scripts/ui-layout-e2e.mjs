@@ -59,7 +59,7 @@ async function close(){const dialogs=page.locator('dialog[open]');while(await di
 async function ready(){await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor').inert);}
 async function select(type){const s=await page.evaluate(()=>window.omc.invoke('snapshot'));const shape=Object.values(s.document.pagesById[s.document.pages[0]].objects).find(x=>x.type===type&&x.id!=='root');assert(shape,'Fixture shape '+type);await page.locator(`#editor .row[data-id="${shape.id}"] .name`).click();await page.locator('#right').evaluate(e=>e.scrollTop=0);}
 try{
- app=await _electron.launch({args:[root,`--profile=${profile}`]});page=await app.firstWindow();page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));await page.locator('#new').waitFor();await page.evaluate(()=>window.omc.invoke('preferences',{name:'Demo designer'}));
+ app=await _electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},args:[root,`--profile=${profile}`]});page=await app.firstWindow();page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));await page.locator('#new').waitFor();await page.evaluate(()=>window.omc.invoke('preferences',{name:'Demo designer'}));
  for(const [name,width,height,zoom] of [['desktop',1500,980,1],['minimum',960,640,1],['scaled',1200,800,1.25]]){
   await app.evaluate(({BrowserWindow},{width,height,zoom})=>{const w=BrowserWindow.getAllWindows()[0];w.setSize(width,height,false);w.webContents.setZoomFactor(zoom);},{width,height,zoom});await page.waitForFunction(({width,height,zoom})=>Math.abs(innerWidth-width/zoom)<2&&Math.abs(innerHeight-height/zoom)<2,{width,height,zoom});
   await measure(name+'-library-empty');

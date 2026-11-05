@@ -3,7 +3,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';import {StdioCl
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-audit-fixes-'));let app,child;const clients=[],errors=[];
 const wait=async f=>{for(let i=0;i<200;i++){if(await f())return;await new Promise(r=>setTimeout(r,50));}throw Error('Audit condition timed out');};
 try{
- app=await electron.launch({executablePath:process.argv.includes('--installed')?'/Applications/Oh My Canvas.app/Contents/MacOS/Oh My Canvas':undefined,args:[process.cwd(),`--profile=${dir}`]});child=app.process();const p=await app.firstWindow();p.setDefaultTimeout(20000);p.on('pageerror',e=>errors.push(e.message));await p.locator('#new').click();await p.waitForFunction(()=>!!window.lvMcp);
+ app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath:process.argv.includes('--installed')?'/Applications/Oh My Canvas.app/Contents/MacOS/Oh My Canvas':undefined,args:[process.cwd(),`--profile=${dir}`]});child=app.process();const p=await app.firstWindow();p.setDefaultTimeout(20000);p.on('pageerror',e=>errors.push(e.message));await p.locator('#new').click();await p.waitForFunction(()=>!!window.lvMcp);
  const tool=async(name,args={})=>{const r=await p.evaluate(({name,args})=>window.lvMcp.handleToolCall('audit-fixture',name,args),{name,args});assert.ok(!r.isError,JSON.stringify(r));await p.evaluate(()=>window.omc.invoke('flush'));return r.structuredContent;};
  const snapshot=()=>p.evaluate(()=>window.omc.invoke('snapshot'));const text=async()=>JSON.stringify((await snapshot()).document);
  const context=await tool('get_context'),board=context.boards[0];
@@ -15,7 +15,7 @@ try{
  await app.evaluate(({dialog})=>{dialog.showSaveDialog=async()=>({canceled:true});});await p.locator('.export-btn').click();await wait(async()=>!(await p.locator('.export-btn').isDisabled()));assert.equal(await p.locator('.export-error').isVisible(),false);
  await app.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:file});},dir);await p.locator('.export-btn').click();await p.locator('.export-error[role="alert"]').waitFor({state:'visible'});
  // Each real stdio process keeps its own Undo identity in the actual app.
- const config=JSON.parse((await p.evaluate(()=>window.omc.invoke('mcp-info'))).config).mcpServers['oh-my-canvas'];
+ const config=JSON.parse((await p.evaluate(()=>window.omc.invoke('mcp-info',{transport:'stdio'}))).config).mcpServers['oh-my-canvas'];
  for(const name of ['A','B']){const c=new Client({name,version:'1'},{capabilities:{}});clients.push(c);await c.connect(new StdioClientTransport(config));}
  for(const [i,c] of clients.entries()){const r=await c.callTool({name:'create_board',arguments:{name:`Agent ${i} isolation`,width:200,height:100}});assert.ok(!r.isError,JSON.stringify(r));}
  const denied=await clients[0].callTool({name:'undo',arguments:{}});assert.equal(denied.isError,true);assert.match(await text(),/Agent 1 isolation/);assert.ok(!(await clients[1].callTool({name:'undo',arguments:{}})).isError);assert.doesNotMatch(await text(),/Agent 1 isolation/);assert.match(await text(),/Agent 0 isolation/);
