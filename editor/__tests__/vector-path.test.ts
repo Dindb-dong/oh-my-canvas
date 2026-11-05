@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createDocument, createShape, insertShape } from '../document';
+import { createDocument, createShape, Editor, insertShape } from '../document';
 import { hitTest, setShapeOrientation } from '../geometry';
-import { exportCanvasJson, importCanvasJson, importSvg } from '../formats';
+import { exportCanvasJson, importCanvasJson, importSvg, parseSvgPath } from '../formats';
 import { shapeMatrix, shapePath } from '../render/scene';
 import { assertDocument, flatten, materialize } from '../../core/document.mjs';
 import { closePath, convertPathNode, deletePathNodes, insertPathNode, joinPathEnds, movePathNodes, setPathHandle } from '../commands/path';
@@ -91,12 +91,18 @@ describe('compound path editing', () => {
 });
 
 describe('canonical editable path persistence', () => {
+    it('bounds parsing before retaining oversized paths and expanded arcs', () => {
+        expect(() => parseSvgPath('M0 0 L1 1 L2 2', 2)).toThrow('too complex');
+        expect(() => parseSvgPath('M0 0 A10 10 0 1 1 10 10', 1)).toThrow('too complex');
+        expect(() => parseSvgPath(' '.repeat(2000001))).toThrow('too complex');
+        expect(parseSvgPath('M0 0 L1 1', 2)).toHaveLength(2);
+    });
     it('renders and exports edited rotated SVG content instead of its imported aliases', () => {
         const imported = importSvg('<svg width="100" height="100"><path transform="rotate(20 50 50)" d="M10 10 L90 10 L50 80 Z"/></svg>');
         const path = imported.shapes.find(s => s.type === 'path')!;
         movePathNodes(path, [1], 7, -4);
         setShapeOrientation(path, 90);
-        expect(path.segments).not.toEqual(path.content);
+        expect(path.segments).toBeUndefined();
         const expected = path.content.map((s: any) => s.command === 'close' ? 'Z' : `${s.command === 'move' ? 'M' : 'L'}${s.x} ${s.y}`).join(' ');
         expect(shapePath(path)).toBe(expected);
         expect(shapeMatrix(path)).toBe('matrix(1 0 0 1 0 0)');
@@ -126,6 +132,55 @@ describe('canonical editable path persistence', () => {
         const legacy = { ...path };
         delete legacy.content;
         expect(shapePath(legacy)).toBe('M0 0L100 100');
+    });
+
+    it.each([
+        { d: 'M10 20 L30 40' }, { pathData: 'M10 20 L30 40' }, { path: { d: 'M10 20 L30 40' } },
+        { segments: [{ type: 'move', point: { x: 10, y: 20 } }, { type: 'line', point: { x: 30, y: 40 } }] },
+        { path: { segments: [{ command: 'move', x: 10, y: 20 }, { command: 'line', x: 30, y: 40 }] } },
+    ])('normalizes a legacy path and keeps subsequent deletion empty: %j', legacy => {
+        const path = createShape('path', { id: 'legacy', ...legacy });
+        expect(shapePath(path)).toBe('M10 20 L30 40');
+        expect(path.content).toEqual([{ command: 'move', x: 10, y: 20 }, { command: 'line', x: 30, y: 40 }]);
+        const doc = createDocument(), page = doc.pagesById[doc.pages[0]];
+        insertShape(page, path);
+        const reopened = importCanvasJson(exportCanvasJson(doc));
+        expect(shapePath(reopened.pagesById[page.id].objects.legacy)).toBe('M10 20 L30 40');
+        deletePathNodes(path, [0, 1]);
+        expect(shapePath(path)).toBe('');
+        expect(path).not.toHaveProperty('d');
+        expect(path).not.toHaveProperty('pathData');
+        expect(path).not.toHaveProperty('path');
+        expect(path).not.toHaveProperty('segments');
+        expect(shapePath(importCanvasJson(exportCanvasJson(doc)).pagesById[page.id].objects.legacy)).toBe('');
+    });
+
+    it('normalizes legacy paths in raw document loading and preserves intentional empty content', () => {
+        const doc = createDocument(), page = doc.pagesById[doc.pages[0]], path = createShape('path', { id: 'raw', d: 'M2 3 L4 5' });
+        insertShape(page, path);
+        delete path.content;
+        const imported = importCanvasJson(doc);
+        expect(shapePath(imported.pagesById[page.id].objects.raw)).toBe('M2 3 L4 5');
+        const editor = new Editor(doc);
+        expect(editor.page.objects.raw.content).toEqual([{ command: 'move', x: 2, y: 3 }, { command: 'line', x: 4, y: 5 }]);
+        editor.destroy();
+        path.content = [];
+        expect(shapePath(createDocument(doc).pagesById[page.id].objects.raw)).toBe('');
+    });
+
+    it('preserves per-node handle modes through portable local coordinates and the next edit', () => {
+        const path = createShape('path', { id: 'modes', x: 50, y: 30, content: [
+            { command: 'move', x: 50, y: 30 },
+            { command: 'curve', x1: 60, y1: 30, x2: 70, y2: 40, x: 80, y: 40, handleMode: 'symmetric' },
+            { command: 'curve', x1: 90, y1: 40, x2: 100, y2: 50, x: 110, y: 50, handleMode: 'free' },
+        ] });
+        const doc = createDocument(), page = doc.pagesById[doc.pages[0]];
+        insertShape(page, path);
+        const reopened = importCanvasJson(exportCanvasJson(doc)).pagesById[page.id].objects.modes;
+        expect(reopened.content).toEqual(path.content);
+        setPathHandle(reopened, 1, 'out', { x: 95, y: 48 }, reopened.content[1].handleMode);
+        expect(reopened.content[1]).toMatchObject({ x2: 65, y2: 32, handleMode: 'symmetric' });
+        expect(reopened.content[2]).toMatchObject({ x1: 95, y1: 48 });
     });
 
     it('preserves image restoration and outline source metadata through interchange and CRDT fields', () => {

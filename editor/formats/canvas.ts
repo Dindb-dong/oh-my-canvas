@@ -4,6 +4,7 @@ import { boxGeometry } from '../geometry';
 import { createPage, insertShape, refreshFrames } from '../document';
 import { assertFiniteDocument, copy, documentModel, richText, shape, textValue, uid } from './model';
 import { parseSvgPath } from './svg';
+import { canonicalPathSegments, normalizePathContent } from '../geometry/svg-path';
 const extensionFields: Record<string, string[]> = {
     editorLayout: ['layout', 'hSizing', 'vSizing', 'widthSizing', 'heightSizing', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight', 'absolute', 'gridCell', 'constraints', 'horizontalConstraint', 'verticalConstraint', 'alignSelf'],
     editorText: ['content', 'autoResize', 'lineBreak', 'truncate', 'maxLines', 'leadingTrim', 'textBackground'],
@@ -77,6 +78,9 @@ export function importCanvasJson(input: any, options: Data = {}): CanvasDocument
     if (!raw || typeof raw !== 'object' || Array.isArray(raw))
         throw new Error('Expected Canvas JSON object');
     if (raw.pagesById) {
+        for (const page of Object.values(raw.pagesById) as Page[])
+            for (const layer of Object.values(page.objects))
+                normalizePathContent(layer);
         assertFiniteDocument(raw);
         return raw;
     }
@@ -149,7 +153,18 @@ export function importCanvasJson(input: any, options: Data = {}): CanvasDocument
         }
         if (type === 'path') {
             const d = rawLayer.editorPath?.content;
-            if (typeof d === 'string') {
+            if (Array.isArray(rawLayer.editorPath?.segments)) {
+                values.content = canonicalPathSegments(rawLayer.editorPath.segments).map(segment => {
+                    for (const key of ['x', 'x1', 'x2'])
+                        if (segment[key] !== undefined)
+                            segment[key] += x;
+                    for (const key of ['y', 'y1', 'y2'])
+                        if (segment[key] !== undefined)
+                            segment[key] += y;
+                    return segment;
+                });
+            }
+            else if (typeof d === 'string') {
                 values.content = flatSegments(d, x, y);
                 values.segments = copy(values.content);
             }
@@ -253,8 +268,18 @@ export function exportCanvasJson(doc: CanvasDocument, options: Data = {}): Data 
         }
         if (s.type === 'frame')
             out.editorFrame = { ...out.editorFrame, x: s.x - ox, y: s.y - oy, width: s.width, height: s.height };
-        if (s.type === 'path')
-            out.editorPath = { ...copy(s.legacy?.editorPath ?? {}), content: svgPath(s) };
+        if (s.type === 'path') {
+            const segments = canonicalPathSegments(s.content ?? s.segments ?? []).map(segment => {
+                for (const key of ['x', 'x1', 'x2'])
+                    if (segment[key] !== undefined)
+                        segment[key] -= s.x;
+                for (const key of ['y', 'y1', 'y2'])
+                    if (segment[key] !== undefined)
+                        segment[key] -= s.y;
+                return segment;
+            });
+            out.editorPath = { ...copy(s.legacy?.editorPath ?? {}), content: svgPath(s), segments };
+        }
         if (s.childIds)
             out.children = s.childIds.map(id => convert(page.objects[id], page, s.x, s.y));
         return out;

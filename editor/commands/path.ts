@@ -51,6 +51,8 @@ export function refreshPath(shape: Shape): void {
     if (segments.some(s => kind(s) !== 'close'))
         Object.assign(shape, orientedPathBox(segments, shape.transform));
     delete shape.primitive;
+    for (const key of ['d', 'pathData', 'path', 'segments'])
+        delete shape[key];
     updateGeometry(shape);
 }
 export function insertPathNode(shape: Shape, index: number, t = .5): number {

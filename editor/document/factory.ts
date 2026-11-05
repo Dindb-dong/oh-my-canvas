@@ -2,6 +2,7 @@
 import type { CanvasDocument, Page, Shape, Data } from '../contracts';
 import { boxGeometry, polygonPoints, orientedPoint } from '../geometry';
 import { validateDocument } from './validation';
+import { normalizePathContent } from '../geometry/svg-path';
 export const ROOT_ID = 'root';
 export function newId(prefix = 'shape'): string {
     return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
@@ -17,6 +18,7 @@ export function createShape(type: string, props: Data = {}): Shape {
     if (['frame', 'group', 'boolean'].includes(shape.type))
         shape.childIds ??= [];
     if(shape.type==='group')shape.fills=props.fills??[];
+    normalizePathContent(shape);
     if (shape.type === 'frame') {
         shape.clipContent ??= false;
         shape.fills = props.fills ?? [{ color: '#ffffff', opacity: 1 }];
@@ -53,6 +55,9 @@ export function createPage(name = 'Page 1', id = newId('page')): Page {
 export function createDocument(options: Data = {}): CanvasDocument {
     if (options.pages && options.pagesById) {
         const doc = clone(options) as CanvasDocument;
+        for (const page of Object.values(doc.pagesById))
+            for (const shape of Object.values(page.objects))
+                normalizePathContent(shape);
         validateDocument(doc);
         return doc;
     }
