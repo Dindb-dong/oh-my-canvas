@@ -30,6 +30,8 @@ function extensions(raw: Data): Data {
     return result;
 }
 function legacyType(raw: Data): ShapeType {
+    if (['path', 'boolean', 'text', 'image', 'svg'].includes(raw.type))
+        return raw.type;
     if (raw.editorBool)
         return 'boolean';
     if (raw.editorPath)
@@ -59,7 +61,7 @@ function flatSegments(content: string, x: number, y: number): Data[] {
     });
 }
 function svgPath(s: Shape): string {
-    return (s.segments ?? s.content ?? []).map((segment: Data) => {
+    return (Array.isArray(s.content) ? s.content : s.segments ?? []).map((segment: Data) => {
         const command = segment.command ?? segment.type, p = segment.point ?? segment, c1 = segment.control1 ?? { x: segment.x1, y: segment.y1 }, c2 = segment.control2 ?? { x: segment.x2, y: segment.y2 };
         if (command === 'close')
             return 'Z';
@@ -117,7 +119,7 @@ export function importCanvasJson(input: any, options: Data = {}): CanvasDocument
     const add = (rawLayer: Data, page: Page, parentId: string, ox: number, oy: number, board = false, placement?: Data): string => {
         const ext = extensions(rawLayer), frame = rawLayer.editorFrame ?? {};
         let type = board ? 'frame' : legacyType(rawLayer);
-        if (rawLayer.editorFrame && !board)
+        if (rawLayer.editorFrame && !board && !rawLayer.editorPath && !rawLayer.editorBool && !['path', 'boolean', 'text', 'image', 'svg'].includes(rawLayer.type))
             type = 'frame';
         const id = idFor(rawLayer.id), x = placement?.x ?? Number(frame.x ?? rawLayer.x ?? 0) + ox, y = placement?.y ?? Number(frame.y ?? rawLayer.y ?? 0) + oy, width = Number(frame.width ?? rawLayer.width ?? (board ? raw.width ?? 1000 : 100)), height = Number(frame.height ?? rawLayer.height ?? (board ? raw.height ?? 1000 : 100));
         const values: Data = { ...copy(rawLayer), ...ext, type, id, x, y, width, height, parentId, enclosingFrameId: parentId, legacy: copy(rawLayer) };
@@ -238,6 +240,10 @@ export function exportCanvasJson(doc: CanvasDocument, options: Data = {}): Data 
         if (s.image)
             out.src = s.image.src;
         for (const [extension, keys] of Object.entries(extensionFields)) {
+            if (extension === 'editorFrame' && s.type !== 'frame' || extension === 'editorBool' && s.type !== 'boolean' || extension === 'editorText' && s.type !== 'text') {
+                delete out[extension];
+                continue;
+            }
             const record: Data = { ...copy(s.legacy?.[extension] ?? {}) };
             for (const key of keys)
                 if (s[key] !== undefined && !(record[key] === null && Array.isArray(s[key]) && s[key].length === 0))

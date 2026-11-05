@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createShape } from '../document';
-import { hitTest } from '../geometry';
+import { createDocument, createShape, insertShape } from '../document';
+import { hitTest, setShapeOrientation } from '../geometry';
+import { exportCanvasJson, importCanvasJson, importSvg } from '../formats';
+import { shapeMatrix, shapePath } from '../render/scene';
+import { assertDocument, flatten, materialize } from '../../core/document.mjs';
 import { closePath, convertPathNode, deletePathNodes, insertPathNode, joinPathEnds, movePathNodes, setPathHandle } from '../commands/path';
 
 const compound = (closed = true) => createShape('path', { fillRule: 'evenodd', fills: [{ color: '#000' }], content: [
@@ -84,5 +87,69 @@ describe('compound path editing', () => {
         expect(() => setPathHandle(path, 1, 'in', { x: Infinity, y: 0 })).toThrow('finite');
         expect(() => closePath(path, false, 99)).toThrow('Unknown path node');
         expect(path.content).toEqual(before);
+    });
+});
+
+describe('canonical editable path persistence', () => {
+    it('renders and exports edited rotated SVG content instead of its imported aliases', () => {
+        const imported = importSvg('<svg width="100" height="100"><path transform="rotate(20 50 50)" d="M10 10 L90 10 L50 80 Z"/></svg>');
+        const path = imported.shapes.find(s => s.type === 'path')!;
+        movePathNodes(path, [1], 7, -4);
+        setShapeOrientation(path, 90);
+        expect(path.segments).not.toEqual(path.content);
+        const expected = path.content.map((s: any) => s.command === 'close' ? 'Z' : `${s.command === 'move' ? 'M' : 'L'}${s.x} ${s.y}`).join(' ');
+        expect(shapePath(path)).toBe(expected);
+        expect(shapeMatrix(path)).toBe('matrix(1 0 0 1 0 0)');
+        const doc = createDocument(), page = doc.pagesById[doc.pages[0]];
+        insertShape(page, path);
+        const saved = exportCanvasJson(doc), reopened = importCanvasJson(saved).pagesById[page.id].objects[path.id];
+        reopened.content.forEach((segment: any, index: number) => {
+            expect(segment.command).toBe(path.content[index].command);
+            if (segment.command !== 'close') {
+                expect(segment.x).toBeCloseTo(path.content[index].x, 8);
+                expect(segment.y).toBeCloseTo(path.content[index].y, 8);
+            }
+        });
+        expect(shapePath(reopened)).toBe(shapePath(path));
+        const persisted = assertDocument(materialize(flatten(doc))).pagesById[page.id].objects[path.id];
+        persisted.content.forEach((segment: any, index: number) => {
+            if (segment.command !== 'close') {
+                expect(segment.x).toBeCloseTo(path.content[index].x, 8);
+                expect(segment.y).toBeCloseTo(path.content[index].y, 8);
+            }
+        });
+    });
+
+    it('does not resurrect stale SVG aliases after all editable nodes are deleted', () => {
+        const path = createShape('path', { content: [], segments: [{ command: 'move', x: 10, y: 10 }], d: 'M0 0L100 100', pathData: 'M1 1L2 2' });
+        expect(shapePath(path)).toBe('');
+        const legacy = { ...path };
+        delete legacy.content;
+        expect(shapePath(legacy)).toBe('M0 0L100 100');
+    });
+
+    it('preserves image restoration and outline source metadata through interchange and CRDT fields', () => {
+        const doc = createDocument(), page = doc.pagesById[doc.pages[0]], originalImage = { src: 'data:image/png;base64,b3JpZ2luYWw=', width: 2, height: 2, mimeType: 'image/png' };
+        const image = createShape('image', { id: 'photo', image: { ...originalImage, src: 'data:image/png;base64,bWFza2Vk' }, originalImage });
+        const path = createShape('path', { id: 'outlined', content: [{ command: 'move', x: 1, y: 2 }, { command: 'line', x: 3, y: 4 }], outlineSourceId: 'source', originalHidden: false });
+        insertShape(page, image);
+        insertShape(page, path);
+        const exported = exportCanvasJson(doc);
+        expect(exported.editorRootLayers[page.id].every((s: any) => !s.editorFrame && !s.editorBool)).toBe(true);
+        for (const restored of [importCanvasJson(exported), assertDocument(materialize(flatten(doc)))]) {
+            expect(restored.pagesById[page.id].objects.photo.type).toBe('image');
+            expect(restored.pagesById[page.id].objects.outlined.type).toBe('path');
+            expect(restored.pagesById[page.id].objects.photo.originalImage).toEqual(originalImage);
+            expect(restored.pagesById[page.id].objects.outlined).toMatchObject({ outlineSourceId: 'source', originalHidden: false });
+        }
+    });
+
+    it('does not reclassify styled layers as boolean/frame during portable round trips', () => {
+        const doc = createDocument(), page = doc.pagesById[doc.pages[0]];
+        for (const type of ['rect', 'ellipse', 'group', 'boolean', 'text', 'image', 'svg'])
+            insertShape(page, createShape(type, { id: type, fills: [{ color: '#123456' }], strokes: [{ color: '#000', width: 2 }] }));
+        const reopened = importCanvasJson(exportCanvasJson(doc));
+        for (const type of ['rect', 'ellipse', 'group', 'boolean', 'text', 'image', 'svg'])
+            expect(reopened.pagesById[page.id].objects[type].type).toBe(type);
     });
 });
