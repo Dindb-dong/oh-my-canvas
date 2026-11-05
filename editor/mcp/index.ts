@@ -1,9 +1,11 @@
 /** Independent MCP dispatcher. Model changes use the editor's isolated transactions. */
 import type { CanvasDocument, Data, EditorStore, RenderView, Shape, Page, ToolResult, EditorServices } from '../contracts';
-import { createShape, insertShape, removeShapes, reparentShapes, cloneShapes, descendants, topLevelIds } from '../document';
-import { importHtml, exportHtml } from '../formats';
+import { createShape, insertShape, removeShapes, reparentShapes, cloneShapes, descendants, topLevelIds, isEditable } from '../document';
+import { importHtml, importSvg, exportHtml } from '../formats';
 import { richText, textValue, uid } from '../formats/model';
 import { safeUrl } from '../formats/markup';
+import { insertPathNode, deletePathNodes, movePathNodes, setPathHandle, closePath, convertPathNode } from '../commands/path';
+import { identity, pathBounds } from '../geometry';
 import { applyStyles } from './style';
 import { TOOLS, validateToolArgs } from './defs';
 import { GUIDES } from './guides';
@@ -21,7 +23,7 @@ export interface McpOptions extends Data {
 class McpError extends Error {
     constructor(public code: string, message: string) { super(message); }
 }
-const writes = new Set(['write_html', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'component', 'undo']);
+const writes = new Set(['write_html', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'component', 'undo', 'write_svg', 'edit_path', 'boolean', 'outline', 'image']);
 interface AgentState {
     aliases: Map<string, string>;
     reverse: Map<string, string>;
@@ -125,20 +127,25 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             affected.add(s.id);
             return { id: alias(agent, s.id), rawId: s.id };
         }
-        if (name === 'write_html') {
+        if (name === 'write_html' || name === 'write_svg') {
             const replaceId = args.position === 'replace' ? resolve(agent, args.target, page) : null;
             if (replaceId === 'root')
                 throw new McpError('invalid', 'Cannot replace the root');
-            const dest = destination(agent, args.target, args.position === 'replace' ? 'before' : args.position, page), parent = page.objects[dest.parent], parsed = (() => {
+            const dest = destination(agent, args.target, args.position === 'replace' ? 'before' : args.position, page), parent = page.objects[dest.parent];
+            if (name === 'write_svg' && (parent.id !== 'root' && !isEditable(page, parent.id) || replaceId && !isEditable(page, replaceId)))
+                throw new McpError('invalid', 'SVG destination is locked or hidden');
+            const parsed = (() => {
                 try {
-                    return importHtml(args.html, { x: parent.x, y: parent.y, width: parent.width || 1000, parentId: parent.id, id: options.newId });
+                    return (name === 'write_svg' ? importSvg : importHtml)(args.svg ?? args.html, { x: parent.x, y: parent.y, width: parent.width || 1000, parentId: parent.id, id: options.newId });
                 }
                 catch (error) {
-                    throw new McpError('bad_html', (error as Error).message);
+                    throw new McpError(name === 'write_svg' ? 'bad_svg' : 'bad_html', (error as Error).message);
                 }
             })();
             if (!parsed.rootIds.length)
-                throw new McpError('bad_html', 'HTML has no editable content');
+                throw new McpError(name === 'write_svg' ? 'bad_svg' : 'bad_html', 'Input has no editable content');
+            if (name === 'write_svg' && (parsed.shapes.length > 2000 || parsed.shapes.reduce((count, s) => count + (Array.isArray(s.content) ? s.content.length : 0), 0) > 10000))
+                throw new McpError('bad_svg', 'SVG exceeds the 2000 layer or 10000 segment limit');
             warnings.push(...parsed.warnings);
             const add = (id: string, parentId: string, index?: number) => {
                 const source = parsed.objects[id], children = [...source.childIds ?? []];
@@ -153,6 +160,39 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             if (replaceId)
                 removeShapes(page, [replaceId]);
             return { ids: parsed.rootIds.map(id => alias(agent, id)), rawIds: parsed.rootIds };
+        }
+        if (name === 'edit_path') {
+            const id = resolve(agent, args.id, page), shape = page.objects[id];
+            if (shape.type !== 'path' || !Array.isArray(shape.content))
+                throw new McpError('invalid', 'Choose an editable path; use boolean with operation flatten before node editing');
+            if (!isEditable(page, id))
+                throw new McpError('invalid', 'Path is locked or hidden');
+            const indices = args.indices ?? (args.index === undefined ? [] : [args.index]);
+            if (indices.some((index: number) => !shape.content[index] || shape.content[index].command === 'close'))
+                throw new McpError('bad_args', 'Unknown path node index');
+            if (args.action === 'move_nodes') movePathNodes(shape, indices, args.dx, args.dy);
+            else if (args.action === 'insert_node') insertPathNode(shape, args.index, args.t);
+            else if (args.action === 'delete_nodes') deletePathNodes(shape, indices);
+            else if (args.action === 'set_handle') setPathHandle(shape, args.index, args.handle, args.point, args.mode);
+            else if (args.action === 'convert_node') convertPathNode(shape, args.index, args.nodeKind);
+            else closePath(shape, args.action === 'close', args.index);
+            affected.add(id);
+            return { id: alias(agent, id), rawId: id };
+        }
+        if (name === 'boolean') {
+            const ids = args.ids.map((id: string) => resolve(agent, id, page)), first = page.objects[ids[0]], prepared = args.prepared, flatten = args.operation === 'flatten';
+            const parentId = ids.every((id: string) => page.objects[id].parentId === first.parentId) ? first.parentId : 'root';
+            const shape = createShape(flatten ? 'path' : 'boolean', { ...Object.fromEntries(['fills', 'strokes', 'strokeWidth', 'strokeAlignment', 'strokeCap', 'strokeJoin', 'strokeDashArray', 'opacity', 'blendMode', 'effects', 'shadows', 'blur', 'backgroundBlur', ...(flatten ? ['absolute', 'layoutPositioning', 'layoutChild', 'hSizing', 'vSizing', 'widthSizing', 'heightSizing', 'layoutSizing', 'alignSelf', 'gridCell', 'constraints', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'] : [])].filter(key => key in first).map(key => [key, structuredClone(first[key])])), id: options.newId?.() ?? uid(), type: flatten ? 'path' : 'boolean', ...(flatten ? { flattenSourceIds: [...ids] } : { childIds: [], booleanOperation: args.operation }), name: flatten ? 'Flattened path' : `Boolean ${args.operation}`, ...(prepared.bounds ?? pathBounds(prepared.segments)), transform: identity(), inverseTransform: identity(), rotation: 0, flipX: false, flipY: false, content: prepared.segments, fillRule: prepared.fillRule });
+            delete shape.primitive;
+            insertShape(page, shape, parentId, page.objects[parentId].childIds!.indexOf(first.id));
+            if (flatten)
+                for (const id of ids) page.objects[id].hidden = true;
+            else {
+                reparentShapes(page, ids, shape.id);
+                shape.childIds = [...ids];
+            }
+            affected.add(shape.id);
+            return { id: alias(agent, shape.id), rawId: shape.id, operands: ids.map((id: string) => alias(agent, id)) };
         }
         if (name === 'update') {
             const id = resolve(agent, args.id, page);
@@ -303,6 +343,38 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             await settled(signal);
             return response({ ok: true, revision });
         }
+        if (name === 'image') {
+            if (args.revision !== revision)
+                throw new McpError('stale_revision', 'Document changed; read the context before editing the image');
+            if (!services.images)
+                throw new McpError('failed', 'Image editing service is unavailable');
+            const id = resolve(agent, args.id), operation = { id: uid(), label: `agent:${agent}`, author: agent };
+            await waiting(args.action === 'remove_background' ? services.images.removeBackground(id, operation, signal) : services.images.restore(id, operation), signal);
+            check(signal);
+            await settled(signal);
+            options.onHighlight?.(agent, [id]);
+            return response({ ok: true, revision, id: alias(agent, id), rawId: id, diagnostics: diagnostics([id]), warnings: [] });
+        }
+        if (name === 'outline') {
+            if (args.revision !== revision)
+                throw new McpError('stale_revision', 'Document changed; read the context before converting');
+            if (!services.commands)
+                throw new McpError('failed', 'Outline command service is unavailable');
+            const ids = args.ids.map((id: string) => resolve(agent, id));
+            if (new Set(ids).size !== ids.length)
+                throw new McpError('bad_args', 'Outline layers must be unique');
+            if (ids.some((id: string) => !isEditable(editor.page, id) || (args.kind === 'text' ? editor.page.objects[id].type !== 'text' : !['path', 'boolean', 'rect', 'ellipse'].includes(editor.page.objects[id].type))))
+                throw new McpError('invalid', 'Choose editable layers matching the outline kind');
+            const result: unknown = await waiting(services.commands.run(args.kind === 'stroke' ? 'path.outline-stroke' : 'text.outline', { ids, author: agent, operationId: uid(), signal }), signal);
+            check(signal);
+            if (!Array.isArray(result) || !result.length || result.some(id => typeof id !== 'string'))
+                throw new McpError('invalid', 'Outline command returned no created layer IDs');
+            const createdIds: string[] = [...result];
+            await settled(signal);
+            const created = createdIds.filter(id => editor.page.objects[id]);
+            options.onHighlight?.(agent, created);
+            return response({ ok: true, revision, ids: created.map(id => alias(agent, id)), rawIds: created, diagnostics: diagnostics(created), warnings: [] });
+        }
         if (writes.has(name)) {
             let preflightText = JSON.stringify(args);
             for (const op of name === 'batch' ? args.ops : [{ tool: name, args }]) {
@@ -318,6 +390,26 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             check(signal);
             if (busy())
                 throw new McpError('busy', 'A user edit started while fonts were loading');
+            if (name === 'edit_path' || name === 'boolean') {
+                if (args.revision !== revision)
+                    throw new McpError('stale_revision', 'Document changed; read the path/context again before editing');
+            }
+            if (name === 'boolean') {
+                const ids = args.ids.map((id: string) => resolve(agent, id));
+                if (topLevelIds(editor.page, ids).length !== ids.length || ids.some((id: string) => !isEditable(editor.page, id) || descendants(editor.page, id, true).some(s => !['rect', 'ellipse', 'path', 'boolean', 'group'].includes(s.type))))
+                    throw new McpError('invalid', 'Choose distinct editable vector operands without ancestor/descendant overlap');
+                const combine = services.combinePaths ?? services.boolean;
+                if (!combine)
+                    throw new McpError('failed', 'Vector operation service is unavailable');
+                const snapshot = editor.doc, pageId = editor.pageId;
+                const prepared = await waiting(combine(ids.map((id: string) => structuredClone(editor.page.objects[id])), args.operation, { objects: editor.page.objects }), signal);
+                check(signal);
+                if (editor.doc !== snapshot || editor.pageId !== pageId || args.revision !== revision)
+                    throw new McpError('stale_revision', 'Document changed while computing paths');
+                if (busy())
+                    throw new McpError('busy', 'A user edit started while computing paths');
+                args = { ...args, prepared };
+            }
             const s = state(agent), saved = { aliases: new Map(s.aliases), reverse: new Map(s.reverse), counter: s.counter }, affected = new Set<string>(), warnings: string[] = [];
             let result: Data;
             try {
@@ -355,6 +447,16 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             return response({ ok: true, ...result, revision, diagnostics: measured, warnings: [...new Set(warnings)] });
         }
         const page = editor.page;
+        if (name === 'get_path') {
+            await settled(signal);
+            const id = resolve(agent, args.id), stored = editor.page.objects[id];
+            const shape = stored.type === 'boolean' && view.projectedShape ? view.projectedShape(id) : stored;
+            if (!shape || !['path', 'boolean'].includes(shape.type) || !Array.isArray(shape.content))
+                throw new McpError('invalid', 'Layer has no native path geometry');
+            if (shape.content.length > 10000)
+                throw new McpError('invalid', 'Path exceeds the 10000 segment inspection limit');
+            return response({ ok: true, revision, id: alias(agent, id), rawId: id, coordinateSpace: 'world', fillRule: shape.fillRule ?? 'nonzero', editable: stored.type === 'path' && isEditable(editor.page, id), segments: shape.content.map((segment: Data, index: number) => ({ ...segment, index })) });
+        }
         if (name === 'get_context')
             return response({ ok: true, revision, page: { id: page.id, name: page.name }, pages: editor.doc.pages.map(id => ({ id, name: editor.doc.pagesById[id].name })), viewport: editor.viewport, selection: editor.selection.map(id => alias(agent, id)), boards: (page.objects.root.childIds ?? []).map(id => alias(agent, id)), boardDetails: (page.objects.root.childIds ?? []).map(id => describe(agent, page.objects[id], true)), editing: options.editing?.() ?? null });
         if (name === 'get_tree') {

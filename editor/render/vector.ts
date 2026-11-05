@@ -2,7 +2,7 @@ import type { Data, Point, Shape, Rect } from '../contracts';
 import { shapePath } from './scene';
 import type { CanvasKit, Path } from 'canvaskit-wasm';
 let kitPromise: Promise<CanvasKit> | undefined;
-async function loadKit(wasmUrl?: string) {
+export async function loadKit(wasmUrl?: string) {
     if (!kitPromise) {
         kitPromise = import('canvaskit-wasm/full').then(module => module.default({ locateFile: () => wasmUrl ?? '/canvaskit.wasm' })).catch(error => {
             kitPromise = undefined;
@@ -82,14 +82,14 @@ export async function combinePaths(shapes: Shape[], operation: 'union' | 'subtra
             result = merged;
         }
         if (operation === 'flatten') {
-            const simplified = result.makeSimplified();
+            const simplified = kit.Path.MakeFromOp(result, result, kit.PathOp.Union);
             if (!simplified)
                 throw new Error('CanvasKit could not simplify the path');
             result.delete();
             result = simplified;
         }
         const tight = result.computeTightBounds();
-        return { segments: canonicalSegments(kit, result.toCmds()), fillRule: 'nonzero', bounds: { x: tight[0], y: tight[1], width: Math.max(0, tight[2] - tight[0]), height: Math.max(0, tight[3] - tight[1]) } };
+        return { segments: canonicalSegments(kit, result.toCmds()), fillRule: result.getFillType() === kit.FillType.EvenOdd ? 'evenodd' : 'nonzero', bounds: { x: tight[0], y: tight[1], width: Math.max(0, tight[2] - tight[0]), height: Math.max(0, tight[3] - tight[1]) } };
     }
     finally {
         result?.delete();
@@ -97,7 +97,7 @@ export async function combinePaths(shapes: Shape[], operation: 'union' | 'subtra
             path.delete();
     }
 }
-function canonicalSegments(kit: CanvasKit, commands: Float32Array): Data[] {
+export function canonicalSegments(kit: CanvasKit, commands: Float32Array): Data[] {
     const segments: Data[] = [];
     let index = 0, current: Point = { x: 0, y: 0 }, origin: Point = { x: 0, y: 0 };
     const point = (): Point => ({ x: commands[index++], y: commands[index++] });

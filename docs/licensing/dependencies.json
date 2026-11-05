@@ -1,35 +1,37 @@
 {
   "schemaVersion": 1,
-  "lockfileSha256": "6229dd133e0e94ca1042ae0a569d4faa6f07c68f45ef5c310369e5ec7e3a552c",
+  "lockfileSha256": "281092f8fffbcbdbdbd5180a15f79e8fb4dbd7bdad6a72061a2125b684735259",
   "counting": "Lockfile package locations, including optional platform packages and duplicate versions. Runtime means not marked dev, not a tree-shaken bundle attribution. Electron runtime is separately distributed despite devDependency placement.",
   "summary": {
-    "directRuntime": 7,
-    "directDevelopment": 10,
-    "lockfileLocations": 546,
-    "uniqueNameVersions": 500,
-    "runtimeLocations": 105,
-    "developmentOnlyLocations": 441,
-    "installedLocations": 470,
+    "directRuntime": 10,
+    "directDevelopment": 11,
+    "lockfileLocations": 574,
+    "uniqueNameVersions": 528,
+    "runtimeLocations": 136,
+    "developmentOnlyLocations": 438,
+    "installedLocations": 498,
     "runtimeLicenseCounts": {
       "(BSD-3-Clause OR GPL-2.0)": 1,
+      "Apache-2.0": 3,
       "BSD-2-Clause": 1,
-      "BSD-3-Clause": 4,
-      "ISC": 7,
-      "MIT": 90,
-      "OFL-1.1": 2
+      "BSD-3-Clause": 14,
+      "ISC": 8,
+      "MIT": 106,
+      "OFL-1.1": 2,
+      "Python-2.0": 1
     },
     "allLicenseCounts": {
       "(BSD-3-Clause OR GPL-2.0)": 1,
       "(MIT OR CC0-1.0)": 1,
       "(WTFPL OR MIT)": 1,
       "0BSD": 1,
-      "Apache-2.0": 11,
+      "Apache-2.0": 14,
       "BSD-2-Clause": 8,
-      "BSD-3-Clause": 14,
+      "BSD-3-Clause": 24,
       "BlueOak-1.0.0": 10,
       "CC0-1.0": 1,
-      "ISC": 40,
-      "MIT": 450,
+      "ISC": 41,
+      "MIT": 464,
       "MIT-0": 2,
       "OFL-1.1": 3,
       "Python-2.0": 1,
@@ -52,6 +54,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/@acemir/cssom/LICENSE.txt",
+          "origin": "package",
           "sha256": "e539937c489c4928ad7461669ec017f4d916fb3565fc26f5b8a0ce816d2ed23c",
           "bytes": 1054
         }
@@ -71,6 +75,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@asamuzakjp/css-color/LICENSE",
+          "origin": "package",
           "sha256": "bd4539377980dd797fc6a51d90e664e52b2b2625b2158f01d4c68b5fe107eacb",
           "bytes": 1093
         }
@@ -90,6 +96,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@asamuzakjp/dom-selector/LICENSE",
+          "origin": "package",
           "sha256": "7cdf9db3b91cc77b9ec947ad0c7126140f00e34528b67c3a58e9fc1a98055e14",
           "bytes": 1093
         }
@@ -109,6 +117,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/@asamuzakjp/dom-selector/node_modules/lru-cache/LICENSE.md",
+          "origin": "package",
           "sha256": "8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004",
           "bytes": 1552
         }
@@ -128,6 +138,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@asamuzakjp/generational-cache/LICENSE",
+          "origin": "package",
           "sha256": "b4206276487160066d7006579da64b1e104f0db639897d5b91babdd0df8165e1",
           "bytes": 1072
         }
@@ -147,6 +159,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@asamuzakjp/nwsapi/LICENSE",
+          "origin": "package",
           "sha256": "9b0ffd74f2cde7528141cc314ece705490d11054805da4a01ee6149498951b8f",
           "bytes": 1084
         }
@@ -166,6 +180,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@bramus/specificity/LICENSE",
+          "origin": "package",
           "sha256": "ae842a63dd9bc829c95a2ec22dda25a08e422a368b71dbca67a45cde7c4a4b81",
           "bytes": 1083
         }
@@ -185,6 +201,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/@csstools/color-helpers/LICENSE.md",
+          "origin": "package",
           "sha256": "947e32047a166cd05f04e45938d172b412c07cbee0b9735afd14bae30e02c2f6",
           "bytes": 930
         }
@@ -204,6 +222,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/@csstools/css-calc/LICENSE.md",
+          "origin": "package",
           "sha256": "d00d032f517721b45c56c70c46bf904ebb71ad313df4d4db7722266b38069665",
           "bytes": 1111
         }
@@ -223,6 +243,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/@csstools/css-color-parser/LICENSE.md",
+          "origin": "package",
           "sha256": "d00d032f517721b45c56c70c46bf904ebb71ad313df4d4db7722266b38069665",
           "bytes": 1111
         }
@@ -242,6 +264,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/@csstools/css-parser-algorithms/LICENSE.md",
+          "origin": "package",
           "sha256": "d00d032f517721b45c56c70c46bf904ebb71ad313df4d4db7722266b38069665",
           "bytes": 1111
         }
@@ -261,6 +285,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/@csstools/css-syntax-patches-for-csstree/LICENSE.md",
+          "origin": "package",
           "sha256": "947e32047a166cd05f04e45938d172b412c07cbee0b9735afd14bae30e02c2f6",
           "bytes": 930
         }
@@ -280,6 +306,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/@csstools/css-tokenizer/LICENSE.md",
+          "origin": "package",
           "sha256": "d00d032f517721b45c56c70c46bf904ebb71ad313df4d4db7722266b38069665",
           "bytes": 1111
         }
@@ -299,6 +327,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron-internal/extract-zip/LICENSE",
+          "origin": "package",
           "sha256": "edab8abb78d9c5b36944c3e00aebf6a90eb32378993f49ac8a3904007029c629",
           "bytes": 1088
         }
@@ -318,6 +348,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/@electron/asar/LICENSE.md",
+          "origin": "package",
           "sha256": "d5af8fc171f6f600c0ab4e7597dca398dda80dbe6821ce01cef78e859e7a00f8",
           "bytes": 1055
         }
@@ -337,6 +369,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/@electron/asar/node_modules/balanced-match/LICENSE.md",
+          "origin": "package",
           "sha256": "a1bd5deadb6a06dd74efa852c1b8b23f63b67f2214fbe9c8bd591da51da69268",
           "bytes": 1096
         }
@@ -356,6 +390,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/asar/node_modules/brace-expansion/LICENSE",
+          "origin": "package",
           "sha256": "68f12f6e2c33688699249c01d8f9623c534da20aa71989c57b061b7bc1676d14",
           "bytes": 1096
         }
@@ -375,6 +411,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/asar/node_modules/minimatch/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -394,6 +432,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/fuses/LICENSE",
+          "origin": "package",
           "sha256": "24e49a190cf97a2127e0588981e82ff6e4357632278c9ab510f328a2689eca53",
           "bytes": 1065
         }
@@ -413,6 +453,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/fuses/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39",
           "bytes": 1084
         }
@@ -432,6 +474,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/fuses/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -451,6 +495,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/fuses/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -470,6 +516,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/get/LICENSE",
+          "origin": "package",
           "sha256": "edab8abb78d9c5b36944c3e00aebf6a90eb32378993f49ac8a3904007029c629",
           "bytes": 1088
         }
@@ -489,6 +537,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/@electron/get/node_modules/env-paths/license",
+          "origin": "package",
           "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
           "bytes": 1117
         }
@@ -508,6 +558,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/notarize/LICENSE",
+          "origin": "package",
           "sha256": "60e42db5f32611ac978f4be323cba0511d1375a1af10f32d2a8bba9b291d9de2",
           "bytes": 1070
         }
@@ -527,6 +579,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/notarize/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39",
           "bytes": 1084
         }
@@ -546,6 +600,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/notarize/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -565,6 +621,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/notarize/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -584,6 +642,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/osx-sign/LICENSE",
+          "origin": "package",
           "sha256": "fe6ac932d2a16058886ab32ce601b50ce2b9d65925305b72227a184185552535",
           "bytes": 1352
         }
@@ -603,6 +663,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/osx-sign/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39",
           "bytes": 1084
         }
@@ -622,6 +684,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/@electron/osx-sign/node_modules/isbinaryfile/LICENSE.txt",
+          "origin": "package",
           "sha256": "2eedc70f2242aaf269e86e2c85eabeb875dc524d187d5953016b24091d26a843",
           "bytes": 1074
         }
@@ -641,6 +705,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/osx-sign/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -660,6 +726,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/osx-sign/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -679,6 +747,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/rebuild/LICENSE",
+          "origin": "package",
           "sha256": "edab8abb78d9c5b36944c3e00aebf6a90eb32378993f49ac8a3904007029c629",
           "bytes": 1088
         }
@@ -698,6 +768,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/universal/LICENSE",
+          "origin": "package",
           "sha256": "edab8abb78d9c5b36944c3e00aebf6a90eb32378993f49ac8a3904007029c629",
           "bytes": 1088
         }
@@ -717,6 +789,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/@electron/universal/node_modules/balanced-match/LICENSE.md",
+          "origin": "package",
           "sha256": "a1bd5deadb6a06dd74efa852c1b8b23f63b67f2214fbe9c8bd591da51da69268",
           "bytes": 1096
         }
@@ -736,6 +810,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/universal/node_modules/brace-expansion/LICENSE",
+          "origin": "package",
           "sha256": "68f12f6e2c33688699249c01d8f9623c534da20aa71989c57b061b7bc1676d14",
           "bytes": 1096
         }
@@ -755,6 +831,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/universal/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "c6a7de1428955aa5a692f4d3a3d3ede658d959616944713337cda296736442e1",
           "bytes": 1084
         }
@@ -774,6 +852,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/universal/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -793,6 +873,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/universal/node_modules/minimatch/LICENSE",
+          "origin": "package",
           "sha256": "d11323827fa4edeaafc437cc5b91b6971b335f0127efeeb42bf5122fe8657e8f",
           "bytes": 775
         }
@@ -812,6 +894,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/universal/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -831,6 +915,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/windows-sign/LICENSE",
+          "origin": "package",
           "sha256": "77cbd788d921cacb2eb6b35c96a37f6752a05c69884387a4e9b1588bacec8e4a",
           "bytes": 1292
         }
@@ -850,6 +936,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/windows-sign/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "c6a7de1428955aa5a692f4d3a3d3ede658d959616944713337cda296736442e1",
           "bytes": 1084
         }
@@ -869,6 +957,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/windows-sign/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -888,6 +978,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@electron/windows-sign/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -1245,6 +1337,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@exodus/bytes/LICENSE",
+          "origin": "package",
           "sha256": "dbffd380d59504ba19fcf87ff5a1a33c37edf66d5b09966b0ad5368ab87bc2af",
           "bytes": 1077
         }
@@ -1264,6 +1358,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@fontsource-variable/ibm-plex-sans/LICENSE",
+          "origin": "package",
           "sha256": "d0283623ef57e722fd0eb688a8041589670c608ab780cd3612d06ba6f153d3fd",
           "bytes": 4429
         }
@@ -1283,6 +1379,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@fontsource-variable/noto-sans-kr/LICENSE",
+          "origin": "package",
           "sha256": "18aabf190848725e2576eefb5c29ba06aac1029d02132252a7f312eac2e50cf3",
           "bytes": 4314
         }
@@ -1302,6 +1400,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@fontsource/noto-color-emoji/LICENSE",
+          "origin": "package",
           "sha256": "2f94a0638c79b1b4b3aa6e9091ca10cb2ba9813efde09772d942dbd457bad868",
           "bytes": 4350
         }
@@ -1321,6 +1421,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@hono/node-server/LICENSE",
+          "origin": "package",
           "sha256": "6895190430d809c4c57a7582ecc2f99acbc2ea39a5dfad20262a41d5b3e91733",
           "bytes": 1101
         }
@@ -1340,6 +1442,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@isaacs/fs-minipass/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -1359,6 +1463,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@jridgewell/sourcemap-codec/LICENSE",
+          "origin": "package",
           "sha256": "769d154fbde32a915af110b1123650bc79f4cbe675acc66e005265bf069c6c6c",
           "bytes": 1080
         }
@@ -1378,6 +1484,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@malept/cross-spawn-promise/LICENSE",
+          "origin": "package",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "bytes": 11358
         }
@@ -1397,6 +1505,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@malept/flatpak-bundler/LICENSE",
+          "origin": "package",
           "sha256": "503b8b4d83781a017ffee6b4ec40d7d8da68be5f898004bfeb4ef4a7cb52ef23",
           "bytes": 1064
         }
@@ -1416,6 +1526,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@malept/flatpak-bundler/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39",
           "bytes": 1084
         }
@@ -1435,6 +1547,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@malept/flatpak-bundler/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -1454,6 +1568,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@malept/flatpak-bundler/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -1473,6 +1589,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@modelcontextprotocol/sdk/LICENSE",
+          "origin": "package",
           "sha256": "5e13dbbc1d120fc2a03cecde7c91424ae2d7de11b63d58ded2f4431e261ee50d",
           "bytes": 1071
         }
@@ -1505,6 +1623,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@noble/hashes/LICENSE",
+          "origin": "package",
           "sha256": "4f221aee6e072336700c408c68ab3b96a3fc09f6aebe6f48f1bd99e5ef13faec",
           "bytes": 1109
         }
@@ -1524,6 +1644,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@peculiar/asn1-schema/LICENSE",
+          "origin": "package",
           "sha256": "1ecdd8e8977af83c07c5f97bec87b47d27059b7ea323ca3160fbfa2314f5d99c",
           "bytes": 1057
         }
@@ -1543,6 +1665,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@peculiar/json-schema/LICENSE",
+          "origin": "package",
           "sha256": "83e4dd21429a91fb7cea67a476032a9641425e5355df2e0f589a738b6ec9fd2c",
           "bytes": 1057
         }
@@ -1562,6 +1686,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@peculiar/utils/LICENSE",
+          "origin": "package",
           "sha256": "ce2ae0f0066d1be56ab4ec851cc611805bb95cdc8dd858b301e22ee54b351d43",
           "bytes": 1084
         }
@@ -1581,8 +1707,199 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/@peculiar/webcrypto/LICENSE.md",
+          "origin": "package",
           "sha256": "06fa9b6896b5e0062651f1a769d08f19892e76f2c1b42329f60f4cdd8de4c378",
           "bytes": 1084
+        }
+      ]
+    },
+    {
+      "location": "node_modules/@protobufjs/aspromise",
+      "name": "@protobufjs/aspromise",
+      "version": "1.1.2",
+      "license": "BSD-3-Clause",
+      "installedLicense": "BSD-3-Clause",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/@protobufjs/aspromise/LICENSE",
+          "origin": "package",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794",
+          "bytes": 1505
+        }
+      ]
+    },
+    {
+      "location": "node_modules/@protobufjs/base64",
+      "name": "@protobufjs/base64",
+      "version": "1.1.2",
+      "license": "BSD-3-Clause",
+      "installedLicense": "BSD-3-Clause",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/@protobufjs/base64/LICENSE",
+          "origin": "package",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794",
+          "bytes": 1505
+        }
+      ]
+    },
+    {
+      "location": "node_modules/@protobufjs/codegen",
+      "name": "@protobufjs/codegen",
+      "version": "2.0.5",
+      "license": "BSD-3-Clause",
+      "installedLicense": "BSD-3-Clause",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/@protobufjs/codegen/LICENSE",
+          "origin": "package",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794",
+          "bytes": 1505
+        }
+      ]
+    },
+    {
+      "location": "node_modules/@protobufjs/eventemitter",
+      "name": "@protobufjs/eventemitter",
+      "version": "1.1.1",
+      "license": "BSD-3-Clause",
+      "installedLicense": "BSD-3-Clause",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/@protobufjs/eventemitter/LICENSE",
+          "origin": "package",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794",
+          "bytes": 1505
+        }
+      ]
+    },
+    {
+      "location": "node_modules/@protobufjs/fetch",
+      "name": "@protobufjs/fetch",
+      "version": "1.1.1",
+      "license": "BSD-3-Clause",
+      "installedLicense": "BSD-3-Clause",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/@protobufjs/fetch/LICENSE",
+          "origin": "package",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794",
+          "bytes": 1505
+        }
+      ]
+    },
+    {
+      "location": "node_modules/@protobufjs/float",
+      "name": "@protobufjs/float",
+      "version": "1.0.2",
+      "license": "BSD-3-Clause",
+      "installedLicense": "BSD-3-Clause",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/@protobufjs/float/LICENSE",
+          "origin": "package",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794",
+          "bytes": 1505
+        }
+      ]
+    },
+    {
+      "location": "node_modules/@protobufjs/path",
+      "name": "@protobufjs/path",
+      "version": "1.1.2",
+      "license": "BSD-3-Clause",
+      "installedLicense": "BSD-3-Clause",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/@protobufjs/path/LICENSE",
+          "origin": "package",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794",
+          "bytes": 1505
+        }
+      ]
+    },
+    {
+      "location": "node_modules/@protobufjs/pool",
+      "name": "@protobufjs/pool",
+      "version": "1.1.0",
+      "license": "BSD-3-Clause",
+      "installedLicense": "BSD-3-Clause",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/@protobufjs/pool/LICENSE",
+          "origin": "package",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794",
+          "bytes": 1505
+        }
+      ]
+    },
+    {
+      "location": "node_modules/@protobufjs/utf8",
+      "name": "@protobufjs/utf8",
+      "version": "1.1.2",
+      "license": "BSD-3-Clause",
+      "installedLicense": "BSD-3-Clause",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/@protobufjs/utf8/LICENSE",
+          "origin": "package",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794",
+          "bytes": 1505
         }
       ]
     },
@@ -1938,6 +2255,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/@sindresorhus/is/license",
+          "origin": "package",
           "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
           "bytes": 1117
         }
@@ -1957,8 +2276,31 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@standard-schema/spec/LICENSE",
+          "origin": "package",
           "sha256": "653b779005a3a4d64a7288c940f7b9a0e8f0b1e0375f6aa6af9473caf131e564",
           "bytes": 1071
+        }
+      ]
+    },
+    {
+      "location": "node_modules/@swc/helpers",
+      "name": "@swc/helpers",
+      "version": "0.5.24",
+      "license": "Apache-2.0",
+      "installedLicense": "Apache-2.0",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/@swc/helpers/LICENSE",
+          "origin": "package",
+          "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+          "bytes": 10836
         }
       ]
     },
@@ -1976,6 +2318,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@szmarczak/http-timer/LICENSE",
+          "origin": "package",
           "sha256": "0194571d45a06ea2a22ceb51f981e3be92525966d28847dbc0d9982603bf90de",
           "bytes": 1071
         }
@@ -1995,6 +2339,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@types/cacheable-request/LICENSE",
+          "origin": "package",
           "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
           "bytes": 1141
         }
@@ -2014,6 +2360,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@types/chai/LICENSE",
+          "origin": "package",
           "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
           "bytes": 1141
         }
@@ -2033,6 +2381,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@types/debug/LICENSE",
+          "origin": "package",
           "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
           "bytes": 1141
         }
@@ -2052,6 +2402,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@types/deep-eql/LICENSE",
+          "origin": "package",
           "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
           "bytes": 1141
         }
@@ -2071,6 +2423,29 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@types/estree/LICENSE",
+          "origin": "package",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "bytes": 1141
+        }
+      ]
+    },
+    {
+      "location": "node_modules/@types/fontkit",
+      "name": "@types/fontkit",
+      "version": "2.0.9",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": true,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": true,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/@types/fontkit/LICENSE",
+          "origin": "package",
           "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
           "bytes": 1141
         }
@@ -2090,6 +2465,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@types/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
           "bytes": 1141
         }
@@ -2109,6 +2486,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@types/http-cache-semantics/LICENSE",
+          "origin": "package",
           "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
           "bytes": 1141
         }
@@ -2128,6 +2507,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@types/keyv/LICENSE",
+          "origin": "package",
           "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
           "bytes": 1141
         }
@@ -2147,6 +2528,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@types/ms/LICENSE",
+          "origin": "package",
           "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
           "bytes": 1141
         }
@@ -2158,7 +2541,7 @@
       "version": "24.19.2",
       "license": "MIT",
       "installedLicense": "MIT",
-      "developmentOnly": true,
+      "developmentOnly": false,
       "optional": false,
       "installed": true,
       "directRuntime": false,
@@ -2166,6 +2549,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@types/node/LICENSE",
+          "origin": "package",
           "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
           "bytes": 1141
         }
@@ -2185,6 +2570,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@types/responselike/LICENSE",
+          "origin": "package",
           "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
           "bytes": 1141
         }
@@ -2204,6 +2591,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@vitest/expect/LICENSE",
+          "origin": "package",
           "sha256": "04575fc5bfae19a9b63100f8691f901a2e15a399011ac02db435a9ef27295551",
           "bytes": 1102
         }
@@ -2223,6 +2612,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@vitest/mocker/LICENSE",
+          "origin": "package",
           "sha256": "04575fc5bfae19a9b63100f8691f901a2e15a399011ac02db435a9ef27295551",
           "bytes": 1102
         }
@@ -2242,6 +2633,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@vitest/pretty-format/LICENSE",
+          "origin": "package",
           "sha256": "04575fc5bfae19a9b63100f8691f901a2e15a399011ac02db435a9ef27295551",
           "bytes": 1102
         }
@@ -2261,6 +2654,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@vitest/runner/LICENSE",
+          "origin": "package",
           "sha256": "04575fc5bfae19a9b63100f8691f901a2e15a399011ac02db435a9ef27295551",
           "bytes": 1102
         }
@@ -2280,6 +2675,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@vitest/snapshot/LICENSE",
+          "origin": "package",
           "sha256": "04575fc5bfae19a9b63100f8691f901a2e15a399011ac02db435a9ef27295551",
           "bytes": 1102
         }
@@ -2299,6 +2696,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@vitest/spy/LICENSE",
+          "origin": "package",
           "sha256": "04575fc5bfae19a9b63100f8691f901a2e15a399011ac02db435a9ef27295551",
           "bytes": 1102
         }
@@ -2318,6 +2717,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@vitest/utils/LICENSE",
+          "origin": "package",
           "sha256": "04575fc5bfae19a9b63100f8691f901a2e15a399011ac02db435a9ef27295551",
           "bytes": 1102
         }
@@ -2337,6 +2738,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@webgpu/types/LICENSE",
+          "origin": "package",
           "sha256": "ad88400fc55c2871ba2ed33930dc13001ef01907c2ddcbfa3caa8656e9142f05",
           "bytes": 1500
         }
@@ -2356,6 +2759,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/@xmldom/xmldom/LICENSE",
+          "origin": "package",
           "sha256": "4da724fc305d81606b245b324d4d2586916b9d248b23d82183df753ace0fdf71",
           "bytes": 1298
         }
@@ -2375,6 +2780,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/abbrev/LICENSE",
+          "origin": "package",
           "sha256": "9e0d5c7989f7e9f07d7c4b158aceff270f235eb7464ace41c5e7b200834a43e0",
           "bytes": 2011
         }
@@ -2394,6 +2801,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/accepts/LICENSE",
+          "origin": "package",
           "sha256": "71f83c4c0621102a56d9853812777b85751bce7e9726f686f5b056c1f8a4b0e6",
           "bytes": 1167
         }
@@ -2413,6 +2822,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/agent-base/LICENSE",
+          "origin": "package",
           "sha256": "8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a",
           "bytes": 1101
         }
@@ -2432,6 +2843,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/ajv/LICENSE",
+          "origin": "package",
           "sha256": "a05350a88e318e4f5f2c2a1ff1e2e88daa4dd38e6e78b71cccae422bdc762cc3",
           "bytes": 1090
         }
@@ -2451,6 +2864,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/ajv-formats/LICENSE",
+          "origin": "package",
           "sha256": "9df3bb69929a3b650ed73b3bfa1756725aaff0ac296461605753547004eafeaf",
           "bytes": 1074
         }
@@ -2470,6 +2885,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/ansi-regex/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -2489,6 +2906,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/ansi-styles/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -2521,6 +2940,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/app-builder-lib/node_modules/@electron/get/LICENSE",
+          "origin": "package",
           "sha256": "edab8abb78d9c5b36944c3e00aebf6a90eb32378993f49ac8a3904007029c629",
           "bytes": 1088
         }
@@ -2540,6 +2961,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/app-builder-lib/node_modules/@electron/get/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39",
           "bytes": 1084
         }
@@ -2559,6 +2982,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/app-builder-lib/node_modules/@electron/get/node_modules/semver/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -2578,6 +3003,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/app-builder-lib/node_modules/ci-info/LICENSE",
+          "origin": "package",
           "sha256": "f58943cb354fb2707fea2f7b26b04e6014ddb56835cdfd414c9d2c6c59165b64",
           "bytes": 1086
         }
@@ -2597,6 +3024,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/app-builder-lib/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39",
           "bytes": 1084
         }
@@ -2616,6 +3045,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/app-builder-lib/node_modules/fs-extra/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -2635,6 +3066,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/app-builder-lib/node_modules/fs-extra/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -2654,6 +3087,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/app-builder-lib/node_modules/isexe/LICENSE.md",
+          "origin": "package",
           "sha256": "8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004",
           "bytes": 1552
         }
@@ -2673,6 +3108,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/app-builder-lib/node_modules/semver/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -2692,6 +3129,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/app-builder-lib/node_modules/which/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -2703,7 +3142,7 @@
       "version": "2.0.1",
       "license": "Python-2.0",
       "installedLicense": "Python-2.0",
-      "developmentOnly": true,
+      "developmentOnly": false,
       "optional": false,
       "installed": true,
       "directRuntime": false,
@@ -2711,6 +3150,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/argparse/LICENSE",
+          "origin": "package",
           "sha256": "de4d1f2d2ad5ad0cfd1657a106476b31cb5db5ef9d1ff842b237c0c81f0c8a23",
           "bytes": 12775
         }
@@ -2730,6 +3171,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/asn1js/LICENSE",
+          "origin": "package",
           "sha256": "ebe5d98519d0dfcbcb80e20b22a56e7321e8557cd14355760434bbd4c1f4f683",
           "bytes": 1571
         }
@@ -2749,6 +3192,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/assertion-error/LICENSE",
+          "origin": "package",
           "sha256": "2130216d5ab4c02134f8247f32999feda0abe1eaf028218baeac445c19ce4cea",
           "bytes": 1108
         }
@@ -2768,6 +3213,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/async/LICENSE",
+          "origin": "package",
           "sha256": "d9fed24f132985934fca621c4dc1dfb53e03377a24d0568d424383d7eaa9c0ac",
           "bytes": 1063
         }
@@ -2787,6 +3234,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/async-exit-hook/license",
+          "origin": "package",
           "sha256": "6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c",
           "bytes": 1119
         }
@@ -2806,6 +3255,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/asynckit/LICENSE",
+          "origin": "package",
           "sha256": "1953150d5d4b10c7542cee6f6e0c613b2682545233f069d75cfff1936386ce10",
           "bytes": 1078
         }
@@ -2825,6 +3276,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/at-least-node/LICENSE",
+          "origin": "package",
           "sha256": "ecc042b5f1cdc6854fc00486065084bed877daa8a7fadce15ef943a550d1dff0",
           "bytes": 770
         }
@@ -2844,6 +3297,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/aws4/LICENSE",
+          "origin": "package",
           "sha256": "c366fee901d0ff03629d5b39509565785e5be424c73c85eef885f4e40eb32578",
           "bytes": 1080
         }
@@ -2863,6 +3318,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/balanced-match/LICENSE.md",
+          "origin": "package",
           "sha256": "d408f38ffa3355c5faec517153295338892eb0f1ea43f57874bb23c6075979b5",
           "bytes": 1155
         }
@@ -2874,7 +3331,7 @@
       "version": "1.5.1",
       "license": "MIT",
       "installedLicense": "MIT",
-      "developmentOnly": true,
+      "developmentOnly": false,
       "optional": false,
       "installed": true,
       "directRuntime": false,
@@ -2882,6 +3339,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/base64-js/LICENSE",
+          "origin": "package",
           "sha256": "5b37224c080cdcc97c871ada971c224e9926370fe74f11b539aa1cf9f3b1aca1",
           "bytes": 1081
         }
@@ -2901,6 +3360,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/bidi-js/LICENSE.txt",
+          "origin": "package",
           "sha256": "49d4d143fed599deb502a0fe6e02f49832f87e9a3a4cd0502e469596d50faa6d",
           "bytes": 1071
         }
@@ -2920,6 +3381,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/bluebird/LICENSE",
+          "origin": "package",
           "sha256": "87092fe7ffd1e92eba5d1dd39b73a73fdb4fdd4df3474beacc3d9f6b08ece82c",
           "bytes": 1086
         }
@@ -2939,6 +3402,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/body-parser/LICENSE",
+          "origin": "package",
           "sha256": "23d466b1b134b415b66fa50c6526b4cf3e7b9258554da88d3abb371721e7ce68",
           "bytes": 1172
         }
@@ -2958,6 +3423,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/body-parser/node_modules/content-type/LICENSE",
+          "origin": "package",
           "sha256": "257aed98914108e91a337912727b6a802eef218248507f74b76faffaff517a38",
           "bytes": 1089
         }
@@ -2977,6 +3444,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/boolean/LICENSE.txt",
+          "origin": "package",
           "sha256": "8e4aa1aef825c37d6f74d4b867dccb7b059b66c75ecdedc74834e2f403568a27",
           "bytes": 1086
         }
@@ -2996,8 +3465,31 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/brace-expansion/LICENSE",
+          "origin": "package",
           "sha256": "9c63a23124d68cd30cd316a94a1a0bca34f032786df6df69fc4b5f136bac8d2e",
           "bytes": 1144
+        }
+      ]
+    },
+    {
+      "location": "node_modules/brotli",
+      "name": "brotli",
+      "version": "1.3.3",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "docs/licensing/brotli-NOTICE.txt",
+          "source": "docs/licensing/brotli-NOTICE.txt",
+          "origin": "repository",
+          "sha256": "be48c0b21694f60d878643284216906f1d6a655b14163da3e045b804436271e3",
+          "bytes": 12729
         }
       ]
     },
@@ -3015,6 +3507,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/buffer-from/LICENSE",
+          "origin": "package",
           "sha256": "14275f5c8139d02054c5259d52a88ccbba662a86af18c30f071c8d082dc6004c",
           "bytes": 1078
         }
@@ -3034,6 +3528,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/builder-util/LICENSE",
+          "origin": "package",
           "sha256": "bed8d0ab3e6031817f775a641ff37313b0f5591bc8ba0ed79b978dafbd4231ce",
           "bytes": 1084
         }
@@ -3053,6 +3549,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/builder-util-runtime/LICENSE",
+          "origin": "package",
           "sha256": "bed8d0ab3e6031817f775a641ff37313b0f5591bc8ba0ed79b978dafbd4231ce",
           "bytes": 1084
         }
@@ -3072,6 +3570,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/builder-util/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39",
           "bytes": 1084
         }
@@ -3091,6 +3591,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/builder-util/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -3110,6 +3612,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/builder-util/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -3129,6 +3633,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/bytes/LICENSE",
+          "origin": "package",
           "sha256": "e3b44af066615de2ea48d18d852d0762f18c0b2efcea714fa48a6f729d405b85",
           "bytes": 1153
         }
@@ -3148,6 +3654,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/bytestreamjs/LICENSE",
+          "origin": "package",
           "sha256": "f0fd6a4bf9bf46cfcea2005f800305fbb72cd0152b3c269cf496388258ee08f9",
           "bytes": 1534
         }
@@ -3167,6 +3675,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/cacheable-lookup/LICENSE",
+          "origin": "package",
           "sha256": "b35de79efc88b23c73dd431df6075bed0890db0db1544ee3d57b046aa7a8e72b",
           "bytes": 1071
         }
@@ -3186,6 +3696,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/cacheable-request/LICENSE",
+          "origin": "package",
           "sha256": "861908ec818ff6142fdd6c4b66d6264c206d3d5a46003b1342e1853a9a85abac",
           "bytes": 1068
         }
@@ -3205,6 +3717,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/call-bind-apply-helpers/LICENSE",
+          "origin": "package",
           "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292",
           "bytes": 1071
         }
@@ -3224,6 +3738,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/call-bound/LICENSE",
+          "origin": "package",
           "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292",
           "bytes": 1071
         }
@@ -3243,6 +3759,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/canvaskit-wasm/LICENSE",
+          "origin": "package",
           "sha256": "d27678cba0d529e77201e2d2a053628143e986aad8f1e77f7039ad4366c8f978",
           "bytes": 1635
         }
@@ -3262,6 +3780,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/chai/LICENSE",
+          "origin": "package",
           "sha256": "b181da80336ff9dd1043fc8be1a764d7382363433319aa872e4d2cb5ce2a3066",
           "bytes": 1082
         }
@@ -3281,6 +3801,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/chalk/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -3300,6 +3822,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/chownr/LICENSE.md",
+          "origin": "package",
           "sha256": "a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09",
           "bytes": 1764
         }
@@ -3332,6 +3856,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/ci-info/LICENSE",
+          "origin": "package",
           "sha256": "f58943cb354fb2707fea2f7b26b04e6014ddb56835cdfd414c9d2c6c59165b64",
           "bytes": 1086
         }
@@ -3351,8 +3877,31 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/cliui/LICENSE.txt",
+          "origin": "package",
           "sha256": "2dc0465729366c3a7890dfa9e972a1ba7048a26c02116fb8b419a6a1ac110149",
           "bytes": 731
+        }
+      ]
+    },
+    {
+      "location": "node_modules/clone",
+      "name": "clone",
+      "version": "2.1.2",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/clone/LICENSE",
+          "origin": "package",
+          "sha256": "3fb0857ef0133928cf72c88dfc464e931486e88778961eedec25585e2321507f",
+          "bytes": 1070
         }
       ]
     },
@@ -3370,6 +3919,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/clone-response/LICENSE",
+          "origin": "package",
           "sha256": "861908ec818ff6142fdd6c4b66d6264c206d3d5a46003b1342e1853a9a85abac",
           "bytes": 1068
         }
@@ -3389,6 +3940,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/color-convert/LICENSE",
+          "origin": "package",
           "sha256": "693866fc419c6f61c8570438ec00659d156ec2b4d4a4d04091711f5f11a365d4",
           "bytes": 1087
         }
@@ -3408,6 +3961,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/color-name/LICENSE",
+          "origin": "package",
           "sha256": "c064f7a3e353bc1bc977f3c897941c75ef763f44f41677e0a15370ca0853d6e2",
           "bytes": 1085
         }
@@ -3427,6 +3982,8 @@
       "licenseFiles": [
         {
           "file": "License",
+          "source": "node_modules/combined-stream/License",
+          "origin": "package",
           "sha256": "47eb8ca82c798246774946d1be0f9aa08f025fa8325ced0947aeeb4c05fe5547",
           "bytes": 1085
         }
@@ -3446,6 +4003,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/commander/LICENSE",
+          "origin": "package",
           "sha256": "04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b",
           "bytes": 1098
         }
@@ -3478,6 +4037,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/concat-map/LICENSE",
+          "origin": "package",
           "sha256": "435a6722c786b0a56fbe7387028f1d9d3f3a2d0fb615bb8fee118727c3f59b7b",
           "bytes": 1073
         }
@@ -3497,6 +4058,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/content-disposition/LICENSE",
+          "origin": "package",
           "sha256": "bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400",
           "bytes": 1094
         }
@@ -3516,6 +4079,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/content-type/LICENSE",
+          "origin": "package",
           "sha256": "257aed98914108e91a337912727b6a802eef218248507f74b76faffaff517a38",
           "bytes": 1089
         }
@@ -3535,6 +4100,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/convert-source-map/LICENSE",
+          "origin": "package",
           "sha256": "1fa6ee8bb95a81ae3d73a5bd074a3ac380ffec13697051063ca1a601921b91db",
           "bytes": 1078
         }
@@ -3554,6 +4121,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/cookie/LICENSE",
+          "origin": "package",
           "sha256": "c02110eedc16c7114f1a9bdc026c65626ce1d9c7e27fd51a8e0feee8a48a6858",
           "bytes": 1175
         }
@@ -3573,6 +4142,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/cookie-signature/LICENSE",
+          "origin": "package",
           "sha256": "0dd4e47333485760cf8c265db5a5e24ae8d7401064c6f2e19793ee81a5bef42f",
           "bytes": 1124
         }
@@ -3592,6 +4163,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/core-util-is/LICENSE",
+          "origin": "package",
           "sha256": "33b734d60042d0fe0c92dd1fc1e874193a1c899ec3e276a2eb935d2d0bf5b710",
           "bytes": 1077
         }
@@ -3611,6 +4184,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/cors/LICENSE",
+          "origin": "package",
           "sha256": "1aa9a12863eefb583779b2ca0e5d73c610b6e6d07529ae0472721769a6ea0a32",
           "bytes": 1095
         }
@@ -3643,6 +4218,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/cross-spawn/LICENSE",
+          "origin": "package",
           "sha256": "aaa78451b6fecd1b9c4594c796c133c0e90cad100372ff8bc6de615e9ef9adf1",
           "bytes": 1105
         }
@@ -3662,6 +4239,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/css-tree/LICENSE",
+          "origin": "package",
           "sha256": "719a251ceca49c057ea90a1152af6546b767ec88e6d573bb6324454267b32c22",
           "bytes": 1065
         }
@@ -3681,6 +4260,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/cssstyle/LICENSE",
+          "origin": "package",
           "sha256": "768faff9f6908c78d848b18770b2a93e3361d6e2ee35edf45c6a5ddf1f7cb185",
           "bytes": 1050
         }
@@ -3700,6 +4281,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/cssstyle/node_modules/lru-cache/LICENSE.md",
+          "origin": "package",
           "sha256": "8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004",
           "bytes": 1552
         }
@@ -3719,6 +4302,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/data-urls/LICENSE.txt",
+          "origin": "package",
           "sha256": "528eec83cb836a0adda9f8fc3d6a2a70a710d6cc0be9a155f92212c8df28acfa",
           "bytes": 1069
         }
@@ -3738,6 +4323,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/debug/LICENSE",
+          "origin": "package",
           "sha256": "3a61c6c96caf5c1d9b623fb9b04c822b783dfcb78aa7e49c76a3f643e6ed7f95",
           "bytes": 1139
         }
@@ -3757,6 +4344,8 @@
       "licenseFiles": [
         {
           "file": "LICENCE.md",
+          "source": "node_modules/decimal.js/LICENCE.md",
+          "origin": "package",
           "sha256": "3108b546bcff5d346923a82f48b2d252ca722f9088076db6d145f6b67757ad6c",
           "bytes": 1104
         }
@@ -3776,6 +4365,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/decompress-response/license",
+          "origin": "package",
           "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
           "bytes": 1117
         }
@@ -3795,6 +4386,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/decompress-response/node_modules/mimic-response/license",
+          "origin": "package",
           "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
           "bytes": 1117
         }
@@ -3814,6 +4407,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/defer-to-connect/LICENSE",
+          "origin": "package",
           "sha256": "0194571d45a06ea2a22ceb51f981e3be92525966d28847dbc0d9982603bf90de",
           "bytes": 1071
         }
@@ -3833,6 +4428,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/define-data-property/LICENSE",
+          "origin": "package",
           "sha256": "b41d08bc3624d8c436fc80237d73ebb361985a67f4504bbcd703e5ca2b27254c",
           "bytes": 1071
         }
@@ -3852,6 +4449,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/define-properties/LICENSE",
+          "origin": "package",
           "sha256": "00d402c2bbe7c67369bd01ce2c16b8ed46ccc949a1ee2d6bb8f9606afa8c7434",
           "bytes": 1080
         }
@@ -3871,6 +4470,8 @@
       "licenseFiles": [
         {
           "file": "License",
+          "source": "node_modules/delayed-stream/License",
+          "origin": "package",
           "sha256": "47eb8ca82c798246774946d1be0f9aa08f025fa8325ced0947aeeb4c05fe5547",
           "bytes": 1085
         }
@@ -3890,6 +4491,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/depd/LICENSE",
+          "origin": "package",
           "sha256": "bd134b41da59e452fb5a1d366b660886f741c87c2bf9428e93764c419fbc40f5",
           "bytes": 1094
         }
@@ -3909,8 +4512,31 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/detect-node/LICENSE",
+          "origin": "package",
           "sha256": "54b32293ea560d22cd9b62af9b2cda1a030d910a48c6601d227c5ff2338d95f8",
           "bytes": 1068
+        }
+      ]
+    },
+    {
+      "location": "node_modules/dfa",
+      "name": "dfa",
+      "version": "1.2.0",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "docs/licensing/dfa-NOTICE.txt",
+          "source": "docs/licensing/dfa-NOTICE.txt",
+          "origin": "repository",
+          "sha256": "94b079a5cba07b84f35663272dbd183bac8e539d7f26f3acfb422b49d7f2143b",
+          "bytes": 3879
         }
       ]
     },
@@ -3928,6 +4554,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/dir-compare/LICENSE",
+          "origin": "package",
           "sha256": "4b5d70dad6961c6f676e8a1dbd408e4869c1996dff9fc7d7d49c04916c60751f",
           "bytes": 1198
         }
@@ -3947,6 +4575,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/dir-compare/node_modules/balanced-match/LICENSE.md",
+          "origin": "package",
           "sha256": "a1bd5deadb6a06dd74efa852c1b8b23f63b67f2214fbe9c8bd591da51da69268",
           "bytes": 1096
         }
@@ -3966,6 +4596,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/dir-compare/node_modules/brace-expansion/LICENSE",
+          "origin": "package",
           "sha256": "68f12f6e2c33688699249c01d8f9623c534da20aa71989c57b061b7bc1676d14",
           "bytes": 1096
         }
@@ -3985,6 +4617,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/dir-compare/node_modules/minimatch/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -4017,6 +4651,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/dmg-builder/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39",
           "bytes": 1084
         }
@@ -4036,6 +4672,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/dmg-builder/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -4055,6 +4693,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/dmg-builder/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -4074,6 +4714,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/dotenv/LICENSE",
+          "origin": "package",
           "sha256": "74b629b24865e1e83c5277ee84590b7937644d6fd959d0c7bdce758676cd2ced",
           "bytes": 1294
         }
@@ -4093,6 +4735,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/dotenv-expand/LICENSE",
+          "origin": "package",
           "sha256": "3726b9470c3a6b54e1ebcc1d802d37089b5a5fc97273b52b2cee578a4421ec45",
           "bytes": 1295
         }
@@ -4112,6 +4756,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/dunder-proto/LICENSE",
+          "origin": "package",
           "sha256": "2b770a704c15de238c3f622b01b0044ddd60b49ee30608ea6991ebf19db7a7a1",
           "bytes": 1073
         }
@@ -4131,6 +4777,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/duplexer2/LICENSE.md",
+          "origin": "package",
           "sha256": "252a200ba7a38686f7954ec4cb09b3ad7788fa099eb724de167d7ab16b1244b9",
           "bytes": 1535
         }
@@ -4150,6 +4798,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/ee-first/LICENSE",
+          "origin": "package",
           "sha256": "965ef284f7f4c176842ec2e87fa13e79feed777d56d7a21a5a3b38f1bb6dc288",
           "bytes": 1099
         }
@@ -4169,6 +4819,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/ejs/LICENSE",
+          "origin": "package",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "bytes": 11358
         }
@@ -4188,6 +4840,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/electron/LICENSE",
+          "origin": "package",
           "sha256": "5154e165bd6c2cc0cfbcd8916498c7abab0497923bafcd5cb07673fe8480087d",
           "bytes": 1096
         }
@@ -4207,6 +4861,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/electron-builder/LICENSE",
+          "origin": "package",
           "sha256": "bed8d0ab3e6031817f775a641ff37313b0f5591bc8ba0ed79b978dafbd4231ce",
           "bytes": 1084
         }
@@ -4226,6 +4882,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/electron-builder-squirrel-windows/LICENSE",
+          "origin": "package",
           "sha256": "bed8d0ab3e6031817f775a641ff37313b0f5591bc8ba0ed79b978dafbd4231ce",
           "bytes": 1084
         }
@@ -4245,6 +4903,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/electron-builder/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39",
           "bytes": 1084
         }
@@ -4264,6 +4924,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/electron-builder/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -4283,6 +4945,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/electron-builder/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -4302,6 +4966,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/electron-publish/LICENSE",
+          "origin": "package",
           "sha256": "bed8d0ab3e6031817f775a641ff37313b0f5591bc8ba0ed79b978dafbd4231ce",
           "bytes": 1084
         }
@@ -4321,6 +4987,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/electron-publish/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39",
           "bytes": 1084
         }
@@ -4340,6 +5008,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/electron-publish/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -4359,6 +5029,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/electron-publish/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -4378,6 +5050,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/electron-winstaller/LICENSE",
+          "origin": "package",
           "sha256": "379ecb81d11a2c2a72225e0cf8cd04803b220da64e1668042ddd0d04bd1c8666",
           "bytes": 1055
         }
@@ -4397,6 +5071,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/electron-winstaller/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39",
           "bytes": 1084
         }
@@ -4416,6 +5092,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE-MIT.txt",
+          "source": "node_modules/emoji-regex/LICENSE-MIT.txt",
+          "origin": "package",
           "sha256": "483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a",
           "bytes": 1077
         }
@@ -4435,6 +5113,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/encodeurl/LICENSE",
+          "origin": "package",
           "sha256": "7585ea7bba616ccbbe43cb54ecb67956688c3c5641bb84f3099a652a73193afe",
           "bytes": 1089
         }
@@ -4454,6 +5134,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/end-of-stream/LICENSE",
+          "origin": "package",
           "sha256": "3fe8d55a98dbf260eace67c00cf9bc53edb46234e840098a0b93df3096b97fb6",
           "bytes": 1078
         }
@@ -4473,6 +5155,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/entities/LICENSE",
+          "origin": "package",
           "sha256": "cb992345949ccd6e8394b2cd6c465f7b897c864f845937dbf64e8997f389e164",
           "bytes": 1260
         }
@@ -4492,6 +5176,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/env-paths/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -4524,6 +5210,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/es-define-property/LICENSE",
+          "origin": "package",
           "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292",
           "bytes": 1071
         }
@@ -4543,6 +5231,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/es-errors/LICENSE",
+          "origin": "package",
           "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292",
           "bytes": 1071
         }
@@ -4562,6 +5252,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/es-module-lexer/LICENSE",
+          "origin": "package",
           "sha256": "8a4b6c44eebfb026d23719a348145a661a555568dbfdc11618ff2d0dd9306b00",
           "bytes": 1085
         }
@@ -4581,6 +5273,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/es-object-atoms/LICENSE",
+          "origin": "package",
           "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292",
           "bytes": 1071
         }
@@ -4600,6 +5294,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/es-set-tostringtag/LICENSE",
+          "origin": "package",
           "sha256": "1a3aeb1f1398bd697d57c3c585faadf59d825aca6e3162cd7eeb72ff76eb2466",
           "bytes": 1073
         }
@@ -4619,6 +5315,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/es6-error/LICENSE.md",
+          "origin": "package",
           "sha256": "9f655c5baa5a6f254d1e87f27e14d04acaff4bd0b489ea3c2f33723919da2f44",
           "bytes": 1081
         }
@@ -4638,6 +5336,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/esbuild/LICENSE.md",
+          "origin": "package",
           "sha256": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681",
           "bytes": 1069
         }
@@ -4657,6 +5357,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/escalade/license",
+          "origin": "package",
           "sha256": "9a9edad7baae52622bddf3c15b2ef8a33d2c89f2d25408ad13e8a7481c6b0c97",
           "bytes": 1104
         }
@@ -4676,6 +5378,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/escape-html/LICENSE",
+          "origin": "package",
           "sha256": "255aa557a1f55224ce522f311629c0bf20854740a67955cefd798fbd1d3d1ded",
           "bytes": 1157
         }
@@ -4695,6 +5399,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/escape-string-regexp/license",
+          "origin": "package",
           "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
           "bytes": 1117
         }
@@ -4714,6 +5420,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/estree-walker/LICENSE",
+          "origin": "package",
           "sha256": "8a6dcbabe7179f9c8489c08a7d874d0f1e093ae7449e03756ccf87cb9d0e296e",
           "bytes": 1126
         }
@@ -4733,6 +5441,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/etag/LICENSE",
+          "origin": "package",
           "sha256": "a7996721249a136fbcfc1c201bcb5f414f38a701d4a24f28abe65e16cfcce813",
           "bytes": 1094
         }
@@ -4752,6 +5462,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/eventsource/LICENSE",
+          "origin": "package",
           "sha256": "f683a72ffe6a9675b5507af22fe0f448d8c8de3da1e14f139d370a7e6a54a23e",
           "bytes": 1087
         }
@@ -4771,6 +5483,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/eventsource-parser/LICENSE",
+          "origin": "package",
           "sha256": "835eb611a23301b27115ca1be9f754c876e643ceb7fe63049c6b50609a1cafeb",
           "bytes": 1098
         }
@@ -4790,6 +5504,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/expect-type/LICENSE",
+          "origin": "package",
           "sha256": "7c6cc83c84eaa249a85bf12fe3eedd831bb50c696e8890b5248223ae68c7b408",
           "bytes": 10760
         }
@@ -4809,6 +5525,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/exponential-backoff/LICENSE",
+          "origin": "package",
           "sha256": "f5afc95c69e116ea6b1755f91a8763f53eadb78b4f1582a08d2d18586a03a117",
           "bytes": 11351
         }
@@ -4828,6 +5546,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/express/LICENSE",
+          "origin": "package",
           "sha256": "95a5762890e5c1c9808921cef095661fc482c5e1f0bba31446ac85595df6237c",
           "bytes": 1249
         }
@@ -4847,6 +5567,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/express-rate-limit/license",
+          "origin": "package",
           "sha256": "a752c164b45840ef677e68c738aefabfd665ee9f112ada4538761301a97118b0",
           "bytes": 1077
         }
@@ -4866,6 +5588,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/express/node_modules/content-type/LICENSE",
+          "origin": "package",
           "sha256": "257aed98914108e91a337912727b6a802eef218248507f74b76faffaff517a38",
           "bytes": 1089
         }
@@ -4885,6 +5609,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/fast-deep-equal/LICENSE",
+          "origin": "package",
           "sha256": "7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a",
           "bytes": 1074
         }
@@ -4904,6 +5630,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/fast-uri/LICENSE",
+          "origin": "package",
           "sha256": "b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786",
           "bytes": 1813
         }
@@ -4923,6 +5651,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/fdir/LICENSE",
+          "origin": "package",
           "sha256": "9a39f2aadab11a3697edd668ff2d8ad885b649737b7ab4d3bf12b34e5ada0c86",
           "bytes": 1053
         }
@@ -4955,6 +5685,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/filelist/node_modules/balanced-match/LICENSE.md",
+          "origin": "package",
           "sha256": "a1bd5deadb6a06dd74efa852c1b8b23f63b67f2214fbe9c8bd591da51da69268",
           "bytes": 1096
         }
@@ -4974,6 +5706,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/filelist/node_modules/brace-expansion/LICENSE",
+          "origin": "package",
           "sha256": "68f12f6e2c33688699249c01d8f9623c534da20aa71989c57b061b7bc1676d14",
           "bytes": 1096
         }
@@ -4993,6 +5727,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/filelist/node_modules/minimatch/LICENSE",
+          "origin": "package",
           "sha256": "d11323827fa4edeaafc437cc5b91b6971b335f0127efeeb42bf5122fe8657e8f",
           "bytes": 775
         }
@@ -5012,8 +5748,52 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/finalhandler/LICENSE",
+          "origin": "package",
           "sha256": "47dcccf62bf40469d23849b0b1dc8df9fc91bce219b880c638d4dc4596e6b5cf",
           "bytes": 1119
+        }
+      ]
+    },
+    {
+      "location": "node_modules/flatbuffers",
+      "name": "flatbuffers",
+      "version": "25.9.23",
+      "license": "Apache-2.0",
+      "installedLicense": "Apache-2.0",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/flatbuffers/LICENSE",
+          "origin": "package",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "bytes": 11358
+        }
+      ]
+    },
+    {
+      "location": "node_modules/fontkit",
+      "name": "fontkit",
+      "version": "2.0.4",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": true,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "docs/licensing/fontkit-NOTICE.txt",
+          "source": "docs/licensing/fontkit-NOTICE.txt",
+          "origin": "repository",
+          "sha256": "4ef01ae6467d5f88aa2ebe2b7e4ef30bce89a68391ec0c0f0a617897b2020ff4",
+          "bytes": 1417
         }
       ]
     },
@@ -5031,6 +5811,8 @@
       "licenseFiles": [
         {
           "file": "License",
+          "source": "node_modules/form-data/License",
+          "origin": "package",
           "sha256": "e5b780d4f38d1d3328e3e53186c4e62d3fa149ea6f2bacd5de5ad0c30ac85343",
           "bytes": 1118
         }
@@ -5050,6 +5832,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/form-data/node_modules/mime-db/LICENSE",
+          "origin": "package",
           "sha256": "cc1dfd4dafa27271e8212cd3b274eeb3f262e40a6fdab36ddc3f9696f706f58b",
           "bytes": 1172
         }
@@ -5069,6 +5853,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/form-data/node_modules/mime-types/LICENSE",
+          "origin": "package",
           "sha256": "71f83c4c0621102a56d9853812777b85751bce7e9726f686f5b056c1f8a4b0e6",
           "bytes": 1167
         }
@@ -5088,6 +5874,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/forwarded/LICENSE",
+          "origin": "package",
           "sha256": "bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400",
           "bytes": 1094
         }
@@ -5107,6 +5895,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/fresh/LICENSE",
+          "origin": "package",
           "sha256": "a0ec0dab16b3666f24950f86d257930ac2ad475557b4bfe245620e0817d8a45d",
           "bytes": 1174
         }
@@ -5126,6 +5916,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/fs.realpath/LICENSE",
+          "origin": "package",
           "sha256": "8465b04b67f473341171b5c9c8b2c741a4a395b3f6ed58339b3a4f4db3db7472",
           "bytes": 2125
         }
@@ -5145,6 +5937,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/fsevents/LICENSE",
+          "origin": "package",
           "sha256": "2a8a5d6197bb97a018b8a190dd3ed853d750ca87c8e80c17aad41d6c6ff448e1",
           "bytes": 1133
         }
@@ -5164,6 +5958,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/function-bind/LICENSE",
+          "origin": "package",
           "sha256": "773e131a7684726005a7e4688a80b4620033bc08499bc1404dd1a1eb3bca725e",
           "bytes": 1052
         }
@@ -5183,6 +5979,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/get-caller-file/LICENSE.md",
+          "origin": "package",
           "sha256": "902dbb4154679fb2b8d7c33878183f45b268d01eae5e5033dddaa8852d45f213",
           "bytes": 745
         }
@@ -5202,6 +6000,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/get-intrinsic/LICENSE",
+          "origin": "package",
           "sha256": "39c5ec504cf6bd5cd782a7c695828e09189df79f5d94840e4f08feb97b9fd416",
           "bytes": 1071
         }
@@ -5221,6 +6021,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/get-proto/LICENSE",
+          "origin": "package",
           "sha256": "be46ce1e3b0479af9ce82d22b465a6d7d2ff084fca0aaf3d54172da2b5eb5781",
           "bytes": 1071
         }
@@ -5240,6 +6042,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/get-stream/license",
+          "origin": "package",
           "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
           "bytes": 1117
         }
@@ -5259,6 +6063,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/glob/LICENSE",
+          "origin": "package",
           "sha256": "6236fa0b88a4a0cce3dda0367979491b2052b3c8d6b1c10b3668de083e86a7f0",
           "bytes": 976
         }
@@ -5278,6 +6084,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/glob/node_modules/balanced-match/LICENSE.md",
+          "origin": "package",
           "sha256": "a1bd5deadb6a06dd74efa852c1b8b23f63b67f2214fbe9c8bd591da51da69268",
           "bytes": 1096
         }
@@ -5297,6 +6105,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/glob/node_modules/brace-expansion/LICENSE",
+          "origin": "package",
           "sha256": "68f12f6e2c33688699249c01d8f9623c534da20aa71989c57b061b7bc1676d14",
           "bytes": 1096
         }
@@ -5316,6 +6126,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/glob/node_modules/minimatch/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -5335,6 +6147,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/global-agent/LICENSE",
+          "origin": "package",
           "sha256": "ba98e94118579117505f6f11fd9a4354c5e65ece03b4898d8b8f7785efcd25c1",
           "bytes": 1529
         }
@@ -5354,6 +6168,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/globalthis/LICENSE",
+          "origin": "package",
           "sha256": "acfaf437865d82f0fa9b9cdcae8b550bed8d011adaa5b42d973191caf99f62a8",
           "bytes": 1081
         }
@@ -5373,6 +6189,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/gopd/LICENSE",
+          "origin": "package",
           "sha256": "d90bf0a089da4cf43d644ed240a0b3825dcdb705e64e38371d56995a4cc9e4c5",
           "bytes": 1071
         }
@@ -5392,6 +6210,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/got/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -5411,8 +6231,31 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/graceful-fs/LICENSE",
+          "origin": "package",
           "sha256": "f65c5d9f22a317b2a10803bd1868461ce6499c2ed7217bc80c0cc772a748789c",
           "bytes": 791
+        }
+      ]
+    },
+    {
+      "location": "node_modules/guid-typescript",
+      "name": "guid-typescript",
+      "version": "1.0.9",
+      "license": "ISC",
+      "installedLicense": "ISC",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "docs/licensing/guid-typescript-NOTICE.txt",
+          "source": "docs/licensing/guid-typescript-NOTICE.txt",
+          "origin": "repository",
+          "sha256": "9d88e888f77dd062ae422ec17b2b89e1c74693d0ed28219e8043aee38b27d84c",
+          "bytes": 2057
         }
       ]
     },
@@ -5430,6 +6273,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/has-flag/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -5449,6 +6294,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/has-property-descriptors/LICENSE",
+          "origin": "package",
           "sha256": "0f0ca96f50793990031ebc488a38f7292ff70bce8ab6a8e5eeda674abc32ccdf",
           "bytes": 1067
         }
@@ -5468,6 +6315,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/has-symbols/LICENSE",
+          "origin": "package",
           "sha256": "206c1adcf206dc0031b11232f5b054ec5f1662407ab1ca415247921cab2068ab",
           "bytes": 1071
         }
@@ -5487,6 +6336,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/has-tostringtag/LICENSE",
+          "origin": "package",
           "sha256": "e2560e002e13281578c75c850061d9255c33d16d732939e8c2db64c2506642fa",
           "bytes": 1067
         }
@@ -5506,6 +6357,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/hasown/LICENSE",
+          "origin": "package",
           "sha256": "bf9b0d665be2a689851eea667ca9f42066ea1d903b38349c51e6a44b2577680a",
           "bytes": 1083
         }
@@ -5525,6 +6378,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/hono/LICENSE",
+          "origin": "package",
           "sha256": "a6ab98e5c77b9070c443eaff2ff81034a6f8cc05a7524d5098eb0f24defa0115",
           "bytes": 1101
         }
@@ -5544,6 +6399,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/hosted-git-info/LICENSE",
+          "origin": "package",
           "sha256": "c1476ec53119cd4c8370f91f5152ac76312a29b4fae2d49b5e0e0970fe0fa5ee",
           "bytes": 733
         }
@@ -5563,6 +6420,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/html-encoding-sniffer/LICENSE.txt",
+          "origin": "package",
           "sha256": "528eec83cb836a0adda9f8fc3d6a2a70a710d6cc0be9a155f92212c8df28acfa",
           "bytes": 1069
         }
@@ -5582,6 +6441,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/http-cache-semantics/LICENSE",
+          "origin": "package",
           "sha256": "ab868ad5a2ef5068560d9cd3b2180ec63c140bb4c5cae1ba779d300a0ac74fa3",
           "bytes": 1274
         }
@@ -5601,6 +6462,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/http-errors/LICENSE",
+          "origin": "package",
           "sha256": "dcb94ff9b1e037a847bc20589dc81a1066d041fd4c16deb18b0fa968c66cf395",
           "bytes": 1168
         }
@@ -5620,6 +6483,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/http-proxy-agent/LICENSE",
+          "origin": "package",
           "sha256": "71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef",
           "bytes": 1102
         }
@@ -5639,6 +6504,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/http2-wrapper/LICENSE",
+          "origin": "package",
           "sha256": "0194571d45a06ea2a22ceb51f981e3be92525966d28847dbc0d9982603bf90de",
           "bytes": 1071
         }
@@ -5658,6 +6525,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/https-proxy-agent/LICENSE",
+          "origin": "package",
           "sha256": "8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a",
           "bytes": 1101
         }
@@ -5677,6 +6546,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/iconv-lite/LICENSE",
+          "origin": "package",
           "sha256": "ac779f7314c74f232ef847ea86e714abe25cf6eeb5cc97b69451b74e2af6492d",
           "bytes": 1064
         }
@@ -5696,6 +6567,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/inflight/LICENSE",
+          "origin": "package",
           "sha256": "05dc4d785ac3a488676d3ed10e901b75ad89dafcc63f8e66610fd4a39cc5c7e8",
           "bytes": 748
         }
@@ -5715,6 +6588,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/inherits/LICENSE",
+          "origin": "package",
           "sha256": "5ffe28e7ade7d8f10d85d5337a73fd793dac5c462fb9a28fbf8c5046c7fbca3b",
           "bytes": 749
         }
@@ -5734,6 +6609,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/ip-address/LICENSE",
+          "origin": "package",
           "sha256": "f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a",
           "bytes": 1061
         }
@@ -5753,6 +6630,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/ipaddr.js/LICENSE",
+          "origin": "package",
           "sha256": "62568a2d1337b77171ecca9db10579163446de1ba6151678e81f06cdc199971b",
           "bytes": 1087
         }
@@ -5772,6 +6651,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/is-fullwidth-code-point/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -5791,6 +6672,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE-MIT.txt",
+          "source": "node_modules/is-potential-custom-element-name/LICENSE-MIT.txt",
+          "origin": "package",
           "sha256": "483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a",
           "bytes": 1077
         }
@@ -5810,6 +6693,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/is-promise/LICENSE",
+          "origin": "package",
           "sha256": "44191656d296391e0ec97e32f5385f0d02b6f2992694082d22ea04ba0f66f9e4",
           "bytes": 1058
         }
@@ -5842,6 +6727,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/isbinaryfile/LICENSE.txt",
+          "origin": "package",
           "sha256": "2eedc70f2242aaf269e86e2c85eabeb875dc524d187d5953016b24091d26a843",
           "bytes": 1074
         }
@@ -5861,6 +6748,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/isexe/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -5880,6 +6769,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/isomorphic.js/LICENSE",
+          "origin": "package",
           "sha256": "dd6488c9c1a4ce2dc978ecee067e5b6a725b52e6057a450b24f1a23bc373b057",
           "bytes": 1108
         }
@@ -5912,6 +6803,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/jiti/LICENSE",
+          "origin": "package",
           "sha256": "46231df5a7733c3f52f11b71f3df61813007745b62b09031acfb45fb42d75082",
           "bytes": 1078
         }
@@ -5931,6 +6824,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/jose/LICENSE.md",
+          "origin": "package",
           "sha256": "8078b0829d6c3e9ecde2f003e1966e4cad3efc6e7a640efbab0313cc166b1af1",
           "bytes": 1079
         }
@@ -5950,6 +6845,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/js-yaml/LICENSE",
+          "origin": "package",
           "sha256": "a07bc24468b9654ce76a547d47a2db282d07733b715db4c73a98bd63961f9550",
           "bytes": 1084
         }
@@ -5969,6 +6866,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/jsdom/LICENSE.txt",
+          "origin": "package",
           "sha256": "242d37e7cab25cbafc36cc973ee88f9345fddf066afe4f72b7ac3d9ad4e24cce",
           "bytes": 1056
         }
@@ -5988,6 +6887,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/json-buffer/LICENSE",
+          "origin": "package",
           "sha256": "715f1f0f2eb7688e53e4e958acdc7fc9e365ae3eaf26efc2604b93cc65fdc3f5",
           "bytes": 1071
         }
@@ -6007,6 +6908,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/json-schema-traverse/LICENSE",
+          "origin": "package",
           "sha256": "7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a",
           "bytes": 1074
         }
@@ -6026,6 +6929,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/json-schema-typed/LICENSE.md",
+          "origin": "package",
           "sha256": "bbe87b573c12bda5baf18742117330efa177e0886b3b0a278dacf8f236e1e129",
           "bytes": 2859
         }
@@ -6045,6 +6950,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/json-stringify-safe/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -6064,6 +6971,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/json5/LICENSE.md",
+          "origin": "package",
           "sha256": "53e59feb13058722d977c699eb0407c7bce2f93c949b681bbd2ff31698535927",
           "bytes": 1145
         }
@@ -6083,6 +6992,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -6128,6 +7039,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/lib0/LICENSE",
+          "origin": "package",
           "sha256": "5446db1e43fe52faf3faab7e9959fe3762ac11bdc61c0945934c498affd52d73",
           "bytes": 1108
         }
@@ -6147,8 +7060,31 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/lodash/LICENSE",
+          "origin": "package",
           "sha256": "f71e8ed126b46346494aad5486874cd8f0aafe95092ed67d2e3cb6110f939abc",
           "bytes": 1952
+        }
+      ]
+    },
+    {
+      "location": "node_modules/long",
+      "name": "long",
+      "version": "5.3.2",
+      "license": "Apache-2.0",
+      "installedLicense": "Apache-2.0",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/long/LICENSE",
+          "origin": "package",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "bytes": 11358
         }
       ]
     },
@@ -6166,6 +7102,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/lowercase-keys/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -6185,6 +7123,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/lru-cache/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -6204,6 +7144,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/magic-string/LICENSE",
+          "origin": "package",
           "sha256": "1cbe51b907662f6cb1492b16c359384a595180bf0e4d101603ed525e75c4e484",
           "bytes": 1051
         }
@@ -6223,6 +7165,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/matcher/license",
+          "origin": "package",
           "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
           "bytes": 1117
         }
@@ -6242,6 +7186,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/math-intrinsics/LICENSE",
+          "origin": "package",
           "sha256": "2b770a704c15de238c3f622b01b0044ddd60b49ee30608ea6991ebf19db7a7a1",
           "bytes": 1073
         }
@@ -6261,6 +7207,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/mdn-data/LICENSE",
+          "origin": "package",
           "sha256": "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673",
           "bytes": 6555
         }
@@ -6280,6 +7228,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/media-typer/LICENSE",
+          "origin": "package",
           "sha256": "bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400",
           "bytes": 1094
         }
@@ -6299,6 +7249,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/merge-descriptors/license",
+          "origin": "package",
           "sha256": "70b126abc64d7ea06e1243349073935caa16fa47a41a571773ccf0b350b1d574",
           "bytes": 1231
         }
@@ -6318,6 +7270,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/mime/LICENSE",
+          "origin": "package",
           "sha256": "8f2658c03422c408b2b2ce4d151decc3b1a6fd3d86e5ca9433777bccdcdf75a2",
           "bytes": 1098
         }
@@ -6337,6 +7291,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/mime-db/LICENSE",
+          "origin": "package",
           "sha256": "cc1dfd4dafa27271e8212cd3b274eeb3f262e40a6fdab36ddc3f9696f706f58b",
           "bytes": 1172
         }
@@ -6356,6 +7312,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/mime-types/LICENSE",
+          "origin": "package",
           "sha256": "71f83c4c0621102a56d9853812777b85751bce7e9726f686f5b056c1f8a4b0e6",
           "bytes": 1167
         }
@@ -6375,6 +7333,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/mimic-response/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -6394,6 +7354,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/minimatch/LICENSE.md",
+          "origin": "package",
           "sha256": "2c7c5d22ed5a8ee968c64757710979afcd77438c48b4a265b94e615babd8a901",
           "bytes": 1550
         }
@@ -6413,6 +7375,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/minimist/LICENSE",
+          "origin": "package",
           "sha256": "435a6722c786b0a56fbe7387028f1d9d3f3a2d0fb615bb8fee118727c3f59b7b",
           "bytes": 1073
         }
@@ -6432,6 +7396,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/minipass/LICENSE.md",
+          "origin": "package",
           "sha256": "8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004",
           "bytes": 1552
         }
@@ -6451,6 +7417,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/minizlib/LICENSE",
+          "origin": "package",
           "sha256": "df05697a04b8997c79d423930534e59cc18828f6e22d0c8c2d62fcbea1c4f50b",
           "bytes": 1339
         }
@@ -6470,6 +7438,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/mkdirp/LICENSE",
+          "origin": "package",
           "sha256": "05991c2e8f070b69ec5b656c2c12fd07cd0153dd157d39b050b82af59b319a01",
           "bytes": 1141
         }
@@ -6489,6 +7459,8 @@
       "licenseFiles": [
         {
           "file": "license.md",
+          "source": "node_modules/ms/license.md",
+          "origin": "package",
           "sha256": "1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801",
           "bytes": 1079
         }
@@ -6508,6 +7480,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/nanoid/LICENSE",
+          "origin": "package",
           "sha256": "da4db1480d9beea3483a2eda5c53b22238d0827d57da162b48f122e04d2d9987",
           "bytes": 1095
         }
@@ -6527,6 +7501,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/negotiator/LICENSE",
+          "origin": "package",
           "sha256": "553d4d20029a24e315b428a1a54a9e109eaa340f2e958a4f50a92362c2c4070b",
           "bytes": 1177
         }
@@ -6546,6 +7522,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/negotiator/node_modules/content-type/LICENSE",
+          "origin": "package",
           "sha256": "257aed98914108e91a337912727b6a802eef218248507f74b76faffaff517a38",
           "bytes": 1089
         }
@@ -6565,6 +7543,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/node-abi/LICENSE",
+          "origin": "package",
           "sha256": "9a508cd4122f2dc1cc39f8ab0b6950efbc49fb087a581c7177a4b8c9d5d0d6a1",
           "bytes": 1069
         }
@@ -6597,6 +7577,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/node-forge/LICENSE",
+          "origin": "package",
           "sha256": "f63ff0e4e239244aa79280da2dd4811a0469e5e201caf5cbc0d97c3a1dff8e82",
           "bytes": 17972
         }
@@ -6616,6 +7598,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/node-gyp/LICENSE",
+          "origin": "package",
           "sha256": "662a1b0115251cfb29c6aed0f221f8847bc49c6365d1c53a62c9f4bccc2489c3",
           "bytes": 1102
         }
@@ -6635,6 +7619,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/node-gyp/node_modules/isexe/LICENSE.md",
+          "origin": "package",
           "sha256": "8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004",
           "bytes": 1552
         }
@@ -6654,6 +7640,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/node-gyp/node_modules/undici/LICENSE",
+          "origin": "package",
           "sha256": "a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27",
           "bytes": 1090
         }
@@ -6673,6 +7661,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/node-gyp/node_modules/which/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -6692,6 +7682,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/node-int64/LICENSE",
+          "origin": "package",
           "sha256": "8f85aab053e268546014761da47630a09886626afbd0d8d440cb2c69611bb8d3",
           "bytes": 1058
         }
@@ -6711,6 +7703,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/nopt/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -6730,6 +7724,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/normalize-url/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -6749,6 +7745,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/object-assign/license",
+          "origin": "package",
           "sha256": "6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c",
           "bytes": 1119
         }
@@ -6768,6 +7766,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/object-inspect/LICENSE",
+          "origin": "package",
           "sha256": "bd40cc437e28a3ad7bef2ad34e6b72e757b182e67bda1acadbab4ef0476f8232",
           "bytes": 1071
         }
@@ -6787,6 +7787,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/object-keys/LICENSE",
+          "origin": "package",
           "sha256": "5640e5cbe2e9f57f6ccfdd8dbfbeadb875495bdbcb69d2666ce3177ccd0942e4",
           "bytes": 1080
         }
@@ -6806,6 +7808,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/obug/LICENSE",
+          "origin": "package",
           "sha256": "ee48679d379ca6b4493d5e231094d85f818dd9be40b1a4f234fb7ff657ee35d9",
           "bytes": 1205
         }
@@ -6825,6 +7829,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/on-finished/LICENSE",
+          "origin": "package",
           "sha256": "8089bcc08845ec143e5761f4a101a65b8c792a0dedbfeeb90a15560c0b77f768",
           "bytes": 1167
         }
@@ -6844,8 +7850,59 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/once/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
+        }
+      ]
+    },
+    {
+      "location": "node_modules/onnxruntime-common",
+      "name": "onnxruntime-common",
+      "version": "1.24.3",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "docs/licensing/onnxruntime-common-NOTICE.txt",
+          "source": "docs/licensing/onnxruntime-common-NOTICE.txt",
+          "origin": "repository",
+          "sha256": "86b979789454a4c0eccc976ae4d37e46652a42958aa8729cbdad57d7a5b99c04",
+          "bytes": 1519
+        }
+      ]
+    },
+    {
+      "location": "node_modules/onnxruntime-web",
+      "name": "onnxruntime-web",
+      "version": "1.24.3",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": true,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "docs/licensing/onnxruntime-web-NOTICE.txt",
+          "source": "docs/licensing/onnxruntime-web-NOTICE.txt",
+          "origin": "repository",
+          "sha256": "86b979789454a4c0eccc976ae4d37e46652a42958aa8729cbdad57d7a5b99c04",
+          "bytes": 1519
+        },
+        {
+          "file": "docs/licensing/onnxruntime-ThirdPartyNotices.txt",
+          "source": "docs/licensing/onnxruntime-ThirdPartyNotices.txt",
+          "origin": "repository",
+          "sha256": "0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2",
+          "bytes": 325054
         }
       ]
     },
@@ -6863,6 +7920,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/p-cancelable/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -6882,8 +7941,31 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/p-limit/license",
+          "origin": "package",
           "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
           "bytes": 1117
+        }
+      ]
+    },
+    {
+      "location": "node_modules/pako",
+      "name": "pako",
+      "version": "0.2.9",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/pako/LICENSE",
+          "origin": "package",
+          "sha256": "3bc404ffa7888053253eedcc5a667619aa08dc1be0bea400e5ff28c51602180f",
+          "bytes": 1084
         }
       ]
     },
@@ -6901,6 +7983,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/parse5/LICENSE",
+          "origin": "package",
           "sha256": "8c535800331e1e4439835555b3f9edc7fe9dee2fab0d8bbbd5a982e8b8343d4d",
           "bytes": 1109
         }
@@ -6920,6 +8004,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/parseurl/LICENSE",
+          "origin": "package",
           "sha256": "11d017c3b9f1ee3f44caf7203035f0461d5b57e0db8ce1bc03a9af34fa7d3f6b",
           "bytes": 1173
         }
@@ -6939,6 +8025,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/path-is-absolute/license",
+          "origin": "package",
           "sha256": "6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c",
           "bytes": 1119
         }
@@ -6958,6 +8046,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/path-key/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -6977,6 +8067,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/path-to-regexp/LICENSE",
+          "origin": "package",
           "sha256": "4eeb3271453a891df609e5a9f4ee79a68307f730c13417a3bfeffa604ac8cf25",
           "bytes": 1103
         }
@@ -6996,6 +8088,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/pathe/LICENSE",
+          "origin": "package",
           "sha256": "52e92576851154bad7737e90cc72818936f43665cb0e3f7428ed8edc8cc5709b",
           "bytes": 3355
         }
@@ -7015,6 +8109,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/pe-library/LICENSE",
+          "origin": "package",
           "sha256": "ad05317184b8cd78a770c1f55e386f600fd23feb88596c797ceb3ccd49f7d6bc",
           "bytes": 1060
         }
@@ -7034,6 +8130,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/picocolors/LICENSE",
+          "origin": "package",
           "sha256": "6582629e2979466878f6014313dcc2f3756c9616148682227ce3063dde310750",
           "bytes": 787
         }
@@ -7053,6 +8151,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/picomatch/LICENSE",
+          "origin": "package",
           "sha256": "d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9",
           "bytes": 1091
         }
@@ -7072,6 +8172,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/pkce-challenge/LICENSE",
+          "origin": "package",
           "sha256": "feb87a2e0c305de3464cc44077da5393c52d8ca6362d37427157d04ec6f4510d",
           "bytes": 1057
         }
@@ -7091,8 +8193,31 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/pkijs/LICENSE",
+          "origin": "package",
           "sha256": "d27a2aa238102924ea75da808f79253484347d824b9b7b077837e4232f9493f5",
           "bytes": 1565
+        }
+      ]
+    },
+    {
+      "location": "node_modules/platform",
+      "name": "platform",
+      "version": "1.3.6",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/platform/LICENSE",
+          "origin": "package",
+          "sha256": "4a161ebed4f1ef933e16ccfa00d86c718703f5d015a9987ea7ce1bb72a43cd22",
+          "bytes": 1095
         }
       ]
     },
@@ -7110,11 +8235,15 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/playwright/LICENSE",
+          "origin": "package",
           "sha256": "45873d00a0dd243596deb4aa23b2493b3d1f0671921bf2538ea431d7380220eb",
           "bytes": 11601
         },
         {
           "file": "NOTICE",
+          "source": "node_modules/playwright/NOTICE",
+          "origin": "package",
           "sha256": "6d602191187b35b9b01d2cffa01c8469c2c8d9de8a96f1bf868e0f264f51c81d",
           "bytes": 254
         }
@@ -7134,11 +8263,15 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/playwright-core/LICENSE",
+          "origin": "package",
           "sha256": "45873d00a0dd243596deb4aa23b2493b3d1f0671921bf2538ea431d7380220eb",
           "bytes": 11601
         },
         {
           "file": "NOTICE",
+          "source": "node_modules/playwright-core/NOTICE",
+          "origin": "package",
           "sha256": "6d602191187b35b9b01d2cffa01c8469c2c8d9de8a96f1bf868e0f264f51c81d",
           "bytes": 254
         }
@@ -7158,6 +8291,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/plist/LICENSE",
+          "origin": "package",
           "sha256": "3677dc86e6e5f119b500c308cc24cf533e2eb44c41050ea64584e049e5b70161",
           "bytes": 1107
         }
@@ -7177,6 +8312,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/postcss/LICENSE",
+          "origin": "package",
           "sha256": "5be1f3465bba68a626777f984878814aaf35e7ef8e9fd314d469bcf887050fb8",
           "bytes": 1095
         }
@@ -7196,6 +8333,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/postject/LICENSE",
+          "origin": "package",
           "sha256": "6546657539feb5b454f400db317e71fa39ff5cd048fa5d78ae0ada2df72f1ea7",
           "bytes": 13409
         }
@@ -7215,6 +8354,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/postject/node_modules/commander/LICENSE",
+          "origin": "package",
           "sha256": "04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b",
           "bytes": 1098
         }
@@ -7234,6 +8375,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/proc-log/LICENSE",
+          "origin": "package",
           "sha256": "dc32a0dee275e0a9aeffbc974dbf4899a30dcdc2e5ffa8934aecb69261065864",
           "bytes": 742
         }
@@ -7253,6 +8396,8 @@
       "licenseFiles": [
         {
           "file": "license.md",
+          "source": "node_modules/process-nextick-args/license.md",
+          "origin": "package",
           "sha256": "ecdccbcf39024f624ded480c01c0b25458e1eca8f26ecf040933865ce56d9a4f",
           "bytes": 1064
         }
@@ -7272,6 +8417,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/progress/LICENSE",
+          "origin": "package",
           "sha256": "d7d2a7786de7c7cfd96f920c6f12927d74e1d2a861ca4498bf465c3bc3f4c21c",
           "bytes": 1098
         }
@@ -7291,6 +8438,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/promise-retry/LICENSE",
+          "origin": "package",
           "sha256": "b1344bd78ebcbf8a359225ec444d038a653c6a5f9ecf405a50d4a5c11fbf27d1",
           "bytes": 1056
         }
@@ -7310,8 +8459,31 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/proper-lockfile/LICENSE",
+          "origin": "package",
           "sha256": "aaa78451b6fecd1b9c4594c796c133c0e90cad100372ff8bc6de615e9ef9adf1",
           "bytes": 1105
+        }
+      ]
+    },
+    {
+      "location": "node_modules/protobufjs",
+      "name": "protobufjs",
+      "version": "7.6.6",
+      "license": "BSD-3-Clause",
+      "installedLicense": "BSD-3-Clause",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/protobufjs/LICENSE",
+          "origin": "package",
+          "sha256": "49d6a1c9a623784c61c6cb70f773f3457faceb1914a13c8560a9823b7631950c",
+          "bytes": 1937
         }
       ]
     },
@@ -7329,6 +8501,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/proxy-addr/LICENSE",
+          "origin": "package",
           "sha256": "a7996721249a136fbcfc1c201bcb5f414f38a701d4a24f28abe65e16cfcce813",
           "bytes": 1094
         }
@@ -7348,6 +8522,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/pump/LICENSE",
+          "origin": "package",
           "sha256": "3fe8d55a98dbf260eace67c00cf9bc53edb46234e840098a0b93df3096b97fb6",
           "bytes": 1078
         }
@@ -7367,6 +8543,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE-MIT.txt",
+          "source": "node_modules/punycode/LICENSE-MIT.txt",
+          "origin": "package",
           "sha256": "483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a",
           "bytes": 1077
         }
@@ -7386,6 +8564,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/pvtsutils/LICENSE",
+          "origin": "package",
           "sha256": "c620c1d08a47c93ce242914a4269b86e41df5a97845325725a5f83d5d6f9d7fd",
           "bytes": 1084
         }
@@ -7405,6 +8585,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/pvutils/LICENSE",
+          "origin": "package",
           "sha256": "15c88630f1e778db64a446cb31b67362cc9eb7a048fdf5ac7ab51905b74464cd",
           "bytes": 1137
         }
@@ -7424,6 +8606,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/qs/LICENSE.md",
+          "origin": "package",
           "sha256": "e7dc37bf662d7f786efcb46c545615e70c1daf458a38385521c63cf6607cdfe1",
           "bytes": 1600
         }
@@ -7443,6 +8627,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/quick-lru/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -7462,6 +8648,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/range-parser/LICENSE",
+          "origin": "package",
           "sha256": "f655e6291356ec0de7a8f0e69f294961a2cea86678ec94588be1e6a492e278ab",
           "bytes": 1178
         }
@@ -7481,6 +8669,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/raw-body/LICENSE",
+          "origin": "package",
           "sha256": "37876d7de8bdf5e5b9b58a697ebc34044624e493e6f49eff5c938e5226dcac6b",
           "bytes": 1181
         }
@@ -7513,6 +8703,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/readable-stream/LICENSE",
+          "origin": "package",
           "sha256": "ec62dc96da0099b87f4511736c87309335527fb7031639493e06c95728dc8c54",
           "bytes": 2337
         }
@@ -7532,6 +8724,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/require-directory/LICENSE",
+          "origin": "package",
           "sha256": "a92e52eb1fa7cd746e3827bf01d3a3589bbc8e1e51348b1da042aad165525ad1",
           "bytes": 1099
         }
@@ -7551,6 +8745,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/require-from-string/license",
+          "origin": "package",
           "sha256": "6ee0feb1f6ef996ff5a68600f8cf98909cf412d39ef3cdceaefd87d636fa1b7f",
           "bytes": 1128
         }
@@ -7570,6 +8766,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/resedit/LICENSE",
+          "origin": "package",
           "sha256": "ad05317184b8cd78a770c1f55e386f600fd23feb88596c797ceb3ccd49f7d6bc",
           "bytes": 1060
         }
@@ -7589,6 +8787,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/resolve-alpn/LICENSE",
+          "origin": "package",
           "sha256": "03b347a3d13b0e5bdb8fc5edeed0286b1be51441c6490a90710692d227136e0d",
           "bytes": 1072
         }
@@ -7608,8 +8808,31 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/responselike/LICENSE",
+          "origin": "package",
           "sha256": "2c4e066228dbca96c8c6e8bef5377306f227ffa1d87a18a218b230e13ac5d39e",
           "bytes": 1055
+        }
+      ]
+    },
+    {
+      "location": "node_modules/restructure",
+      "name": "restructure",
+      "version": "3.0.2",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/restructure/LICENSE",
+          "origin": "package",
+          "sha256": "c0df7f551401f8f80197ff31bf69b8cd23727d127423403282514d242a3ab132",
+          "bytes": 1077
         }
       ]
     },
@@ -7627,6 +8850,8 @@
       "licenseFiles": [
         {
           "file": "License",
+          "source": "node_modules/retry/License",
+          "origin": "package",
           "sha256": "01ad164273e8e095abc9dbd1c21e194594a671af7d528cb43ee7b4c903ba7da3",
           "bytes": 1139
         }
@@ -7646,6 +8871,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/rimraf/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -7665,6 +8892,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/roarr/LICENSE",
+          "origin": "package",
           "sha256": "ba98e94118579117505f6f11fd9a4354c5e65ece03b4898d8b8f7785efcd25c1",
           "bytes": 1529
         }
@@ -7684,6 +8913,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/rollup/LICENSE.md",
+          "origin": "package",
           "sha256": "fa1bd040c5bdeefe65b3821cebf474f2733ce65df13089bd151dda1778e62fe8",
           "bytes": 35231
         }
@@ -7703,6 +8934,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/router/LICENSE",
+          "origin": "package",
           "sha256": "d0bca4e517157b7a6120c085f5fe43a35b90c095e3bbeb9e67f220c608506a16",
           "bytes": 1128
         }
@@ -7722,6 +8955,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/safe-buffer/LICENSE",
+          "origin": "package",
           "sha256": "c7cc929b57080f4b9d0c6cf57669f0463fc5b39906344dfc8d3bc43426b30eac",
           "bytes": 1081
         }
@@ -7741,6 +8976,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/safer-buffer/LICENSE",
+          "origin": "package",
           "sha256": "4bc935e71be198c67ddf3c2b5fddb195f6edc182bfc155a96a6db61b44b494b9",
           "bytes": 1094
         }
@@ -7760,6 +8997,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/sanitize-filename/LICENSE.md",
+          "origin": "package",
           "sha256": "69dbd0bb60112fbdd6da878a5ecddee7ddac764d669591d7846cb0310c6e7be8",
           "bytes": 1304
         }
@@ -7779,6 +9018,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/sax/LICENSE.md",
+          "origin": "package",
           "sha256": "8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004",
           "bytes": 1552
         }
@@ -7811,6 +9052,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/selfsigned/LICENSE",
+          "origin": "package",
           "sha256": "cce91643d3456176ba7870772e107f28f54d51948086339522e3c31fb49f2f34",
           "bytes": 1078
         }
@@ -7830,6 +9073,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/semver/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -7849,6 +9094,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/semver-compare/LICENSE",
+          "origin": "package",
           "sha256": "435a6722c786b0a56fbe7387028f1d9d3f3a2d0fb615bb8fee118727c3f59b7b",
           "bytes": 1073
         }
@@ -7868,6 +9115,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/send/LICENSE",
+          "origin": "package",
           "sha256": "25a328069fe771f8ed5b6f983ed4b0e6c84b3312ac0f69b28c3d52dc277962c9",
           "bytes": 1128
         }
@@ -7887,6 +9136,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/serialize-error/license",
+          "origin": "package",
           "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
           "bytes": 1117
         }
@@ -7906,6 +9157,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/serve-static/LICENSE",
+          "origin": "package",
           "sha256": "63b9a188d7d43e64b0558b7115255045b9fe20a5fc3ff483421cb899e7f52bcb",
           "bytes": 1189
         }
@@ -7925,6 +9178,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/setprototypeof/LICENSE",
+          "origin": "package",
           "sha256": "76d6d1ea0c268da37dd3c961b4fcfb23dee8417fff9e8786d4d44c585b781b69",
           "bytes": 727
         }
@@ -7944,6 +9199,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/shebang-command/license",
+          "origin": "package",
           "sha256": "69dee148a2cc470554dfa7142e830662062394d0fe67cddd379aba90dc60d6b3",
           "bytes": 1116
         }
@@ -7963,6 +9220,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/shebang-regex/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -7982,6 +9241,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/side-channel/LICENSE",
+          "origin": "package",
           "sha256": "cfc3f455254c0af0655cc3ff46a41ed644b67599f6043346169d285bf2b3cf3b",
           "bytes": 1071
         }
@@ -8001,6 +9262,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/side-channel-list/LICENSE",
+          "origin": "package",
           "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292",
           "bytes": 1071
         }
@@ -8020,6 +9283,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/side-channel-map/LICENSE",
+          "origin": "package",
           "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292",
           "bytes": 1071
         }
@@ -8039,6 +9304,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/side-channel-weakmap/LICENSE",
+          "origin": "package",
           "sha256": "cfc3f455254c0af0655cc3ff46a41ed644b67599f6043346169d285bf2b3cf3b",
           "bytes": 1071
         }
@@ -8058,6 +9325,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/siginfo/LICENSE",
+          "origin": "package",
           "sha256": "3bdddf0b9b08aaa2fe4365b803fc958ed32c0597ca0bd727be8d9fcb8b248d18",
           "bytes": 744
         }
@@ -8077,6 +9346,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/signal-exit/LICENSE.txt",
+          "origin": "package",
           "sha256": "e05b1eaf5b5f99b7ad75cd1f38858ff9a311780b97715ead67936d60bf96aa7e",
           "bytes": 748
         }
@@ -8096,6 +9367,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/simple-update-notifier/LICENSE",
+          "origin": "package",
           "sha256": "c34396f8f573f642c7ce5d18fb9b46b2d85e46979f8c06facca387c5293baede",
           "bytes": 1069
         }
@@ -8115,6 +9388,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/source-map/LICENSE",
+          "origin": "package",
           "sha256": "6cb0631f71c7749763fd3dd1d5bee52dd1070ec17f2edc1710079ad070bd2fbd",
           "bytes": 1526
         }
@@ -8134,6 +9409,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/source-map-js/LICENSE",
+          "origin": "package",
           "sha256": "6cb0631f71c7749763fd3dd1d5bee52dd1070ec17f2edc1710079ad070bd2fbd",
           "bytes": 1526
         }
@@ -8153,6 +9430,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/source-map-support/LICENSE.md",
+          "origin": "package",
           "sha256": "3a7d3bb198e909ed642bd68bd29a7d7c09a636d27a51ec663d35f00c4760ec42",
           "bytes": 1079
         }
@@ -8172,6 +9451,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/sprintf-js/LICENSE",
+          "origin": "package",
           "sha256": "f8287e4dd9480be58c56aca4a55c23b782c43a86e69aabad78fff4df0d29edef",
           "bytes": 1513
         }
@@ -8204,6 +9485,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/stat-mode/LICENSE",
+          "origin": "package",
           "sha256": "57e9315162353f033b16b7dfb95dd1aab998a0c8dcae9f198988c4a25ffebc0d",
           "bytes": 1087
         }
@@ -8223,6 +9506,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/statuses/LICENSE",
+          "origin": "package",
           "sha256": "512cfa4d5e7a7569c7ae4dd95241cb6ae2aaf648ef9ebd080c01bd24868d26e9",
           "bytes": 1172
         }
@@ -8242,6 +9527,8 @@
       "licenseFiles": [
         {
           "file": "LICENCE",
+          "source": "node_modules/std-env/LICENCE",
+          "origin": "package",
           "sha256": "a6f36438e46fb911859f3b9c4cad045ba64e1af3d8f4512c60258fa2d7552d28",
           "bytes": 1079
         }
@@ -8261,6 +9548,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/string_decoder/LICENSE",
+          "origin": "package",
           "sha256": "11f2aafb37d06b3ee5bdaf06e9811141d0da05263c316f3d627f45c20d43261b",
           "bytes": 2338
         }
@@ -8280,6 +9569,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/string-width/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -8299,6 +9590,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/strip-ansi/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -8318,6 +9611,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/sumchecker/LICENSE",
+          "origin": "package",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "bytes": 11358
         }
@@ -8337,6 +9632,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/supports-color/license",
+          "origin": "package",
           "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
           "bytes": 1109
         }
@@ -8356,6 +9653,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/symbol-tree/LICENSE",
+          "origin": "package",
           "sha256": "9ea1eccdabe469767a9edb9249a840b2461cf91b2434bf8a3e2fc1f414311cb1",
           "bytes": 1084
         }
@@ -8375,6 +9674,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/tar/LICENSE.md",
+          "origin": "package",
           "sha256": "8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004",
           "bytes": 1552
         }
@@ -8394,6 +9695,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/tar/node_modules/yallist/LICENSE.md",
+          "origin": "package",
           "sha256": "a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09",
           "bytes": 1764
         }
@@ -8413,6 +9716,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/temp/LICENSE",
+          "origin": "package",
           "sha256": "63053a2fc2b06fe2138fa128ab29c487e28e38be8a7b9c16a4ef7209e945c0b0",
           "bytes": 1086
         }
@@ -8445,6 +9750,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/temp-file/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39",
           "bytes": 1084
         }
@@ -8464,6 +9771,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/temp-file/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -8483,6 +9792,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/temp-file/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -8502,6 +9813,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE-MIT",
+          "source": "node_modules/tiny-async-pool/LICENSE-MIT",
+          "origin": "package",
           "sha256": "b454bece2de2ec708e14ce7596c36a853e04fbe763b85f63169ea6cd62a10f29",
           "bytes": 1095
         }
@@ -8521,8 +9834,31 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/tiny-async-pool/node_modules/semver/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
+        }
+      ]
+    },
+    {
+      "location": "node_modules/tiny-inflate",
+      "name": "tiny-inflate",
+      "version": "1.0.3",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/tiny-inflate/LICENSE",
+          "origin": "package",
+          "sha256": "c0df7f551401f8f80197ff31bf69b8cd23727d127423403282514d242a3ab132",
+          "bytes": 1077
         }
       ]
     },
@@ -8540,6 +9876,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/tinybench/LICENSE",
+          "origin": "package",
           "sha256": "cebc084d54e6dd99e53292ddb4bc1cdb63d9bfcd9ce438fe3aa6eb106d79e2ea",
           "bytes": 1065
         }
@@ -8559,6 +9897,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/tinyexec/LICENSE",
+          "origin": "package",
           "sha256": "f95f668fe64081ddb4153b322e34fdd719b991285ed08177d5ad7133b7988d92",
           "bytes": 1065
         }
@@ -8578,6 +9918,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/tinyglobby/LICENSE",
+          "origin": "package",
           "sha256": "22c68811e174cbbfb3813d4135918df4f540959c14d872e601d9abe83d3cde8f",
           "bytes": 1076
         }
@@ -8597,6 +9939,8 @@
       "licenseFiles": [
         {
           "file": "LICENCE",
+          "source": "node_modules/tinyrainbow/LICENCE",
+          "origin": "package",
           "sha256": "cebc084d54e6dd99e53292ddb4bc1cdb63d9bfcd9ce438fe3aa6eb106d79e2ea",
           "bytes": 1065
         }
@@ -8616,6 +9960,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/tldts/LICENSE",
+          "origin": "package",
           "sha256": "c64182d48160db948b6aa97a984f1a32974ce4d2053900361264cd33853796cb",
           "bytes": 1078
         }
@@ -8635,6 +9981,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/tldts-core/LICENSE",
+          "origin": "package",
           "sha256": "c64182d48160db948b6aa97a984f1a32974ce4d2053900361264cd33853796cb",
           "bytes": 1078
         }
@@ -8654,6 +10002,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/tmp/LICENSE",
+          "origin": "package",
           "sha256": "162413c61e0982abe89a06bf7a02ec760dc49a7364d838bd9f01daebb5b95954",
           "bytes": 1082
         }
@@ -8686,6 +10036,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/toidentifier/LICENSE",
+          "origin": "package",
           "sha256": "a832d679750e49ab433626ab196350b89964b60eb0d3edd3341887c7d5f4c128",
           "bytes": 1108
         }
@@ -8705,6 +10057,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/tough-cookie/LICENSE",
+          "origin": "package",
           "sha256": "22ec6791c91ba42c0516a05f4cbdde019aae4687f8a38c5ca7e8a69ee68f851d",
           "bytes": 1485
         }
@@ -8724,6 +10078,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/tr46/LICENSE.md",
+          "origin": "package",
           "sha256": "499d6d466d064e0460427967a344e2a32fcb86ea8c6cd1a285ec4f1fa03fba67",
           "bytes": 1076
         }
@@ -8756,6 +10112,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/tslib/LICENSE.txt",
+          "origin": "package",
           "sha256": "210b19e543130388c68654b7497e967119ce17145f66ab7d85688fbd70f08751",
           "bytes": 655
         }
@@ -8775,6 +10133,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/type-fest/license",
+          "origin": "package",
           "sha256": "64a93ffc0a06a2266dbb57ed7ebe3b56ba66ab337b6347fabdbf86c76819fbae",
           "bytes": 1116
         }
@@ -8794,6 +10154,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/type-is/LICENSE",
+          "origin": "package",
           "sha256": "23d466b1b134b415b66fa50c6526b4cf3e7b9258554da88d3abb371721e7ce68",
           "bytes": 1172
         }
@@ -8813,6 +10175,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/type-is/node_modules/content-type/LICENSE",
+          "origin": "package",
           "sha256": "257aed98914108e91a337912727b6a802eef218248507f74b76faffaff517a38",
           "bytes": 1089
         }
@@ -8832,6 +10196,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/typescript/LICENSE.txt",
+          "origin": "package",
           "sha256": "a7d00bfd54525bc694b6e32f64c7ebcf5e6b7ae3657be5cc12767bce74654a47",
           "bytes": 9197
         }
@@ -8851,6 +10217,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/undici/LICENSE",
+          "origin": "package",
           "sha256": "a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27",
           "bytes": 1090
         }
@@ -8862,7 +10230,7 @@
       "version": "7.24.6",
       "license": "MIT",
       "installedLicense": "MIT",
-      "developmentOnly": true,
+      "developmentOnly": false,
       "optional": false,
       "installed": true,
       "directRuntime": false,
@@ -8870,8 +10238,52 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/undici-types/LICENSE",
+          "origin": "package",
           "sha256": "a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27",
           "bytes": 1090
+        }
+      ]
+    },
+    {
+      "location": "node_modules/unicode-properties",
+      "name": "unicode-properties",
+      "version": "1.4.1",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/unicode-properties/LICENSE",
+          "origin": "package",
+          "sha256": "43439dbd4f43837aadab215cdbe5a422cc6323a50c4ea84d8d6bbc3671666a1d",
+          "bytes": 1040
+        }
+      ]
+    },
+    {
+      "location": "node_modules/unicode-trie",
+      "name": "unicode-trie",
+      "version": "2.0.0",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": false,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/unicode-trie/LICENSE",
+          "origin": "package",
+          "sha256": "43439dbd4f43837aadab215cdbe5a422cc6323a50c4ea84d8d6bbc3671666a1d",
+          "bytes": 1040
         }
       ]
     },
@@ -8889,6 +10301,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -8908,6 +10322,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/unpipe/LICENSE",
+          "origin": "package",
           "sha256": "1a526fbe8d8577f5a4b1c2821842b55b7c0e18862531c62ae4ce69c9b19b74b6",
           "bytes": 1114
         }
@@ -8927,6 +10343,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/unzipper/LICENSE",
+          "origin": "package",
           "sha256": "b9e9abeaf8b92573dc28915d4948dbce30d55b30c688d109898b35e6105c4215",
           "bytes": 1219
         }
@@ -8946,6 +10364,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/unzipper/node_modules/fs-extra/LICENSE",
+          "origin": "package",
           "sha256": "c6a7de1428955aa5a692f4d3a3d3ede658d959616944713337cda296736442e1",
           "bytes": 1084
         }
@@ -8965,6 +10385,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/unzipper/node_modules/jsonfile/LICENSE",
+          "origin": "package",
           "sha256": "a9801fb52ba22ef808682a094da8a7a480584b7ed0dfd0d888ab543616335031",
           "bytes": 1110
         }
@@ -8984,6 +10406,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/unzipper/node_modules/universalify/LICENSE",
+          "origin": "package",
           "sha256": "3fda5977c0904e226190b4e21d64340c1731e2142d6fe5f3dee0090a216b8b63",
           "bytes": 1100
         }
@@ -9003,11 +10427,15 @@
       "licenseFiles": [
         {
           "file": "LICENSE.MIT.txt",
+          "source": "node_modules/utf8-byte-length/LICENSE.MIT.txt",
+          "origin": "package",
           "sha256": "bfefe6b48c92732f278120d7a3bf682c3b01e25fdc2e0327544cbb62a2fa9a8e",
           "bytes": 1079
         },
         {
           "file": "LICENSE.WTFPL.txt",
+          "source": "node_modules/utf8-byte-length/LICENSE.WTFPL.txt",
+          "origin": "package",
           "sha256": "184d8dd2923c05139a55da1ff61a367e45ca596ac4fb96a26856c3c90003c4bb",
           "bytes": 480
         }
@@ -9027,6 +10455,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/util-deprecate/LICENSE",
+          "origin": "package",
           "sha256": "0154425673db15cdfa80ecba2c9b1f1a867f7197a006764712849bfc3a93cbb7",
           "bytes": 1102
         }
@@ -9046,6 +10476,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/vary/LICENSE",
+          "origin": "package",
           "sha256": "bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400",
           "bytes": 1094
         }
@@ -9065,6 +10497,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/vite/LICENSE.md",
+          "origin": "package",
           "sha256": "a77a1c089806b39ad339535bdf3677f636c91d96693e8ad7b11fe733f650ea64",
           "bytes": 101176
         }
@@ -9422,6 +10856,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/vite/node_modules/esbuild/LICENSE.md",
+          "origin": "package",
           "sha256": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681",
           "bytes": 1069
         }
@@ -9441,6 +10877,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/vitest/LICENSE.md",
+          "origin": "package",
           "sha256": "881d660c26831481b697e39724d4a35c9f86e07b67156d4aeb693a0b39910435",
           "bytes": 37726
         }
@@ -9460,8 +10898,38 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/w3c-xmlserializer/LICENSE.md",
+          "origin": "package",
           "sha256": "ab654de803cdaa9e2819ab2e934bdf7f757e308649ec231d78e80e92425cdc34",
           "bytes": 1105
+        }
+      ]
+    },
+    {
+      "location": "node_modules/wawoff2",
+      "name": "wawoff2",
+      "version": "2.0.1",
+      "license": "MIT",
+      "installedLicense": "MIT",
+      "developmentOnly": false,
+      "optional": false,
+      "installed": true,
+      "directRuntime": true,
+      "directDevelopment": false,
+      "licenseFiles": [
+        {
+          "file": "LICENSE",
+          "source": "node_modules/wawoff2/LICENSE",
+          "origin": "package",
+          "sha256": "d42a3e363d99da22b860ab760faa37dfa9781d74c9f3ed634d05109081616513",
+          "bytes": 1071
+        },
+        {
+          "file": "docs/licensing/wawoff2-NOTICE.txt",
+          "source": "docs/licensing/wawoff2-NOTICE.txt",
+          "origin": "repository",
+          "sha256": "d80315b1082504f3ca5162315f414e947234a28906f3d1663ec45e2011e296e4",
+          "bytes": 2780
         }
       ]
     },
@@ -9479,6 +10947,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/webcrypto-core/LICENSE",
+          "origin": "package",
           "sha256": "77f65dc73794f48cbf111484def84366d470b0fab2b4c51c564c3ce62ea028b8",
           "bytes": 1067
         }
@@ -9498,6 +10968,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.md",
+          "source": "node_modules/webidl-conversions/LICENSE.md",
+          "origin": "package",
           "sha256": "a889cc4dbee2ae172c179856b25d75b0b7a5a136e1b97109b9b590b2ff1a879c",
           "bytes": 1323
         }
@@ -9517,6 +10989,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/whatwg-mimetype/LICENSE.txt",
+          "origin": "package",
           "sha256": "528eec83cb836a0adda9f8fc3d6a2a70a710d6cc0be9a155f92212c8df28acfa",
           "bytes": 1069
         }
@@ -9536,6 +11010,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/whatwg-url/LICENSE.txt",
+          "origin": "package",
           "sha256": "db480f236292a093e77a83c35431a8496624e1e664a3547768a9ce2bdde39877",
           "bytes": 1076
         }
@@ -9555,6 +11031,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/which/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -9574,6 +11052,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/why-is-node-running/LICENSE",
+          "origin": "package",
           "sha256": "6a134e51aa31496c15a741592fc5d782b2dbf8d8b6b8524e15c8520ae0cd6374",
           "bytes": 1079
         }
@@ -9593,6 +11073,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/wrap-ansi/license",
+          "origin": "package",
           "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
           "bytes": 1117
         }
@@ -9612,6 +11094,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/wrappy/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -9631,6 +11115,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/ws/LICENSE",
+          "origin": "package",
           "sha256": "2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef",
           "bytes": 1183
         }
@@ -9650,6 +11136,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/xml-name-validator/LICENSE.txt",
+          "origin": "package",
           "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
           "bytes": 10173
         }
@@ -9669,6 +11157,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/xmlbuilder/LICENSE",
+          "origin": "package",
           "sha256": "e368bc4263b466cf98c225af15e300549e00da8859416a4536109e9654d434a8",
           "bytes": 1101
         }
@@ -9688,6 +11178,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/xmlchars/LICENSE",
+          "origin": "package",
           "sha256": "45d196313c2647d313cc65ca9b093d2d6974b64d35ee7346f2c60c9d518dff2c",
           "bytes": 1086
         }
@@ -9707,6 +11199,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/y18n/LICENSE",
+          "origin": "package",
           "sha256": "2034cce3b6fafcddd642c4175e01d3ddfc332a53b9f20fdc46b1466dc89ac469",
           "bytes": 731
         }
@@ -9726,6 +11220,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/yallist/LICENSE",
+          "origin": "package",
           "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b",
           "bytes": 765
         }
@@ -9745,6 +11241,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/yargs/LICENSE",
+          "origin": "package",
           "sha256": "2f1a503bfab84b3ba7393627308b3274501e459e3b5185bbb56bbf16cb1602d4",
           "bytes": 1146
         }
@@ -9764,6 +11262,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE.txt",
+          "source": "node_modules/yargs-parser/LICENSE.txt",
+          "origin": "package",
           "sha256": "365496ca1f56da40b23c9815fc40fa9005847b2f8f8fd1c1a4929ef25ec8cd1d",
           "bytes": 731
         }
@@ -9783,6 +11283,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/yjs/LICENSE",
+          "origin": "package",
           "sha256": "341baa53605ed85d6f95782322854cca56c655ebc7fd4712649b8e7afc6020ff",
           "bytes": 1211
         }
@@ -9802,6 +11304,8 @@
       "licenseFiles": [
         {
           "file": "license",
+          "source": "node_modules/yocto-queue/license",
+          "origin": "package",
           "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
           "bytes": 1117
         }
@@ -9821,6 +11325,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/zod/LICENSE",
+          "origin": "package",
           "sha256": "3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8",
           "bytes": 1072
         }
@@ -9840,6 +11346,8 @@
       "licenseFiles": [
         {
           "file": "LICENSE",
+          "source": "node_modules/zod-to-json-schema/LICENSE",
+          "origin": "package",
           "sha256": "80d3168ad2f70f6f5bb2ab22b23414707abf6f0a392034891481ae36a1a429d4",
           "bytes": 745
         }

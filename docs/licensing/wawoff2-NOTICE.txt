@@ -1,0 +1,33 @@
+wawoff2 2.0.1 embedded decoder notices
+
+Build source: https://github.com/fontello/wawoff2/blob/2.0.1/src/Dockerfile
+WOFF2 source commit: a0d0ed7da27b708c0a4e96ad7a998bddc933c06e
+Brotli source submodule: 533843e3546cd24c8344eaa899c6b0b681c8d222
+The npm LICENSE preserves the WOFF2 Authors MIT license. The linked Brotli decoder license is preserved below from https://raw.githubusercontent.com/google/brotli/533843e3546cd24c8344eaa899c6b0b681c8d222/LICENSE.
+Emscripten-generated glue/runtime also retains the applicable notices distributed in licenses/native/texts/emscripten--LICENSE.
+
+Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+Application modification: the Vite build replaces Emscripten createNamedFunction with a direct return of its body and craftInvokerFunction with static argument conversion, ABI invocation, return conversion and destructor cleanup. This removes runtime binding/function-name generation so the decoder works under the existing CSP without unsafe-eval. The unchanged npm decoder source is SHA256 112a89e7497a856698103e2ce530d2b6fc27668c0cd56f45bcbf7850d73b7c2b.
+
+Application readiness modification: the async decompress wrapper resolves immediately when Module.calledRun is already true, rejects on Module.onAbort, and applies a 15-second initialization deadline. This handles the browser initialization order without waiting for an event that already fired. Original wrapper SHA256 f9dee5dcd810246083df4c8f09e3ae096dbecb6da61727d669b6e85006a64bef.
+
+Application browser export modification: the transformed binding assigns module.exports=Module unconditionally; upstream only makes this assignment in its Node environment branch. This exposes the same initialized module to the bundler-generated browser wrapper.

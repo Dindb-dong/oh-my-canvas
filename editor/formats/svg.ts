@@ -1,9 +1,12 @@
 import type { Data, Matrix, Point, Shape } from '../contracts';
 import { identity, multiply, transformPoint, bounds, boxGeometry, pathBounds } from '../geometry';
 import { shape, uid, richText } from './model';
-import { parseMarkup, cssDeclarations, serializeNode, type MarkupNode } from './markup';
+import { parseMarkup, cssDeclarations, escapeAttr, escapeText, type MarkupNode } from './markup';
 import type { Imported, ImportOptions } from './html';
 import { measureTextLayout } from '../layout';
+import { parseSvgPath } from '../geometry/svg-path';
+export { parseSvgPath } from '../geometry/svg-path';
+export const SVG_IMPORT_LIMITS = { layers: 2000, segments: 10000, visits: 20000, depth: 100, fallbackBytes: 4 * 1024 * 1024, retainedBytes: 16 * 1024 * 1024 } as const;
 const num = (v: any, d = 0) => {
     const n = parseFloat(v);
     if (!Number.isFinite(n))
@@ -45,120 +48,6 @@ function matrix(value = ''): Matrix {
     }
     return m;
 }
-function arc(from: Point, to: Point, rx: number, ry: number, angle: number, large: number, sweep: number): Data[] {
-    rx = Math.abs(rx);
-    ry = Math.abs(ry);
-    if (!rx || !ry || from.x === to.x && from.y === to.y)
-        return [{ type: 'line', point: to }];
-    const phi = angle * Math.PI / 180, c = Math.cos(phi), s = Math.sin(phi), dx = (from.x - to.x) / 2, dy = (from.y - to.y) / 2, x = c * dx + s * dy, y = -s * dx + c * dy, lambda = x * x / (rx * rx) + y * y / (ry * ry);
-    if (lambda > 1) {
-        rx *= Math.sqrt(lambda);
-        ry *= Math.sqrt(lambda);
-    }
-    const factor = (large === sweep ? -1 : 1) * Math.sqrt(Math.max(0, (rx * rx * ry * ry - rx * rx * y * y - ry * ry * x * x) / (rx * rx * y * y + ry * ry * x * x))), cxp = factor * rx * y / ry, cyp = -factor * ry * x / rx, cx = c * cxp - s * cyp + (from.x + to.x) / 2, cy = s * cxp + c * cyp + (from.y + to.y) / 2;
-    const start = Math.atan2((y - cyp) / ry, (x - cxp) / rx);
-    let delta = Math.atan2((-y - cyp) / ry, (-x - cxp) / rx) - start;
-    if (sweep && delta < 0)
-        delta += Math.PI * 2;
-    if (!sweep && delta > 0)
-        delta -= Math.PI * 2;
-    const count = Math.ceil(Math.abs(delta) / (Math.PI / 2)), segments: Data[] = [];
-    const p = (a: number) => ({ x: cx + rx * c * Math.cos(a) - ry * s * Math.sin(a), y: cy + rx * s * Math.cos(a) + ry * c * Math.sin(a) }), derivative = (a: number) => ({ x: -rx * c * Math.sin(a) - ry * s * Math.cos(a), y: -rx * s * Math.sin(a) + ry * c * Math.cos(a) });
-    for (let i = 0; i < count; i++) {
-        const a = start + delta * i / count, b = start + delta * (i + 1) / count, k = 4 / 3 * Math.tan((b - a) / 4), p0 = p(a), p1 = p(b), d0 = derivative(a), d1 = derivative(b);
-        segments.push({ type: 'curve', control1: { x: p0.x + k * d0.x, y: p0.y + k * d0.y }, control2: { x: p1.x - k * d1.x, y: p1.y - k * d1.y }, point: i === count - 1 ? to : p1 });
-    }
-    return segments;
-}
-/** SVG path grammar interpreted into editable world-coordinate cubic segments. */
-export function parseSvgPath(value: string): Data[] {
-    const tokens = value.match(/[a-zA-Z]|[-+]?(?:\d*\.\d+|\d+\.?\d*)(?:e[-+]?\d+)?/g) ?? [], segments: Data[] = [];
-    let index = 0, command = '', p: Point = { x: 0, y: 0 }, start = { ...p }, lastControl: Point | null = null, lastKind = '';
-    const take = () => {
-        const t = tokens[index++];
-        if (t === undefined || /[a-z]/i.test(t) && !/^[-+]?\d/.test(t))
-            throw new Error('Invalid SVG path');
-        const n = Number(t);
-        if (!Number.isFinite(n))
-            throw new Error('Invalid SVG path number');
-        return n;
-    };
-    while (index < tokens.length) {
-        if (/^[a-z]$/i.test(tokens[index]))
-            command = tokens[index++];
-        if (!command)
-            throw new Error('SVG path command missing');
-        const upper = command.toUpperCase(), relative = command !== upper, point = () => { const x = take(), y = take(); return { x: x + (relative ? p.x : 0), y: y + (relative ? p.y : 0) }; };
-        if (upper === 'Z') {
-            segments.push({ type: 'close' });
-            p = { ...start };
-            lastControl = null;
-            command = '';
-            continue;
-        }
-        const old = { ...p };
-        switch (upper) {
-            case 'M':
-                p = point();
-                start = { ...p };
-                segments.push({ type: 'move', point: p });
-                command = relative ? 'l' : 'L';
-                break;
-            case 'L':
-                p = point();
-                segments.push({ type: 'line', point: p });
-                break;
-            case 'H':
-                p = { x: take() + (relative ? p.x : 0), y: p.y };
-                segments.push({ type: 'line', point: p });
-                break;
-            case 'V':
-                p = { x: p.x, y: take() + (relative ? p.y : 0) };
-                segments.push({ type: 'line', point: p });
-                break;
-            case 'C': {
-                const c1 = point(), c2 = point();
-                p = point();
-                segments.push({ type: 'curve', control1: c1, control2: c2, point: p });
-                lastControl = c2;
-                break;
-            }
-            case 'S': {
-                const c1 = lastControl && ['C', 'S'].includes(lastKind) ? { x: 2 * p.x - lastControl.x, y: 2 * p.y - lastControl.y } : { ...p }, c2 = point();
-                p = point();
-                segments.push({ type: 'curve', control1: c1, control2: c2, point: p });
-                lastControl = c2;
-                break;
-            }
-            case 'Q':
-            case 'T': {
-                const q: Point = upper === 'Q' ? point() : lastControl && ['Q', 'T'].includes(lastKind) ? { x: 2 * p.x - lastControl.x, y: 2 * p.y - lastControl.y } : { ...p };
-                p = point();
-                segments.push({ type: 'curve', control1: { x: old.x + 2 / 3 * (q.x - old.x), y: old.y + 2 / 3 * (q.y - old.y) }, control2: { x: p.x + 2 / 3 * (q.x - p.x), y: p.y + 2 / 3 * (q.y - p.y) }, point: p });
-                lastControl = q;
-                break;
-            }
-            case 'A': {
-                const flag = () => { const token = tokens[index]; if (!token || !/^([01])/.test(token))
-                    throw new Error('Invalid SVG arc flag'); const value = Number(token[0]); if (token.length === 1)
-                    index++;
-                else
-                    tokens[index] = token.slice(1); return value; };
-                const rx = take(), ry = take(), a = take(), large = flag(), sweep = flag();
-                p = point();
-                segments.push(...arc(old, p, rx, ry, a, large, sweep));
-                break;
-            }
-            default: throw new Error(`Unsupported SVG path command ${command}`);
-        }
-        if (!['C', 'S', 'Q', 'T'].includes(upper))
-            lastControl = null;
-        lastKind = upper;
-        if (segments.length > 50000)
-            throw new Error('SVG path too complex');
-    }
-    return segments;
-}
 export function importSvg(text: string, options: ImportOptions = {}): Imported {
     const parsed = parseMarkup(text, { svg: true }), svg = parsed.children.find(n => n.tag === 'svg');
     if (!svg)
@@ -171,6 +60,36 @@ export function importSvg(text: string, options: ImportOptions = {}): Imported {
     };
     collect(svg);
     const viewBox = (svg.attrs.viewbox?.match(/[-+\d.e]+/gi) ?? []).map(Number), width = num(svg.attrs.width, viewBox[2] ?? options.width ?? 100), height = num(svg.attrs.height, viewBox[3] ?? options.height ?? 100), objects: Record<string, Shape> = {}, rootIds: string[] = [], warnings: string[] = [], makeId = options.id ?? uid;
+    const encoder = new TextEncoder(), bytes = (value: string) => encoder.encode(value).length;
+    let layers = 0, visits = 0, segmentCount = 0, fallbackBytes = 0, retainedBytes = 0, definitions: string | undefined;
+    const retain = (value: Shape) => {
+        const size = bytes(JSON.stringify(value));
+        if (retainedBytes + size > SVG_IMPORT_LIMITS.retainedBytes)
+            throw new Error('SVG exceeds the retained data byte limit');
+        retainedBytes += size;
+        objects[value.id] = value;
+    };
+    function serializeLimited(node: MarkupNode, limit: number): string {
+        const parts: string[] = [];
+        let length = 0;
+        const append = (part: string) => {
+            length += bytes(part);
+            if (length > limit)
+                throw new Error('SVG exceeds the fallback picture byte limit');
+            parts.push(part);
+        };
+        const walk = (value: MarkupNode) => {
+            if (value.tag === '#text') { append(escapeText(value.text)); return; }
+            append(`<${value.sourceTag ?? value.tag}`);
+            for (const [key, content] of Object.entries(value.attrs))
+                append(` ${value.sourceNames?.[key] ?? key}="${escapeAttr(content)}"`);
+            append('>');
+            value.children.forEach(walk);
+            append(`</${value.sourceTag ?? value.tag}>`);
+        };
+        walk(node);
+        return parts.join('');
+    }
     const vbWidth = viewBox[2] || width, vbHeight = viewBox[3] || height;
     let scaleX = width / vbWidth, scaleY = height / vbHeight;
     const aspect = svg.attrs.preserveaspectratio ?? 'xMidYMid meet';
@@ -207,11 +126,31 @@ export function importSvg(text: string, options: ImportOptions = {}): Imported {
     });
     function picture(n: MarkupNode, m: Matrix, common: Data, reason: string): Shape {
         warnings.push(reason);
-        const definitions = [...defs.values()].filter(value => ['clippath', 'mask', 'filter', 'lineargradient', 'radialgradient', 'pattern', 'symbol'].includes(value.tag)).map(serializeNode).join('');
-        const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs>${definitions}</defs><g transform="matrix(${m.a} ${m.b} ${m.c} ${m.d} ${m.e - (options.x ?? 0)} ${m.f - (options.y ?? 0)})">${serializeNode({ ...n, attrs: { ...n.attrs, transform: '' } })}</g></svg>`;
-        return shape('svg', { ...common, x: options.x ?? 0, y: options.y ?? 0, width, height, rotation: 0, fills: [], strokes: [], svg: source, viewBox: `0 0 ${width} ${height}`, image: { src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`, width, height, mimeType: 'image/svg+xml' }, svgOriginal: serializeNode(n) });
+        const remaining = SVG_IMPORT_LIMITS.fallbackBytes - fallbackBytes;
+        if (definitions === undefined) {
+            const parts: string[] = [];
+            let length = 0;
+            for (const value of defs.values())
+                if (['clippath', 'mask', 'filter', 'lineargradient', 'radialgradient', 'pattern', 'symbol'].includes(value.tag)) {
+                    const source = serializeLimited(value, remaining / 4 - length);
+                    length += bytes(source);
+                    parts.push(source);
+                }
+            definitions = parts.join('');
+        }
+        const original = serializeLimited(n, remaining), body = serializeLimited({ ...n, attrs: { ...n.attrs, transform: '' } }, remaining);
+        const prefix = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs>`, middle = `</defs><g transform="matrix(${m.a} ${m.b} ${m.c} ${m.d} ${m.e - (options.x ?? 0)} ${m.f - (options.y ?? 0)})">`, suffix = '</g></svg>';
+        // URI escaping costs at most three ASCII bytes per UTF-8 byte, plus the raw SVG copy.
+        const cost = 4 * (bytes(prefix) + bytes(definitions) + bytes(middle) + bytes(body) + bytes(suffix)) + bytes(original) + 100;
+        if (cost > remaining)
+            throw new Error('SVG exceeds the fallback picture byte limit');
+        fallbackBytes += cost;
+        const source = prefix + definitions + middle + body + suffix;
+        return shape('svg', { ...common, x: options.x ?? 0, y: options.y ?? 0, width, height, rotation: 0, fills: [], strokes: [], svg: source, viewBox: `0 0 ${width} ${height}`, image: { src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`, width, height, mimeType: 'image/svg+xml' }, svgOriginal: original });
     }
-    function walk(n: MarkupNode, parent: string, parentMatrix: Matrix, inherited: Data, seen: Set<string>): string | null {
+    function walk(n: MarkupNode, parent: string, parentMatrix: Matrix, inherited: Data, seen: Set<string>, depth = 0): string | null {
+        if (++visits > SVG_IMPORT_LIMITS.visits || depth > SVG_IMPORT_LIMITS.depth)
+            throw new Error('SVG expansion exceeds the traversal limit');
         if (n.tag === '#text' || ['defs', 'lineargradient', 'radialgradient', 'stop', 'clippath', 'mask', 'title', 'desc', 'metadata'].includes(n.tag))
             return null;
         const attrs = { ...Object.fromEntries(Object.entries(inherited).filter(([key]) => ['fill', 'fill-rule', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-opacity', 'stroke-linecap', 'stroke-linejoin', 'stroke-dasharray', 'font-family', 'font-size', 'font-weight', 'font-style', 'text-anchor', 'visibility'].includes(key))), ...n.attrs, ...cssDeclarations(n.attrs.style ?? '') };
@@ -228,23 +167,25 @@ export function importSvg(text: string, options: ImportOptions = {}): Imported {
                 return null;
             }
             m = multiply(m, { ...identity(), e: num(n.attrs.x), f: num(n.attrs.y) });
-            return walk({ ...source, attrs: { ...source.attrs, ...Object.fromEntries(Object.entries(n.attrs).filter(([k]) => !['href', 'xlink:href', 'x', 'y', 'transform'].includes(k))) } }, parent, m, attrs, new Set([...seen, ref]));
+            return walk({ ...source, attrs: { ...source.attrs, ...Object.fromEntries(Object.entries(n.attrs).filter(([k]) => !['href', 'xlink:href', 'x', 'y', 'transform'].includes(k))) } }, parent, m, attrs, new Set([...seen, ref]), depth + 1);
         }
+        if (++layers > SVG_IMPORT_LIMITS.layers)
+            throw new Error('SVG exceeds the 2000 layer limit');
         const id = makeId(), common: Data = { id, name: n.attrs['data-name'] ?? n.attrs.id ?? n.tag, parentId: parent, enclosingFrameId: parent, opacity: num(attrs.opacity, 1), fills: paint(attrs.fill, num(attrs['fill-opacity'], 1)), strokes: attrs.stroke && attrs.stroke !== 'none' ? paint(attrs.stroke, num(attrs['stroke-opacity'], 1)).map(p => ({ ...p, width: num(attrs['stroke-width'], 1), cap: attrs['stroke-linecap'], join: attrs['stroke-linejoin'], dashes: attrs['stroke-dasharray']?.split(/[ ,]+/).map(Number) })) : [], fillRule: attrs['fill-rule'], svgAttributes: { ...n.attrs } };
         const paintRef = /url\(#([^)]*)\)/.exec(attrs.fill ?? '');
         const paintDef = paintRef ? defs.get(paintRef[1]) : undefined;
         const positionedText = n.tag === 'text' && n.children.some(child => child.tag === 'tspan' && ['x', 'y', 'dx', 'dy', 'rotate'].some(key => child.attrs[key] !== undefined));
         if (attrs['clip-path'] || attrs.mask || attrs.filter || paintDef && (paintDef.attrs.gradientunits === 'userSpaceOnUse' || paintDef.attrs.gradienttransform) || positionedText) {
             const image = picture(n, m, common, `SVG effects or positioned text on ${common.name} preserved as a picture`);
-            objects[id] = image;
+            retain(image);
             return id;
         }
         let s: Shape;
         if (['g', 'svg', 'symbol', 'a'].includes(n.tag)) {
             s = shape('group', { ...common, x: 0, y: 0, width: 0, height: 0, childIds: [] });
-            objects[id] = s;
+            retain(s);
             for (const child of n.children) {
-                const cid = walk(child, id, m, attrs, seen);
+                const cid = walk(child, id, m, attrs, seen, depth + 1);
                 if (cid)
                     s.childIds!.push(cid);
             }
@@ -255,17 +196,25 @@ export function importSvg(text: string, options: ImportOptions = {}): Imported {
         if (n.tag === 'path' || ['polyline', 'polygon', 'line'].includes(n.tag)) {
             let segments: Data[] = [];
             if (n.tag === 'path')
-                segments = parseSvgPath(n.attrs.d ?? '');
+                segments = parseSvgPath(n.attrs.d ?? '', SVG_IMPORT_LIMITS.segments - segmentCount);
             else if (n.tag === 'line')
                 segments = [{ type: 'move', point: { x: num(n.attrs.x1), y: num(n.attrs.y1) } }, { type: 'line', point: { x: num(n.attrs.x2), y: num(n.attrs.y2) } }];
             else {
-                const values = (n.attrs.points?.match(/[-+]?(?:\d*\.\d+|\d+\.?\d*)(?:e[-+]?\d+)?/gi) ?? []).map(Number);
+                const values: number[] = [];
+                for (const match of (n.attrs.points ?? '').matchAll(/[-+]?(?:\d*\.\d+|\d+\.?\d*)(?:e[-+]?\d+)?/gi)) {
+                    if (values.length >= (SVG_IMPORT_LIMITS.segments - segmentCount) * 2)
+                        throw new Error('SVG exceeds the 10000 segment limit');
+                    values.push(Number(match[0]));
+                }
                 if (values.length % 2)
                     throw new Error('Odd SVG point coordinate');
                 segments = Array.from({ length: values.length / 2 }, (_, i) => ({ type: i ? 'line' : 'move', point: { x: values[i * 2], y: values[i * 2 + 1] } }));
                 if (n.tag === 'polygon')
                     segments.push({ type: 'close' });
             }
+            if (segmentCount + segments.length > SVG_IMPORT_LIMITS.segments)
+                throw new Error('SVG exceeds the 10000 segment limit');
+            segmentCount += segments.length;
             segments = transformSegments(segments, m);
             const canonical = segments.map(segment => segment.type === 'close' ? { command: 'close' } : segment.type === 'curve' ? { command: 'curve', x: segment.point.x, y: segment.point.y, x1: segment.control1.x, y1: segment.control1.y, x2: segment.control2.x, y2: segment.control2.y } : { command: segment.type, x: segment.point.x, y: segment.point.y });
             const b = pathBounds(canonical);
@@ -304,7 +253,7 @@ export function importSvg(text: string, options: ImportOptions = {}): Imported {
         }
         else
             s = picture(n, m, common, `SVG ${n.tag} preserved as a picture`);
-        objects[id] = s;
+        retain(s);
         return id;
     }
     for (const node of svg.children) {

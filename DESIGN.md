@@ -41,6 +41,12 @@ Canvas selections show each included shape plus aggregate transform bounds. Sele
 
 Canvas Shift-click toggles individual membership. Layer Shift-click uses a visible-row anchor range; Ctrl/Meta-click toggles individual rows. Empty unselected frame interior supports marquee, with partial intersection selecting eligible group units. Moving layers preserves relative order and canvas geometry. Pen input has unobstructed anchors and a live next-segment preview.
 
+### Vector precision and image cutout (2026-11-05)
+
+The editable **Oh My Canvas UI Kit** document, page `10e6f879-40f8-4352-8d71-c6179ff89e64`, contains **States / Vector precision and image cutout / 2026-11-05**, board `f70f7827-2951-4755-8ee7-8dd484a24371`. Its three inspector mains are Vector precision (`component-d17b5666-fb02-468b-bd5c-cf20863a5a1e`), Text outlines (`component-b37807fd-cae4-4584-b9b4-4aff8af5f0c4`), and Image cutout (`component-330c7dea-bff4-40b6-91f7-5036ff835c32`). Board and mains were read back after returning to the library and reopening the document. The overview was visually reviewed without clipping.
+
+Reuse existing inspector sections, labeled numeric fields and native selects. A selected path node exposes its world-space coordinates, node type, incoming/outgoing handle coordinates, and tangent angles and lengths. Angles are measured clockwise from world +X; zero-length handles retain the anchor until a positive length is entered. Other contours, including holes, remain independent. Outline actions create editable paths while preserving the source. Image background removal creates an alpha PNG locally on Windows, Linux and macOS and offers Restore original. Loading disables duplicate actions; errors leave source content intact and appear in the existing inspector status treatment. The board's 260 px reference panels map to `editor/ui/inspector.ts`; node selection and handles map to `editor/interaction/canvas.ts`. Existing desktop minimum size, focus and undo behavior apply. Runtime comparison evidence is tracked separately from this design reference.
+
 ## Implementation constraints
 Reuse the existing editor and Electron bridge. No new UI framework or network service. Never connect a cosmetic control to fake data. Preferences are device-local and independently validated. Preserve existing library/import/new/export selectors for regression tests. Keep offline fonts and CanvasKit assets. No uploads, analytics, or external fonts.
 

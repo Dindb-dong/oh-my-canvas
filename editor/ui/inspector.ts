@@ -1,6 +1,6 @@
 import type { Data, EditorServices, Shape, MountOptions } from "../contracts";
 import { moveTree, resizeTree, topLevelIds, isEditable, ancestors } from "../document";
-import { rotateShapes, setPathHandle } from "../commands";
+import { rotateShapes, setPathHandle, movePathNodes, convertPathNode } from "../commands";
 import { el, button, iconButton, labeledIconButton, input, select, check, section, row, clone, jsonEditor, askName, modal, toast, download } from "./dom";
 import { chooseFiles, readImageFile } from "./picker";
 import type { createTextSession } from "../interaction/text";
@@ -27,6 +27,33 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
     const editor = services.editor;
     const pickerAbort = new AbortController();
     let destroyed = false, rendering = false, numericSession = false;
+    const processing = new Set<string>();
+    const processingErrors = new Map<string, string>();
+    function asyncAction(label: string, pending: string, key: string, run: () => Promise<unknown>) {
+        const control = button(processing.has(key) ? pending : label, async () => {
+            if (processing.has(key))
+                return;
+            processing.add(key);
+            processingErrors.delete(key);
+            refresh();
+            try {
+                await run();
+            }
+            catch (error) {
+                processingErrors.set(key, error instanceof Error ? error.message : String(error));
+                throw error;
+            }
+            finally {
+                processing.delete(key);
+                if (!destroyed)
+                    refresh();
+            }
+        });
+        control.disabled = processing.has(key);
+        control.setAttribute("aria-busy", String(processing.has(key)));
+        control.setAttribute("aria-live", "polite");
+        return control;
+    }
     const selected = () => editor.selection.map(id => editor.page.objects[id]).filter((s): s is Shape => !!s);
     const applyChange = (label: string, apply: (doc: Data) => void) => {
         const pageId = editor.pageId;
@@ -916,6 +943,24 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
                     [key]: Math.max(-1, Math.min(1, v))
                 };
             }), "number"));
+        if (shape.type === "image") {
+            const remove = asyncAction("Remove background", "Removing…", `background:${shape.id}`, () => services.images.removeBackground(shape.id));
+            remove.disabled ||= !services.images?.available || !isEditable(editor.page, shape.id);
+            if (!services.images?.available)
+                remove.title = "Background removal is unavailable on this platform";
+            s.append(remove);
+            if (shape.originalImage) {
+                const restore = button("Restore original", () => services.images.restore(shape.id));
+                restore.disabled = processing.has(`background:${shape.id}`) || !isEditable(editor.page, shape.id);
+                s.append(restore);
+            }
+            const error = processingErrors.get(`background:${shape.id}`);
+            if (error) {
+                const message = el("p", "muted", error);
+                message.setAttribute("role", "alert");
+                s.append(message);
+            }
+        }
         return s;
     }
     async function exportLayer(id: string, setting: Data) {
@@ -1168,6 +1213,20 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             design.append(typography());
         if (shape.type === "image" || shape.type === "svg")
             design.append(imagePanel());
+        if (["rect", "ellipse", "path"].includes(shape.type) && shapes.length === 1) {
+            const outline = asyncAction("Outline stroke", "Outlining…", `outline:${shape.id}`, async () => services.commands.run("path.outline-stroke", { id: shape.id }));
+            outline.disabled ||= !isEditable(editor.page, shape.id) || !(shape.strokes ?? []).some((stroke: Data) => !stroke.hidden && stroke.visible !== false && (stroke.width ?? 1) > 0);
+            design.append(outline);
+        }
+        if (shape.type === "text" && shapes.length === 1) {
+            const outline = asyncAction("Outline text", "Outlining…", `outline:${shape.id}`, async () => {
+                if (text.active)
+                    await text.exit();
+                return services.commands.run("text.outline", { id: shape.id });
+            });
+            outline.disabled ||= !isEditable(editor.page, shape.id);
+            design.append(outline);
+        }
         design.append(paintPanel("fills"), paintPanel("strokes"));
         const sides = section("Stroke sides");
         for (const keys of [["top", "right"], ["bottom", "left"]])
@@ -1221,7 +1280,11 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
         }
         if (shape.type === "path") {
             const vector = section("Vector");
-            vector.append(button(canvas.pathId === shape.id ? "Editing nodes" : "Edit nodes", () => canvas.editPath(shape.id)), button("Edit segments", () => jsonEditor("Path segments", shape.content, v => patch("content", v))), choice("Fill rule", "fillRule", ["nonzero", "evenodd"], "nonzero"), row(action("path.close", "Close path"), action("path.open", "Open path")), row(action("path.join", "Join paths"), action("path.merge", "Merge points")), select("Mirror handles", shape.handleMode ?? "free", ["free", "aligned", "symmetric"], v => {
+            const pathAction = (command: string, label: string) => button(label, () => {
+                const nodes = canvas.pathId === shape.id ? canvas.selectedPathNodes ?? [] : [];
+                return services.commands.run(command, { id: shape.id, ...(nodes.length === 1 ? { index: nodes[0] } : {}) });
+            });
+            vector.append(button(canvas.pathId === shape.id ? "Editing nodes" : "Edit nodes", () => canvas.editPath(shape.id)), button("Edit segments", () => jsonEditor("Path segments", shape.content, v => patch("content", v))), choice("Fill rule", "fillRule", ["nonzero", "evenodd"], "nonzero"), row(pathAction("path.close", "Close path"), pathAction("path.open", "Open path")), row(action("path.join", "Join paths"), action("path.merge", "Merge points")), select("Mirror handles", shape.handleMode ?? "free", ["free", "aligned", "symmetric"], v => {
                 update("Mirror path handles", target => {
                     if (target.type !== "path")
                         return;
@@ -1236,6 +1299,61 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
                     }
                 });
             }));
+            if (canvas.pathId === shape.id) {
+                const nodes = shape.content.map((node: Data, index: number) => ({ node, index })).filter(({ node }: Data) => node.command !== "close");
+                const selectedNodes = canvas.selectedPathNodes ?? [], index = selectedNodes.length === 1 ? selectedNodes[0] : -1, node = shape.content[index];
+                vector.append(select("Selected node", index < 0 ? "" : String(index), [{ value: "", label: selectedNodes.length > 1 ? `${selectedNodes.length} nodes selected` : "Select a node" }, ...nodes.map(({ index }: Data) => ({ value: String(index), label: `Node ${index + 1}` }))], v => {
+                    if (v !== "")
+                        canvas.selectPathNode(Number(v));
+                }));
+                if (node) {
+                    const mutate = (label: string, apply: (target: Shape) => void) => applyChange(label, doc => {
+                        const page = doc.pagesById[editor.pageId], target = page.objects[shape.id];
+                        if (target && isEditable(page, shape.id) && canvas.pathId === shape.id && canvas.selectedPathNodes.length === 1 && canvas.selectedPathNodes[0] === index)
+                            apply(target);
+                    });
+                    vector.append(row(...["x", "y"].map(axis => input(`Node ${axis.toUpperCase()}`, node[axis], value => mutate("Move path node", target => movePathNodes(target, [index], axis === "x" ? value - target.content[index].x : 0, axis === "y" ? value - target.content[index].y : 0)), "number"))));
+                    const mode = node.handleMode ?? "corner";
+                    vector.append(select("Node type", mode === "aligned" ? "smooth" : ["free", "angle", "angleLength", "mirrored"].includes(mode) ? "corner" : mode, ["corner", "smooth", "symmetric"], kind => mutate("Change node type", target => convertPathNode(target, index, kind as "corner" | "smooth" | "symmetric"))));
+                    for (const handle of ["in", "out"] as const) {
+                        const segment = handle === "in" ? node : shape.content[index + 1];
+                        if (!segment || segment.command === "close" || segment.command === "move")
+                            continue;
+                        const prefix = handle === "in" ? "Incoming" : "Outgoing", key = handle === "in" ? "2" : "1";
+                        const coordinates = { x: segment["x" + key] ?? node.x, y: segment["y" + key] ?? node.y };
+                        const values: Data = { ...coordinates, angle: Math.atan2(coordinates.y - node.y, coordinates.x - node.x) * 180 / Math.PI, length: Math.hypot(coordinates.x - node.x, coordinates.y - node.y) };
+                        for (const fields of [["x", "y"], ["angle", "length"]])
+                            vector.append(row(...fields.map(field => {
+                                const label = `${prefix} ${field === "angle" ? "angle (°)" : field.length === 1 ? field.toUpperCase() : field}`;
+                                const control = input(label, values[field], value => {
+                                    if (!Number.isFinite(value) || field === "length" && value < 0)
+                                        throw Error("Handle length must be finite and nonnegative; angle and coordinates must be finite.");
+                                    mutate("Move path handle", target => {
+                                        const anchor = target.content[index], edge = handle === "in" ? anchor : target.content[index + 1];
+                                        const point = { x: edge["x" + key] ?? anchor.x, y: edge["y" + key] ?? anchor.y };
+                                        if (field === "x" || field === "y")
+                                            point[field] = value;
+                                        else {
+                                            const angle = field === "angle" ? value * Math.PI / 180 : Math.atan2(point.y - anchor.y, point.x - anchor.x), length = field === "length" ? value : Math.hypot(point.x - anchor.x, point.y - anchor.y);
+                                            point.x = anchor.x + Math.cos(angle) * length;
+                                            point.y = anchor.y + Math.sin(angle) * length;
+                                        }
+                                        const mode = anchor.handleMode ?? target.handleMode ?? "free";
+                                        setPathHandle(target, index, handle, point, mode === "smooth" ? "aligned" : mode === "corner" ? "free" : mode);
+                                    });
+                                }, "number");
+                                if (field === "angle" || field === "length")
+                                    control.querySelector(".field-label")!.textContent = `${handle === "in" ? "In" : "Out"} ${field === "angle" ? "angle°" : "length"}`;
+                                if (field === "length")
+                                    control.querySelector("input")!.min = "0";
+                                if (field === "angle")
+                                    control.title = "Degrees clockwise from world +X, from node to handle";
+                                return control;
+                            })));
+
+                    }
+                }
+            }
             if (shape.primitive) {
                 vector.append(row(input("Points", shape.primitive.count, v => services.commands.run("path.primitive", {
                     id: shape.id,

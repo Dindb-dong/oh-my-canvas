@@ -5,6 +5,7 @@ import { clone, newId, ROOT_ID } from './factory';
 import { refreshFrames } from './tree';
 import { validateDocument } from './validation';
 import { share, patches, applyPatches } from './journal';
+import { normalizePathContent } from '../geometry/svg-path';
 export * from './factory';
 export * from './tree';
 export * from './validation';
@@ -93,8 +94,10 @@ export class Editor implements EditorStore {
     private normalize(doc: CanvasDocument, before?: CanvasDocument): void {
         for (const pageId of doc.pages) {
             const page = doc.pagesById[pageId];
-            for (const s of Object.values(page.objects))
+            for (const s of Object.values(page.objects)) {
+                normalizePathContent(s, true);
                 reconcileShapeGeometry(before?.pagesById[pageId]?.objects[s.id], s);
+            }
             refreshFrames(page);
         }
     }

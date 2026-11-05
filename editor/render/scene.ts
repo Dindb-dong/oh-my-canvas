@@ -28,12 +28,13 @@ export function shapePath(s: Shape): string {
     if (s.type === 'ellipse')
         return `M${x + w / 2},${y} A${w / 2},${h / 2} 0 1 1 ${x + w / 2},${y + h} A${w / 2},${h / 2} 0 1 1 ${x + w / 2},${y}Z`;
     if (s.type === 'path' || s.type === 'boolean') {
-        if (s.d || s.pathData)
+        const canonical = Array.isArray(s.content);
+        if (!canonical && (s.d || s.pathData))
             return String(s.d ?? s.pathData);
-        if (s.path?.d)
+        if (!canonical && s.path?.d)
             return s.path.d;
-        const segments = s.segments ?? s.path?.segments ?? s.content?.segments ?? (Array.isArray(s.content) ? s.content : []);
-        if (segments.length)
+        const segments = canonical ? s.content : s.segments ?? s.path?.segments ?? s.content?.segments ?? [];
+        if (canonical || segments.length)
             return segments.map((seg: Data) => {
                 const p = seg.point ?? seg.to ?? seg;
                 const type = String(seg.type ?? seg.command ?? 'line').toLowerCase();

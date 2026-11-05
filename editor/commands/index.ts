@@ -538,12 +538,67 @@ export function createCommands(editor: EditorStore, services: Data = {}): Comman
                 insertShape(page, shape, parentId, index);
                 if (operation === 'flatten')
                     removeShapes(page, selectedIds);
-                else
+                else {
                     reparentShapes(page, selectedIds, shape.id);
+                    shape.childIds = [...selectedIds];
+                }
             });
             editor.setSelection([resultId]);
             return true;
         }, () => editable().some(id => ['rect', 'ellipse', 'path', 'boolean', 'group'].includes(editor.page.objects[id].type)));
+    for (const [command, kind, label] of [['path.outline-stroke', 'stroke', 'Outline stroke'], ['text.outline', 'text', 'Outline text']])
+        register(command, label, async args => {
+            const chosen = topLevelIds(editor.page, ids(args));
+            if (!chosen.length) throw new Error('Select layers to outline');
+            if (chosen.some(id => !isEditable(editor.page, id))) throw new Error('Every source layer must be editable');
+            if (editor.activeSession) throw new Error('Finish the active edit before outlining');
+            const pageId = editor.pageId, snapshot = editor.doc, sources = chosen.map(id => clone(editor.page.objects[id]));
+            if (!services.outline) throw new Error('Outline service is unavailable');
+            const maskModes = new Map<string, string>();
+            for (const source of sources) {
+                let branch = source.id;
+                for (const parent of ancestors(editor.page, source.id)) {
+                    const mode = parent.isMaskGroup === false ? undefined : parent.maskType ?? parent.maskMode ?? parent.mask?.mode ?? (parent.isMaskGroup ? 'alpha' : undefined);
+                    if (mode && parent.childIds?.[0] === branch) {
+                        if (parent.id !== source.parentId || mode !== 'vector' || kind !== 'text' || source.clip || source.clipContent || parent.layout && parent.layout.type !== 'none')
+                            throw new Error('Release this mask before outlining its source; the original mask was kept');
+                        maskModes.set(source.id, mode);
+                    }
+                    branch = parent.id;
+                }
+            }
+            const prepared: Data[][] = [];
+            for (const source of sources) {
+                args.signal?.throwIfAborted();
+                prepared.push(await services.outline(source, kind, { signal: args.signal }));
+            }
+            args.signal?.throwIfAborted();
+            if (editor.doc !== snapshot || editor.pageId !== pageId || editor.activeSession) throw new Error('Document changed while preparing outlines');
+            const created: string[] = [];
+            editor.transact({ id: args.operationId ?? newId('op'), label: args.author ? `agent:${args.author}` : label, author: args.author }, doc => {
+                const page = doc.pagesById[pageId];
+                for (let index = 0; index < sources.length; index++) {
+                    const source = page.objects[sources[index].id], parts = prepared[index] as Data[];
+                    if (!isEditable(page, source.id)) throw new Error('The source layer is no longer editable');
+                    if (!parts.length || parts.some(part => !part.segments?.length)) throw new Error('The outline result is empty');
+                    const box = unionBounds(parts.map(part => pathBounds(part.segments)));
+                    // Retain the source layout/clip box; child paths already use world coordinates.
+                    const parent = page.objects[source.parentId], maskSource = maskModes.has(source.id);
+                    const container = !maskSource && (source.type === 'text' || parent.layout) ? 'frame' : 'group';
+                    const layout = Object.fromEntries(['absolute', 'layoutPositioning', 'layoutChild', 'hSizing', 'vSizing', 'widthSizing', 'heightSizing', 'layoutSizing', 'alignSelf', 'gridCell', 'constraints', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight', 'inlineStyles'].filter(key => source[key] !== undefined).map(key => [key, clone(source[key])]));
+                    const group = createShape(container, { ...layout, ...(container === 'frame' ? { x: source.x, y: source.y, width: source.width, height: source.height, rotation: source.rotation, transform: clone(source.transform), inverseTransform: clone(source.inverseTransform) } : box), clip: clone(source.clip ?? false), fills: [], strokes: [], name: `${source.name ?? source.type} outlines`, childIds: [], outlineSourceId: source.id, opacity: source.opacity, blendMode: source.blendMode, effects: clone(source.effects ?? []), shadows: clone(source.shadows ?? []), blur: source.blur, blurHidden: source.blurHidden, backgroundBlur: source.backgroundBlur, backgroundBlurHidden: source.backgroundBlurHidden });
+                    insertShape(page, group, source.parentId, page.objects[source.parentId].childIds!.indexOf(source.id));
+                    for (const part of parts) {
+                        const path = createShape('path', { ...pathBounds(part.segments), name: kind === 'text' ? 'Glyph outlines' : 'Stroke outline', content: part.segments, fills: part.fills, fillRule: part.fillRule ?? 'nonzero', strokes: [], rotation: 0, transform: identity(), inverseTransform: identity() });
+                        insertShape(page, path, group.id);
+                    }
+                    source.hidden = true;
+                    created.push(group.id);
+                }
+            });
+            editor.setSelection(created);
+            return created;
+        }, () => editable().some(id => kind === 'text' ? editor.page.objects[id].type === 'text' : ['path', 'boolean', 'rect', 'ellipse'].includes(editor.page.objects[id].type) && editor.page.objects[id].strokes?.some((stroke: Data) => !stroke.hidden && stroke.visible !== false)));
     for (const action of ['create', 'combine-variants', 'instance', 'add-variant', 'reset', 'detach'])
         register(`component.${action}`, `Component ${action}`, args => {
             if (!services.components?.run)
@@ -608,7 +663,7 @@ export function createCommands(editor: EditorStore, services: Data = {}): Comman
     editPath('path.delete-nodes', 'Delete nodes', (shape, args) => deletePathNodes(shape, args.indices ?? [args.index]));
     editPath('path.move-nodes', 'Move nodes', (shape, args) => movePathNodes(shape, args.indices ?? [args.index], args.dx ?? 0, args.dy ?? 0));
     editPath('path.handle', 'Move handle', (shape, args) => setPathHandle(shape, args.index, args.handle, args.point, args.mode));
-    editPath('path.close', 'Close path', (shape, args) => closePath(shape, args.closed ?? true));
+    editPath('path.close', 'Close path', (shape, args) => closePath(shape, args.closed ?? true, args.index));
     edit('path.join', 'Join open endpoints', (page, args) => {
         const chosen = editable(args);
         if (!chosen.length)
@@ -633,7 +688,7 @@ export function createCommands(editor: EditorStore, services: Data = {}): Comman
         for (const id of editable(args))
             regeneratePrimitive(page.objects[id], args.primitive ?? args);
     });
-    editPath('path.open', 'Open path', (shape, args) => closePath(shape, false));
+    editPath('path.open', 'Open path', (shape, args) => closePath(shape, false, args.index));
     editPath('path.mirror', 'Set handle mirroring', (path, args) => {
         const indices = args.indices ?? [args.index];
         for (const index of indices) {

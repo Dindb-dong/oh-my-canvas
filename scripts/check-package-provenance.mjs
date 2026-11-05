@@ -5,8 +5,11 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {listPackage, extractFile, statFile} from '@electron/asar';
+import {execFileSync} from 'node:child_process';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+const primary = execFileSync('git',['worktree','list','--porcelain'],{cwd:root,encoding:'utf8'}).split('\n')[0].slice(9);
+const output = path.join(primary,'internal/docs/vector-authoring/delivery');
 const bundle = 'release/mac-arm64/Oh My Canvas.app';
 const archivePath = `${bundle}/Contents/Resources/app.asar`;
 const archive = path.join(root, archivePath);
@@ -99,7 +102,7 @@ const report = {schemaVersion: 1, at: new Date().toISOString(), passed,
   standaloneCli: {matchesCurrentDist: standaloneCliMatches, bytes: standalone.length, sha256: sha256(standalone)},
   groups: Object.fromEntries([...new Set(checks.map(item => item.group))].map(group => [group, checks.filter(item => item.group === group).length])),
   mismatches, checks};
-await mkdir(path.join(root, 'docs/qa'), {recursive: true});
-await writeFile(path.join(root, 'docs/qa/package-provenance.json'), JSON.stringify(report, null, 2) + '\n');
-console.log(JSON.stringify({passed, indexedPaths: entries.length, comparedFiles: checks.length, excludedPaths, mismatches, report: 'docs/qa/package-provenance.json'}, null, 2));
+await mkdir(output, {recursive: true});
+await writeFile(path.join(output,'package-provenance.json'), JSON.stringify(report, null, 2) + '\n');
+console.log(JSON.stringify({passed, indexedPaths: entries.length, comparedFiles: checks.length, excludedPaths, mismatches, report: path.join(output,'package-provenance.json')}, null, 2));
 if (!passed) process.exitCode = 1;

@@ -5,7 +5,11 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';import {StdioCl
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {createMcpFetch} from '../core/mcp-fetch.mjs';
 import {extractFile} from '@electron/asar';import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {TOOLS} from '../dist/tool-defs.mjs';
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-packaged-'));
+const primary=execFileSync('git',['worktree','list','--porcelain'],{encoding:'utf8'}).split('\n')[0].slice(9);
+const output=path.join(primary,'internal/docs/vector-authoring/delivery');await fs.mkdir(output,{recursive:true});
 const executablePath=path.resolve('release/mac-arm64/Oh My Canvas.app/Contents/MacOS/Oh My Canvas');
 let app,client,child;
 async function assertPortableLinks(directory){
@@ -30,7 +34,7 @@ try{
   const config=JSON.parse((await page.evaluate(()=>window.omc.invoke('mcp-info',{transport:'stdio'}))).config).mcpServers['oh-my-canvas'];
   assert.equal(config.command,executablePath);assert.ok(!config.args[0].includes('app.asar/'));
   client=new Client({name:'packaged-smoke',version:'1'},{capabilities:{}});await client.connect(new StdioClientTransport(config));
-  assert.ok((await client.listTools()).tools.length>=15);
+  assert.deepEqual((await client.listTools()).tools.map(tool=>tool.name).sort(),TOOLS.map(tool=>tool.name).sort());
   const result=await client.callTool({name:'create_board',arguments:{name:'Packaged MCP',width:320,height:200}});assert.ok(!result.isError,JSON.stringify(result));
   await client.close();client=null;
   const descriptor=JSON.parse(await fs.readFile(path.join(dir,'mcp-runtime.json'),'utf8'));
@@ -38,13 +42,13 @@ try{
   const token=await fs.readFile(path.join(dir,'mcp-token-v2'),'utf8');
   client=new Client({name:'packaged-http-smoke',version:'1'},{capabilities:{}});
   const transport=new StreamableHTTPClientTransport(new URL(`https://127.0.0.1:${descriptor.port}/mcp`),{fetch:createMcpFetch(await fs.readFile(descriptor.certFile,'utf8')),requestInit:{headers:{Authorization:`Bearer ${token}`}}});
-  await client.connect(transport);assert.equal((await client.listTools()).tools.length,19);
+  await client.connect(transport);assert.deepEqual((await client.listTools()).tools.map(tool=>tool.name).sort(),TOOLS.map(tool=>tool.name).sort());
   assert.ok(!(await client.callTool({name:'get_context',arguments:{}})).isError);
   await transport.terminateSession();await client.close();client=null;
   const tree=await page.evaluate(()=>window.lvMcp.handleToolCall('smoke','get_tree',{depth:1}));assert.match(JSON.stringify(tree),/Packaged MCP/);
-  await page.screenshot({path:'docs/qa/packaged-app.png'});
+  await page.screenshot({path:path.join(output,'packaged-app.png')});
   await page.evaluate(()=>window.omc.invoke('flush'));
-  await fs.writeFile('docs/qa/packaged-result.json',JSON.stringify({passed:true,electron:runtime,sourceSha256,checks:['portable bundle framework/dependency links','packaged app launches','packaged source matches current core/main/renderer bytes','packaged runtime fonts/WASM','bundled MCP CLI through Electron Node mode','durable MCP edit','packaged SDK Streamable HTTP initialize/list/call'],at:new Date().toISOString()},null,2));
+  await fs.writeFile(path.join(output,'packaged-result.json'),JSON.stringify({passed:true,electron:runtime,sourceSha256,checks:['portable bundle framework/dependency links','packaged app launches','packaged source matches current core/main/renderer bytes','packaged runtime fonts/WASM','bundled MCP CLI through Electron Node mode','durable MCP edit','packaged SDK Streamable HTTP initialize/list/call'],at:new Date().toISOString()},null,2));
   console.log('PASS packaged macOS app + standalone bundled MCP CLI + persistent edit');
 }catch(error){console.error('PACKAGED CHECK FAILED:',error);throw error;}finally{
   await client?.close().catch(()=>{});
