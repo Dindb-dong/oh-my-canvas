@@ -96,7 +96,7 @@ npm run dist:mac
 
 ## 에이전트에게 실제 캔버스를 연결하세요
 
-문서를 열고 **MCP → Copy configuration**을 눌러 설정을 MCP 클라이언트에 등록하세요. 패키지에 포함된 CLI는 Electron의 Node 모드를 사용하므로 설치 앱에 별도 Node 설치는 필요 없습니다. 앱이 전역 Codex·Claude 설정을 자동 수정하지는 않습니다.
+MCP now defaults to the app-owned Streamable HTTP endpoint `http://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. Open a canvas and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
 
 > 지금 열린 캔버스에 1440 × 900 대시보드를 만들어줘. 파란색·하늘색·옅은 보라색·흰색·검정색을 사용하고, 내비게이션과 버튼은 재사용 컴포넌트로 만들어줘. 스크린샷으로 결과도 확인해줘.
 

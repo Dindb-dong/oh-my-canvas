@@ -9,12 +9,13 @@ Use a copy of your document while investigating. Include the app version/source 
 ## An agent cannot connect or edit
 
 - Launch the app and open a document in the editor. A library-only screen has no active editable canvas.
-- Re-copy **MCP → Copy configuration** from this app/profile. The runtime path must match the running profile. Rebuild a source checkout before using its bundled CLI.
+- Re-copy **MCP → Copy configuration** from this app/profile. The default is the app-owned HTTP URL; supply the private bearer in the client environment. Check [MCP credentials and rollback](MCP.md), particularly GUI environment inheritance. Rebuild a source checkout before using its bundled CLI.
 - The installed app uses its own Electron Node mode; a separate Node runtime is unnecessary. Keep the quoted executable path intact if it contains spaces.
 - Refresh the MCP client connection after installing a new binary. An already-open Codex chat may need a new chat to discover newly registered tools.
 - `busy` while typing/scrubbing is expected. Finish that user transaction, then retry the write. Read tools remain available.
-- Separate stdio processes have separate author identities. Undo cannot revert another process's or the user's latest step. Fix forward with an explicit update instead.
+- Separate HTTP sessions and stdio processes have separate author identities. Undo cannot revert another agent's or the user's latest step. A restart or document replacement discards aliases; start with a fresh `get_context`. Read back an uncertain write before making another mutation.
 - Variant switching can replace the instance root; use the returned selection alias for subsequent calls. Component actions are outside `batch`.
+- A port conflict leaves editing available and MCP unavailable. Close the conflicting server normally or launch this profile with a separate explicit `--mcp-port`; do not terminate unrelated processes.
 - Do not forward the MCP port, remove authentication, or change certificate checks to work around a connection error.
 
 ## A teammate cannot join

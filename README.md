@@ -96,7 +96,7 @@ Create your own with **Create component** (`⌥⌘K` on macOS), **Combine varian
 
 ## Give your agent a real canvas
 
-Open a document, click **MCP → Copy configuration**, and register that configuration in your MCP client. The packaged CLI uses Electron's Node mode; a separate Node installation is unnecessary for the installed app. The app does not silently edit global Codex or Claude settings.
+Open a document, click **MCP → Copy configuration**, and register the app-owned Streamable HTTP endpoint in your MCP client. The normal URL is `http://127.0.0.1:47831/mcp`; supply its persistent private token through `OMC_MCP_TOKEN`. The app does not silently edit global Codex or Claude settings. See [HTTP setup, credentials, and stdio rollback](docs/MCP.md) before connecting.
 
 > In this open canvas, create a 1440 × 900 dashboard. Use blue, sky, pale lavender, white, and black. Make the navigation and buttons reusable components. Check the result with a screenshot.
 
