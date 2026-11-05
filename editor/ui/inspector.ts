@@ -1320,11 +1320,35 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
                         if (!segment || segment.command === "close" || segment.command === "move")
                             continue;
                         const prefix = handle === "in" ? "Incoming" : "Outgoing", key = handle === "in" ? "2" : "1";
-                        vector.append(row(...["x", "y"].map(axis => input(`${prefix} ${axis.toUpperCase()}`, segment[axis + key] ?? node[axis], value => mutate("Move path handle", target => {
-                            const anchor = target.content[index], edge = handle === "in" ? anchor : target.content[index + 1], point = { x: edge["x" + key] ?? anchor.x, y: edge["y" + key] ?? anchor.y, [axis]: value };
-                            const mode = anchor.handleMode ?? target.handleMode ?? "free";
-                            setPathHandle(target, index, handle, point, mode === "smooth" ? "aligned" : mode === "corner" ? "free" : mode);
-                        }), "number"))));
+                        const coordinates = { x: segment["x" + key] ?? node.x, y: segment["y" + key] ?? node.y };
+                        const values: Data = { ...coordinates, angle: Math.atan2(coordinates.y - node.y, coordinates.x - node.x) * 180 / Math.PI, length: Math.hypot(coordinates.x - node.x, coordinates.y - node.y) };
+                        for (const fields of [["x", "y"], ["angle", "length"]])
+                            vector.append(row(...fields.map(field => {
+                                const label = `${prefix} ${field === "angle" ? "angle (°)" : field.length === 1 ? field.toUpperCase() : field}`;
+                                const control = input(label, values[field], value => {
+                                    if (!Number.isFinite(value) || field === "length" && value < 0)
+                                        throw Error("Handle length must be finite and nonnegative; angle and coordinates must be finite.");
+                                    mutate("Move path handle", target => {
+                                        const anchor = target.content[index], edge = handle === "in" ? anchor : target.content[index + 1];
+                                        const point = { x: edge["x" + key] ?? anchor.x, y: edge["y" + key] ?? anchor.y };
+                                        if (field === "x" || field === "y")
+                                            point[field] = value;
+                                        else {
+                                            const angle = field === "angle" ? value * Math.PI / 180 : Math.atan2(point.y - anchor.y, point.x - anchor.x), length = field === "length" ? value : Math.hypot(point.x - anchor.x, point.y - anchor.y);
+                                            point.x = anchor.x + Math.cos(angle) * length;
+                                            point.y = anchor.y + Math.sin(angle) * length;
+                                        }
+                                        const mode = anchor.handleMode ?? target.handleMode ?? "free";
+                                        setPathHandle(target, index, handle, point, mode === "smooth" ? "aligned" : mode === "corner" ? "free" : mode);
+                                    });
+                                }, "number");
+                                if (field === "length")
+                                    control.querySelector("input")!.min = "0";
+                                if (field === "angle")
+                                    control.title = "Degrees clockwise from world +X, from node to handle";
+                                return control;
+                            })));
+
                     }
                 }
             }

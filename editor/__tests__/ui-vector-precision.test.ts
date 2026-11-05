@@ -82,3 +82,25 @@ it('retains an actionable image error and permits retry after processing fails',
     expect(t.root.querySelector('[role="alert"]')!.textContent).toContain('Try again');
     expect(t.root.querySelector<HTMLButtonElement>('[aria-label="Remove background"]')!.disabled).toBe(false);
 });
+it('edits handle angle and length in world coordinates and mirrors a symmetric node', () => {
+    const t = setup(); t.canvas.editPath('shape'); t.change('Selected node','1'); t.change('Node type','symmetric');
+    t.change('Incoming angle (°)','90'); t.change('Incoming length','25');
+    let nodes = t.editor.page.objects.shape.content;
+    expect(nodes[1].x2).toBeCloseTo(200); expect(nodes[1].y2).toBeCloseTo(125);
+    expect(nodes[2].x1).toBeCloseTo(200); expect(nodes[2].y1).toBeCloseTo(75);
+    t.change('Outgoing angle (°)','180'); t.change('Outgoing length','40');
+    nodes = t.editor.page.objects.shape.content;
+    expect(nodes[2].x1).toBeCloseTo(160); expect(nodes[2].y1).toBeCloseTo(100);
+    expect(nodes[1].x2).toBeCloseTo(240); expect(nodes[1].y2).toBeCloseTo(100);
+    expect(t.editor.undoStep()).toBe(true);
+    expect(Math.hypot(t.editor.page.objects.shape.content[2].x1 - 200, t.editor.page.objects.shape.content[2].y1 - 100)).toBeCloseTo(25);
+});
+it('rejects negative handle length and can extend a collapsed handle', () => {
+    const t = setup(); t.canvas.editPath('shape'); t.change('Selected node','0');
+    const before = structuredClone(t.editor.page.objects.shape.content);
+    t.change('Outgoing length','-1'); expect(t.editor.page.objects.shape.content).toEqual(before);
+    expect(document.querySelector('[role="alert"]')!.textContent).toContain('nonnegative');
+    t.change('Outgoing length','0'); t.change('Outgoing length','12');
+    expect(t.editor.page.objects.shape.content[1].x1).toBeCloseTo(112);
+    expect(t.editor.page.objects.shape.content[1].y1).toBeCloseTo(100);
+});
