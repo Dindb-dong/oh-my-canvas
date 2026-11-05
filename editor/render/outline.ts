@@ -146,7 +146,7 @@ export async function outlineText(shape: Shape, fragments: TextFragment[], sourc
         const fills = paints.map(solid);
         if (!sources.some(input => input.family.toLowerCase() === families(style.fontFamily)[0]?.toLowerCase()))
             throw new Error('Outlining needs the actual font file for the primary family; import or choose a bundled font');
-        const ordered = families(style.fontFamily).flatMap(family => sources.filter(input => input.family.toLowerCase() === family.toLowerCase()).sort((a, b) => weightDistance(a, weight) - weightDistance(b, weight)));
+        const ordered = families(style.fontFamily).flatMap(family => sources.filter(input => input.family.toLowerCase() === family.toLowerCase()).sort((a, b) => Number((a.style ?? 'normal') !== (style.fontStyle ?? 'normal')) - Number((b.style ?? 'normal') !== (style.fontStyle ?? 'normal')) || weightDistance(a, weight) - weightDistance(b, weight)));
         if (!ordered.length) throw new Error('Outlining needs the actual font file; import or choose a bundled font');
         const chunks: { text: string; font: Font; input: FontFaceInput }[] = [];
         for (const { segment } of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(fragment.text)) {

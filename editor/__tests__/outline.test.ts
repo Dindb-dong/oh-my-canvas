@@ -45,6 +45,17 @@ describe('editable vector outlines', () => {
         expect(pathBounds(part.segments).width).toBeGreaterThan(150);
         expect(part.fills).toEqual([{color:'#123456'}]);
     });
+    it('selects an actual italic face before equal-weight normal faces and rejects synthetic italics', async () => {
+        const bytes=await readFile('node_modules/@fontsource-variable/ibm-plex-sans/files/ibm-plex-sans-latin-wght-italic.woff2');
+        const font=create(await decompress(bytes)).getVariation({wght:600}),width=font.layout('Logo').advanceWidth*48/font.unitsPerEm;
+        const fetch=vi.fn(async()=>new Response(bytes));vi.stubGlobal('fetch',fetch);
+        const actual=fragment('Logo',width,{fontStyle:'italic',letterSpacing:'0px'});
+        const faces=[{family:'IBM Plex Sans',url:'normal.woff2',weight:'100 900',style:'normal'},{family:'IBM Plex Sans',url:'italic.woff2',weight:'100 900',style:'italic'}];
+        const [part]=await outlineText(createShape('text'),[actual],faces);
+        expect(part.segments.length).toBeGreaterThan(20);
+        expect(fetch.mock.calls[0][0]).toBe('italic.woff2');
+        await expect(outlineText(createShape('text'),[actual],[faces[0]])).rejects.toThrow('Synthetic font styles');
+    });
     it('resolves Korean WOFF2 subset glyphs from the actual font file', async () => {
         const folder='node_modules/@fontsource-variable/noto-sans-kr/files';
         let bytes: Uint8Array|undefined, font: ReturnType<typeof create>|undefined;
