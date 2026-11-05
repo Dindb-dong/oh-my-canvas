@@ -1,14 +1,37 @@
 import { defineConfig } from 'vite';
 import {createHash} from 'node:crypto';
 export const alias={};
+const staticInvoker=`function craftInvokerFunction(humanName,argTypes,classType,cppInvokerFunc,cppTargetFunc) {
+  var expected=argTypes.length-2;
+  if(expected<0)throwBindingError('argTypes array size mismatch');
+  var method=argTypes[1]!==null&&classType!==null;
+  var needsStack=argTypes.slice(1).some(function(type){return type!==null&&type.destructorFunction===undefined});
+  return function() {
+    if(arguments.length!==expected)throwBindingError('function '+humanName+' called with '+arguments.length+' arguments, expected '+expected);
+    var destructors=needsStack?[]:null,wired=[],types=[],rv;
+    try {
+      if(method){wired.push(argTypes[1].toWireType(destructors,this));types.push(argTypes[1]);}
+      for(var index=0;index<expected;index++){
+        wired.push(argTypes[index+2].toWireType(destructors,arguments[index]));
+        types.push(argTypes[index+2]);
+      }
+      rv=cppInvokerFunc.apply(null,[cppTargetFunc].concat(wired));
+    } finally {
+      if(needsStack)runDestructors(destructors);
+      else for(var index=0;index<types.length;index++)if(types[index].destructorFunction!==null)types[index].destructorFunction(wired[index]);
+    }
+    if(argTypes[0].name!=='void')return argTypes[0].fromWireType(rv);
+  };
+}`;
 export function woff2StaticNames() {
-  return {name:'woff2-static-function-names',enforce:'pre',transform(code,id) {
+  return {name:'woff2-static-invokers',enforce:'pre',transform(code,id) {
     if(!id.replaceAll('\\','/').endsWith('/wawoff2/build/decompress_binding.js'))return;
     if(createHash('sha256').update(code).digest('hex')!=='112a89e7497a856698103e2ce530d2b6fc27668c0cd56f45bcbf7850d73b7c2b')throw Error('Re-audit the WOFF2 decoder before changing its CSP transform');
-    const start=code.indexOf('function createNamedFunction(name,body){'),end=code.indexOf('function extendError(',start);
-    if(start<0||end<0)throw Error('WOFF2 naming helper was not found');
-    // Emscripten only uses generated names for debugging; keep the callable without runtime eval.
-    return {code:code.slice(0,start)+'function createNamedFunction(name,body){return body}'+code.slice(end),map:null};
+    const names=code.indexOf('function createNamedFunction(name,body){'),afterNames=code.indexOf('function extendError(',names);
+    const invoker=code.indexOf('function craftInvokerFunction('),afterInvoker=code.indexOf('function ensureOverloadTable(',invoker);
+    if(names<0||afterNames<0||invoker<afterNames||afterInvoker<0)throw Error('WOFF2 binding helpers were not found');
+    // Replace Emscripten's dynamic binding generation with the same ABI conversions under CSP.
+    return {code:code.slice(0,names)+'function createNamedFunction(name,body){return body}'+code.slice(afterNames,invoker)+staticInvoker+code.slice(afterInvoker),map:null};
   }};
 }
 export default defineConfig({ plugins:[woff2StaticNames()], base: './', build: { target: 'es2022' }, server: { host: '127.0.0.1', port: 5179, strictPort: true } });

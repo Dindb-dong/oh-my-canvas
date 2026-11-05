@@ -26,4 +26,4 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-Application modification: the Vite build replaces Emscripten createNamedFunction with a direct return of its body. This removes debugging-only runtime function-name generation so the decoder works under the existing CSP without unsafe-eval. The unchanged npm decoder source is SHA256 112a89e7497a856698103e2ce530d2b6fc27668c0cd56f45bcbf7850d73b7c2b.
+Application modification: the Vite build replaces Emscripten createNamedFunction with a direct return of its body and craftInvokerFunction with static argument conversion, ABI invocation, return conversion and destructor cleanup. This removes runtime binding/function-name generation so the decoder works under the existing CSP without unsafe-eval. The unchanged npm decoder source is SHA256 112a89e7497a856698103e2ce530d2b6fc27668c0cd56f45bcbf7850d73b7c2b.

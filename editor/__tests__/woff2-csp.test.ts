@@ -1,13 +1,22 @@
 import { it, expect } from 'vitest';
 import {readFile} from 'node:fs/promises';
+import {createRequire} from 'node:module';
+import vm from 'node:vm';
+import {resolve,dirname} from 'node:path';
 import {woff2StaticNames} from '../../vite.config.mjs';
-it('removes only the audited decoder naming eval and fails closed after upstream changes',async()=>{
+it('decodes real WOFF2 with string code generation forbidden and fails closed on source drift',async()=>{
     const file='node_modules/wawoff2/build/decompress_binding.js',source=await readFile(file,'utf8');
-    const transform=woff2StaticNames().transform;
-    const result=transform(source,'/'+file)!;
-    expect(source.match(/new Function/g)).toHaveLength(1);
+    const transform=woff2StaticNames().transform,result=transform(source,'/'+file)!;
     expect(result.code).not.toContain('new Function');
-    expect(result.code).toContain('function createNamedFunction(name,body){return body}');
+    expect(result.code).not.toContain('new_(Function');
     expect(()=>transform(source+'\n','/'+file)).toThrow('Re-audit');
     expect(transform(source,'/other/decompress_binding.js')).toBeUndefined();
+    const module={exports:{} as any};
+    const context=vm.createContext({module,require:createRequire(resolve(file)),__dirname:dirname(resolve(file)),process,console,Buffer,Uint8Array,Int8Array,Uint16Array,Int16Array,Uint32Array,Int32Array,Float32Array,Float64Array,ArrayBuffer,WebAssembly,setTimeout,clearTimeout},{codeGeneration:{strings:false,wasm:true}});
+    vm.runInContext(result.code,context);
+    await new Promise<void>((resolve,reject)=>{module.exports.onRuntimeInitialized=resolve;module.exports.onAbort=reject;});
+    const bytes=await readFile('node_modules/@fontsource-variable/ibm-plex-sans/files/ibm-plex-sans-latin-wght-normal.woff2');
+    const decoded=module.exports.decompress(bytes);
+    expect(Array.from(decoded.slice(0,4))).toEqual([0,1,0,0]);
+    expect(decoded.length).toBeGreaterThan(bytes.length);
 });
