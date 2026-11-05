@@ -1,6 +1,6 @@
 # Local MCP connection and recovery
 
-The app owns `http://127.0.0.1:47831/mcp` during normal operation. It uses the installed official SDK's **2025-11-25 protocol family**, including initialize and session IDs. It does not claim support for the later sessionless protocol. There are 19 tools; start with `get_context` and `get_guide`.
+The app owns the HTTPS endpoint `https://127.0.0.1:47831/mcp` during normal operation. It uses the installed official SDK's **2025-11-25 protocol family**, including initialize and session IDs. It does not claim support for the later sessionless protocol. There are 19 tools; start with `get_context` and `get_guide`.
 
 Open a canvas and keep the app running. **MCP → Copy configuration** provides URL configuration without embedding the secret. The app never rewrites global client settings. A failed MCP startup leaves local editing available; inspect the connection dialog rather than forwarding a port or disabling authentication. A port conflict never falls back to a random port during normal operation or terminates another process.
 
@@ -8,13 +8,17 @@ For isolated development and test profiles, `--profile=/absolute/profile` uses a
 
 ## Credentials and registration
 
-Each profile has a private `mcp-token` file in its application-data directory. It contains a persistent bearer token, is mode 0600, and survives app restarts. `mcp-runtime.json` is a disposable private descriptor containing the active port and token for legacy clients. Never share either file or include their contents in logs, screenshots, commits, or issue reports. The normal macOS data directory is `~/Library/Application Support/oh-my-canvas`.
+Each profile has a private `mcp-token` file in its application-data directory. It contains a persistent bearer token, is mode 0600, and survives app restarts. `mcp-runtime.json` is a disposable private descriptor containing the active port, token, and public certificate path for legacy clients. Never share either file or include their contents in logs, screenshots, commits, or issue reports. The normal macOS data directory is `~/Library/Application Support/oh-my-canvas`.
+
+The profile also keeps a persistent self-signed TLS identity. Its public `mcp-cert.pem` path is available in the connection dialog; the private key and certificate are stored together in private `mcp-identity.json` (0600). Never copy or share that identity file. Before supplying a bearer, configure the client to trust that specific certificate from the profile's public certificate file using its supported certificate-store or pinning mechanism. Never establish trust by downloading a certificate from the listening port. The app does not install OS certificate trust. Never disable TLS verification (`NODE_TLS_REJECT_UNAUTHORIZED=0`, `--insecure`, or equivalent) or send the bearer over plain HTTP: a different process occupying the same port must fail certificate verification before receiving it. The token, certificate, and private key persist across restarts. Newly generated certificates last 365 days; invalid or expired identity files stop MCP startup rather than silently replacing client trust. Renewing an identity requires explicitly updating the client's trusted certificate. Protect the private key like the token; the public certificate itself is not a bearer secret.
+
+For the repository's Node SDK consumers, `createMcpFetch(cert)` from `core/mcp-fetch.mjs` supplies a fetch implementation pinned to the profile certificate. Pass it as the official SDK HTTP transport's `fetch` option. Legacy bundled stdio also verifies this certificate. An independently launched Codex GUI's certificate-trust and credential-inheritance path remains unverified; retain a working registration until both are confirmed. The registration below assumes certificate trust has already been configured.
 
 Set `OMC_MCP_TOKEN` privately in the environment inherited by the MCP client. A shell export alone does not establish that a GUI-launched client inherited it. Confirm the actual GUI connection and app restart behavior before retiring an existing working registration. No client setup command below reads or prints the token.
 
 ```sh
 codex mcp add oh-my-canvas \
-  --url http://127.0.0.1:47831/mcp \
+  --url https://127.0.0.1:47831/mcp \
   --bearer-token-env-var OMC_MCP_TOKEN
 ```
 
@@ -22,7 +26,7 @@ Equivalent Codex configuration:
 
 ```toml
 [mcp_servers.oh-my-canvas]
-url = "http://127.0.0.1:47831/mcp"
+url = "https://127.0.0.1:47831/mcp"
 bearer_token_env_var = "OMC_MCP_TOKEN"
 ```
 
@@ -30,7 +34,7 @@ Use the HTTP registration on its own. Do not combine `command`, `args`, `ELECTRO
 
 ## Sessions, cancellation, and uncertain results
 
-Every initialized HTTP session receives a separate server-generated agent, even when clients have identical names or JSON-RPC request IDs. Aliases, Undo ownership, and idempotency keys belong to that agent. DELETE, idle expiry, and app shutdown end the session. A new document mount also replaces the dispatcher. Reconnect with `get_context`; discard old aliases and Undo expectations. A new session may assign `n1` to a different object.
+Every initialized HTTP session receives a separate server-generated agent, even when clients have identical names or JSON-RPC request IDs. Aliases, Undo ownership, and idempotency keys belong to that agent. DELETE, idle expiry, and successful app shutdown end the session. If saving prevents a native close, the app resumes the same session with its aliases, Undo ownership, and completed replay-cache entries intact. A new document mount also replaces the dispatcher. Reconnect with `get_context`; discard old aliases and Undo expectations. A new session may assign `n1` to a different object.
 
 Explicit SDK cancellation stops queued work and font preparation before mutation. Disconnecting a socket is not an explicit cancellation. A write that already applied is not automatically undone when its response is cancelled or lost. Success responses continue to wait for durable persistence.
 
@@ -46,4 +50,4 @@ Existing stdio processes are not automatically killed. End their client connecti
 
 ## Local checks
 
-After building, `node scripts/mcp-http-e2e.mjs` launches an isolated real Electron profile and exercises official SDK HTTP sessions, tools, author isolation, durable readback, and restart invalidation. `node scripts/packaged-smoke.mjs` checks both HTTP and the bundled stdio CLI in the packaged app. These checks do not establish credential inheritance by an independently launched Codex GUI.
+After building, `node scripts/mcp-http-e2e.mjs` launches an isolated real Electron profile and exercises official SDK sessions over certificate-pinned HTTPS, tools, author isolation, failed-close cache preservation, durable readback, and restart invalidation. `node scripts/packaged-smoke.mjs` checks both certificate-pinned HTTPS and the bundled stdio CLI in the packaged app. These checks do not establish certificate trust or credential inheritance by an independently launched Codex GUI.

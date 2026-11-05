@@ -6,7 +6,7 @@ Oh My Canvas uses an independently authored DOM/SVG editor inside an Electron ap
 
 ```mermaid
 flowchart LR
-  Agent[Local MCP client] -->|Streamable HTTP + bearer| Bridge[App-owned MCP listener]
+  Agent[Local MCP client] -->|Streamable HTTP over pinned TLS + bearer| Bridge[App-owned MCP listener]
   Legacy[Legacy stdio client] --> CLI[Bundled MCP CLI]
   CLI -->|Authenticated loopback /rpc| Bridge
   Bridge --> Renderer[Sandboxed editor renderer]
@@ -51,7 +51,7 @@ Containment uses parent links and deterministic sibling ranks. Materialization r
 
 ## Separate network boundaries
 
-MCP defaults to an authenticated app-owned Streamable HTTP listener at `127.0.0.1:47831/mcp`. The installed SDK negotiates the 2025-11-25 protocol family, with one server, transport, and server-generated agent per session. It does not implement the later sessionless protocol. Legacy stdio and `/rpc` remain available during rollout; neither endpoint becomes the collaboration server. The collaboration listener is a separate pinned-certificate TLS WebSocket endpoint for invitation holders. There is no discovery service, relay, hosted backend, automatic NAT traversal, automatic host election, or shared asset server. Images travel inside the document.
+MCP defaults to an authenticated app-owned Streamable HTTP listener at `https://127.0.0.1:47831/mcp`. A persistent per-profile self-signed TLS identity protects the bearer from a different process reusing the port. Clients must trust that specific certificate; the app does not install OS trust. Node SDK consumers and the bundled stdio relay use the certificate-pinned fetch helper. The installed SDK negotiates the 2025-11-25 protocol family, with one server, transport, and server-generated agent per session. It does not implement the later sessionless protocol. Legacy stdio and `/rpc` remain available during rollout; neither endpoint becomes the collaboration server. The collaboration listener is a separate pinned-certificate TLS WebSocket endpoint for invitation holders. There is no discovery service, relay, hosted backend, automatic NAT traversal, automatic host election, or shared asset server. Images travel inside the document.
 
 The trust model is a local user and trusted invited editors. It is not a multi-tenant service or a permission system for mutually hostile participants. Read [SECURITY.md](../SECURITY.md) for what reports and screenshots must exclude.
 

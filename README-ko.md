@@ -96,7 +96,7 @@ npm run dist:mac
 
 ## 에이전트에게 실제 캔버스를 연결하세요
 
-MCP now defaults to the app-owned Streamable HTTP endpoint `http://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. Open a canvas and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
+MCP now defaults to the app-owned Streamable HTTP endpoint `https://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. The client must trust this profile's TLS certificate; the app never installs OS trust. Open a canvas and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
 
 > 지금 열린 캔버스에 1440 × 900 대시보드를 만들어줘. 파란색·하늘색·옅은 보라색·흰색·검정색을 사용하고, 내비게이션과 버튼은 재사용 컴포넌트로 만들어줘. 스크린샷으로 결과도 확인해줘.
 

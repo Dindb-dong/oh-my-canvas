@@ -96,7 +96,7 @@ npm run dist:mac
 
 ## 给智能体一张真正的画布
 
-MCP now defaults to the app-owned Streamable HTTP endpoint `http://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. Open a canvas and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
+MCP now defaults to the app-owned Streamable HTTP endpoint `https://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. The client must trust this profile's TLS certificate; the app never installs OS trust. Open a canvas and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
 
 > 在当前打开的画布中创建一个 1440 × 900 的仪表盘。使用蓝色、天蓝色、浅薰衣草紫、白色和黑色。将导航和按钮做成可复用组件，最后通过截图检查结果。
 

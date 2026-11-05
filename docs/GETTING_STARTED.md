@@ -80,7 +80,7 @@ The writer emits `.omc` v2 and reads v1. Existing files are not a license to ope
 3. Register that JSON in your MCP client. Keep the application and document open.
 4. Start with `get_context` and `get_guide` before editing.
 
-The default configuration connects directly to the app-owned Streamable HTTP URL at `http://127.0.0.1:47831/mcp`. Privately supply the persistent bearer through the client's `OMC_MCP_TOKEN` environment; GUI clients must actually inherit it. No secret appears in the copied configuration. See [credential setup, profiles, restart recovery, and stdio rollback](MCP.md).
+The default configuration connects directly to the app-owned Streamable HTTP URL at `https://127.0.0.1:47831/mcp`. Privately supply the persistent bearer through the client's `OMC_MCP_TOKEN` environment; GUI clients must actually inherit it. The client must trust this profile's public TLS certificate before sending its bearer; the app does not configure OS trust. No secret appears in the copied configuration. See [credential setup, profiles, restart recovery, and stdio rollback](MCP.md).
 
 The app does not automatically modify global client settings. A chat that loaded its tools before registration may need a new chat to discover them. Legacy bundled stdio remains available during rollout; installed users do not need a separate Node runtime for that path.
 

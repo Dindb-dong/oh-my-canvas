@@ -96,7 +96,7 @@ npm run dist:mac
 
 ## エージェントにも本物のキャンバスを
 
-MCP now defaults to the app-owned Streamable HTTP endpoint `http://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. Open a canvas and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
+MCP now defaults to the app-owned Streamable HTTP endpoint `https://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. The client must trust this profile's TLS certificate; the app never installs OS trust. Open a canvas and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
 
 > 開いているキャンバスに1440 × 900のダッシュボードを作ってください。青、水色、淡いラベンダー、白、黒を使い、ナビゲーションとボタンを再利用できるコンポーネントにしてください。最後にスクリーンショットで確認してください。
 
