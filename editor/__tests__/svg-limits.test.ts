@@ -27,7 +27,7 @@ describe('SVG import resource limits',()=>{
         expect(()=>parseSvgPath('M0 0'+'Z'.repeat(10000),10000)).toThrow(/complex|segment/i);
         expect(()=>parseSvgPath('M0 0 C1 1 2 2 3 3',1)).toThrow(/complex|segment|token/i);
         expect(()=>parseSvgPath('M0 0 A10 10 0 1 1 20 0',2)).toThrow(/complex|segment/i);
-        expect(()=>parseSvgPath('M0 0'+'0 '.repeat(100000))).toThrow(/complex/i);
+        expect(()=>parseSvgPath('M0 0'+'0 '.repeat(100000),10000)).toThrow(/complex/i);
         expect(()=>parseSvgPath(' '.repeat(2000001))).toThrow(/complex/i);
     });
     it('charges copied defs and serialized fallback pictures before retaining duplicates',()=>{
