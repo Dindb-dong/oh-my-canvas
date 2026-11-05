@@ -13,9 +13,15 @@ export async function startMcpBridge({dir,dispatch,endSession=()=>{},port=MCP_PO
   const budget={...MCP_LIMITS,...limits};
   const {key,cert,certFile}=await loadMcpIdentity(dir);
   if(!Number.isInteger(port)||port<0||port>65535)throw Error('Invalid MCP port');
-  const tokenFile=path.join(dir,'mcp-token'),file=path.join(dir,'mcp-runtime.json');
+  const tokenFile=path.join(dir,'mcp-token-v2'),file=path.join(dir,'mcp-runtime.json');
+  let legacyCredential=false;
+  try {const previous=JSON.parse(await fs.readFile(file,'utf8'));legacyCredential=previous!==null&&typeof previous==='object'&&Object.hasOwn(previous,'token');}
+  catch(e){if(e.code!=='ENOENT')throw e;}
+  // Invalidate legacy relay discovery even when the new listener cannot start.
+  await fs.rm(file,{force:true});
   let token;
-  try {token=await fs.readFile(tokenFile,'utf8');if(!/^[a-f0-9]{64}$/.test(token))throw Error('Invalid local MCP token');await fs.chmod(tokenFile,0o600);}
+  if(legacyCredential){token=randomBytes(32).toString('hex');await atomicWrite(tokenFile,token,{backup:false});}
+  else try {token=await fs.readFile(tokenFile,'utf8');if(!/^[a-f0-9]{64}$/.test(token))throw Error('Invalid local MCP token');await fs.chmod(tokenFile,0o600);}
   catch(e){if(e.code!=='ENOENT')throw e;token=randomBytes(32).toString('hex');await atomicWrite(tokenFile,token,{backup:false});}
   const sessions=new Map(),legacy=new Map(),controllers=new Set(),sockets=new Set();
   let accepting=true,active=0,reading=0,actualPort,closing;
@@ -127,7 +133,7 @@ export async function startMcpBridge({dir,dispatch,endSession=()=>{},port=MCP_PO
   try {
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
     actualPort=server.address().port;
-    await atomicWrite(file,JSON.stringify({port:actualPort,token,pid:process.pid,certFile}),{backup:false});
+    await atomicWrite(file,JSON.stringify({version:2,port:actualPort,pid:process.pid,certFile}),{backup:false});
   }catch(e){clearInterval(sweep);if(server.listening)await close();throw e;}
   return {file,certFile,port:actualPort,url:`https://127.0.0.1:${actualPort}/mcp`,stopAccepting,resumeAccepting(){if(!closing)accepting=true;},resetSessions,close};
 }

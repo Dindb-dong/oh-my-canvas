@@ -7,7 +7,7 @@ import {build} from 'esbuild';import {Client} from '@modelcontextprotocol/sdk/cl
 import {Replica} from '../core/replica.mjs';import {changesBetween} from '../core/document.mjs';import {documentFixture} from './helpers.mjs';
 test('local MCP bridge rejects missing auth, DNS rebinding Host and browser Origin',async t=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-mcp-')),bridge=await startMcpBridge({dir,port:0,dispatch:async c=>({content:[{type:'text',text:c.name}]})});t.after(async()=>{await bridge.close();await fs.rm(dir,{recursive:true,force:true});});
-  const {port,token,certFile}=JSON.parse(await fs.readFile(bridge.file,'utf8')),cert=await fs.readFile(certFile,'utf8'),fetch=createMcpFetch(cert),url=`https://127.0.0.1:${port}/rpc`;
+  const {port,certFile}=JSON.parse(await fs.readFile(bridge.file,'utf8')),token=await fs.readFile(path.join(dir,'mcp-token-v2'),'utf8'),cert=await fs.readFile(certFile,'utf8'),fetch=createMcpFetch(cert),url=`https://127.0.0.1:${port}/rpc`;
   for(const headers of [{},{Authorization:`Bearer ${token}`,Origin:'https://evil.example'}])assert.equal((await fetch(url,{method:'POST',headers,body:'{}'})).status,403);
   const rebound=await new Promise((resolve,reject)=>{const req=https.request(url,{method:'POST',ca:cert,servername:'localhost',headers:{Authorization:`Bearer ${token}`,Host:'evil.example'}},res=>{res.resume();resolve(res.statusCode);});req.on('error',reject);req.end('{}');});assert.equal(rebound,403);
   const r=await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:JSON.stringify({name:'get_context',args:{},agent:`mcp-stdio-${randomUUID()}`})});assert.equal(r.status,200);assert.equal((await r.json()).content[0].text,'get_context');assert.equal((await fs.stat(bridge.file)).mode&0o777,0o600);
@@ -18,7 +18,7 @@ test('independent stdio clients retain unique identities and cannot undo each ot
   const executable=path.join(dir,'mcp-cli.cjs');
   await build({entryPoints:[path.join(root,'cli/mcp.mjs')],bundle:true,platform:'node',format:'cjs',outfile:executable,logLevel:'silent',plugins:[{name:'source-tool-definitions',setup(b){b.onResolve({filter:/tool-defs\.mjs$/},()=>({path:path.join(root,'editor/mcp/defs.ts')}));}}]});
   const reply=value=>({content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value});
-  bridge=await startMcpBridge({dir,port:0,dispatch:async call=>{
+  bridge=await startMcpBridge({dir,port:0,tools:await sourceTools(),dispatch:async call=>{
     if(call.name==='create_board'){
       const before=replica.document,after=structuredClone(before),id=randomUUID();
       after.pagesById.page.objects[id]={id,type:'frame',name:call.args.name,parentId:'root',enclosingFrameId:'root',childIds:[],x:0,y:0,width:100,height:100};after.pagesById.page.objects.root.childIds.push(id);
@@ -33,7 +33,7 @@ test('independent stdio clients retain unique identities and cannot undo each ot
   for(const name of ['A','B']){const client=new Client({name,version:'1'},{capabilities:{}});clients.push(client);await client.connect(new StdioClientTransport({command:process.execPath,args:[executable,'--runtime',bridge.file]}));}
   const [a,b]=clients,call=(client,name,args={})=>client.callTool({name,arguments:args});
   const first=await call(a,'create_board',{name:'Agent A board'}),second=await call(b,'create_board',{name:'Agent B board'});
-  const aId=first.structuredContent.agent,bId=second.structuredContent.agent;assert.match(aId,/^mcp-stdio-[0-9a-f-]{36}$/);assert.notEqual(aId,bId);
+  const aId=first.structuredContent.agent,bId=second.structuredContent.agent;assert.match(aId,/^mcp-http-[0-9a-f-]{36}$/);assert.notEqual(aId,bId);
   assert.equal((await call(a,'get_context')).structuredContent.agent,aId);
   assert.equal((await call(a,'undo')).isError,true);
   let names=(await call(a,'get_context')).structuredContent.names;assert.ok(names.includes('Agent A board'));assert.ok(names.includes('Agent B board'));
@@ -46,11 +46,15 @@ import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/st
 import net from 'node:net';
 import tls from 'node:tls';
 let toolDefinitions;
-async function httpFixture(t,options={}) {
+async function sourceTools(){
   if(!toolDefinitions){const built=await build({entryPoints:[fileURLToPath(new URL('../editor/mcp/defs.ts',import.meta.url))],bundle:true,platform:'node',format:'esm',write:false,logLevel:'silent'});toolDefinitions=(await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString('base64')}`)).TOOLS;}
+  return toolDefinitions;
+}
+async function httpFixture(t,options={}) {
+  await sourceTools();
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-http-')),ended=[],clients=[];
   let bridge=await startMcpBridge({dir,port:0,tools:toolDefinitions,endSession:agent=>ended.push(agent),dispatch:async call=>({content:[{type:'text',text:call.agent}],structuredContent:{agent:call.agent}}),...options});
-  const token=await fs.readFile(path.join(dir,'mcp-token'),'utf8'),cert=await fs.readFile(path.join(dir,'mcp-cert.pem'),'utf8'),fetch=createMcpFetch(cert);
+  const token=await fs.readFile(path.join(dir,'mcp-token-v2'),'utf8'),cert=await fs.readFile(path.join(dir,'mcp-cert.pem'),'utf8'),fetch=createMcpFetch(cert);
   const connect=async(options={})=>{const client=new Client({name:'identical-client',version:'1'},{capabilities:{}}),transport=new StreamableHTTPClientTransport(new URL(bridge.url),{fetch,...options,requestInit:{headers:{Authorization:`Bearer ${token}`}}});clients.push({client,transport});await client.connect(transport);return {client,transport};};
   t.after(async()=>{await Promise.allSettled(clients.map(({client})=>client.close()));await bridge.close();await fs.rm(dir,{recursive:true,force:true});});
   return {get bridge(){return bridge;},dir,token,cert,fetch,ended,connect,async restart(){const port=bridge.port;await bridge.close();bridge=await startMcpBridge({dir,port,tools:toolDefinitions,dispatch:async call=>({content:[{type:'text',text:call.agent}]})});},post(body,headers={},method='POST'){return fetch(bridge.url,{method,headers:{Authorization:`Bearer ${token}`,Accept:'application/json, text/event-stream','Content-Type':'application/json',...headers},...method==='POST'?{body:typeof body==='string'?body:JSON.stringify(body)}:{}});}};
@@ -82,9 +86,10 @@ test('HTTP validates auth, exact hosts, origins, media, methods, versions and bo
   const id=r.headers.get('mcp-session-id');assert.ok(id);assert.equal(JSON.parse((await r.text()).match(/^data: (.+)$/m)[1]).result.protocolVersion,'2025-11-25');
   assert.equal((await f.post({jsonrpc:'2.0',id:2,method:'tools/list'},{'mcp-session-id':id,'mcp-protocol-version':'unsupported'})).status,400);
   assert.equal((await f.post({jsonrpc:'2.0',id:2,method:'tools/list'},{'mcp-session-id':'missing'})).status,404);
-  assert.equal((await fs.stat(path.join(f.dir,'mcp-token'))).mode&0o777,0o600);
+  assert.equal((await fs.stat(path.join(f.dir,'mcp-token-v2'))).mode&0o777,0o600);
   assert.equal((await fs.stat(f.bridge.file)).mode&0o777,0o600);
-  assert.deepEqual((await fs.readdir(f.dir)).sort(),['mcp-cert.pem','mcp-identity.json','mcp-runtime.json','mcp-token']);
+  const descriptor=JSON.parse(await fs.readFile(f.bridge.file,'utf8'));assert.equal(descriptor.version,2);assert.equal(Object.hasOwn(descriptor,'token'),false);
+  assert.deepEqual((await fs.readdir(f.dir)).sort(),['mcp-cert.pem','mcp-identity.json','mcp-runtime.json','mcp-token-v2']);
 });
 test('HTTP enforces session limit, reclaims DELETE sessions and idle sessions',async t=>{
   const f=await httpFixture(t,{limits:{sessions:1,idleMs:30}}),first=await f.post(initialize(1)),id=first.headers.get('mcp-session-id');
@@ -109,7 +114,7 @@ test('HTTP cancellation isolates requests and pending limit is reclaimed',async 
 });
 test('HTTP stable URL and private credential survive restart, old session is rejected',async t=>{
   const f=await httpFixture(t),r=await f.post(initialize(1)),id=r.headers.get('mcp-session-id'),url=f.bridge.url;
-  await f.restart();assert.equal(f.bridge.url,url);assert.equal(await fs.readFile(path.join(f.dir,'mcp-token'),'utf8'),f.token);
+  await f.restart();assert.equal(f.bridge.url,url);assert.equal(await fs.readFile(path.join(f.dir,'mcp-token-v2'),'utf8'),f.token);
   assert.equal((await f.post({jsonrpc:'2.0',id:2,method:'tools/list'},{'mcp-session-id':id,'mcp-protocol-version':'2025-11-25'})).status,404);
   assert.equal((await f.post(initialize(1))).status,200);
 });
@@ -185,4 +190,27 @@ test('TCP admission bounds unauthenticated stalled TLS sockets and recovers capa
   await new Promise(resolve=>overflow.once('close',resolve));assert.equal(overflow.destroyed,true);
   const closed=Promise.all([first,second].map(socket=>new Promise(resolve=>socket.once('close',resolve))));first.destroy();second.destroy();await closed;
   assert.equal((await f.post(initialize(1))).status,200);
+});
+
+test('runtime discovery excludes credentials and retires legacy bearer on migration, including failed listen',async t=>{
+  for(const legacyDescriptor of [true,false]){
+    const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-migration-')),file=path.join(dir,'mcp-runtime.json'),oldToken='a'.repeat(64),listener=net.createServer();
+    let bridge;t.after(async()=>{await bridge?.close();await new Promise(resolve=>listener.close(resolve));await fs.rm(dir,{recursive:true,force:true});});
+    await fs.writeFile(path.join(dir,'mcp-token'),oldToken,{mode:0o600});
+    await new Promise(resolve=>listener.listen(0,'127.0.0.1',resolve));const port=listener.address().port;
+    if(legacyDescriptor){await fs.writeFile(file,JSON.stringify({port,token:oldToken,pid:1}),{mode:0o600});await fs.writeFile(path.join(dir,'mcp-token-v2'),oldToken,{mode:0o600});}
+    await assert.rejects(startMcpBridge({dir,port,tools:[],dispatch:async()=>({content:[]})}),{code:'EADDRINUSE'});
+    await assert.rejects(fs.readFile(file),{code:'ENOENT'});
+    const token=await fs.readFile(path.join(dir,'mcp-token-v2'),'utf8');assert.notEqual(token,oldToken);
+    await new Promise(resolve=>listener.close(resolve));
+    bridge=await startMcpBridge({dir,port,tools:[],dispatch:async()=>({content:[]})});
+    const descriptor=JSON.parse(await fs.readFile(file,'utf8'));assert.equal(descriptor.version,2);assert.equal(Object.hasOwn(descriptor,'token'),false);
+    // The pre-TLS relay rejects this shape before its HTTP fetch because token is absent.
+    assert.throws(()=>{if(!Number.isInteger(descriptor.port)||descriptor.port<1||descriptor.port>65535||typeof descriptor.token!=='string')throw Error('Invalid local MCP runtime');},/Invalid local MCP runtime/);
+    const fetch=createMcpFetch(await fs.readFile(descriptor.certFile,'utf8')),headers={Accept:'application/json, text/event-stream','Content-Type':'application/json'};
+    assert.equal((await fetch(bridge.url,{method:'POST',headers:{...headers,Authorization:`Bearer ${oldToken}`},body:JSON.stringify(initialize(1))})).status,403);
+    assert.equal((await fetch(bridge.url,{method:'POST',headers:{...headers,Authorization:`Bearer ${token}`},body:JSON.stringify(initialize(1))})).status,200);
+    await bridge.close();bridge=await startMcpBridge({dir,port,tools:[],dispatch:async()=>({content:[]})});
+    assert.equal(await fs.readFile(path.join(dir,'mcp-token-v2'),'utf8'),token);
+  }
 });
