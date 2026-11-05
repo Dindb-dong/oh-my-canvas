@@ -11190,6 +11190,8 @@ Application modification: the Vite build replaces Emscripten createNamedFunction
 
 Application readiness modification: the async decompress wrapper resolves immediately when Module.calledRun is already true, rejects on Module.onAbort, and applies a 15-second initialization deadline. This handles the browser initialization order without waiting for an event that already fired. Original wrapper SHA256 f9dee5dcd810246083df4c8f09e3ae096dbecb6da61727d669b6e85006a64bef.
 
+Application browser export modification: the transformed binding assigns module.exports=Module unconditionally; upstream only makes this assignment in its Node environment branch. This exposes the same initialized module to the bundler-generated browser wrapper.
+
 
 ========================================================================
 which@2.0.2 — node_modules/which/LICENSE
