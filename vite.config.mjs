@@ -44,7 +44,7 @@ export function woff2StaticNames() {
     const invoker=code.indexOf('function craftInvokerFunction('),afterInvoker=code.indexOf('function ensureOverloadTable(',invoker);
     if(names<0||afterNames<0||invoker<afterNames||afterInvoker<0)throw Error('WOFF2 binding helpers were not found');
     // Replace Emscripten's dynamic binding generation with the same ABI conversions under CSP.
-    return {code:code.slice(0,names)+'function createNamedFunction(name,body){return body}'+code.slice(afterNames,invoker)+staticInvoker+code.slice(afterInvoker),map:null};
+    return {code:code.slice(0,names)+'function createNamedFunction(name,body){return body}'+code.slice(afterNames,invoker)+staticInvoker+code.slice(afterInvoker)+';module.exports=Module;',map:null};
   }};
 }
 export default defineConfig({ plugins:[woff2StaticNames()], base: './', build: { target: 'es2022' }, server: { host: '127.0.0.1', port: 5179, strictPort: true } });

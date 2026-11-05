@@ -12,8 +12,10 @@ it('decodes real WOFF2 with string code generation forbidden and fails closed on
     expect(()=>transform(source+'\n','/'+file)).toThrow('Re-audit');
     expect(transform(source,'/other/decompress_binding.js')).toBeUndefined();
     const module={exports:{} as any};
-    const context=vm.createContext({module,require:createRequire(resolve(file)),__dirname:dirname(resolve(file)),process,console,Buffer,Uint8Array,Int8Array,Uint16Array,Int16Array,Uint32Array,Int32Array,Float32Array,Float64Array,ArrayBuffer,WebAssembly,setTimeout,clearTimeout},{codeGeneration:{strings:false,wasm:true}});
+    const context=vm.createContext({module,require:createRequire(resolve(file)),__dirname:dirname(resolve(file)),window:{},document:{currentScript:{src:'https://app.invalid/decoder.js'}},fetch,console,Buffer,Uint8Array,Int8Array,Uint16Array,Int16Array,Uint32Array,Int32Array,Float32Array,Float64Array,ArrayBuffer,WebAssembly,setTimeout,clearTimeout},{codeGeneration:{strings:false,wasm:true}});
+    // Browser Emscripten does not take its Node-only module.exports branch.
     vm.runInContext(result.code,context);
+    expect(module.exports).toHaveProperty('run');
     await new Promise<void>((resolve,reject)=>{module.exports.onRuntimeInitialized=resolve;module.exports.onAbort=reject;});
     const bytes=await readFile('node_modules/@fontsource-variable/ibm-plex-sans/files/ibm-plex-sans-latin-wght-normal.woff2');
     const decoded=module.exports.decompress(bytes);
