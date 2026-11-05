@@ -37,6 +37,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         promise: Promise<void>;
         content?: Data[];
         bounds?: Rect;
+        fillRule?: string;
         error?: unknown;
     }>();
     function resolvedObjects() {
@@ -44,7 +45,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         for (const [id, entry] of booleans)
             if (result[id] && entry.content)
                 result[id] = {
-                    ...result[id], ...(entry.bounds ? { ...entry.bounds, box: { ...entry.bounds }, corners: [{ x: entry.bounds.x, y: entry.bounds.y }, { x: entry.bounds.x + entry.bounds.width, y: entry.bounds.y }, { x: entry.bounds.x + entry.bounds.width, y: entry.bounds.y + entry.bounds.height }, { x: entry.bounds.x, y: entry.bounds.y + entry.bounds.height }] } : {}), content: entry.content, transform: {
+                    ...result[id], ...(entry.bounds ? { ...entry.bounds, box: { ...entry.bounds }, corners: [{ x: entry.bounds.x, y: entry.bounds.y }, { x: entry.bounds.x + entry.bounds.width, y: entry.bounds.y }, { x: entry.bounds.x + entry.bounds.width, y: entry.bounds.y + entry.bounds.height }, { x: entry.bounds.x, y: entry.bounds.y + entry.bounds.height }] } : {}), content: entry.content, fillRule: entry.fillRule, transform: {
                         a: 1, b: 0, c: 0, d: 1, e: 0, f: 0
                     }, inverseTransform: {
                         a: 1, b: 0, c: 0, d: 1, e: 0, f: 0
@@ -66,6 +67,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 promise: Promise<void>;
                 content?: Data[];
                 bounds?: Rect;
+                fillRule?: string;
                 error?: unknown;
             } = { signature: key, promise: Promise.resolve() };
             booleans.set(shape.id, entry);
@@ -73,6 +75,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 const operands = shape.childIds!.map(id => objects[id]).filter(child => child && !child.hidden);
                 if (!operands.length) {
                     entry.content = [];
+                    entry.fillRule = 'nonzero';
                     if (!destroyed)
                         render();
                     return;
@@ -81,6 +84,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 const result = await combinePaths(operands, operation, { wasmUrl: options.wasmUrl, objects });
                 entry.content = result.segments;
                 entry.bounds = result.bounds;
+                entry.fillRule = result.fillRule;
                 if (!destroyed)
                     render();
             })().catch(error => {
