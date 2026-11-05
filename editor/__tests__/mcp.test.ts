@@ -6,6 +6,8 @@ import { createStyleService, reconcileStyles } from '../styles';
 import { applyLayout } from '../layout';
 import { installLvMcp } from '../mcp';
 import { TOOLS, validateToolArgs } from '../mcp/defs';
+import { resolve } from 'node:path';
+import { combinePaths } from '../render/vector';
 import { textValue } from '../formats/model';
 const cleanup: Array<() => void> = [];
 afterEach(() => {
@@ -779,12 +781,52 @@ describe('MCP typed component property transport', () => {
         expect((await call('write_svg', { svg: 'x'.repeat(200001), target: 'board', position: 'last' })).structuredContent?.error.code).toBe('bad_args');
     });
     it('dispatches outline with agent ownership and cancellation context outside transactions', async () => {
-        const commands = { run: vi.fn((_name, args) => { expect(args.author).toBe('alpha'); expect(args.signal).toBeInstanceOf(AbortSignal); return true; }) };
+        const commands = { run: vi.fn((_name, args) => { expect(args.author).toBe('alpha'); expect(args.signal).toBeInstanceOf(AbortSignal); return ['box']; }) };
         const { ok, call } = fixture({ services: { commands } });
         await ok('outline', { ids: ['box'], kind: 'stroke', revision: 0 });
         expect(commands.run).toHaveBeenCalledWith('path.outline-stroke', expect.objectContaining({ ids: ['box'], operationId: expect.any(String) }));
         expect((await call('outline', { ids: ['box'], kind: 'text', revision: 999 })).structuredContent?.error.code).toBe('stale_revision');
         expect(commands.run).toHaveBeenCalledTimes(1);
+    });
+    it('returns command-created outline IDs when selection changes during settling', async () => {
+        const commands = { run: vi.fn(async () => ['box']) };
+        const { ok, editor, view } = fixture({ services: { commands } });
+        view.settled = vi.fn(async () => { editor.setSelection(['title']); });
+        const result = await ok('outline', { ids: ['box'], kind: 'stroke', revision: 0 });
+        expect(editor.selection).toEqual(['title']);
+        expect(result.rawIds).toEqual(['box']);
+        expect(result.diagnostics.map((d: Data) => d.id)).toEqual(['box']);
+        expect((await ok('get_tree', { id: result.ids[0] })).tree.rawId).toBe('box');
+    });
+    it('reads settled recomposed Boolean paths after operand edits and reopening without stored content', async () => {
+        const { editor, view, ok, call } = fixture();
+        editor.transact('Reopen Boolean operands', doc => {
+            const page = doc.pagesById[editor.pageId];
+            insertShape(page, createShape('boolean', { id: 'reopened', childIds: [], booleanOperation: 'subtract' }), 'board');
+            insertShape(page, createShape('rect', { id: 'outer', x: 0, y: 0, width: 100, height: 100 }), 'reopened');
+            insertShape(page, createShape('rect', { id: 'inner', x: 25, y: 25, width: 50, height: 50 }), 'reopened');
+        });
+        let projected: Data | undefined;
+        view.settled = vi.fn(async () => {
+            const result = await combinePaths([editor.page.objects.reopened], 'flatten', { wasmUrl: resolve('node_modules/canvaskit-wasm/bin/full/canvaskit.wasm'), objects: editor.page.objects });
+            projected = { ...editor.page.objects.reopened, content: result.segments, fillRule: result.fillRule };
+        });
+        view.projectedShape = () => projected;
+        expect(editor.page.objects.reopened.content).toBeUndefined();
+        const original = await ok('get_path', { id: 'reopened' });
+        expect(original.segments.filter((s: Data) => s.command === 'close')).toHaveLength(2);
+        expect(original.editable).toBe(false);
+        editor.transact('Change operand', doc => {
+            doc.pagesById[editor.pageId].objects.outer.width = 120;
+            doc.pagesById[editor.pageId].objects.reopened.content = [{ command: 'move', x: 999, y: 999 }];
+        });
+        const changed = await ok('get_path', { id: 'reopened' });
+        expect(changed.revision).toBeGreaterThan(original.revision);
+        expect(changed.segments).not.toEqual(original.segments);
+        expect(changed.segments.some((s: Data) => s.x === 120)).toBe(true);
+        expect(changed.segments.some((s: Data) => s.x === 999)).toBe(false);
+        view.projectedShape = () => undefined;
+        expect((await call('get_path', { id: 'reopened' })).structuredContent?.error.code).toBe('invalid');
     });
     it('does not commit asynchronous geometry after the document changes', async () => {
         const ready = deferred();

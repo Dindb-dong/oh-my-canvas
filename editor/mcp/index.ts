@@ -363,12 +363,15 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             const ids = args.ids.map((id: string) => resolve(agent, id));
             if (new Set(ids).size !== ids.length)
                 throw new McpError('bad_args', 'Outline layers must be unique');
-            const result = await waiting(services.commands.run(args.kind === 'stroke' ? 'path.outline-stroke' : 'text.outline', { ids, author: agent, operationId: uid(), signal }), signal);
+            if (ids.some((id: string) => !isEditable(editor.page, id) || (args.kind === 'text' ? editor.page.objects[id].type !== 'text' : !['path', 'boolean', 'rect', 'ellipse'].includes(editor.page.objects[id].type))))
+                throw new McpError('invalid', 'Choose editable layers matching the outline kind');
+            const result: unknown = await waiting(services.commands.run(args.kind === 'stroke' ? 'path.outline-stroke' : 'text.outline', { ids, author: agent, operationId: uid(), signal }), signal);
             check(signal);
-            if (!result)
-                throw new McpError('invalid', 'No layers were converted');
+            if (!Array.isArray(result) || !result.length || result.some(id => typeof id !== 'string'))
+                throw new McpError('invalid', 'Outline command returned no created layer IDs');
+            const createdIds: string[] = [...result];
             await settled(signal);
-            const created = editor.selection.filter(id => editor.page.objects[id]);
+            const created = createdIds.filter(id => editor.page.objects[id]);
             options.onHighlight?.(agent, created);
             return response({ ok: true, revision, ids: created.map(id => alias(agent, id)), rawIds: created, diagnostics: diagnostics(created), warnings: [] });
         }
@@ -445,12 +448,14 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         }
         const page = editor.page;
         if (name === 'get_path') {
-            const id = resolve(agent, args.id), shape = page.objects[id];
-            if (!['path', 'boolean'].includes(shape.type) || !Array.isArray(shape.content))
+            await settled(signal);
+            const id = resolve(agent, args.id), stored = editor.page.objects[id];
+            const shape = stored.type === 'boolean' && view.projectedShape ? view.projectedShape(id) : stored;
+            if (!shape || !['path', 'boolean'].includes(shape.type) || !Array.isArray(shape.content))
                 throw new McpError('invalid', 'Layer has no native path geometry');
             if (shape.content.length > 10000)
                 throw new McpError('invalid', 'Path exceeds the 10000 segment inspection limit');
-            return response({ ok: true, revision, id: alias(agent, id), rawId: id, coordinateSpace: 'world', fillRule: shape.fillRule ?? 'nonzero', editable: shape.type === 'path' && isEditable(page, id), segments: shape.content.map((segment: Data, index: number) => ({ ...segment, index })) });
+            return response({ ok: true, revision, id: alias(agent, id), rawId: id, coordinateSpace: 'world', fillRule: shape.fillRule ?? 'nonzero', editable: stored.type === 'path' && isEditable(editor.page, id), segments: shape.content.map((segment: Data, index: number) => ({ ...segment, index })) });
         }
         if (name === 'get_context')
             return response({ ok: true, revision, page: { id: page.id, name: page.name }, pages: editor.doc.pages.map(id => ({ id, name: editor.doc.pagesById[id].name })), viewport: editor.viewport, selection: editor.selection.map(id => alias(agent, id)), boards: (page.objects.root.childIds ?? []).map(id => alias(agent, id)), boardDetails: (page.objects.root.childIds ?? []).map(id => describe(agent, page.objects[id], true)), editing: options.editing?.() ?? null });
