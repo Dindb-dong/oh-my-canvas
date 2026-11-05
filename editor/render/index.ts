@@ -319,6 +319,9 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             renderListeners.add(listener);
             return () => renderListeners.delete(listener);
         },
+        textFragments(id: string) {
+            return (fragments.get(id) ?? []).map(fragment => ({ ...fragment, style: { ...fragment.style } }));
+        },
         render, settled, measure, computedStyle(id, keys) {
             const s = resolvedObjects()[id];
             if (!s)

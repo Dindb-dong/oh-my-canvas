@@ -2,7 +2,7 @@ import type { Data, Point, Shape, Rect } from '../contracts';
 import { shapePath } from './scene';
 import type { CanvasKit, Path } from 'canvaskit-wasm';
 let kitPromise: Promise<CanvasKit> | undefined;
-async function loadKit(wasmUrl?: string) {
+export async function loadKit(wasmUrl?: string) {
     if (!kitPromise) {
         kitPromise = import('canvaskit-wasm/full').then(module => module.default({ locateFile: () => wasmUrl ?? '/canvaskit.wasm' })).catch(error => {
             kitPromise = undefined;
@@ -97,7 +97,7 @@ export async function combinePaths(shapes: Shape[], operation: 'union' | 'subtra
             path.delete();
     }
 }
-function canonicalSegments(kit: CanvasKit, commands: Float32Array): Data[] {
+export function canonicalSegments(kit: CanvasKit, commands: Float32Array): Data[] {
     const segments: Data[] = [];
     let index = 0, current: Point = { x: 0, y: 0 }, origin: Point = { x: 0, y: 0 };
     const point = (): Point => ({ x: commands[index++], y: commands[index++] });

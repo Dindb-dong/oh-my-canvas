@@ -162,6 +162,7 @@ export function createFontCatalog(initial: FontFaceInput[] = [], options: Data =
             }
             return [...groups.values()];
         },
+        sources() { return records.map(record => ({ ...record.input })); },
         add, ensure, embeddedCss, syncAssets, prepareAssets,
         async ready() {
             await ensure(options.sampleText ?? 'Aa한글😀');

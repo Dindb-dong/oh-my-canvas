@@ -25,12 +25,16 @@
     "@fontsource-variable/noto-sans-kr": "^5.3.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "canvaskit-wasm": "0.42.0",
+    "fontkit": "2.0.4",
+    "onnxruntime-web": "1.24.3",
     "selfsigned": "^3.0.1",
+    "wawoff2": "2.0.1",
     "ws": "^8.21.0",
     "yjs": "^13.6.27"
   },
   "devDependencies": {
     "@fontsource/noto-color-emoji": "^5.3.2",
+    "@types/fontkit": "^2.0.9",
     "@types/node": "^24.0.0",
     "electron": "^45.2.1",
     "electron-builder": "^26.15.3",
