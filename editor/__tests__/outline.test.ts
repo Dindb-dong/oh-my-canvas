@@ -56,6 +56,16 @@ describe('editable vector outlines', () => {
         expect(fetch.mock.calls[0][0]).toBe('italic.woff2');
         await expect(outlineText(createShape('text'),[actual],[faces[0]])).rejects.toThrow('Synthetic font styles');
     });
+    it('honors named normal/bold face descriptors and rejects undeclared synthetic weights', async () => {
+        const bytes=await readFile(latinFile),font=create(await decompress(bytes)).getVariation({wght:700});
+        const width=font.layout('Logo').advanceWidth*48/font.unitsPerEm;
+        const fetch=vi.fn(async()=>new Response(bytes));vi.stubGlobal('fetch',fetch);
+        const bold=fragment('Logo',width,{fontWeight:'700',letterSpacing:'0px'});
+        const faces=[{family:'IBM Plex Sans',url:'normal.woff2',weight:'normal'},{family:'IBM Plex Sans',url:'bold.woff2',weight:'bold'}];
+        await outlineText(createShape('text'),[bold],faces);
+        expect(fetch.mock.calls[0][0]).toBe('bold.woff2');
+        await expect(outlineText(createShape('text'),[bold],[faces[0]])).rejects.toThrow('Synthetic font weights');
+    });
     it('resolves Korean WOFF2 subset glyphs from the actual font file', async () => {
         const folder='node_modules/@fontsource-variable/noto-sans-kr/files';
         let bytes: Uint8Array|undefined, font: ReturnType<typeof create>|undefined;

@@ -74,8 +74,8 @@ function inRange(code: number, range?: string) {
     });
 }
 function weightDistance(input: FontFaceInput, weight: number) {
-    const values = String(input.weight ?? 400).split(/\s+/).map(Number);
-    return Math.max(values[0] - weight, weight - (values[1] ?? values[0]), 0);
+    const values = String(input.weight ?? 400).split(/\s+/).map(value => value === 'normal' ? 400 : value === 'bold' ? 700 : Number(value));
+    return values.every(Number.isFinite) ? Math.max(values[0] - weight, weight - (values[1] ?? values[0]), 0) : Infinity;
 }
 export function glyphSegments(commands: PathCommand[], x: number, baseline: number, scale: number): Data[] {
     const segments: Data[] = [];
@@ -168,13 +168,13 @@ export async function outlineText(shape: Shape, fragments: TextFragment[], sourc
         const segments: Data[] = [];
         for (const chunk of chunks) {
             let font = chunk.font;
+            if (weightDistance(chunk.input, weight) > 0)
+                throw new Error('Synthetic font weights cannot be outlined accurately; import the matching weight');
             const axes: Record<string, number> = {};
             if (font.variationAxes?.wght) axes.wght = weight;
             for (const setting of (style.fontVariationSettings ?? '').matchAll(/["']([\w ]{4})["']\s+(-?[\d.]+)/g))
                 axes[setting[1]] = Number(setting[2]);
             if (Object.keys(axes).length) font = font.getVariation(axes);
-            else if (weightDistance(chunk.input, weight) > 0)
-                throw new Error('Synthetic font weights cannot be outlined accurately; import the matching weight');
             const features = { ...(spacing ? { liga: false, clig: false } : {}), ...(style.fontVariantCaps === 'small-caps' ? { smcp: true } : {}) };
             const run = font.layout(chunk.text, features), scale = size / font.unitsPerEm;
             for (let index = 0; index < run.glyphs.length; index++) {
