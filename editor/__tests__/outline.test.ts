@@ -5,8 +5,10 @@ import { create } from 'fontkit';
 import decompress from 'wawoff2/decompress.js';
 import { outlineStroke, outlineText, glyphSegments } from '../render/outline';
 import { pathBounds } from '../geometry';
+import { SceneWriter, shapePath } from '../render/scene';
+import { loadKit } from '../render/vector';
 import { createCommands } from '../commands';
-import { Editor, createDocument, createShape, insertShape } from '../document';
+import { Editor, createDocument, createShape, insertShape, reparentShapes } from '../document';
 import type { TextFragment } from '../render/scene';
 
 const wasmUrl = resolve('node_modules/canvaskit-wasm/bin/full/canvaskit.wasm');
@@ -39,11 +41,11 @@ describe('editable vector outlines', () => {
         const bytes=await readFile(latinFile),font=create(await decompress(bytes)).getVariation({wght:600});
         const width=font.layout('Logo AV',{liga:false,clig:false}).advanceWidth*48/font.unitsPerEm+14;
         vi.stubGlobal('fetch',vi.fn(async()=>new Response(bytes)));
-        const [part]=await outlineText(createShape('text'),[fragment('Logo AV',width)],[{family:'IBM Plex Sans',url:'font.woff2',weight:'100 900'}]);
+        const [part]=await outlineText(createShape('text'),[fragment('Logo AV',width,{paints:JSON.stringify([{color:'#123456',opacity:.35,blendMode:'normal'}])})],[{family:'IBM Plex Sans',url:'font.woff2',weight:'100 900'}]);
         expect(part.segments.filter(s=>s.command==='move').length).toBeGreaterThan(6);
         expect(part.segments.filter(s=>s.command==='close').length).toBeGreaterThan(6);
         expect(pathBounds(part.segments).width).toBeGreaterThan(150);
-        expect(part.fills).toEqual([{color:'#123456'}]);
+        expect(part.fills).toEqual([{color:'#123456',opacity:.35}]);
     });
     it('selects an actual italic face before equal-weight normal faces and rejects synthetic italics', async () => {
         const bytes=await readFile('node_modules/@fontsource-variable/ibm-plex-sans/files/ibm-plex-sans-latin-wght-italic.woff2');
@@ -85,10 +87,17 @@ describe('editable vector outlines', () => {
         await expect(outlineText(createShape('text'),[fragment('A',500)],[{family:'IBM Plex Sans',url:'font.woff2',weight:'100 900'}])).rejects.toThrow('shaping differs');
     });
 });
-function fixture(outline: (...args:any[])=>any) {
-    const doc=createDocument(),page=doc.pagesById[doc.pages[0]],source=createShape('text',{id:'source',x:10,y:20,width:200,height:60,name:'Wordmark'});
+function fixture(outline: (...args:any[])=>any, props: Record<string,any> = {}) {
+    const doc=createDocument(),page=doc.pagesById[doc.pages[0]],source=createShape(props.type ?? 'text',{id:'source',x:10,y:20,width:200,height:60,name:'Wordmark',...props});
     insertShape(page,source);const editor=new Editor(doc);editor.setSelection(['source']);
     return {editor,commands:createCommands(editor,{outline})};
+}
+function setMask(editor: Editor, mode: string) {
+    editor.transact('Mask',doc=>{
+        const page=doc.pagesById[editor.pageId];
+        insertShape(page,createShape('group',{id:'mask',childIds:[],isMaskGroup:true,maskType:mode}));
+        reparentShapes(page,['source'],'mask');
+    });
 }
 const parts=[{segments:[{command:'move',x:10,y:20},{command:'line',x:30,y:20},{command:'line',x:30,y:40},{command:'close'}],fills:[{color:'#000'}]}];
 describe('outline transactions',()=>{
@@ -112,6 +121,66 @@ describe('outline transactions',()=>{
         expect(editor.page.objects.mask.childIds).toEqual([ids[0],'source']);
         expect(editor.page.objects[ids[0]].type).toBe('group');
         expect(editor.page.objects.source.hidden).toBe(true);
+    });
+    it.each(['alpha','luminance','vector'])('refuses %s stroke-mask conversion without changing elliptical coverage',async mode=>{
+        const outline=vi.fn(async()=>parts),{editor,commands}=fixture(outline,{type:'ellipse',fills:[],strokes:[{color:'#000',width:4}]});
+        setMask(editor,mode);
+        const snapshot=editor.doc,before=new SceneWriter(editor.page.objects).node(editor.page.objects.source,true);
+        const kit=await loadKit(wasmUrl),path=kit.Path.MakeFromSVGString(shapePath(editor.page.objects.source))!;
+        try {expect(path.contains(110,50)).toBe(true);expect(path.contains(10,20)).toBe(false);} finally {path.delete();}
+        await expect(commands.run('path.outline-stroke',{id:'source'})).rejects.toThrow('Release this mask');
+        expect(outline).not.toHaveBeenCalled();expect(editor.doc).toBe(snapshot);
+        expect(new SceneWriter(editor.page.objects).node(editor.page.objects.source,true)).toBe(before);
+    });
+    it.each(['alpha','luminance','vector'])('refuses nested %s mask sources before preparing outlines',async mode=>{
+        const outline=vi.fn(async()=>parts),{editor,commands}=fixture(outline);setMask(editor,mode);
+        editor.transact('Nested mask source',doc=>{
+            const page=doc.pagesById[editor.pageId];
+            insertShape(page,createShape('group',{id:'nested',childIds:[]}),'mask',0);
+            reparentShapes(page,['source'],'nested');
+        });
+        const snapshot=editor.doc;
+        await expect(commands.run('text.outline',{id:'source'})).rejects.toThrow('Release this mask');
+        expect(outline).not.toHaveBeenCalled();expect(editor.doc).toBe(snapshot);
+    });
+    it('retains the actual O glyph counter in exported vector mask coverage',async()=>{
+        const bytes=await readFile(latinFile),font=create(await decompress(bytes)).getVariation({wght:600});
+        const width=font.layout('O').advanceWidth*48/font.unitsPerEm;
+        vi.stubGlobal('fetch',vi.fn(async()=>new Response(bytes)));
+        const source=createShape('text',{fontFamily:'IBM Plex Sans',fontSize:48,fontWeight:600,text:'O'});
+        const actual=await outlineText(source,[fragment('O',width,{letterSpacing:'0px'})],[{family:'IBM Plex Sans',url:'font.woff2',weight:'100 900'}]);
+        const {editor,commands}=fixture(async()=>actual);setMask(editor,'vector');
+        const ids=await commands.run('text.outline',{id:'source'}) as string[];
+        const group=editor.page.objects[ids[0]],leaf=editor.page.objects[group.childIds![0]],mask=new SceneWriter(editor.page.objects).vectorMask(group);
+        const d=/d="([^"]+)"/.exec(mask)![1],kit=await loadKit(wasmUrl);
+        const path=kit.Path.MakeFromSVGString(d)!,expected=kit.Path.MakeFromSVGString(shapePath(leaf))!,box=pathBounds(leaf.content);
+        try {
+            expect(mask).not.toContain('<rect');expect(leaf.content.filter((segment:any)=>segment.command==='close').length).toBeGreaterThan(1);
+            expect(path.contains(box.x+box.width/2,box.y+box.height/2)).toBe(false);
+            let ink=0;
+            for(let x=0;x<15;x++)for(let y=0;y<15;y++){
+                const px=box.x+(x+.5)*box.width/15,py=box.y+(y+.5)*box.height/15;
+                expect(path.contains(px,py)).toBe(expected.contains(px,py));if(path.contains(px,py))ink++;
+            }
+            expect(ink).toBeGreaterThan(0);
+        } finally {path.delete();expected.delete();}
+    });
+    it('keeps hidden blur effects disabled in the rendered outline',async()=>{
+        const {editor,commands}=fixture(async()=>parts,{blur:12,blurHidden:true,backgroundBlur:8,backgroundBlurHidden:true});
+        const ids=await commands.run('text.outline') as string[],group=editor.page.objects[ids[0]];
+        expect(group).toMatchObject({blur:12,blurHidden:true,backgroundBlur:8,backgroundBlurHidden:true});
+        expect(new SceneWriter(editor.page.objects).node(group,false,'<rect width="400" height="400"/>')).not.toContain('filter=');
+    });
+    it('refuses per-paint blending without hiding the original and preserves normal fill opacity',async()=>{
+        const {editor,commands}=fixture(async source=>outlineStroke(source,{wasmUrl}),{type:'ellipse',fills:[{color:'#fff',blendMode:'multiply',opacity:.4}],strokes:[{color:'#000',width:4}]});
+        const snapshot=editor.doc,svg=new SceneWriter(editor.page.objects).node(editor.page.objects.source);
+        expect(svg).toContain('mix-blend-mode:multiply');
+        await expect(commands.run('path.outline-stroke',{id:'source'})).rejects.toThrow('per-paint blend modes');
+        expect(editor.doc).toBe(snapshot);expect(editor.page.objects.source.hidden).not.toBe(true);
+        const normal=await outlineStroke(createShape('ellipse',{fills:[{color:'#fff',opacity:.4}],strokes:[{color:'#000',width:4}]}),{wasmUrl});
+        expect(normal[0].fills).toEqual([{color:'#fff',opacity:.4}]);
+        const glyph=fragment('O',10,{paints:JSON.stringify([{color:'#000',blendMode:'screen',opacity:.5}])});
+        await expect(outlineText(createShape('text'),[glyph],[])).rejects.toThrow('per-paint blend modes');
     });
     it('does not commit stale, cancelled, locked or active-session requests',async()=>{
         const {editor,commands}=fixture(async()=>{editor.transact('Concurrent change',doc=>{doc.name='Changed';});return parts;});

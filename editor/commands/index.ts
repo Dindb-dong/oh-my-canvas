@@ -554,6 +554,19 @@ export function createCommands(editor: EditorStore, services: Data = {}): Comman
             if (editor.activeSession) throw new Error('Finish the active edit before outlining');
             const pageId = editor.pageId, snapshot = editor.doc, sources = chosen.map(id => clone(editor.page.objects[id]));
             if (!services.outline) throw new Error('Outline service is unavailable');
+            const maskModes = new Map<string, string>();
+            for (const source of sources) {
+                let branch = source.id;
+                for (const parent of ancestors(editor.page, source.id)) {
+                    const mode = parent.isMaskGroup === false ? undefined : parent.maskType ?? parent.maskMode ?? parent.mask?.mode ?? (parent.isMaskGroup ? 'alpha' : undefined);
+                    if (mode && parent.childIds?.[0] === branch) {
+                        if (parent.id !== source.parentId || mode !== 'vector' || kind !== 'text' || source.clip || source.clipContent || parent.layout && parent.layout.type !== 'none')
+                            throw new Error('Release this mask before outlining its source; the original mask was kept');
+                        maskModes.set(source.id, mode);
+                    }
+                    branch = parent.id;
+                }
+            }
             const prepared: Data[][] = [];
             for (const source of sources) {
                 args.signal?.throwIfAborted();
@@ -570,10 +583,10 @@ export function createCommands(editor: EditorStore, services: Data = {}): Comman
                     if (!parts.length || parts.some(part => !part.segments?.length)) throw new Error('The outline result is empty');
                     const box = unionBounds(parts.map(part => pathBounds(part.segments)));
                     // Retain the source layout/clip box; child paths already use world coordinates.
-                    const parent = page.objects[source.parentId], maskSource = parent.isMaskGroup !== false && !!(parent.isMaskGroup || parent.maskType || parent.maskMode || parent.mask?.mode) && parent.childIds?.[0] === source.id;
+                    const parent = page.objects[source.parentId], maskSource = maskModes.has(source.id);
                     const container = !maskSource && (source.type === 'text' || parent.layout) ? 'frame' : 'group';
                     const layout = Object.fromEntries(['absolute', 'layoutPositioning', 'layoutChild', 'hSizing', 'vSizing', 'widthSizing', 'heightSizing', 'layoutSizing', 'alignSelf', 'gridCell', 'constraints', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight', 'inlineStyles'].filter(key => source[key] !== undefined).map(key => [key, clone(source[key])]));
-                    const group = createShape(container, { ...layout, ...(container === 'frame' ? { x: source.x, y: source.y, width: source.width, height: source.height, rotation: source.rotation, transform: clone(source.transform), inverseTransform: clone(source.inverseTransform) } : box), clip: clone(source.clip ?? false), fills: [], strokes: [], name: `${source.name ?? source.type} outlines`, childIds: [], outlineSourceId: source.id, opacity: source.opacity, blendMode: source.blendMode, effects: clone(source.effects ?? []), shadows: clone(source.shadows ?? []), blur: source.blur, backgroundBlur: source.backgroundBlur });
+                    const group = createShape(container, { ...layout, ...(container === 'frame' ? { x: source.x, y: source.y, width: source.width, height: source.height, rotation: source.rotation, transform: clone(source.transform), inverseTransform: clone(source.inverseTransform) } : box), clip: clone(source.clip ?? false), fills: [], strokes: [], name: `${source.name ?? source.type} outlines`, childIds: [], outlineSourceId: source.id, opacity: source.opacity, blendMode: source.blendMode, effects: clone(source.effects ?? []), shadows: clone(source.shadows ?? []), blur: source.blur, blurHidden: source.blurHidden, backgroundBlur: source.backgroundBlur, backgroundBlurHidden: source.backgroundBlurHidden });
                     insertShape(page, group, source.parentId, page.objects[source.parentId].childIds!.indexOf(source.id));
                     for (const part of parts) {
                         const path = createShape('path', { ...pathBounds(part.segments), name: kind === 'text' ? 'Glyph outlines' : 'Stroke outline', content: part.segments, fills: part.fills, fillRule: part.fillRule ?? 'nonzero', strokes: [], rotation: 0, transform: identity(), inverseTransform: identity() });

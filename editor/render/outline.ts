@@ -7,6 +7,8 @@ import { orientedPoint } from '../geometry';
 export interface OutlinePart { segments: Data[]; fills: Data[]; fillRule?: string; }
 const visible = (paint: Data) => paint.visible !== false && !paint.hidden;
 function solid(paint: Data) {
+    if (paint.blendMode && paint.blendMode !== 'normal')
+        throw new Error('Outline does not support per-paint blend modes; the original layer was kept');
     if (paint.gradient || paint.image || paint.type && !['solid', 'color'].includes(paint.type))
         throw new Error('Outline currently requires solid paints; the original layer was kept');
     return { color: paint.color ?? '#000000', ...(paint.opacity !== undefined ? { opacity: paint.opacity } : {}) };
