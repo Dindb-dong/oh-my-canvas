@@ -178,9 +178,33 @@ describe('canonical editable path persistence', () => {
         insertShape(page, path);
         const reopened = importCanvasJson(exportCanvasJson(doc)).pagesById[page.id].objects.modes;
         expect(reopened.content).toEqual(path.content);
-        setPathHandle(reopened, 1, 'out', { x: 95, y: 48 }, reopened.content[1].handleMode);
+        setPathHandle(reopened, 1, 'out', { x: 95, y: 48 });
         expect(reopened.content[1]).toMatchObject({ x2: 65, y2: 32, handleMode: 'symmetric' });
         expect(reopened.content[2]).toMatchObject({ x1: 95, y1: 48 });
+    });
+
+    it.each([
+        ['symmetric', undefined, undefined, 'symmetric', 20],
+        [undefined, 'symmetric', undefined, 'symmetric', 20],
+        ['smooth', 'symmetric', undefined, 'aligned', 10],
+        ['corner', 'symmetric', undefined, 'free', 10],
+        ['symmetric', undefined, 'free', 'free', 10],
+    ])('defaults to node/shape modes and honors explicit free (%s/%s/%s)', (nodeMode, shapeMode, explicitMode, expectedMode, length) => {
+        const path = createShape('path', { handleMode: shapeMode, content: [
+            { command: 'move', x: 0, y: 0 },
+            { command: 'curve', x1: 10, y1: 0, x2: 40, y2: 0, x: 50, y: 0, handleMode: nodeMode },
+            { command: 'curve', x1: 60, y1: 0, x2: 90, y2: 0, x: 100, y: 0 },
+        ] });
+        setPathHandle(path, 1, 'out', { x: 50, y: 20 }, explicitMode as string | undefined);
+        expect(path.content[1].handleMode).toBe(expectedMode);
+        const incoming = path.content[1];
+        expect(Math.hypot(incoming.x2 - incoming.x, incoming.y2 - incoming.y)).toBeCloseTo(Number(length));
+        if (expectedMode === 'free')
+            expect(incoming).toMatchObject({ x2: 40, y2: 0 });
+        else {
+            expect(incoming.x2).toBeCloseTo(50);
+            expect(incoming.y2).toBeCloseTo(-Number(length));
+        }
     });
 
     it('preserves image restoration and outline source metadata through interchange and CRDT fields', () => {

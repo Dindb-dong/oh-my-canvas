@@ -114,9 +114,11 @@ export function movePathNodes(shape: Shape, indices: number[], dx: number, dy: n
         }
     refreshPath(shape);
 }
-export function setPathHandle(shape: Shape, index: number, handle: 'in' | 'out', point: Point, mode = 'free'): void {
+export function setPathHandle(shape: Shape, index: number, handle: 'in' | 'out', point: Point, mode?: string): void {
     const segments = pathSegments(shape), s = segments[index];
     checkNodes(segments, [index]);
+    const storedMode: string = mode ?? s.handleMode ?? shape.handleMode ?? 'free';
+    const handleMode = storedMode === 'smooth' ? 'aligned' : storedMode === 'corner' ? 'free' : storedMode;
     if (!['in', 'out'].includes(handle) || !Number.isFinite(point?.x) || !Number.isFinite(point?.y))
         throw new Error('Choose a handle and finite coordinates');
     const p = pathPoint(s), incoming = handle === 'in', target = incoming ? s : segments[index + 1];
@@ -124,14 +126,14 @@ export function setPathHandle(shape: Shape, index: number, handle: 'in' | 'out',
         throw new Error('Open endpoint has no handle on this side');
     const first = incoming ? { x: target.x1 ?? p.x, y: target.y1 ?? p.y } : point, second = incoming ? point : { x: target.x2 ?? target.x, y: target.y2 ?? target.y };
     setControls(target, first, second);
-    if (['mirrored', 'symmetric', 'aligned', 'angle', 'angleLength'].includes(mode)) {
+    if (['mirrored', 'symmetric', 'aligned', 'angle', 'angleLength'].includes(handleMode)) {
         const other = incoming ? segments[index + 1] : s;
         if (other && !['move', 'close'].includes(kind(other))) {
-            const ox = incoming ? 'x1' : 'x2', oy = incoming ? 'y1' : 'y2', old = { x: other[ox] ?? p.x, y: other[oy] ?? p.y }, length = ['aligned', 'angle'].includes(mode) ? Math.hypot(old.x - p.x, old.y - p.y) : Math.hypot(point.x - p.x, point.y - p.y), angle = Math.atan2(point.y - p.y, point.x - p.x) + Math.PI, a = { x: p.x + Math.cos(angle) * length, y: p.y + Math.sin(angle) * length }, [c1, c2] = controls(other, p);
+            const ox = incoming ? 'x1' : 'x2', oy = incoming ? 'y1' : 'y2', old = { x: other[ox] ?? p.x, y: other[oy] ?? p.y }, length = ['aligned', 'angle'].includes(handleMode) ? Math.hypot(old.x - p.x, old.y - p.y) : Math.hypot(point.x - p.x, point.y - p.y), angle = Math.atan2(point.y - p.y, point.x - p.x) + Math.PI, a = { x: p.x + Math.cos(angle) * length, y: p.y + Math.sin(angle) * length }, [c1, c2] = controls(other, p);
             setControls(other, incoming ? a : c1, incoming ? c2 : a);
         }
     }
-    s.handleMode = mode;
+    s.handleMode = handleMode;
     refreshPath(shape);
 }
 export function closePath(shape: Shape, closed = true, index?: number): void {
