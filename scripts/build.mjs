@@ -2,6 +2,7 @@ import {build as viteBuild} from 'vite';
 import {build} from 'esbuild';
 import {writeDistributionLicenses} from './license-inventory.mjs';
 import {writeNativeNotices} from './native-license-notices.mjs';
+import {prepareBackgroundRemoval} from './prepare-background-removal.mjs';
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 await fs.mkdir('public/fonts',{recursive:true});
@@ -17,6 +18,7 @@ for(const block of css.matchAll(/@font-face\s*\{([^}]+)\}/g)){
   faces.push({family:'Noto Sans KR',url:'/fonts/'+file,weight:'100 900',style:'normal',unicodeRange});
 }
 await fs.writeFile('src/fonts.json',JSON.stringify(faces));
+await prepareBackgroundRemoval();
 await viteBuild();
 await writeDistributionLicenses('dist/licenses');
 await writeNativeNotices('dist/licenses');

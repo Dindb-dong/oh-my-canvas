@@ -186,7 +186,7 @@ if(!process.argv.includes('--mcp-disabled'))try{
     });
   }});
 }catch(error){bridgeError=error.code==='EADDRINUSE'?'MCP port is already in use. Close the other listener or choose --mcp-port.':error.message;}
-const mime={'.html':'text/html','.js':'application/javascript','.css':'text/css','.wasm':'application/wasm','.woff2':'font/woff2','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'};
+const mime={'.html':'text/html','.js':'application/javascript','.mjs':'application/javascript','.css':'text/css','.wasm':'application/wasm','.woff2':'font/woff2','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'};
 protocol.handle('omc',async req=>{
   const u=new URL(req.url);if(u.hostname!=='canvas')return new Response('Not found',{status:404});
   let name;try{name=decodeURIComponent(u.pathname);}catch{return new Response('Invalid path',{status:400});}

@@ -16,3 +16,7 @@ work/
 /public/canvaskit.wasm
 /public/fonts/*.woff
 /public/fonts/*.woff2
+/public/background-removal/*.onnx
+/public/background-removal/ort-*
+/public/background-removal/LICENSE.txt
+/public/background-removal/NOTICE.md

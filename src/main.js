@@ -4,6 +4,7 @@ import {mountEditor,importCanvasJson,exportCanvasJson,installLvMcp,screenToWorld
 import {changesBetween,applyPending,same,assertDocument} from '../core/document.mjs';
 import {sampleCanvas,blankCanvas} from './sample';
 import fontFaces from './fonts.json';
+import {removeBackground} from '../editor/images/background';
 
 const $=s=>document.querySelector(s), api=window.omc;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -43,6 +44,7 @@ async function openSnapshot(snap){
   let candidate=snap;
   for(let attempt=0;attempt<8;attempt++){
     handle=await mountEditor($('#editor'),{
+      removeBackground,
       pickFiles:async options=>{const files=await api.invoke('pick-files',options);const mime={svg:'image/svg+xml',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',avif:'image/avif',bmp:'image/bmp',ico:'image/x-icon',json:'application/json',woff:'font/woff',woff2:'font/woff2',ttf:'font/ttf',otf:'font/otf'};return files.map(file=>new File([file.bytes],file.name,{type:mime[file.name.split('.').pop().toLowerCase()]||'application/octet-stream'}));},
       exportFile:async(blob,name)=>api.invoke('export-file',{name,mime:blob.type,bytes:new Uint8Array(await blob.arrayBuffer())}),
       document:candidate.document,title:candidate.title,subtitle:'Oh My Canvas',faces:fontFaces.map(face=>({...face,url:new URL(face.url,location.href).href})),defaultFamily:'IBM Plex Sans',fallbacks:['Noto Sans KR','sans-serif'],wasmUrl:new URL('/canvaskit.wasm',location.href).href,
