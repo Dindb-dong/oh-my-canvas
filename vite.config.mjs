@@ -1,6 +1,14 @@
 import { defineConfig } from 'vite';
 import {createHash} from 'node:crypto';
 export const alias={};
+const decoderReady=`new Promise((resolve,reject) => {
+  const timer=setTimeout(()=>reject(new Error('WOFF2 decoder initialization timed out')),15000);
+  const ready=()=>{clearTimeout(timer);resolve();};
+  const failed=reason=>{clearTimeout(timer);reject(new Error('WOFF2 decoder initialization failed: '+String(reason)));};
+  if(em_module.calledRun) {
+    if(typeof em_module.decompress==='function')ready();else failed('decoder unavailable');
+  } else {em_module.onRuntimeInitialized=ready;em_module.onAbort=failed;}
+})`;
 const staticInvoker=`function craftInvokerFunction(humanName,argTypes,classType,cppInvokerFunc,cppTargetFunc) {
   var expected=argTypes.length-2;
   if(expected<0)throwBindingError('argTypes array size mismatch');
@@ -25,7 +33,12 @@ const staticInvoker=`function craftInvokerFunction(humanName,argTypes,classType,
 }`;
 export function woff2StaticNames() {
   return {name:'woff2-static-invokers',enforce:'pre',transform(code,id) {
-    if(!id.replaceAll('\\','/').endsWith('/wawoff2/build/decompress_binding.js'))return;
+    const file=id.replaceAll('\\','/');
+    if(file.endsWith('/wawoff2/decompress.js')) {
+      if(createHash('sha256').update(code).digest('hex')!=='f9dee5dcd810246083df4c8f09e3ae096dbecb6da61727d669b6e85006a64bef')throw Error('Re-audit the WOFF2 wrapper before changing its readiness guard');
+      return {code:code.replace('new Promise(resolve => {\n  em_module.onRuntimeInitialized = resolve\n})', decoderReady),map:null};
+    }
+    if(!file.endsWith('/wawoff2/build/decompress_binding.js'))return;
     if(createHash('sha256').update(code).digest('hex')!=='112a89e7497a856698103e2ce530d2b6fc27668c0cd56f45bcbf7850d73b7c2b')throw Error('Re-audit the WOFF2 decoder before changing its CSP transform');
     const names=code.indexOf('function createNamedFunction(name,body){'),afterNames=code.indexOf('function extendError(',names);
     const invoker=code.indexOf('function craftInvokerFunction('),afterInvoker=code.indexOf('function ensureOverloadTable(',invoker);

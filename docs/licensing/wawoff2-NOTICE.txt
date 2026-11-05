@@ -27,3 +27,5 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 Application modification: the Vite build replaces Emscripten createNamedFunction with a direct return of its body and craftInvokerFunction with static argument conversion, ABI invocation, return conversion and destructor cleanup. This removes runtime binding/function-name generation so the decoder works under the existing CSP without unsafe-eval. The unchanged npm decoder source is SHA256 112a89e7497a856698103e2ce530d2b6fc27668c0cd56f45bcbf7850d73b7c2b.
+
+Application readiness modification: the async decompress wrapper resolves immediately when Module.calledRun is already true, rejects on Module.onAbort, and applies a 15-second initialization deadline. This handles the browser initialization order without waiting for an event that already fired. Original wrapper SHA256 f9dee5dcd810246083df4c8f09e3ae096dbecb6da61727d669b6e85006a64bef.

@@ -19,4 +19,12 @@ it('decodes real WOFF2 with string code generation forbidden and fails closed on
     const decoded=module.exports.decompress(bytes);
     expect(Array.from(decoded.slice(0,4))).toEqual([0,1,0,0]);
     expect(decoded.length).toBeGreaterThan(bytes.length);
+    // Browser preloading may finish the binding before its async wrapper is evaluated.
+    const wrapperFile='node_modules/wawoff2/decompress.js',wrapperSource=await readFile(wrapperFile,'utf8');
+    const wrapper=transform(wrapperSource,'/'+wrapperFile)!;
+    const wrapped={exports:{} as any};
+    vm.runInContext(wrapper.code,vm.createContext({module:wrapped,require:()=>module.exports,Promise,Error,String,setTimeout,clearTimeout},{codeGeneration:{strings:false,wasm:true}}));
+    const again=await wrapped.exports(bytes);
+    expect(Array.from(again.slice(0,4))).toEqual([0,1,0,0]);
+    expect(()=>transform(wrapperSource+'\n','/'+wrapperFile)).toThrow('Re-audit');
 });
