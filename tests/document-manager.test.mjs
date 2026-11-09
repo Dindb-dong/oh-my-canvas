@@ -4,6 +4,8 @@ import {promises as fs} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {Store} from '../core/storage.mjs';
+import {Replica} from '../core/replica.mjs';
+import {randomUUID} from 'node:crypto';
 import {changesBetween} from '../core/document.mjs';
 import {createDocumentManager} from '../electron/document-manager.mjs';
 import {documentFixture} from './helpers.mjs';
@@ -127,4 +129,10 @@ test('one document save failure does not block another document writer',async t=
   change(b,'B still saves');await manager.save(b);rejectA(Error('A disk failure'));
   await assert.rejects(writingA,/A disk failure/);assert.equal(a.saveError,'A disk failure');assert.equal(b.saveError,null);
   store.save=save;
+});
+
+test('failed uninitialized join candidates can be discarded without saving a damaged file',async t=>{
+  const {manager,store}=await fixture(t),id=randomUUID();
+  const entry=await manager.load(id,{id,title:'Uninitialized join',replica:new Replica()});
+  assert.equal(manager.discard(entry),true);assert.equal(manager.entries.size,0);assert.deepEqual(await store.list(),[]);
 });

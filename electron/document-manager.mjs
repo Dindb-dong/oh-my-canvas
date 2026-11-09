@@ -116,9 +116,10 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
     entry.tabOpen=false;if(activeTabId===id)activeTabId=[...entries.values()].filter(item=>item.tabOpen).at(-1)?.record.id??null;
     await release(entry);changed();return state();
   }
+  function discard(entry){if(entries.get(entry.record.id)!==entry||entry.runtime||entry.starting||entry.tabOpen||entry.agents.size||entry.collab||entry.holds)return false;clearTimeout(entry.saveTimer);entry.unsubscribe();entry.record.replica.destroy();entries.delete(entry.record.id);changed();return true;}
   async function endAgent(agent){bindings.delete(agent);for(const entry of [...entries.values()]){entry.agents.delete(agent);await release(entry);}}
   async function flushAll(){for(const entry of entries.values()){if(entry.runtime)await flushRuntime(entry);await entry.operations;await save(entry);}}
   async function disposeAll(){for(const entry of entries.values()){clearTimeout(entry.saveTimer);clearTimeout(entry.readyTimer);await entry.collab?.close();await disposeRuntime(entry);entry.unsubscribe();entry.record.replica.destroy();}entries.clear();bindings.clear();activeTabId=null;}
   function runtimeGone(entry){ready(entry,entry.generation,Error('Document renderer stopped'));entry.runtime=null;entry.generation++;generations.set(entry.record.id,entry.generation);entry.seq=0;changed();}
-  return {entries,bindings,state,identity,snapshot,load,enqueue,confirmGeneration,save,ensureRuntime,ready,bind,resolve,open,create,duplicate,rename,activate,release,showLibrary(){activeTabId=null;changed();return state();},closeTab,endAgent,flushAll,disposeAll,runtimeGone,changed};
+  return {entries,bindings,state,identity,snapshot,load,enqueue,confirmGeneration,save,ensureRuntime,ready,bind,resolve,open,create,duplicate,rename,activate,release,discard,showLibrary(){activeTabId=null;changed();return state();},closeTab,endAgent,flushAll,disposeAll,runtimeGone,changed};
 }

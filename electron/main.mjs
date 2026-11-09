@@ -139,12 +139,12 @@ app.whenReady().then(async()=>{
   async function stopSession(entry){const previous=entry.collab;entry.collab=null;await previous?.close();sendRuntime(entry,{type:'session',status:{mode:'offline',peers:[]}});manager.changed();}
   function bindSession(entry,collab){entry.collab=collab;collab.on('status',status=>{sendRuntime(entry,{type:'session',status});manager.changed();});collab.on('cursor',data=>sendRuntime(entry,{type:'cursor',...data}));collab.on('warning',message=>sendRuntime(entry,{type:'error',message}));}
   async function join(data){
-    const invitation=parseInvite(data.invite);let entry;
-    try{entry=await manager.load(invitation.room);}catch(error){if(error.code!=='ENOENT')throw error;entry=await manager.load(invitation.room,{id:invitation.room,title:canvasTitle(invitation.title??'Shared canvas'),createdAt:new Date().toISOString(),replica:new Replica()});}
-    if(entry.runtime)await runtimeRequest(entry,'flush');await stopSession(entry);
-    const collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:prefs.name});
-    try{await collab.join(data.invite);bindSession(entry,collab);await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.activate(entry.record.id);return {document:{id:entry.record.id,title:entry.record.title}};}
-    catch(error){await collab.close();throw error;}
+    const invitation=parseInvite(data.invite);let entry,created=false;
+    try{entry=await manager.load(invitation.room);}catch(error){if(error.code!=='ENOENT')throw error;entry=await manager.load(invitation.room,{id:invitation.room,title:canvasTitle(invitation.title??'Shared canvas'),createdAt:new Date().toISOString(),replica:new Replica()});created=true;}
+    entry.holds=(entry.holds??0)+1;let collab,joined=false;
+    try{if(entry.runtime)await runtimeRequest(entry,'flush');await stopSession(entry);collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:prefs.name});await collab.join(data.invite);joined=true;bindSession(entry,collab);await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.activate(entry.record.id);return {document:{id:entry.record.id,title:entry.record.title}};}
+    catch(error){await collab?.close();if(entry.collab===collab)entry.collab=null;throw error;}
+    finally{entry.holds--;if(created&&!joined&&!entry.runtime&&!entry.collab)manager.discard(entry);}
   }
   async function importFile(){
     const result=await fileDialogs.open({title:'Open canvas',filters:[{name:'Canvas documents',extensions:['omc','json']}],properties:['openFile']});if(result.canceled)return null;
@@ -154,7 +154,9 @@ app.whenReady().then(async()=>{
     const record=decodeFile(raw);let entry;
     if(manager.entries.has(record.id)){entry=await manager.load(record.id,record);}
     else {try{const existing=await store.load(record.id);try{record.replica.receive(existing.replica.state);}finally{existing.replica.destroy();}}catch(error){if(error.code!=='ENOENT'){record.replica.destroy();throw error;}}entry=await manager.load(record.id,record);}
-    await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.activate(entry.record.id);return {opened:metadata(entry)};
+    entry.holds=(entry.holds??0)+1;
+    try{await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.activate(entry.record.id);return {opened:metadata(entry)};}
+    finally{entry.holds--;if(!entry.runtime&&!entry.tabOpen&&!entry.agents.size&&!entry.collab)await manager.release(entry);}
   }
   function mcpInfo(data){
     if(!bridge)return {available:false,error:bridgeError||'MCP is disabled',config:''};
