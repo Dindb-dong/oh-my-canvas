@@ -5,7 +5,7 @@ import { createComponentService, reconcileComponents, duplicateComponentMain } f
 import { createStyleService, reconcileStyles } from '../styles';
 import { applyLayout } from '../layout';
 import { installLvMcp } from '../mcp';
-import { TOOLS, EDITOR_TOOLS, WORKSPACE_TOOLS, validateToolArgs } from '../mcp/defs';
+import { TOOLS, EDITOR_TOOLS, WORKSPACE_TOOLS, DOCUMENT_MUTATIONS, validateToolArgs, validateDesktopToolArgs } from '../mcp/defs';
 import { resolve } from 'node:path';
 import { combinePaths } from '../render/vector';
 import { textValue } from '../formats/model';
@@ -126,6 +126,33 @@ describe('MCP-01 frozen schemas', () => {
         Data
     ]>)('rejects semantic/limit case %s %#', (name, args) => expect(validateToolArgs(name, args)).not.toBeNull());
 });
+describe('desktop document targeting', () => {
+    it.each(DOCUMENT_MUTATIONS)('requires an explicit documentId on desktop %s while keeping embedded arguments pure', name => {
+        expect(validateDesktopToolArgs(name, valid[name])).toMatch(/documentId/);
+        expect(validateDesktopToolArgs(name, { ...valid[name], documentId })).toBeNull();
+        expect(validateToolArgs(name, { ...valid[name], documentId })).toMatch(/unsupported/);
+    });
+    it('allows reads to select a document or defer to the host session binding', () => {
+        for (const { name } of EDITOR_TOOLS.filter(tool => !DOCUMENT_MUTATIONS.includes(tool.name))) {
+            expect(validateDesktopToolArgs(name, valid[name])).toBeNull();
+            expect(validateDesktopToolArgs(name, { ...valid[name], documentId })).toBeNull();
+            expect(validateDesktopToolArgs(name, { ...valid[name], documentId: '../outside' })).not.toBeNull();
+        }
+        expect(EDITOR_TOOLS.find(tool => tool.name === 'get_context')!.inputSchema.properties).not.toHaveProperty('documentId');
+        expect(TOOLS).toHaveLength(31);
+    });
+    it('validates focus booleans and rejects nested batch document overrides', () => {
+        for (const name of ['open_document', 'create_document', 'duplicate_document']) {
+            for (const focus of [true, false])
+                expect(validateDesktopToolArgs(name, { ...valid[name], focus })).toBeNull();
+            for (const focus of ['true', 1, null, {}])
+                expect(validateDesktopToolArgs(name, { ...valid[name], focus })).toMatch(/boolean/);
+            expect(WORKSPACE_TOOLS.find(tool => tool.name === name)!.inputSchema.properties.focus.default).toBe(false);
+        }
+        expect(validateDesktopToolArgs('batch', { documentId, ops: [{ tool: 'update', args: { id: 'box', documentId } }] })).toMatch(/unsupported/);
+        expect(validateDesktopToolArgs('batch', { documentId, ops: [{ tool: 'update', args: { id: 'box' } }] })).toBeNull();
+    });
+});
 describe('workspace schemas and page navigation', () => {
     it('validates document IDs, title bounds and pagination at the dispatch boundary', () => {
         for (const name of ['open_document', 'rename_document', 'duplicate_document']) {
@@ -185,6 +212,31 @@ describe('workspace schemas and page navigation', () => {
         for (const id of ['missing-page', '__proto__', 'constructor'])
             expect((await f.call('select_page', { id })).structuredContent?.error.code).toBe('not_found');
         expect(f.editor.pageId).toBe(firstId);
+    });
+    it('does not redirect a queued write after another agent selects a different page', async () => {
+        const f = fixture(), firstPage = f.editor.pageId, next = createPage('Other');
+        f.editor.transact('seed page', doc => { doc.pages.push(next.id); doc.pagesById[next.id] = next; });
+        const selecting = f.call('select_page', { id: next.id }, 'beta');
+        const queued = f.call('create_board', { name: 'Never redirected', width: 100 });
+        expect((await selecting).isError).not.toBe(true);
+        expect((await queued).structuredContent?.error.code).toBe('page_changed');
+        expect(f.editor.pageId).toBe(next.id);
+        expect(f.editor.doc.pagesById[firstPage].objects.root.childIds).toEqual(['board']);
+        expect(f.editor.page.objects.root.childIds).toEqual([]);
+    });
+    it('rejects an asynchronous write when the selected page changes while fonts load, even after returning', async () => {
+        const gate = deferred(), entered = deferred(), f = fixture(), firstPage = f.editor.pageId, next = createPage('Other');
+        insertShape(next, createShape('text', { id: 'title', name: 'Other title', content: 'Other' }));
+        f.editor.transact('seed page', doc => { doc.pages.push(next.id); doc.pagesById[next.id] = next; });
+        f.fonts.ensure.mockImplementationOnce(() => { entered.resolve(); return gate.promise; });
+        const changing = f.call('update', { id: 'title', text: 'Must not apply' });
+        await entered.promise;
+        f.editor.setPage(next.id);
+        f.editor.setPage(firstPage);
+        gate.resolve();
+        expect((await changing).structuredContent?.error.code).toBe('page_changed');
+        expect(textValue(f.editor.doc.pagesById[firstPage].objects.title)).toBe('Hello');
+        expect(textValue(f.editor.doc.pagesById[next.id].objects.title)).toBe('Other');
     });
     it('refuses page navigation during a user gesture or text editing', async () => {
         const f = fixture();

@@ -41,17 +41,32 @@ export const EDITOR_TOOLS = [
 ] as const;
 const documentId = str({ minLength: 36, maxLength: 36, pattern: '^[a-f0-9-]{36}$' });
 const documentTitle = str({ minLength: 1, maxLength: 120, pattern: '\\S' });
+const focus = { type: 'boolean', default: false };
 export const WORKSPACE_TOOLS = [
     tool('list_documents', 'List local canvas metadata without opening a document. Optional query, zero-based offset and limit (default 50, maximum 100). No paths, thumbnails or document content.', obj({ query: str(), offset: int({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }), limit: int({ minimum: 1, maximum: 100, default: 50 }) })),
-    tool('open_document', 'Open a local canvas by its document ID after saving pending edits. Returns document identity and refreshed context. Discard old layer aliases after navigation.', obj({ id: documentId }, ['id'])),
-    tool('create_document', 'Create and open a blank local canvas, optionally named with 1–120 characters. Returns its saved document ID and refreshed context.', obj({ title: documentTitle })),
+    tool('open_document', 'Open and bind a local canvas by its document ID. Keeps other documents and sessions open. focus defaults to false; true reveals its tab. Returns document identity and context.', obj({ id: documentId, focus }, ['id'])),
+    tool('create_document', 'Create and bind a blank local canvas, optionally named with 1–120 characters. focus defaults to false; true reveals its tab. Returns its saved document ID and context.', obj({ title: documentTitle, focus })),
     tool('rename_document', 'Rename a local canvas by document ID without switching the open canvas. The trimmed title must contain 1–120 characters.', obj({ id: documentId, title: documentTitle }, ['id', 'title'])),
-    tool('duplicate_document', 'Duplicate and open a local canvas by document ID, optionally naming the copy. Saves pending edits first and returns a new document ID and refreshed context.', obj({ id: documentId, title: documentTitle }, ['id'])),
+    tool('duplicate_document', 'Flush and duplicate the specified canvas, optionally naming the copy. Binds the caller to the new document. focus defaults to false; true reveals its tab.', obj({ id: documentId, title: documentTitle, focus }, ['id'])),
 ] as const;
-export const TOOLS = [...EDITOR_TOOLS, ...WORKSPACE_TOOLS] as const;
+export const DOCUMENT_MUTATIONS = ['write_html', 'write_svg', 'edit_path', 'boolean', 'outline', 'image', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'undo', 'component', 'select_page'];
+const plainTools = [...EDITOR_TOOLS, ...WORKSPACE_TOOLS];
+export const TOOLS = [...EDITOR_TOOLS.map(definition => {
+    const mutation = DOCUMENT_MUTATIONS.includes(definition.name);
+    return { ...definition,
+        description: `${definition.description} ${mutation ? 'Requires explicit documentId; never targets the visible tab implicitly.' : 'Optional documentId targets a document; otherwise uses this MCP session’s binding, never the visible tab.'}`,
+        inputSchema: { ...definition.inputSchema, properties: { ...definition.inputSchema.properties, documentId }, required: [...definition.inputSchema.required, ...mutation ? ['documentId'] : []] }
+    };
+}), ...WORKSPACE_TOOLS];
 export type LvMcpToolName = typeof EDITOR_TOOLS[number]['name'];
 export function validateToolArgs(name: string, args: unknown): string | null {
-    const definition = TOOLS.find(t => t.name === name);
+    return validateArgs(name, args, plainTools);
+}
+export function validateDesktopToolArgs(name: string, args: unknown): string | null {
+    return validateArgs(name, args, TOOLS);
+}
+function validateArgs(name: string, args: unknown, definitions: ReadonlyArray<{ name: string; inputSchema: Data }>): string | null {
+    const definition = definitions.find(t => t.name === name);
     if (!definition)
         return 'Unknown tool';
     function check(schema: Data, value: any, path: string): string | null {
@@ -93,6 +108,8 @@ export function validateToolArgs(name: string, args: unknown): string | null {
                     return error;
             }
         }
+        if (schema.type === 'boolean' && typeof value !== 'boolean')
+            return `${path} must be a boolean`;
         if (schema.type === 'string') {
             if (typeof value !== 'string')
                 return `${path} must be a string`;

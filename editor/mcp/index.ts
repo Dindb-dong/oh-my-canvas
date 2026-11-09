@@ -7,7 +7,7 @@ import { safeUrl } from '../formats/markup';
 import { insertPathNode, deletePathNodes, movePathNodes, setPathHandle, closePath, convertPathNode } from '../commands/path';
 import { identity, pathBounds } from '../geometry';
 import { applyStyles } from './style';
-import { EDITOR_TOOLS, validateToolArgs } from './defs';
+import { EDITOR_TOOLS, DOCUMENT_MUTATIONS, validateToolArgs } from './defs';
 import { GUIDES } from './guides';
 export { EDITOR_TOOLS as TOOLS };
 export interface McpOptions extends Data {
@@ -23,14 +23,14 @@ export interface McpOptions extends Data {
 class McpError extends Error {
     constructor(public code: string, message: string) { super(message); }
 }
-const writes = new Set(['write_html', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'component', 'undo', 'write_svg', 'edit_path', 'boolean', 'outline', 'image']);
+const writes = new Set(DOCUMENT_MUTATIONS.filter(name => name !== 'select_page'));
 interface AgentState {
     aliases: Map<string, { id: string; pageId: string }>;
     reverse: Map<string, string>;
     counter: number;
 }
 export function installLvMcp(editor: EditorStore, view: RenderView, options: McpOptions = {}) {
-    let disposed = false, revision = 0, queue: Promise<unknown> = Promise.resolve(), latest = editor.lastOperation;
+    let disposed = false, revision = 0, pageGeneration = 0, queue: Promise<unknown> = Promise.resolve(), latest = editor.lastOperation;
     const sessions = new Map<string, AbortController>();
     const agents = new Map<string, AgentState>(), cache = new Map<string, {
         signature: string;
@@ -62,8 +62,11 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             revision++;
             latest = { id: uid(), label: 'projection' };
         }
-        else if (event.page)
-            revision++;
+        if (event.page) {
+            pageGeneration++;
+            if (!event.changes && !event.projection)
+                revision++;
+        }
     });
     function state(agent: string) {
         let s = agents.get(agent);
@@ -332,8 +335,13 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         await waiting((async () => { await view.settled(); await options.afterWrite?.(); })(), signal);
     }
     function diagnostics(ids: string[]) { const measured = view.measure(ids.filter(id => editor.page.objects[id])); return [...measured].map(([id, m]) => ({ id, bounds: { x: m.x, y: m.y, width: m.w, height: m.h }, clippedText: m.clippedText, overflowParent: m.overflowParent, ...m.fontFallback ? { fontFallback: m.fontFallback } : {}, ...m.imageFailed ? { imageFailed: true } : {} })); }
-    async function execute(agent: string, name: string, args: Data, signal: AbortSignal, requestId?: string): Promise<ToolResult> {
-        check(signal);
+    async function execute(agent: string, name: string, args: Data, signal: AbortSignal, requestId: string | undefined, admittedPage: { id: string; generation: number }): Promise<ToolResult> {
+        const checkPage = () => {
+            check(signal);
+            if (writes.has(name) && (editor.pageId !== admittedPage.id || pageGeneration !== admittedPage.generation))
+                throw new McpError('page_changed', 'The selected page changed after this request was admitted; read context before retrying');
+        };
+        checkPage();
         if (!EDITOR_TOOLS.some(t => t.name === name))
             throw new McpError('unknown_tool', `Unknown tool: ${name}`);
         const invalid = validateToolArgs(name, args);
@@ -404,7 +412,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
                 catch { /* A reference created by an earlier batch write is represented in the HTML arguments. */ }
             }
             await waiting(services.fonts?.ensure?.(preflightText), signal);
-            check(signal);
+            checkPage();
             if (busy())
                 throw new McpError('busy', 'A user edit started while fonts were loading');
             if (name === 'edit_path' || name === 'boolean') {
@@ -420,7 +428,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
                     throw new McpError('failed', 'Vector operation service is unavailable');
                 const snapshot = editor.doc, pageId = editor.pageId;
                 const prepared = await waiting(combine(ids.map((id: string) => structuredClone(editor.page.objects[id])), args.operation, { objects: editor.page.objects }), signal);
-                check(signal);
+                checkPage();
                 if (editor.doc !== snapshot || editor.pageId !== pageId || args.revision !== revision)
                     throw new McpError('stale_revision', 'Document changed while computing paths');
                 if (busy())
@@ -594,8 +602,8 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         const signal = AbortSignal.any([session.signal, request.signal, ...context.signal ? [context.signal] : []]);
         const timer = setTimeout(() => request.abort(new McpError('timeout', 'Tool response exceeded its time limit; inspect revision before retrying')), Math.min(60000, Math.max(1, options.timeoutMs ?? 60000)));
         state(agent);
-        const requestId = context.requestId;
-        const work = queue.then(() => execute(agent, name, args, signal, requestId));
+        const requestId = context.requestId, admittedPage = { id: editor.pageId, generation: pageGeneration };
+        const work = queue.then(() => execute(agent, name, args, signal, requestId, admittedPage));
         queue = work.then(() => { }, () => { });
         const task = waiting(work, signal).catch(error => failure(signal.aborted && !(signal.reason instanceof McpError) ? new McpError('cancelled', 'Tool cancelled; applied changes are not rolled back; inspect revision before retrying') : error)).finally(() => clearTimeout(timer));
         if (key) {
