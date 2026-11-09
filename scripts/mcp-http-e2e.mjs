@@ -65,9 +65,9 @@ try{
   const a=await connect(),b=await connect();
   assert.notEqual(a.transport.sessionId,b.transport.sessionId);
   assert.equal(a.transport.protocolVersion,'2025-11-25');
-  assert.equal((await a.client.listTools()).tools.length,19);
+  assert.equal((await a.client.listTools()).tools.length,31);
   assert.ok(!(await call(b.client,'get_context')).isError);
-  record('official SDK HTTP initialize/list/call, 19 tools, negotiated 2025-11-25 and distinct sessions with identical client names');
+  record('official SDK HTTP initialize/list/call, 31 tools, negotiated 2025-11-25 and distinct sessions with identical client names');
   const first=await call(a.client,'create_board',{name:'HTTP author A',width:200,height:100},{'oh-my-canvas/idempotency-key':'http-once'});assert.ok(!first.isError,JSON.stringify(first));
   assert.deepEqual(await call(a.client,'create_board',{name:'HTTP author A',width:200,height:100},{'oh-my-canvas/idempotency-key':'http-once'}),first);
   assert.equal(count(await snapshot(),'HTTP author A'),1);
