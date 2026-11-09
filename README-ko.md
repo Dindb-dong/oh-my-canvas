@@ -2,7 +2,7 @@
 <h1 align="center">Oh My Canvas</h1>
 <p align="center"><strong>나의 캔버스. 나의 파일. 나의 에이전트.</strong></p>
 <p align="center">재사용 컴포넌트, MCP, 최대 4인 협업을 갖춘 로컬 데스크톱 디자인 스튜디오.</p>
-<p align="center"><img src="assets/readme/badges.svg" alt="로컬 우선 · MCP 도구 19개 · 최대 4인 협업 · macOS arm64 대상" width="660"></p>
+<p align="center"><img src="assets/readme/badges.svg" alt="로컬 우선 · MCP 도구 31개 · 최대 4인 협업 · macOS arm64 대상" width="660"></p>
 <p align="center"><a href="README.md">English</a> · <strong>한국어</strong> · <a href="README-ja.md">日本語</a> · <a href="README-zh-CN.md">简体中文</a></p>
 <p align="center"><a href="#quick-start">빠른 시작</a> · <a href="#screenshots">스크린샷</a> · <a href="#components">컴포넌트</a> · <a href="#mcp">MCP</a> · <a href="#contributing">기여하기</a></p>
 
@@ -96,11 +96,13 @@ npm run dist:mac
 
 ## 에이전트에게 실제 캔버스를 연결하세요
 
-MCP now defaults to the app-owned Streamable HTTP endpoint `https://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. The client must trust this profile's TLS certificate; the app never installs OS trust. Open a canvas and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
+MCP now defaults to the app-owned Streamable HTTP endpoint `https://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. The client must trust this profile's TLS certificate; the app never installs OS trust. Keep the app running and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
 
 > 지금 열린 캔버스에 1440 × 900 대시보드를 만들어줘. 파란색·하늘색·옅은 보라색·흰색·검정색을 사용하고, 내비게이션과 버튼은 재사용 컴포넌트로 만들어줘. 스크린샷으로 결과도 확인해줘.
 
-`get_context`와 `get_guide`로 시작한 뒤 `create_board`, `write_html`, `update`, `components`, `component`를 사용하세요. **도구는 19개**입니다. 컴포넌트 작업은 `batch` 밖에서 호출하며, variant 전환은 새 선택 ID를 반환할 수 있습니다. 에이전트 변경도 동일한 저장·협업 Undo 경로를 거칩니다.
+`get_context`와 `get_guide`로 시작한 뒤 `create_board`, `write_html`, `update`, `components`, `component`를 사용하세요. **도구는 31개**입니다. 컴포넌트 작업은 `batch` 밖에서 호출하며, variant 전환은 새 선택 ID를 반환할 수 있습니다. 에이전트 변경도 동일한 저장·협업 Undo 경로를 거칩니다.
+
+The desktop MCP can list, create, open, rename, and duplicate local canvases without manual library clicks. Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Use stable document IDs with `rename_document` and `duplicate_document`; `select_page` changes the active page. In the UI, use **Rename** beside the canvas title, **File → Rename canvas**, or **Actions → Rename canvas** in the library. See the [workspace tool contract](docs/MCP.md#documents-and-pages).
 
 사용자가 텍스트를 입력하거나 값을 스크럽하는 동안 읽기는 가능하지만, 에이전트 수정·Undo는 `busy`를 반환합니다. 사용자 작업을 마친 뒤 재시도하세요. MCP bridge는 인증된 loopback 전용이며 협업과 분리됩니다. **MCP 포트를 포워딩하거나 `mcp-runtime.json`을 공유하지 마세요.**
 

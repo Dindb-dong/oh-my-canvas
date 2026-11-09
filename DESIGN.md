@@ -35,6 +35,16 @@ Desktop-first Electron, minimum 960 × 640. Main content scrolls independently o
 ## Interaction and content
 Use concrete language: New canvas, Open file, Export, Starred. Show actual local dates and file counts. Search and sort act immediately; view and stars persist locally. Saved means persistence succeeded. A failed edit shows an actionable error. Collaboration shows host, guests, capacity, reconnecting and offline conditions. Local MCP does not remove the AI client's own costs or limits.
 
+### Canvas naming and document access (2026-11-09)
+
+The **Oh My Canvas UI Kit** document, page `10e6f879-40f8-4352-8d71-c6179ff89e64`, contains the editable board **States / Canvas names and document access / 2026-11-09** (`ad62196f-a6bb-456f-8c6f-18f146ca8460`). It shows the editor Rename control, library Actions entry and focused naming dialog. The reusable **Canvas / Rename control** main (`component-3d4f44c1-d543-48bf-b510-b08cd6e73cc3`) has a linked example instance. The board uses existing IBM Plex Sans, neutral surfaces, blue focus and spacing tokens.
+
+Map the compact Rename control to `#rename-canvas`, beside the current title; retain title-click as another entry. The library heading is passive. Each readable canvas exposes **Actions → Rename canvas**; **File → Rename canvas** works in the editor. Reuse the existing focused dialog, with Enter to save, explicit Cancel and Escape to close. Names are trimmed and limited to 120 characters. Persist before publishing a changed title. Naming an inactive canvas does not open it. Use the supported 1500 × 980 desktop and 960 × 640 minimum window for comparison; mobile remains outside this desktop app's scope.
+
+Desktop MCP adds local document discovery, creation, opening, naming and duplication plus existing-page selection. Document names and IDs are separate from page names and layer aliases. This increment still uses a single open editor; simultaneous document tabs and stable per-repository targeting require a separate lifecycle design.
+
+Runtime comparison in an isolated Electron profile confirms the compact labeled control, library action and dialog match the board's existing surfaces and focus treatment. Desktop and minimum-window screenshots include escaped names and a 120-character title; the title truncates while Rename remains visible. Runtime evidence is kept locally, separate from the shareable design contract.
+
 ### Selection and layer movement (2026-11-05)
 
 Canvas selections show each included shape plus aggregate transform bounds. Selected layer rows remain visibly selected on hover. A 2 px blue line indicates sibling insertion; a container outline indicates insertion inside. These states reuse the existing selection colors and map to `editor/interaction/canvas.ts` and `editor/ui/index.ts` / `style.ts`.

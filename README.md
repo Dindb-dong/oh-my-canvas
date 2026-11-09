@@ -2,7 +2,7 @@
 <h1 align="center">Oh My Canvas</h1>
 <p align="center"><strong>Your canvas. Your files. Your agents.</strong></p>
 <p align="center">A local desktop design studio with reusable components, MCP, and four-person collaboration.</p>
-<p align="center"><img src="assets/readme/badges.svg" alt="Local-first · 19 MCP tools · Up to 4 collaborators · macOS arm64 target" width="660"></p>
+<p align="center"><img src="assets/readme/badges.svg" alt="Local-first · 31 MCP tools · Up to 4 collaborators · macOS arm64 target" width="660"></p>
 <p align="center"><strong>English</strong> · <a href="README-ko.md">한국어</a> · <a href="README-ja.md">日本語</a> · <a href="README-zh-CN.md">简体中文</a></p>
 <p align="center"><a href="#quick-start">Quick start</a> · <a href="#screenshots">Screenshots</a> · <a href="#components">Components</a> · <a href="#mcp">MCP</a> · <a href="#contributing">Contribute</a></p>
 
@@ -96,11 +96,13 @@ Create your own with **Create component** (`⌥⌘K` on macOS), **Combine varian
 
 ## Give your agent a real canvas
 
-Open a document, click **MCP → Copy configuration**, and register the app-owned Streamable HTTP endpoint in your MCP client. The normal URL is `https://127.0.0.1:47831/mcp`; supply its persistent private token through `OMC_MCP_TOKEN`. Your client must also trust this profile's TLS certificate; the app does not install OS trust or silently edit global Codex or Claude settings. See [HTTP setup, credentials, and stdio rollback](docs/MCP.md) before connecting.
+Keep the desktop app running, click **MCP → Copy configuration**, and register the app-owned Streamable HTTP endpoint in your MCP client. The normal URL is `https://127.0.0.1:47831/mcp`; supply its persistent private token through `OMC_MCP_TOKEN`. Your client must also trust this profile's TLS certificate; the app does not install OS trust or silently edit global Codex or Claude settings. See [HTTP setup, credentials, and stdio rollback](docs/MCP.md) before connecting.
 
 > In this open canvas, create a 1440 × 900 dashboard. Use blue, sky, pale lavender, white, and black. Make the navigation and buttons reusable components. Check the result with a screenshot.
 
-Start with `get_context` and `get_guide`; then use `create_board`, `write_html`, `update`, `components`, and `component`. There are **19 tools**. Component actions run outside `batch`; variant switching can return a new selection ID. Agent edits use the same persistence and collaborative Undo path as local edits.
+Start with `get_context` and `get_guide`; then use `create_board`, `write_html`, `update`, `components`, and `component`. There are **31 tools**. Component actions run outside `batch`; variant switching can return a new selection ID. Agent edits use the same persistence and collaborative Undo path as local edits.
+
+The desktop MCP can list, create, open, rename, and duplicate local canvases without manual library clicks. Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Use stable document IDs with `rename_document` and `duplicate_document`; `select_page` changes the active page. In the UI, use **Rename** beside the canvas title, **File → Rename canvas**, or **Actions → Rename canvas** in the library. See the [workspace tool contract](docs/MCP.md#documents-and-pages).
 
 While a user is typing or scrubbing a value, read tools stay available and agent mutations/Undo return `busy`. Finish the user transaction before retrying. The MCP bridge is authenticated, loopback-only, and separate from collaboration. **Never forward its port or share `mcp-runtime.json`.**
 
