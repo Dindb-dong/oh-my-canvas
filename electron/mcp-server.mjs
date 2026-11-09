@@ -13,7 +13,7 @@ export function createMcpServer({tools,agent,dispatch,onCancel=()=>{}}) {
       return await dispatch({name:request.params.name,args:request.params.arguments||{},agent,...idempotencyKey?{context:{idempotencyKey}}:{}},{signal:extra.signal});
     } catch(e) {
       const message=e.code==='ENOENT'?'Open the desktop app and a document first.':e.message;
-      return {isError:true,content:[{type:'text',text:`Oh My Canvas: ${message}`}],structuredContent:{ok:false,revision:null,error:{code:/Invalid/i.test(message)?'bad_args':e.name==='TimeoutError'||e.name==='AbortError'?'timeout':'failed',message}}};
+      return {isError:true,content:[{type:'text',text:`Oh My Canvas: ${message}`}],structuredContent:{ok:false,revision:null,error:{code:['bad_args','busy','cancelled','document_required','document_changed','runtime_restarted','runtime_failed','resource_limit','page_changed'].includes(e.code)?e.code:/Invalid/i.test(message)?'bad_args':e.name==='TimeoutError'||e.name==='AbortError'?'timeout':'failed',message}}};
     } finally {extra.signal.removeEventListener('abort',cancelled);}
   });
   return server;
