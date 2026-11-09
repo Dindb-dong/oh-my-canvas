@@ -127,6 +127,7 @@ const rich = (a = "Alpha", b = "Beta") => ({
         }]
 });
 async function snapshot() {
+    await page.evaluate(() => window.omc.invoke("flush"));
     return page.evaluate(() => window.omc.invoke("snapshot"));
 }
 async function until(fn, message, timeout = 12000) {
@@ -320,6 +321,7 @@ try {
         assert.equal(initial.inlineStyles.left, "300px");
         assert.equal(initial.inlineStyles.top, "300px");
         await choose("move");
+        await page.locator(`#editor .layers .row[data-id="${id}"] .name`).click();
         await drag([340, 330], [380, 350]);
         await until(async () => {
             const imported = (await objects())[id];
