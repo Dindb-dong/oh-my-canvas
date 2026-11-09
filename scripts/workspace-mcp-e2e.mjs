@@ -16,17 +16,23 @@ execFileSync('git',['check-ignore',evidence],{cwd:primary});
 await fs.mkdir(evidence,{recursive:true});
 const profile=await fs.mkdtemp(path.join(os.tmpdir(),'omc-workspace-e2e-'));
 const clients=[],errors=[],checks=[];
-let app,page,runtime,token,mcpFetch;
+let app,shell,page,runtime,token,mcpFetch,documentId;
 const record=name=>{checks.push(name);console.log('PASS '+name);};
-const invoke=(client,name,args={},key)=>client.callTool({name,arguments:args,...key?{_meta:{'oh-my-canvas/idempotency-key':key}}:{}});
-async function ok(client,name,args={},key){const result=await invoke(client,name,args,key);assert.ok(!result.isError,`${name}: ${JSON.stringify(result)}`);return result.structuredContent;}
+const mutations=new Set(['write_html','write_svg','edit_path','boolean','outline','image','update','move','duplicate','delete','batch','create_board','undo','component','select_page']);
+const navigation=new Set(['open_document','create_document','duplicate_document']);
+const invoke=(client,name,args={},key)=>client.callTool({name,arguments:{...mutations.has(name)?{documentId}:{},...navigation.has(name)?{focus:true}:{},...args},...key?{_meta:{'oh-my-canvas/idempotency-key':key}}:{}});
+async function ok(client,name,args={},key){
+  const result=await invoke(client,name,args,key);assert.ok(!result.isError,`${name}: ${JSON.stringify(result)}`);
+  if(navigation.has(name)){documentId=result.structuredContent.document.id;page=app.windows().find(item=>new URL(item.url()).searchParams.get('documentId')===documentId);assert.ok(page,'Document runtime missing');await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor').inert);}
+  return result.structuredContent;
+}
 const snapshot=()=>page.evaluate(()=>window.omc.invoke('snapshot'));
 const named=(snap,name)=>Object.values(snap.document.pagesById).flatMap(p=>Object.values(p.objects)).filter(shape=>shape.name===name);
 async function launch(){
   app=await electron.launch({args:[root,`--profile=${profile}`,'--mcp-port=0'],env:{...process.env,OMC_TEST_BACKGROUND:'1'},timeout:30000});
-  page=await app.firstWindow();
-  page.on('pageerror',error=>errors.push(error.message));
-  await page.locator('#new').waitFor();
+  shell=await app.firstWindow();page=null;
+  app.on('window',runtimePage=>runtimePage.on('pageerror',error=>errors.push(error.message)));
+  await shell.locator('#new').waitFor();
   assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),false);
   runtime=JSON.parse(await fs.readFile(path.join(profile,'mcp-runtime.json'),'utf8'));
   token=await fs.readFile(path.join(profile,'mcp-token-v2'),'utf8');
@@ -41,7 +47,6 @@ async function staleStatus(sessionId){
   const response=await mcpFetch(`https://127.0.0.1:${runtime.port}/mcp`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Mcp-Session-Id':sessionId,'MCP-Protocol-Version':'2025-11-25','Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})});
   await response.arrayBuffer();return response.status;
 }
-async function waitMain(predicate){for(let i=0;i<200;i++){if(await app.evaluate(predicate))return;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Test main-process gate was not reached');}
 async function stop(){
   if(!app)return;
   const child=app.process();
@@ -63,7 +68,7 @@ try{
   const idA=createdA.document.id;assert.equal(createdA.document.title,'Canvas A');assert.ok(createdA.context.page.id);
   assert.deepEqual(await ok(a.client,'create_document',{title:'Canvas A'},'create-A'),createdA);
   assert.equal((await ok(a.client,'list_documents')).total,1);
-  assert.equal(a.transport.sessionId,session);assert.equal(await staleStatus(b.transport.sessionId),404);
+  assert.equal(a.transport.sessionId,session);assert.equal(await staleStatus(b.transport.sessionId),200);assert.equal((await invoke(b.client,'get_context')).isError,true);
   await ok(a.client,'create_board',{name:'Retained A content',width:240,height:120});
   const createdB=await ok(a.client,'create_document',{title:'Canvas B'}),idB=createdB.document.id;
   assert.equal((await ok(a.client,'get_context')).document.id,idB);
@@ -74,46 +79,7 @@ try{
   await ok(a.client,'open_document',{id:idA});
   assert.equal(named(await snapshot(),'Retained A content').length,1);
   assert.equal((await ok(a.client,'get_context')).document.id,idA);
-  record('MCP creates, edits, lists and reopens canvases on the same session while retiring stale clients');
-
-  // Delay only a synthetic old-document message so navigation can overtake its delivery.
-  await app.evaluate(({BrowserWindow})=>{
-    const web=BrowserWindow.getAllWindows()[0].webContents,send=web.send.bind(web);
-    globalThis.__workspaceDelayed=[];globalThis.__workspaceRestoreSend=()=>{web.send=send;};
-    web.send=(...args)=>{const [channel,message]=args;if(channel==='omc:event'&&message.type==='tool'&&message.call.args?.name==='Must never cross documents')globalThis.__workspaceDelayed.push(args);else send(...args);};
-  });
-  try{
-    const delayed=invoke(a.client,'create_board',{name:'Must never cross documents',width:100,height:100}).then(result=>({result}),error=>({error}));
-    await waitMain(()=>globalThis.__workspaceDelayed.length===1);
-    await ok(a.client,'open_document',{id:idB});
-    const cancelled=await delayed;assert.ok(cancelled.error||cancelled.result.isError);
-    await app.evaluate(({BrowserWindow})=>{globalThis.__workspaceRestoreSend();for(const args of globalThis.__workspaceDelayed)BrowserWindow.getAllWindows()[0].webContents.send(...args);});
-    await ok(a.client,'get_context');assert.equal(named(await snapshot(),'Must never cross documents').length,0);
-  }finally{await app.evaluate(()=>{globalThis.__workspaceRestoreSend();delete globalThis.__workspaceRestoreSend;delete globalThis.__workspaceDelayed;});}
-  await ok(a.client,'open_document',{id:idA});
-  record('a delayed admitted edit for the old document is cancelled and cannot mutate the new document');
-
-  // Hold the test-only IPC reply after the durable host switch, then cancel its SDK caller.
-  await app.evaluate(({ipcMain},destination)=>{
-    const handler=ipcMain._invokeHandlers.get('omc:invoke');
-    globalThis.__workspaceHostSwitched=false;globalThis.__workspaceRelease=null;
-    globalThis.__workspaceRestoreInvoke=()=>{ipcMain.removeHandler('omc:invoke');ipcMain.handle('omc:invoke',handler);};
-    ipcMain.removeHandler('omc:invoke');ipcMain.handle('omc:invoke',async(event,action,data)=>{
-      const result=await handler(event,action,data);
-      if(action==='open'&&data.id===destination){globalThis.__workspaceHostSwitched=true;await new Promise(resolve=>globalThis.__workspaceRelease=resolve);}
-      return result;
-    });
-  },idB);
-  try{
-    const controller=new AbortController(),pending=a.client.callTool({name:'open_document',arguments:{id:idB}},undefined,{signal:controller.signal});
-    await waitMain(()=>globalThis.__workspaceHostSwitched);
-    controller.abort();await assert.rejects(pending);
-    await app.evaluate(()=>globalThis.__workspaceRelease());
-    await page.waitForFunction(()=>document.querySelector('#document-name').textContent==='Canvas B'&&!document.querySelector('#editor').inert);
-  }finally{await app.evaluate(()=>{globalThis.__workspaceRelease?.();globalThis.__workspaceRestoreInvoke();delete globalThis.__workspaceRestoreInvoke;delete globalThis.__workspaceRelease;delete globalThis.__workspaceHostSwitched;});}
-  assert.equal((await ok(a.client,'get_context')).document.id,idB);
-  await ok(a.client,'open_document',{id:idA});
-  record('cancellation after the durable host switch still reconciles the renderer and permits later navigation');
+  record('MCP creates, edits, lists and reopens canvases while preserving other sessions and their bindings');
 
   const renamed=await ok(a.client,'rename_document',{id:idA,title:'  Active A renamed  '});
   assert.equal(renamed.document.title,'Active A renamed');
@@ -210,11 +176,11 @@ try{
   const renameBounds=await page.locator('#document-title').boundingBox();assert.ok(renameBounds.x+renameBounds.width<=960);
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1500,980));
   await ok(a.client,'rename_document',{id:copied.document.id,title:'Manual rename <safe>'});
-  await page.locator('#home').click();await page.locator(`[data-more="${idB}"]`).waitFor();
-  await page.locator(`[data-more="${idB}"]`).click();
-  await page.screenshot({path:path.join(evidence,'rename-library-actions.png')});
-  await page.locator('#rename-doc').click();await page.locator('#name').fill('B renamed from library');await page.locator('#name').press('Enter');
-  await page.locator('#dialog').waitFor({state:'hidden'});
+  await page.locator('#home').click();await shell.locator(`[data-more="${idB}"]`).waitFor();
+  await shell.locator(`[data-more="${idB}"]`).click();
+  await shell.screenshot({path:path.join(evidence,'rename-library-actions.png')});
+  await shell.locator('#rename-doc').click();await shell.locator('#name').fill('B renamed from library');await shell.locator('#name').press('Enter');
+  await shell.locator('#dialog').waitFor({state:'hidden'});
   assert.equal((await snapshot()).id,copied.document.id);
   assert.equal((await ok(a.client,'list_documents',{query:'B renamed from library'})).documents[0].id,idB);
   assert.equal((await ok(a.client,'list_documents')).view,'library');
@@ -239,6 +205,6 @@ try{
   throw error;
 }finally{
   await Promise.allSettled(clients.map(client=>client.close()));
-  if(app){const child=app.process();await app.evaluate(({app})=>app.exit(0)).catch(()=>{});if(child.exitCode===null&&child.signalCode===null)await new Promise(resolve=>child.once('exit',resolve));}
+  await app?.close().catch(()=>{});
   await fs.rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});
 }

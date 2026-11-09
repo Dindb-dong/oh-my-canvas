@@ -9,19 +9,22 @@ import {createMcpFetch} from '../core/mcp-fetch.mjs';
 
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-http-e2e-'));
 const clients=[],errors=[],checks=[];
-let app,page,port,token,certificate,mcpFetch,documentId,conflictApp,appChild,conflictChild;
+let app,shell,page,port,token,certificate,mcpFetch,documentId,conflictApp,appChild,conflictChild;
 const record=name=>{checks.push(name);console.log('PASS '+name);};
-const call=(client,name,args={},meta)=>client.callTool({name,arguments:args,...meta?{_meta:meta}:{}});
+const workspaceTools=new Set(['list_documents','open_document','create_document','rename_document','duplicate_document']);
+const call=(client,name,args={},meta)=>client.callTool({name,arguments:{...workspaceTools.has(name)?{}:{documentId},...args},...meta?{_meta:meta}:{}});
+async function activeDocument(shell,previous=null){for(let i=0;i<600;i++){const id=await shell.evaluate(async()=>(await window.omc.invoke('workspace')).activeTabId);if(typeof id==='string'&&id!==previous)return id;await new Promise(resolve=>setTimeout(resolve,50));}throw Error('Visible document did not become active');}
+async function documentPage(instance,id){assert.equal(typeof id,'string');const page=instance.windows().find(item=>{try{return new URL(item.url()).searchParams.get('documentId')===id;}catch{return false;}});assert.ok(page,'Document runtime page missing');try{await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor').inert,null,{timeout:30000});}catch(error){console.error('Runtime readiness diagnostic',await page.evaluate(()=>({url:location.href,mcp:!!window.lvMcp,inert:document.querySelector('#editor')?.inert,toast:document.querySelector('#toast')?.textContent})),errors);throw error;}return page;}
 const snapshot=()=>page.evaluate(()=>window.omc.invoke('snapshot'));
 const count=(snap,name)=>Object.values(snap.document.pagesById).flatMap(p=>Object.values(p.objects)).filter(s=>s.name===name).length;
 async function launch(){
   app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath:process.env.OMC_TEST_EXECUTABLE,args:[...process.env.OMC_TEST_EXECUTABLE?[]:[process.cwd()],`--profile=${dir}`,`--mcp-port=${port??0}`],timeout:30000});
-  appChild=app.process();page=await app.firstWindow();
+  appChild=app.process();shell=await app.firstWindow();
   assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),false,'Synthetic MCP test window must start hidden');
-  page.on('pageerror',error=>errors.push(error.message));
-  await page.locator('#new').waitFor();
-  if(documentId)await page.locator(`[data-open="${documentId}"]`).click();else await page.locator('#start-sample').click();
-  await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor').inert,null,{timeout:30000});
+  shell.on('pageerror',error=>errors.push(error.message));app.on('window',runtimePage=>runtimePage.on('pageerror',error=>errors.push(error.message)));
+  await shell.locator('#new').waitFor();
+  if(documentId)await shell.locator(`[data-open="${documentId}"]`).click();else await shell.locator('#start-sample').click();
+  documentId=await activeDocument(shell);page=await documentPage(app,documentId);
   const runtime=JSON.parse(await fs.readFile(path.join(dir,'mcp-runtime.json'),'utf8'));
   assert.equal(runtime.version,2);assert.equal('token' in runtime,false);
   const currentToken=await fs.readFile(path.join(dir,'mcp-token-v2'),'utf8');
@@ -54,7 +57,7 @@ try{
   assert.equal(await conflictApp.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),false,'Synthetic conflict test window must start hidden');
   await conflictPage.locator('#new').waitFor();
   assert.equal((await conflictPage.evaluate(()=>window.omc.invoke('mcp-info'))).available,false);
-  await conflictPage.locator('#start-sample').click();await conflictPage.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor').inert,null,{timeout:30000});
+  await conflictPage.locator('#start-sample').click();await documentPage(conflictApp,await activeDocument(conflictPage));
   await gracefulClose(conflictApp);
   conflictApp=null;record('secret-free URL configuration and port-conflict editing without fallback');
   const a=await connect(),b=await connect();
@@ -76,7 +79,7 @@ try{
   const beforeFailedClose=await call(a.client,'create_board',closeArgs,closeMeta);assert.ok(!beforeFailedClose.isError,JSON.stringify(beforeFailedClose));
   const retainedAlias=beforeFailedClose.structuredContent.id,retainedRawId=beforeFailedClose.structuredContent.rawId,retainedSession=a.transport.sessionId;
   await page.evaluate(()=>window.omc.invoke('flush'));
-  await page.evaluate(()=>{window.__httpCloseCancelled=false;window.__httpCloseUnsubscribe=window.omc.on(message=>{if(message.type==='close-cancelled')window.__httpCloseCancelled=true;});});
+  await page.evaluate(()=>{window.__httpCloseCancelled=false;window.__httpCloseUnsubscribe=window.omc.on(message=>{if(message.type==='error'&&/Could not save before closing/.test(message.message))window.__httpCloseCancelled=true;});});
   const documents=path.join(dir,'documents'),preservedDocuments=path.join(dir,'documents-before-failed-close');
   await fs.rename(documents,preservedDocuments);
   try{
@@ -108,14 +111,13 @@ try{
   assert.equal(count(await snapshot(),'HTTP author A'),1);
   record('same HTTPS URL, pinned certificate and persistent credential survive graceful restart; old session rejected and mutation retained once');
   const priorSession=fresh.transport.sessionId;
-  await page.evaluate(()=>{window.__previousHttpMcp=window.lvMcp;});
   await app.evaluate(({Menu})=>Menu.getApplicationMenu().items.find(item=>item.label==='File').submenu.items.find(item=>item.label==='New canvas').click());
-  await page.waitForFunction(()=>window.lvMcp!==window.__previousHttpMcp&&!document.querySelector('#editor').inert,null,{timeout:30000});
-  await page.evaluate(()=>{delete window.__previousHttpMcp;});
+  await activeDocument(shell,documentId);
   const previousResponse=await mcpFetch(`https://127.0.0.1:${port}/mcp`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Mcp-Session-Id':priorSession,'MCP-Protocol-Version':'2025-11-25','Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})});
-  assert.equal(previousResponse.status,404);await previousResponse.arrayBuffer();
+  assert.equal(previousResponse.status,200);await previousResponse.arrayBuffer();
   const switched=await connect();assert.ok(!(await call(switched.client,'get_context')).isError);
-  record('document replacement invalidates the previous HTTP session');
+  assert.equal((await call(fresh.client,'get_context')).structuredContent.document.id,documentId);
+  record('opening another UI tab preserves existing HTTP sessions and explicit document targets');
   assert.deepEqual(errors,[]);await stop();
   console.log(JSON.stringify({passed:true,protocol:'2025-11-25',checks,rendererErrors:errors}));
 }catch(error){console.error('HTTP E2E failed:',error.stack);throw error;}finally{
