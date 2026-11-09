@@ -1,6 +1,6 @@
 # Local MCP connection and recovery
 
-The app owns the HTTPS endpoint `https://127.0.0.1:47831/mcp` during normal operation. It uses the installed official SDK's **2025-11-25 protocol family**, including initialize and session IDs. It does not claim support for the later sessionless protocol. The desktop catalog has 31 tools. Start with `list_documents`, choose a document, then read `get_context` and `get_guide`. The reusable embedded editor exposes 26 editor tools.
+The app owns the HTTPS endpoint `https://127.0.0.1:47831/mcp` during normal operation. It uses the installed official SDK's **2025-11-25 protocol family**, including initialize and session IDs. It does not claim support for the later sessionless protocol. The desktop catalog has 50 tools. Start with `list_documents`, choose a document, then read `get_context` and `get_guide`. The reusable embedded editor exposes 37 editor tools.
 
 Keep the app running; document discovery and creation work even in an empty library. **MCP → Copy configuration** provides URL configuration without embedding the secret. The app never rewrites global client settings. A failed MCP startup leaves local editing available; inspect the connection dialog rather than forwarding a port or disabling authentication. A port conflict never falls back to a random port during normal operation or terminates another process.
 
@@ -13,11 +13,11 @@ The desktop library belongs to the current app profile. It is not a filesystem b
 | Tool | Arguments | Behavior |
 |---|---|---|
 | `list_documents` | `query?`, `offset?`, `limit?` | Return metadata, `total`, `nextOffset`, tabs, `activeTabId`, and the caller's `boundDocumentId`. Default page size 50, maximum 100. No thumbnail or document payload. |
-| `create_document` | `title?`, `focus?` | Create, persist and mount a blank canvas; bind the caller. |
+| `create_document` | `title?`, `focus?`, `sample?` | Create, persist and mount a blank or sample canvas; bind the caller. |
 | `open_document` | `id`, `focus?` | Mount an existing canvas and bind the caller, retaining other document runtimes and sessions. |
 | `rename_document` | `id`, `title` | Persist the specified canvas name without changing the caller's binding or visible tab. |
 | `duplicate_document` | `id`, `title?`, `focus?` | Flush and copy the specified canvas, then bind the caller to the copy. |
-| `select_page` | `documentId`, `id` | Select an existing page inside the specified canvas. No page creation/deletion. |
+| `select_page` | `documentId`, `id` | Select an existing page inside the specified canvas. Use `page` for page lifecycle and guides. |
 
 MCP open/create/duplicate default to `focus:false`; pass `focus:true` to reveal the canvas. UI actions reveal their result. Switching tabs never changes an agent's binding. Reads accept an explicit `documentId` or use the session's bound document. **Every document mutation requires `documentId`**, including `select_page`, `undo`, component actions and `batch`. A batch has one outer document ID; nested overrides are rejected. This also supports several repositories sharing one transport session: use the intended stable document ID on every call.
 
@@ -27,7 +27,7 @@ Example: `list_documents({query:"Product"})` → `open_document({id:"<document I
 
 The app keeps an independent editor, page, selection, Undo history and render context for each resident canvas. Closing a tab saves it. If an MCP agent or collaboration session still uses it, its runtime remains available in the background; the library reports that activity. End those sessions before deleting that canvas. Up to eight document runtimes can be resident; an additional open returns `resource_limit` without evicting active work. Close an unused tab or end its agent session to release resources. App shutdown flushes all resident canvases; a save failure keeps the app open and reports the error.
 
-Document deletion, arbitrary file-path import/export, profile switching and collaboration invitations are not MCP tools. The library rename entry is **Actions → Rename canvas**; an open canvas title edits in place on click, with Enter/blur to save and Escape to cancel. **File → Rename canvas** opens the same field.
+The [capability map](MCP_PARITY.md) covers native editing, pages, shared styles, libraries, assets/fonts, clipboard, file import/export, collaboration and workspace operations. Profile switching remains a process-launch option; no UI profile switch exists. The library rename entry is **Actions → Rename canvas**; an open canvas title edits in place on click, with Enter/blur to save and Escape to cancel. **File → Rename canvas** opens the same field.
 
 ## Credentials and registration
 
@@ -77,6 +77,6 @@ Existing stdio processes are not automatically killed. End their client connecti
 
 ## Local checks
 
-After building, `node scripts/multi-document-e2e.mjs` exercises same-profile concurrent document targeting, shared transports, background rendering, tab close, IPC identity and renderer restart. `node scripts/workspace-mcp-e2e.mjs` checks empty-library discovery, document lifecycle, session isolation, rename UI and restart persistence using a synthetic profile. `node scripts/mcp-http-e2e.mjs` launches an isolated real Electron profile and exercises official SDK sessions over certificate-pinned HTTPS, tools, author isolation, failed-close cache preservation, durable readback, and restart invalidation. `node scripts/packaged-smoke.mjs` checks both certificate-pinned HTTPS and the bundled stdio CLI in the packaged app. Automated Electron checks opt into `OMC_TEST_BACKGROUND=1` with isolated `--profile` directories. The main process suppresses Dock activation and creates the window hidden before loading it; normal development launch is unchanged. The failed-close fixture intentionally replaces its temporary `documents` directory with a file and expects a filesystem error such as `EEXIST` or `ENOTDIR`, then restores the directory. That error is test injection in a synthetic profile, not evidence of a user-profile save failure.
+After building, `node scripts/ultimate-mcp-e2e.mjs` checks native authoring, resources, private clipboard/history, all export formats, explicit file safety, isolated collaboration and restart readback. `node scripts/multi-document-e2e.mjs` exercises same-profile concurrent document targeting, shared transports, background rendering, tab close, IPC identity and renderer restart. `node scripts/workspace-mcp-e2e.mjs` checks empty-library discovery, document lifecycle, session isolation, rename UI and restart persistence using a synthetic profile. `node scripts/mcp-http-e2e.mjs` launches an isolated real Electron profile and exercises official SDK sessions over certificate-pinned HTTPS, tools, author isolation, failed-close cache preservation, durable readback, and restart invalidation. `node scripts/packaged-smoke.mjs` checks both certificate-pinned HTTPS and the bundled stdio CLI in the packaged app. Automated Electron checks opt into `OMC_TEST_BACKGROUND=1` with isolated `--profile` directories. The main process suppresses Dock activation and creates the window hidden before loading it; normal development launch is unchanged. The failed-close fixture intentionally replaces its temporary `documents` directory with a file and expects a filesystem error such as `EEXIST` or `ENOTDIR`, then restores the directory. That error is test injection in a synthetic profile, not evidence of a user-profile save failure.
 
 These checks do not establish certificate trust or credential inheritance by an independently launched Codex GUI.

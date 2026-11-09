@@ -57,7 +57,7 @@ try{
   await launch();
   const a=await connect(),b=await connect(),session=a.transport.sessionId;
   const names=(await a.client.listTools()).tools.map(tool=>tool.name);
-  assert.equal(names.length,31);
+  assert.equal(names.length,50);
   for(const name of ['list_documents','open_document','create_document','rename_document','duplicate_document','select_page'])assert.ok(names.includes(name));
   assert.deepEqual((await ok(a.client,'list_documents')).documents,[]);
   assert.equal((await ok(a.client,'list_documents')).view,'library');

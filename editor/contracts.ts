@@ -32,7 +32,7 @@ export interface FontFaceInput {family:string;url:string;weight?:number|string;s
 export interface FontCatalog {[key:string]:any;catalog():Data[];add(faces:FontFaceInput[]):void;syncAssets(assets:Data):void;prepareAssets(assets:Data):Promise<()=>void>;ready():Promise<void>;destroy():void;}
 export interface RenderView {
  settled():Promise<void>;measure(ids:string[]):Map<string,Measured>;computedStyle(id:string,keys?:string[]):Record<string,string>;
- screenshot(id?:string,options?:{mode?:'slice'|'overview';slice?:number}):Promise<Shot>;
+ screenshot(id?:string,options?:{mode?:'slice'|'overview';slice?:number;scope?:'page'}):Promise<Shot>;
  thumbnailSvg?(pageId:string,id:string):Promise<string>;
  element(id:string):HTMLElement|null;render():void;destroy():void;[key:string]:any;
 }

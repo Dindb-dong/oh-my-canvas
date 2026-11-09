@@ -6,6 +6,11 @@ import { richText, textValue, uid } from '../formats/model';
 import { safeUrl } from '../formats/markup';
 import { insertPathNode, deletePathNodes, movePathNodes, setPathHandle, closePath, convertPathNode } from '../commands/path';
 import { identity, pathBounds } from '../geometry';
+import { createCommands } from '../commands';
+import { joinPathEnds, regeneratePrimitive } from '../commands/path';
+import { exportCanvasJson } from '../formats';
+import { applyEditorOperation, applyView, requireEditable, clipboardPayload, pasteProperties, validateClipboardPayload, prepareClipboardPayload, selectionDocument } from './operations';
+import { isResourceRead, readResourceOperation, applyResourceOperation, prepareResourceOperation } from './resources';
 import { applyStyles } from './style';
 import { EDITOR_TOOLS, DOCUMENT_MUTATIONS, validateToolArgs } from './defs';
 import { GUIDES } from './guides';
@@ -14,6 +19,7 @@ export interface McpOptions extends Data {
     services?: Partial<EditorServices>;
     fonts?: () => Data[];
     undo?: (agent: string, signal?: AbortSignal, requestId?: string) => boolean | Promise<boolean>;
+    redo?: (agent: string, signal?: AbortSignal, requestId?: string) => boolean | Promise<boolean>;
     editing?: () => string | null;
     onHighlight?: (agent: string, ids: string[]) => void;
     afterWrite?: () => void | Promise<void>;
@@ -28,6 +34,7 @@ interface AgentState {
     aliases: Map<string, { id: string; pageId: string }>;
     reverse: Map<string, string>;
     counter: number;
+    clipboard?: Data;
 }
 export function installLvMcp(editor: EditorStore, view: RenderView, options: McpOptions = {}) {
     let disposed = false, revision = 0, pageGeneration = 0, queue: Promise<unknown> = Promise.resolve(), latest = editor.lastOperation;
@@ -53,6 +60,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         }
     };
     const services = options.services ?? {};
+    let redoOwner: string | null = null, redoRevision = -1;
     const unsubscribe = editor.on(event => {
         if (event.changes) {
             revision++;
@@ -105,7 +113,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             throw new McpError('not_found', `Layer ${value} was not found`);
         return id;
     }
-    const describe = (agent: string, s: Shape, detailed = false): Data => ({ id: alias(agent, s.id), rawId: s.id, name: s.name ?? s.type, kind: s.type, ...s.dataRef || s['data-ref'] ? { ref: s.dataRef ?? s['data-ref'] } : {}, ...detailed ? { x: s.x, y: s.y, width: s.width, height: s.height, hidden: !!s.hidden, locked: !!s.locked, parent: s.parentId === 'root' ? 'root' : alias(agent, s.parentId), ...s.type === 'text' ? { text: textValue(s) } : {}, ...s.layout ? { layout: s.layout } : {}, ...s.fills?.length ? { fills: s.fills } : {}, ...s.childIds ? { childCount: s.childIds.length } : {} } : {} });
+    const describe = (agent: string, s: Shape, detailed = false): Data => ({ id: alias(agent, s.id), rawId: s.id, name: s.name ?? s.type, kind: s.type, ...s.dataRef || s['data-ref'] ? { ref: s.dataRef ?? s['data-ref'] } : {}, ...detailed ? { properties: structuredClone(Object.fromEntries(Object.entries(s).filter(([key]) => !['id','parentId','enclosingFrameId','childIds','box','corners','transform','inverseTransform'].includes(key)))), x: s.x, y: s.y, width: s.width, height: s.height, hidden: !!s.hidden, locked: !!s.locked, parent: s.parentId === 'root' ? 'root' : alias(agent, s.parentId), ...s.type === 'text' ? { text: textValue(s) } : {}, ...s.layout ? { layout: s.layout } : {}, ...s.fills?.length ? { fills: s.fills } : {}, ...s.childIds ? { childCount: s.childIds.length } : {} } : {} });
     function response(data: Data, images: Data[] = []): ToolResult { return { content: [{ type: 'text', text: JSON.stringify(data) }, ...images], structuredContent: data }; }
     function failure(error: unknown): ToolResult { const e = error as any; return { ...response({ ok: false, error: { code: e?.code ?? 'failed', message: e?.message ?? String(error) }, revision }), isError: true }; }
     function context(agent: string): ToolResult {
@@ -132,6 +140,46 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         const page = doc.pagesById[editor.pageId];
         if (!page)
             throw new McpError('not_found', 'Active page was removed');
+        if (name === 'clipboard' && args.preparedAssets) Object.assign(doc.assets ||= {}, structuredClone(args.preparedAssets));
+        if (['page', 'create_shape', 'edit_shapes', 'edit_text', 'styles', 'libraries', 'document_assets', 'clipboard'].includes(name)) {
+            const resolved = { ...args };
+            if (args.ids) resolved.ids = args.ids.map((id: string) => resolve(agent, id, page));
+            for (const key of ['parentId', 'maskId']) if (args[key]) resolved[key] = resolve(agent, args[key], page);
+            if (name === 'edit_text') resolved.id = resolve(agent, args.id, page);
+            let result: Data | undefined;
+            if (name === 'clipboard') {
+                if (['copy', 'cut', 'copy_properties'].includes(args.action)) {
+                    if (args.action === 'cut') requireEditable(editor, resolved.ids);
+                    const payload = clipboardPayload(resolved, editor);
+                    state(agent).clipboard = structuredClone(payload);
+                    if (args.action === 'cut') removeShapes(page, resolved.ids);
+                    result = { payload, ...(args.action === 'cut' ? { deleted: resolved.ids } : {}) };
+                } else {
+                    let payload = args.payload ?? state(agent).clipboard;
+                    if (!payload) throw new McpError('bad_args', 'Copy content or supply a clipboard payload first');
+                    if (args.action === 'paste_properties') result = pasteProperties(payload, resolved.ids, editor);
+                    else {
+                        validateClipboardPayload(payload);
+                        payload = prepareClipboardPayload(payload, doc);
+                        if (resolved.parentId && resolved.parentId !== 'root') requireEditable(editor, [resolved.parentId]);
+                        if (args.mode === 'replace') requireEditable(editor, resolved.ids ?? []);
+                        const commands = createCommands(editor, { duplicateComponentMain: services.duplicateComponentMain });
+                        const mode = args.mode === 'replace' ? 'paste-replace' : args.mode === 'in_place' ? 'paste-in-place' : 'paste';
+                        const changed = commands.run('edit.' + mode, { ...resolved, ids: resolved.ids ?? [], payload });
+                        if (changed !== true) throw new McpError('invalid', 'Clipboard insertion failed');
+                        result = { selection: [...editor.selection] };
+                    }
+                }
+            } else if (['styles', 'libraries', 'document_assets'].includes(name)) {
+                if (resolved.ids) requireEditable(editor, resolved.ids);
+                if (resolved.parentId && resolved.parentId !== 'root') requireEditable(editor, [resolved.parentId]);
+                result = applyResourceOperation(name, resolved, doc, editor.pageId, services);
+            } else result = applyEditorOperation(name, resolved, editor, doc, services);
+            if (!result) throw new McpError('unknown_tool', 'Unsupported operation');
+            const selection = result.selection ?? result.rawIds ?? [];
+            for (const id of selection) if (editor.page.objects[id]) affected.add(id);
+            return { ...result, ...result.selection ? { rawIds: result.selection, ids: result.selection.map((id: string) => alias(agent, id)), selection: result.selection.map((id: string) => alias(agent, id)) } : result.rawIds ? { ids: result.rawIds.map((id: string) => alias(agent, id)) } : {} };
+        }
         if (name === 'create_board') {
             const boards = (page.objects.root.childIds ?? []).map(id => page.objects[id]);
             const x = boards.length ? Math.max(...boards.map(s => s.x + s.width)) + 100 : 0;
@@ -145,8 +193,8 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             if (replaceId === 'root')
                 throw new McpError('invalid', 'Cannot replace the root');
             const dest = destination(agent, args.target, args.position === 'replace' ? 'before' : args.position, page), parent = page.objects[dest.parent];
-            if (name === 'write_svg' && (parent.id !== 'root' && !isEditable(page, parent.id) || replaceId && !isEditable(page, replaceId)))
-                throw new McpError('invalid', 'SVG destination is locked or hidden');
+            if (parent.id !== 'root' && !isEditable(page, parent.id) || replaceId && !isEditable(page, replaceId))
+                throw new McpError('invalid', 'Insertion destination is locked or hidden');
             const parsed = (() => {
                 try {
                     return (name === 'write_svg' ? importSvg : importHtml)(args.svg ?? args.html, { x: parent.x, y: parent.y, width: parent.width || 1000, parentId: parent.id, id: options.newId });
@@ -180,6 +228,15 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
                 throw new McpError('invalid', 'Choose an editable path; use boolean with operation flatten before node editing');
             if (!isEditable(page, id))
                 throw new McpError('invalid', 'Path is locked or hidden');
+            if (args.action === 'join' || args.action === 'merge') {
+                const otherId = args.otherId ? resolve(agent, args.otherId, page) : undefined;
+                if (otherId === id) throw new McpError('bad_args', 'Choose distinct paths');
+                if (otherId) requireEditable(editor, [otherId]);
+                joinPathEnds(shape, otherId ? page.objects[otherId] : undefined, { merge: args.action === 'merge', firstStart: args.firstStart, secondEnd: args.secondEnd });
+                if (otherId) removeShapes(page, [otherId]);
+                affected.add(id); return { id: alias(agent, id), rawId: id };
+            }
+            if (args.action === 'primitive') { regeneratePrimitive(shape, args.primitive); affected.add(id); return { id: alias(agent, id), rawId: id }; }
             const indices = args.indices ?? (args.index === undefined ? [] : [args.index]);
             if (indices.some((index: number) => !shape.content[index] || shape.content[index].command === 'close'))
                 throw new McpError('bad_args', 'Unknown path node index');
@@ -212,6 +269,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             if (id === 'root')
                 throw new McpError('invalid', 'Root updates are not supported');
             const s = page.objects[id];
+            requireEditable(editor, [id], args.attrs && Object.keys(args.attrs).length === 1 && args.attrs.hidden === 'false' && !args.style && args.text === undefined ? { hidden: false } : undefined);
             if (args.style)
                 warnings.push(...applyStyles(page, s, args.style).map(k => `Ignored CSS key: ${k}`));
             if (args.text !== undefined) {
@@ -249,7 +307,9 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             const id = resolve(agent, args.id, page);
             if (id === 'root')
                 throw new McpError('invalid', 'Cannot move the root');
+            requireEditable(editor, [id]);
             const dest = destination(agent, args.target, args.position, page);
+            if (dest.parent !== 'root') requireEditable(editor, [dest.parent]);
             if ((args.position === 'before' || args.position === 'after') && id === resolve(agent, args.target, page))
                 throw new McpError('invalid', 'Cannot move a layer relative to itself');
             const s = page.objects[id];
@@ -263,9 +323,11 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             const id = resolve(agent, args.id, page);
             if (id === 'root')
                 throw new McpError('invalid', 'Cannot duplicate the root');
+            requireEditable(editor, [id]);
             const dest = args.target ? destination(agent, args.target, args.position ?? 'after', page) : destination(agent, id, 'after', page);
             const instance = services.duplicateComponentMain?.(doc, page, id, { parentId: dest.parent, dx: 0, dy: 0 });
             const roots: Shape[] = instance ? [instance] : cloneShapes(page, [id], { parentId: dest.parent, index: dest.index });
+            if (dest.parent !== 'root') requireEditable(editor, [dest.parent]);
             if (instance)
                 reparentShapes(page, [instance.id], dest.parent, dest.index);
             for (const root of roots)
@@ -279,6 +341,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             const ids = args.ids.map((id: string) => resolve(agent, id, page));
             if (ids.includes('root'))
                 throw new McpError('invalid', 'Cannot delete the root');
+            requireEditable(editor, ids);
             removeShapes(page, ids);
             return { deleted: ids.map((id: string) => alias(agent, id)) };
         }
@@ -293,6 +356,12 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
                 throw new McpError('not_found', 'Source component was not found');
             if (args.ids)
                 resolved.ids = args.ids.map((id: string) => resolve(agent, id, page));
+            for (const id of [...resolved.ids ?? [], ...resolved.id ? [resolved.id] : [], ...resolved.parent ? [resolved.parent] : []]) if (id !== 'root') requireEditable(editor, [id]);
+            if (args.action === 'axes') {
+                const shape = page.objects[resolved.id ?? resolved.ids?.[0]], component = doc.components?.[shape?.componentId];
+                if (!component || !shape.isMain) throw new McpError('invalid', 'Choose a main component to edit variant axes');
+                component.variantProperties = structuredClone(args.variantProperties); affected.add(shape.id); return { componentId: component.id, variantProperties: component.variantProperties };
+            }
             const result = services.components.run(args.action, resolved);
             if (result.pageId && result.pageId !== editor.pageId) {
                 if (!doc.pagesById[result.pageId])
@@ -335,6 +404,27 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         await waiting((async () => { await view.settled(); await options.afterWrite?.(); })(), signal);
     }
     function diagnostics(ids: string[]) { const measured = view.measure(ids.filter(id => editor.page.objects[id])); return [...measured].map(([id, m]) => ({ id, bounds: { x: m.x, y: m.y, width: m.w, height: m.h }, clippedText: m.clippedText, overflowParent: m.overflowParent, ...m.fontFallback ? { fontFallback: m.fontFallback } : {}, ...m.imageFailed ? { imageFailed: true } : {} })); }
+    async function readExport(agent: string, args: Data, signal: AbortSignal, checkScope: () => void, maxBytes: number, wholeDocument = false): Promise<{ mime: string; bytes: Uint8Array }> {
+        if (busy()) throw new McpError('busy', 'A user edit is in progress');
+        await settled(signal); checkScope();
+        const snapshot = editor.doc, sourcePage = editor.pageId;
+        const guard = () => { check(signal); checkScope(); if (editor.doc !== snapshot || editor.pageId !== sourcePage) throw new McpError('stale_revision', 'Canvas changed during export; read context before retrying'); };
+        const ids = args.ids?.length ? args.ids.map((id: string) => resolve(agent, id)) : [...editor.page.objects.root.childIds ?? []];
+        let bytes: Uint8Array, mime: string;
+        if (args.format === 'json') { bytes = new TextEncoder().encode(JSON.stringify(wholeDocument ? exportCanvasJson(snapshot) : selectionDocument(editor, ids))); mime = 'application/json'; }
+        else if (args.format === 'html') { if (!ids.length) throw new McpError('invalid', 'Choose layers to export'); bytes = new TextEncoder().encode(exportHtml(snapshot, sourcePage, ids, { view, limit: maxBytes })); mime = 'text/html'; }
+        else if (args.format === 'svg') {
+            if (!services.export || !ids.length) throw new McpError('invalid', 'Choose layers to export');
+            const source = await waiting((services.export as Data).svg(ids, args), signal); guard(); bytes = new TextEncoder().encode(source); mime = 'image/svg+xml';
+        } else {
+            if (!services.export || ids.length !== 1) throw new McpError('invalid', 'Choose one layer for a raster or PDF export');
+            const blob = await waiting(services.export.layer(ids[0], args), signal); guard();
+            if (blob.size > maxBytes) throw new McpError('response_limit', 'Export exceeds the byte limit; use export_document with filePath for large exports');
+            bytes = new Uint8Array(await waiting(blob.arrayBuffer(), signal)); mime = blob.type;
+        }
+        guard(); if (bytes.byteLength > maxBytes) throw new McpError('response_limit', 'Export exceeds the byte limit; use export_document with filePath for large exports');
+        return { bytes, mime };
+    }
     async function execute(agent: string, name: string, args: Data, signal: AbortSignal, requestId: string | undefined, admittedPage: { id: string; generation: number }): Promise<ToolResult> {
         const checkPage = () => {
             check(signal);
@@ -347,8 +437,29 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         const invalid = validateToolArgs(name, args);
         if (invalid)
             throw new McpError('bad_args', invalid);
-        if ((writes.has(name) || name === 'select_page') && busy())
+        const semanticRead = isResourceRead(name, args) || name === 'page' && args.action === 'list' || name === 'view' && args.action === 'get' || name === 'clipboard' && ['copy', 'copy_properties'].includes(args.action);
+        if ((writes.has(name) && !semanticRead || name === 'select_page') && busy())
             throw new McpError('busy', 'A user edit is in progress');
+        if (isResourceRead(name, args)) return response({ ok: true, revision, ...readResourceOperation(name, args, editor.doc, editor.pageId, services) });
+        if (name === 'page' && args.action === 'list') return response({ ok: true, revision, pages: editor.doc.pages.map(id => ({ id, name: editor.doc.pagesById[id].name, guides: editor.doc.pagesById[id].guides ?? [] })), pageId: editor.pageId });
+        if (name === 'clipboard' && ['copy', 'copy_properties'].includes(args.action)) {
+            const resolved = { ...args, ids: args.ids.map((id: string) => resolve(agent, id)) };
+            const payload = clipboardPayload(resolved, editor); state(agent).clipboard = structuredClone(payload);
+            return response({ ok: true, revision, payload });
+        }
+        if (name === 'view') {
+            const resolved = { ...args, ...(args.ids ? { ids: args.ids.map((id: string) => resolve(agent, id)) } : {}) };
+            const result = applyView(resolved, editor); view.render(); await settled(signal);
+            return response({ ok: true, revision, ...result, selection: result.selection.map((id: string) => alias(agent, id)) });
+        }
+        if (name === 'export_selection') {
+            const exported = await readExport(agent, args, signal, checkPage, 4 * 1024 * 1024);
+            const text = ['json', 'html', 'svg'].includes(args.format);
+            let data: string;
+            if (text) data = new TextDecoder().decode(exported.bytes);
+            else { let binary = ''; for (let offset = 0; offset < exported.bytes.length; offset += 8192) binary += String.fromCharCode(...exported.bytes.subarray(offset, offset + 8192)); data = btoa(binary); }
+            return response({ ok: true, revision, format: args.format, mimeType: exported.mime, encoding: text ? 'utf8' : 'base64', data });
+        }
         if (name === 'select_page') {
             if (!editor.doc.pages.includes(args.id))
                 throw new McpError('not_found', 'Page was not found');
@@ -364,9 +475,16 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             const ok = options.undo ? await waiting(options.undo(agent, signal, requestId), signal) : editor.undoStep();
             if (!ok)
                 throw new McpError('nothing_to_undo', 'There is no eligible agent edit');
+            redoOwner = agent; redoRevision = revision;
             latest = { id: uid(), label: 'Undo' };
             await settled(signal);
             return response({ ok: true, revision });
+        }
+        if (name === 'redo') {
+            if (!options.redo && (redoOwner !== agent || redoRevision !== revision)) throw new McpError('nothing_to_redo', 'There is no eligible agent redo');
+            const ok = options.redo ? await waiting(options.redo(agent, signal, requestId), signal) : editor.redoStep();
+            if (!ok) throw new McpError('nothing_to_redo', 'There is no eligible agent redo');
+            redoOwner = null; await settled(signal); return response({ ok: true, revision });
         }
         if (name === 'image') {
             if (args.revision !== revision)
@@ -401,6 +519,12 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             return response({ ok: true, revision, ids: created.map(id => alias(agent, id)), rawIds: created, diagnostics: diagnostics(created), warnings: [] });
         }
         if (writes.has(name)) {
+            if (name === 'clipboard' && ['paste', 'paste_properties'].includes(args.action) && !args.payload) args = { ...args, payload: state(agent).clipboard };
+            const prepared = await waiting(prepareResourceOperation(name, args, editor.doc, editor.pageId, services, signal), signal);
+            args = prepared.args;
+            try {
+            checkPage(); if (!semanticRead && busy()) throw new McpError('busy', 'A user edit started while preparing assets');
+            if (name === 'batch' && args.ops.some((op: Data) => op.tool === 'document_assets' && op.args.action === 'add')) throw new McpError('bad_args', 'Asset uploads require standalone preparation; add first, then batch place operations');
             let preflightText = JSON.stringify(args);
             for (const op of name === 'batch' ? args.ops : [{ tool: name, args }]) {
                 if (op.tool !== 'update' || !op.args.style?.['font-family'])
@@ -413,8 +537,9 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             }
             await waiting(services.fonts?.ensure?.(preflightText), signal);
             checkPage();
-            if (busy())
+            if (!semanticRead && busy())
                 throw new McpError('busy', 'A user edit started while fonts were loading');
+            for (const op of name === 'batch' ? args.ops : [{ tool: name, args }]) if (op.tool === 'edit_text' && op.args.revision !== undefined && op.args.revision !== revision) throw new McpError('stale_revision', 'Document changed; read the text/context again before editing');
             if (name === 'edit_path' || name === 'boolean') {
                 if (args.revision !== revision)
                     throw new McpError('stale_revision', 'Document changed; read the path/context again before editing');
@@ -435,7 +560,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
                     throw new McpError('busy', 'A user edit started while computing paths');
                 args = { ...args, prepared };
             }
-            const s = state(agent), saved = { aliases: new Map(s.aliases), reverse: new Map(s.reverse), counter: s.counter }, affected = new Set<string>(), warnings: string[] = [];
+            const s = state(agent), saved = { aliases: new Map(s.aliases), reverse: new Map(s.reverse), counter: s.counter, clipboard: s.clipboard ? structuredClone(s.clipboard) : undefined }, affected = new Set<string>(), warnings: string[] = [];
             let result: Data;
             try {
                 result = editor.transact({ id: uid(), label: `agent:${agent}`, author: agent }, doc => {
@@ -469,7 +594,8 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
                 if (diagnostic.imageFailed)
                     warnings.push(`Image failed: ${label}`);
             }
-            return response({ ok: true, ...result, revision, diagnostics: measured, warnings: [...new Set(warnings)] });
+            return response({ ok: true, ...result, ...name === 'page' ? { context: context(agent).structuredContent } : {}, revision, diagnostics: measured, warnings: [...new Set(warnings)] });
+            } finally { prepared.release?.(); }
         }
         const page = editor.page;
         if (name === 'get_path') {
@@ -531,7 +657,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         if (name === 'screenshot') {
             await settled(signal);
             const id = args.id ? resolve(agent, args.id) : undefined;
-            const shot = await waiting(view.screenshot(id, { mode: args.mode ?? 'slice', slice: args.slice ?? 0 }), signal);
+            const shot = await waiting(view.screenshot(id, { mode: args.mode ?? 'slice', slice: args.slice ?? 0, ...args.id ? {} : { scope: 'page' as const } }), signal);
             if (!shot?.data || !shot.mimeType)
                 throw new McpError('failed', 'Renderer returned no screenshot');
             return response({ ok: true, revision, ...shot.slices !== undefined ? { slices: shot.slices } : {} }, [{ type: 'image', data: shot.data, mimeType: shot.mimeType }]);
@@ -623,7 +749,15 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         return task;
     }
     const globalTarget: Data | undefined = options.target ?? (typeof window !== 'undefined' ? window : undefined);
-    const api = { tools: () => EDITOR_TOOLS.map(t => structuredClone(t)), handleToolCall, endSession(agent?: string) {
+    const api = { exportData(agent: string, args: Data, context: { signal?: AbortSignal } = {}) {
+            const captured = { pageId: editor.pageId, generation: pageGeneration }, controller = new AbortController();
+            const signal = context.signal ? AbortSignal.any([controller.signal, context.signal]) : controller.signal;
+            const timer = setTimeout(() => controller.abort(new McpError('timeout', 'Export timed out')), 60000);
+            const checkScope = () => { check(signal); if (disposed || editor.pageId !== captured.pageId || pageGeneration !== captured.generation) throw new McpError('page_changed', 'Selected page changed during export'); };
+            const work = queue.then(() => { checkScope(); return readExport(agent, structuredClone(args), signal, checkScope, 100 * 1024 * 1024, true); });
+            queue = work.then(() => {}, () => {});
+            return waiting(work, signal).finally(() => clearTimeout(timer));
+        }, resolveIds(agent: string, ids: string[]) { return ids.map(id => resolve(agent, id)); }, tools: () => EDITOR_TOOLS.map(t => structuredClone(t)), handleToolCall, endSession(agent?: string) {
             if (agent) {
                 sessions.get(agent)?.abort(new McpError('failed', 'MCP session has ended'));
                 sessions.delete(agent);

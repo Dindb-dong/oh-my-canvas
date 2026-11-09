@@ -1,5 +1,5 @@
 import {createFileDialogs} from './file-dialogs.mjs';
-import {app,BrowserWindow,WebContentsView,ipcMain,dialog,protocol,Menu,clipboard} from 'electron';
+import {app,BrowserWindow,WebContentsView,ipcMain,dialog,protocol,Menu,clipboard,screen,desktopCapturer,systemPreferences} from 'electron';
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -14,6 +14,8 @@ import {startMcpBridge,MCP_PORT} from './mcp-bridge.mjs';
 import {canvasTitle} from './document-actions.mjs';
 import {createDocumentManager} from './document-manager.mjs';
 import {createWorkspaceReplay} from './workspace-replay.mjs';
+import {createWorkspaceTools,DESKTOP_TOOL_NAMES} from './workspace-tools.mjs';
+import {createScreenSampler} from './sample-color.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 app.setName('oh-my-canvas');
@@ -25,8 +27,8 @@ if(!app.requestSingleInstanceLock()){app.quit();}else{
 protocol.registerSchemesAsPrivileged([{scheme:'omc',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true,stream:true}}]);
 app.whenReady().then(async()=>{
   const fileDialogs=createFileDialogs(dialog),dir=app.getPath('userData'),store=new Store(path.join(dir,'documents'));
-  const {WORKSPACE_TOOLS,DOCUMENT_MUTATIONS,validateDesktopToolArgs}=await import('../dist/tool-defs.mjs');
-  const {blankDocument,sampleDocument}=await import('../dist/document-factories.mjs');
+  const {TOOLS,WORKSPACE_TOOLS,DOCUMENT_MUTATIONS,validateDesktopToolArgs}=await import('../dist/tool-defs.mjs');
+  const {blankDocument,sampleDocument,importCanvasJson,exportCanvasJson}=await import('../dist/document-factories.mjs');
   const workspaceNames=new Set(WORKSPACE_TOOLS.map(tool=>tool.name)),mutations=new Set(DOCUMENT_MUTATIONS);
   const pending=new Map(),senders=new Map(),contexts=new Map(),activeCalls=new Set(),replay=createWorkspaceReplay();
   let win,bridge,bridgeError,closing=false,quitting=false,prefsWork=Promise.resolve(),shellWork=Promise.resolve();
@@ -63,7 +65,7 @@ app.whenReady().then(async()=>{
     void runtime.sender.loadURL(url).catch(error=>manager.ready(entry,generation,error));
     return runtime;
   }
-  const manager=createDocumentManager({store,createRuntime,disposeRuntime,flushRuntime:entry=>runtimeRequest(entry,'flush'),canDispose:entry=>![...pending.values()].some(request=>request.entry===entry),onChange:state=>{layoutViews();sendShell({type:'workspace',...state});sendShell({type:'library-changed'});},onEvent:(entry,message)=>{sendRuntime(entry,message);if(message.type==='saved'||message.type==='metadata')sendShell({type:'library-changed'});}});
+  const manager=createDocumentManager({store,createRuntime,disposeRuntime,flushRuntime:(entry,options={})=>runtimeRequest(entry,'flush',{guardBusy:options.guardBusy},options),canDispose:entry=>![...pending.values()].some(request=>request.entry===entry),onChange:state=>{layoutViews();sendShell({type:'workspace',...state});sendShell({type:'library-changed'});},onEvent:(entry,message)=>{sendRuntime(entry,message);if(message.type==='saved'||message.type==='metadata')sendShell({type:'library-changed'});}});
   function source(event){
     if(event.sender===win?.webContents&&event.senderFrame?.url==='omc://canvas/index.html')return {role:'shell'};
     const registered=senders.get(event.sender.id);
@@ -85,7 +87,7 @@ app.whenReady().then(async()=>{
       runtime.sender.send('omc:event',{...message,id,documentId:entry.record.id,generation});
     });
   }
-  function runtimeRequest(entry,name,args={}){return requestRuntime(entry,{type:'runtime-request',name,args}).then(result=>{if(result?.ok===false)throw Object.assign(Error(result.error?.message??'Document operation failed'),{code:result.error?.code??'failed'});return result;});}
+  function runtimeRequest(entry,name,args={},options={}){return requestRuntime(entry,{type:'runtime-request',name,args},options).then(result=>{if(result?.ok===false)throw Object.assign(Error(result.error?.message??'Document operation failed'),{code:result.error?.code??'failed'});return result;});}
   async function tool(entry,call,signal){
     const generation=entry.generation,{documentId,...args}=call.args;
     const result=await requestRuntime(entry,{type:'tool',call:{...call,args,documentId:entry.record.id,generation}},{signal,agent:call.agent});
@@ -97,30 +99,42 @@ app.whenReady().then(async()=>{
   const response=value=>({content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value});
   async function library(){const docs=await store.list();return docs.map(doc=>{const entry=manager.entries.get(doc.id);return {...doc,...entry?{title:entry.record.title,open:entry.tabOpen,inUse:!!(entry.agents.size||entry.collab||[...pending.values()].some(request=>request.entry===entry))}:{open:false,inUse:false}};});}
   async function workspaceTool(call,signal){
+    if(DESKTOP_TOOL_NAMES.has(call.name))return replay.run(call.agent,call.context?.idempotencyKey,call.name,call.args,()=>{const work=shellWork.then(()=>desktopTools(call,signal));shellWork=work.catch(()=>{});return work;}).then(response);
     if(call.name==='list_documents'){
-      const docs=(await library()).filter(doc=>doc.title.toLocaleLowerCase().includes((call.args.query??'').toLocaleLowerCase())),offset=call.args.offset??0,limit=call.args.limit??50,state=manager.state();
+      const starred=new Set(prefs.starred??[]),docs=(await library()).map(doc=>({...doc,starred:starred.has(doc.id)})).filter(doc=>doc.title.toLocaleLowerCase().includes((call.args.query??'').toLocaleLowerCase())&&(!call.args.starredOnly||doc.starred)),offset=call.args.offset??0,limit=call.args.limit??50,state=manager.state();
+      if(call.args.sort)docs.sort((a,b)=>(call.args.sort==='title'?a.title.localeCompare(b.title):call.args.sort==='oldest'?(a.updatedAt??'').localeCompare(b.updatedAt??''):(b.updatedAt??'').localeCompare(a.updatedAt??''))||a.id.localeCompare(b.id));
       signal?.throwIfAborted();return response({ok:true,documents:docs.slice(offset,offset+limit).map(({thumbnail,...doc})=>doc),total:docs.length,nextOffset:offset+limit<docs.length?offset+limit:null,...state,boundDocumentId:manager.bindings.get(call.agent)??null,view:state.libraryVisible?'library':'editor'});
     }
     return replay.run(call.agent,call.context?.idempotencyKey,call.name,call.args,async()=>{
       signal?.throwIfAborted();
       if(call.name==='rename_document'){
         const entry=manager.entries.get(call.args.id);
-        if(entry?.runtime){const context=await tool(entry,{name:'get_context',args:{},agent:call.agent},signal);if(context.isError)return context;if(context.structuredContent.editing)throw Object.assign(Error('A user edit is in progress in this canvas'),{code:'busy'});}
+        if(entry?.runtime)await checkBusy(entry,call.agent,signal);
         const document=await manager.rename(call.args.id,call.args.title,{signal});signal?.throwIfAborted();return response({ok:true,document,documentId:document.id});
       }
       const options={agent:call.agent,focus:call.args.focus??false,signal};let entry;
       if(call.name==='open_document')entry=await manager.open(call.args.id,options);
-      else if(call.name==='create_document')entry=await manager.create(call.args.title,blankDocument(),options);
+      else if(call.name==='create_document')entry=await manager.create(call.args.title??(call.args.sample?'Studio 01':undefined),call.args.sample?sampleDocument():blankDocument(),options);
       else entry=await manager.duplicate(call.args.id,call.args.title,options);
       signal?.throwIfAborted();const context=await tool(entry,{name:'get_context',args:{},agent:call.agent},signal);
       if(context.isError)return context;
       return response({ok:true,revision:context.structuredContent.revision,document:{id:entry.record.id,title:entry.record.title},documentId:entry.record.id,generation:entry.generation,context:context.structuredContent});
     });
   }
+  async function checkBusy(entry,agent,signal){
+    signal?.throwIfAborted();if(entry.runtime){const inspection=await runtimeRequest(entry,'inspect',{}, {signal,agent});if(inspection.busy)throw Object.assign(Error('A user edit is in progress in this canvas'),{code:'busy'});}
+  }
+  const desktopTools=createWorkspaceTools({sampleColor:createScreenSampler({screen,desktopCapturer,systemPreferences}),manager,store,profile:dir,sourceRoot:root,importCanvasJson,exportCanvasJson,runtimeRequest,preferences,checkBusy,
+    notifyPreferences:value=>{sendShell({type:'preferences',preferences:value});for(const entry of manager.entries.values())sendRuntime(entry,{type:'preferences',preferences:value});},
+    editorTool:(entry,call,signal)=>mcpDispatch({...call,args:{...call.args,documentId:entry.record.id}},{signal}),capabilities:()=>({tools:TOOLS,explicitDocumentMutations:DOCUMENT_MUTATIONS,protocol:{explicitTargets:true,implicitVisibleTabTarget:false,idempotency:'session-scoped',clipboard:'private-agent'},platform:{os:process.platform,windowControls:true,devTools:process.argv.includes('--debug-ui'),screenSampling:process.platform!=='darwin'||systemPreferences.getMediaAccessStatus('screen')==='granted'}}),requestQuit:()=>{setTimeout(()=>void closeApplication(),250).unref();},
+    connection:mcpInfo,about:()=>({name:app.getName(),version:app.getVersion(),platform:process.platform,license:'MIT',notices:'omc://canvas/licenses/index.html',debugUi:process.argv.includes('--debug-ui')}),
+    windowState:data=>{if(typeof data.devTools==='boolean'&&!process.argv.includes('--debug-ui'))throw Object.assign(Error('DevTools are available only when launched with --debug-ui'),{code:'unavailable'});if(typeof data.hideOthers==='boolean'&&process.platform!=='darwin')throw Object.assign(Error('Hide other applications is available only on macOS'),{code:'unavailable'});if(typeof data.fullscreen==='boolean')win.setFullScreen(data.fullscreen);if(typeof data.visible==='boolean'){if(data.visible)win.show();else win.hide();}if(typeof data.hideOthers==='boolean')Menu.sendActionToFirstResponder(data.hideOthers?'hideOtherApplications:':'unhideAllApplications:');if(typeof data.devTools==='boolean'){if(data.devTools)win.webContents.openDevTools();else win.webContents.closeDevTools();}return {fullscreen:win.isFullScreen(),visible:win.isVisible(),devTools:win.webContents.isDevToolsOpened()};},
+    join,host:(entry,args)=>manager.enqueue(entry,()=>startHost(entry,{...args,replace:false})),stopSession:entry=>manager.enqueue(entry,()=>stopSession(entry)),context:async(entry,agent,signal)=>{const result=await tool(entry,{name:'get_context',args:{},agent},signal);if(result.isError)throw Object.assign(Error(result.structuredContent?.error?.message??'Could not inspect imported canvas'),{code:'failed'});return result.structuredContent;}
+  });
   async function mcpDispatch(call,{signal}={}){
     if(closing||quitting)throw Error('Application is closing');
     const invalid=validateDesktopToolArgs(call.name,call.args);if(invalid)throw Object.assign(Error('Invalid tool arguments: '+invalid),{code:'bad_args'});
-    if(workspaceNames.has(call.name))return workspaceTool(call,signal);
+    if(workspaceNames.has(call.name)||DESKTOP_TOOL_NAMES.has(call.name))return workspaceTool(call,signal);
     const id=manager.resolve(call.agent,call.args.documentId,mutations.has(call.name));
     const admitted=manager.entries.get(id),admittedGeneration=admitted?.runtime||admitted?.starting?admitted.generation:null;
     const entry=await manager.load(id);
@@ -134,17 +148,24 @@ app.whenReady().then(async()=>{
   }
   async function endAgent(agent){cancelRequests('MCP session ended',request=>request.agent===agent);contexts.delete(agent);replay.end(agent);for(const entry of manager.entries.values())sendRuntime(entry,{type:'tool-session-end',agent});await manager.endAgent(agent);}
   async function preferences(data){
-    const task=prefsWork.then(async()=>{if(data){const next={...prefs,name:String(data.name||prefs.name).slice(0,40)};if(typeof data.toggleStar==='string'&&/^[a-zA-Z0-9-]{1,64}$/.test(data.toggleStar)){const starred=new Set(next.starred||[]);if(starred.has(data.toggleStar))starred.delete(data.toggleStar);else if(starred.size<10000)starred.add(data.toggleStar);next.starred=[...starred];}if(['grid','list'].includes(data.view))next.view=data.view;await atomicWrite(path.join(dir,'preferences.json'),JSON.stringify(next));prefs=next;}return structuredClone(prefs);});prefsWork=task.catch(()=>{});return task;
+    const task=prefsWork.then(async()=>{if(data){const next={...prefs,name:String(data.name||prefs.name).slice(0,40)};if(typeof data.toggleStar==='string'&&/^[a-zA-Z0-9-]{1,64}$/.test(data.toggleStar)){const starred=new Set(next.starred||[]);if(starred.has(data.toggleStar))starred.delete(data.toggleStar);else if(starred.size<10000)starred.add(data.toggleStar);next.starred=[...starred];}if(typeof data.documentId==='string'&&typeof data.starred==='boolean'){const starred=new Set(next.starred||[]);if(data.starred)starred.add(data.documentId);else starred.delete(data.documentId);next.starred=[...starred].slice(0,10000);}if(['grid','list'].includes(data.view))next.view=data.view;await atomicWrite(path.join(dir,'preferences.json'),JSON.stringify(next));prefs=next;}return structuredClone(prefs);});prefsWork=task.catch(()=>{});return task;
   }
   async function stopSession(entry){const previous=entry.collab;entry.collab=null;await previous?.close();sendRuntime(entry,{type:'session',status:{mode:'offline',peers:[]}});manager.changed();}
   function bindSession(entry,collab){entry.collab=collab;collab.on('status',status=>{sendRuntime(entry,{type:'session',status});manager.changed();});collab.on('cursor',data=>sendRuntime(entry,{type:'cursor',...data}));collab.on('warning',message=>sendRuntime(entry,{type:'error',message}));}
   async function join(data){
     const invitation=parseInvite(data.invite);let entry,created=false;
+    data.signal?.throwIfAborted();
     try{entry=await manager.load(invitation.room);}catch(error){if(error.code!=='ENOENT')throw error;entry=await manager.load(invitation.room,{id:invitation.room,title:canvasTitle(invitation.title??'Shared canvas'),createdAt:new Date().toISOString(),replica:new Replica()});created=true;}
     entry.holds=(entry.holds??0)+1;let collab,joined=false;
-    try{if(entry.runtime)await runtimeRequest(entry,'flush');await stopSession(entry);collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:prefs.name});await collab.join(data.invite);joined=true;bindSession(entry,collab);await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.activate(entry.record.id);return {document:{id:entry.record.id,title:entry.record.title}};}
+    try{if(data.replace===false){if(entry.collab||[...entry.agents].some(agent=>agent!==data.agent))throw Object.assign(Error('Canvas already has an active session; leave it first'),{code:'busy'});await checkBusy(entry,data.agent,data.signal);}if(entry.runtime)await runtimeRequest(entry,'flush');if(data.replace!==false)await stopSession(entry);collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:data.name??prefs.name});await collab.join(data.invite);joined=true;data.signal?.throwIfAborted();bindSession(entry,collab);await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.bind(data.agent,entry);if(data.focus!==false)manager.activate(entry.record.id);else manager.changed();return {documentId:entry.record.id,document:{id:entry.record.id,title:entry.record.title},...collab.status()};}
     catch(error){await collab?.close();if(entry.collab===collab)entry.collab=null;throw error;}
     finally{entry.holds--;if(created&&!joined&&!entry.runtime&&!entry.collab)manager.discard(entry);}
+  }
+  async function startHost(entry,data={}){
+    if(data.replace===false&&entry.collab)throw Object.assign(Error('Leave the existing collaboration session first'),{code:'busy'});
+    if(data.replace!==false)await stopSession(entry);const collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:data.name??prefs.name});bindSession(entry,collab);
+    try{await collab.host({port:Number(data.port)||0});}catch(error){await stopSession(entry);throw error;}
+    return {port:collab.port,addresses:Object.values(os.networkInterfaces()).flat().filter(address=>address?.family==='IPv4'&&!address.internal).map(address=>address.address)};
   }
   async function importFile(){
     const result=await fileDialogs.open({title:'Open canvas',filters:[{name:'Canvas documents',extensions:['omc','json']}],properties:['openFile']});if(result.canceled)return null;
@@ -164,7 +185,7 @@ app.whenReady().then(async()=>{
     const config=JSON.stringify({mcpServers:{'oh-my-canvas':entry}},null,2);if(data?.copy)clipboard.writeText(config);return {available:true,config,port:bridge.port,url:bridge.url,runtime:bridge.file,certificatePath:bridge.certFile};
   }
   async function documentAction(entry,action,data){
-    checkIdentity(entry,data);const generation=entry.generation;
+    checkIdentity(entry,data);if(manager.deleting.has(entry.record.id)&&!['flush','snapshot','cursor'].includes(action))throw Object.assign(Error('Document is being deleted'),{code:'busy'});const generation=entry.generation;
     switch(action){
       case 'snapshot':return manager.snapshot(entry);
       case 'runtime-ready':manager.ready(entry,entry.generation,data?.ok===false||data?.error?data.error??Error('Document renderer failed'):null);return metadata(entry);
@@ -174,20 +195,18 @@ app.whenReady().then(async()=>{
         entry.bootstrapNonce=null;entry.bootstrapBase=null;entry.record.replica.patch(data.changes,'Initialize canvas',undefined,{recordHistory:false});await manager.save(entry);manager.confirmGeneration(entry,generation);return manager.snapshot(entry);
       }
       case 'commit':if(!Number.isSafeInteger(data.seq))throw Error('Invalid edit sequence');if(data.seq<=entry.seq)return manager.snapshot(entry);entry.record.replica.patch(data.changes,data.label,data.group);await manager.save(entry);manager.confirmGeneration(entry,generation);entry.seq=data.seq;return manager.snapshot(entry);
-      case 'undo':{
-        if(data?.requestId){const request=pending.get(data.requestId);if(!request||request.agent!==data.agent||request.entry!==entry)throw Error('MCP Undo request cancelled');}
-        if(data?.agent&&entry.record.replica.undo.undoStack.at(-1)?.meta.get('label')!==`agent:${data.agent}`)return false;
-        entry.record.replica.history('undo');await manager.save(entry);manager.confirmGeneration(entry,generation);return manager.snapshot(entry);
+      case 'undo':
+      case 'redo':{
+        if(data?.requestId){const request=pending.get(data.requestId);if(!request||request.agent!==data.agent||request.entry!==entry)throw Error('MCP history request cancelled');}
+        const history=entry.record.replica.undo,source=action==='undo'?history.undoStack:history.redoStack,label=source.at(-1)?.meta.get('label');
+        if(data?.agent&&label!==`agent:${data.agent}`)return false;
+        entry.record.replica.history(action);const target=action==='undo'?history.redoStack:history.undoStack;if(label!==undefined)target.at(-1)?.meta.set('label',label);
+        await manager.save(entry);manager.confirmGeneration(entry,generation);return manager.snapshot(entry);
       }
-      case 'redo':entry.record.replica.history('redo');await manager.save(entry);manager.confirmGeneration(entry,generation);return manager.snapshot(entry);
       case 'flush':await manager.save(entry);return true;
       case 'rename':return manager.rename(entry.record.id,data.title);
       case 'thumbnail':if(typeof data.src==='string'&&data.src.startsWith('data:image/')&&data.src.length<500000){entry.record.thumbnail=data.src;await manager.save(entry);}return true;
-      case 'host':{
-        await stopSession(entry);const collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:prefs.name});bindSession(entry,collab);
-        try{await collab.host({port:Number(data?.port)||0});}catch(error){await stopSession(entry);throw error;}
-        return {port:collab.port,addresses:Object.values(os.networkInterfaces()).flat().filter(address=>address?.family==='IPv4'&&!address.internal).map(address=>address.address)};
-      }
+      case 'host':return startHost(entry,data);
       case 'invite':return entry.collab?.invite(data.address);
       case 'leave':await stopSession(entry);return true;
       case 'cursor':entry.collab?.cursor(data);return true;
@@ -225,8 +244,8 @@ app.whenReady().then(async()=>{
       if(action==='duplicate'){const entry=await manager.duplicate(data.id,data.title,{focus:data.focus??true});return {...metadata(entry),...manager.state()};}
       if(action==='import')return importFile();
       if(action==='delete'){
-        const entry=manager.entries.get(data.id);if(entry&&(entry.agents.size||entry.collab||[...pending.values()].some(request=>request.entry===entry)))throw Error('Canvas is in use by an agent or collaboration session. End that work before deleting it.');
-        if(entry)await manager.closeTab(data.id);await store.remove(data.id);sendShell({type:'library-changed'});return true;
+        const entry=manager.entries.get(data.id),metadata=entry?.record??(await store.list()).find(record=>record.id===data.id);if(!metadata)throw Error('Canvas was not found');
+        await manager.remove(data.id,{expectedTitle:metadata.title,beforeRemove:entry=>entry.runtime?runtimeRequest(entry,'prepare-delete'):undefined,cancelRemove:entry=>entry.runtime?runtimeRequest(entry,'cancel-delete'):undefined});sendShell({type:'library-changed'});return true;
       }
       if(action==='cancel-close'){closing=false;bridge?.resumeAccepting?.();return true;}
       throw Error('Unknown app action');

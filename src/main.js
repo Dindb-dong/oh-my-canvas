@@ -72,6 +72,7 @@ async function mcpDialog(){
 function joinDialog(){modal('Join a canvas',`<form id="join-form"><label for="join-invite">Private invitation</label><textarea id="join-invite" rows="4" placeholder="omc://join/…" required></textarea><p class="hint">Only open invitations from people you trust. Collaborators can change the shared canvas.</p><div class="actions right"><button class="primary">Join canvas</button></div></form>`);$('#join-form').onsubmit=run(async event=>{event.preventDefault();await api.invoke('join',{invite:$('#join-invite').value.trim(),focus:true});$('#dialog').close();});}
 api.on(message=>{
   if(message.type==='workspace')renderWorkspace(message.state??message);
+  else if(message.type==='preferences'){prefs=message.preferences;renderView();renderLibrary();}
   else if(message.type==='library-changed'&&workspace.activeTabId==null)void run(refreshLibrary)();
   else if(message.type==='error')toast(message.message,true);
   else if(message.type==='command'){const actions={new:()=>newCanvas(),import:importFile,library:()=>api.invoke('show-library'),join:joinDialog};void run(actions[message.name]??(()=>{}))();}
