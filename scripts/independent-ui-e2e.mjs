@@ -1,3 +1,4 @@
+import {documentPage,libraryPage} from './desktop-test-pages.mjs';
 import { _electron as electron } from "playwright";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
@@ -126,6 +127,7 @@ const rich = (a = "Alpha", b = "Beta") => ({
         }]
 });
 async function snapshot() {
+    await page.evaluate(() => window.omc.invoke("flush"));
     return page.evaluate(() => window.omc.invoke("snapshot"));
 }
 async function until(fn, message, timeout = 12000) {
@@ -150,11 +152,7 @@ async function objects() {
 }
 async function fresh(items = []) {
     await page.keyboard.press("Escape");
-    if (await page.locator("#home").isVisible())
-        await page.locator("#home").click();
-    await page.locator("#import").waitFor({
-        state: "visible"
-    });
+    page=await libraryPage(app,{closeTabs:true});
     const file = path.join(profile, `fixture-${fixtureNumber++}.json`);
     await fs.writeFile(file, JSON.stringify(fixture(items)));
     await app.evaluate(({ dialog }, file) => {
@@ -164,6 +162,7 @@ async function fresh(items = []) {
         });
     }, file);
     await page.locator("#import").click();
+    page=await documentPage(app);
     await until(async () => {
         const o = await objects();
         return o.board && Object.keys(o).length === items.length + 2;
@@ -322,6 +321,7 @@ try {
         assert.equal(initial.inlineStyles.left, "300px");
         assert.equal(initial.inlineStyles.top, "300px");
         await choose("move");
+        await page.locator(`#editor .layers .row[data-id="${id}"] .name`).click();
         await drag([340, 330], [380, 350]);
         await until(async () => {
             const imported = (await objects())[id];

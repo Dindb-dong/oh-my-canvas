@@ -64,12 +64,42 @@ test('HTTP SDK clients list all tools, isolate identical client identities and t
   const f=await httpFixture(t),a=await f.connect(),b=await f.connect();
   const listed=(await a.client.listTools()).tools,expected=await sourceTools();
   assert.deepEqual(listed,expected);
-  for(const name of ['write_svg','get_path','edit_path','boolean','outline','image'])assert.ok(listed.some(tool=>tool.name===name),name);
+  for(const name of ['write_svg','get_path','edit_path','boolean','outline','image','list_documents','open_document','create_document','rename_document','duplicate_document','select_page'])assert.ok(listed.some(tool=>tool.name===name),name);
+  for(const name of ['write_html','write_svg','edit_path','boolean','outline','image','update','move','duplicate','delete','batch','create_board','undo','component','select_page'])assert.ok(listed.find(tool=>tool.name===name).inputSchema.required.includes('documentId'),name);
+  assert.ok(listed.find(tool=>tool.name==='get_context').inputSchema.properties.documentId);
+  assert.equal(listed.find(tool=>tool.name==='get_context').inputSchema.required.includes('documentId'),false);
   const call=client=>client.callTool({name:'get_context',arguments:{}}),[one,two]=await Promise.all([call(a.client),call(b.client)]);
   assert.match(one.structuredContent.agent,/^mcp-http-[a-f0-9-]{36}$/);assert.notEqual(one.structuredContent.agent,two.structuredContent.agent);
   assert.equal((await call(a.client)).structuredContent.agent,one.structuredContent.agent);
   await a.transport.terminateSession();assert.ok(f.ended.includes(one.structuredContent.agent));
   assert.equal((await call(b.client)).structuredContent.agent,two.structuredContent.agent);
+});
+test('selective HTTP reset retains the exempt session and cancels other pending calls',async t=>{
+  let started,cancelled=false;const began=new Promise(resolve=>started=resolve);
+  const f=await httpFixture(t,{dispatch:async(call,{signal})=>{
+    if(call.args.wait){started();await new Promise((_,reject)=>signal.addEventListener('abort',()=>{cancelled=true;reject(signal.reason);},{once:true}));}
+    if(call.name==='open_document')await f.bridge.resetSessions({exceptAgent:call.agent});
+    assert.equal(signal.aborted,false);
+    return {content:[{type:'text',text:call.agent}],structuredContent:{agent:call.agent}};
+  }}),a=await f.connect(),b=await f.connect();
+  const aId=(await a.client.callTool({name:'get_context',arguments:{}})).structuredContent.agent;
+  const bId=(await b.client.callTool({name:'get_context',arguments:{}})).structuredContent.agent;
+  const pending=b.client.callTool({name:'get_context',arguments:{wait:true}}).then(result=>({result}),error=>({error}));
+  await began;
+  const result=await a.client.callTool({name:'open_document',arguments:{id:randomUUID()}});
+  assert.equal(result.isError,undefined);assert.equal(result.structuredContent.agent,aId);
+  const stopped=await pending;assert.ok(stopped.error||stopped.result.isError);assert.equal(cancelled,true);
+  assert.deepEqual(f.ended,[bId]);
+  assert.equal((await a.client.callTool({name:'get_context',arguments:{}})).structuredContent.agent,aId);
+  const stale=await f.post({jsonrpc:'2.0',id:10,method:'tools/list'},{'mcp-session-id':b.transport.sessionId,'mcp-protocol-version':'2025-11-25'});
+  assert.equal(stale.status,404);await stale.arrayBuffer();
+});
+test('HTTP tool failures preserve document routing codes without exposing native errno as protocol codes',async t=>{
+  const f=await httpFixture(t,{dispatch:async call=>{throw Object.assign(Error('Synthetic routing failure'),{code:call.args.code});}}),{client}=await f.connect();
+  for(const code of ['bad_args','busy','cancelled','document_required','document_changed','runtime_restarted','runtime_failed','resource_limit','page_changed']){
+    const result=await client.callTool({name:'get_context',arguments:{code}});assert.equal(result.isError,true);assert.equal(result.structuredContent.error.code,code);
+  }
+  const native=await client.callTool({name:'get_context',arguments:{code:'ENOENT'}});assert.equal(native.isError,true);assert.equal(native.structuredContent.error.code,'failed');
 });
 test('HTTP validates auth, exact hosts, origins, media, methods, versions and body bounds',async t=>{
   const f=await httpFixture(t,{limits:{bodyBytes:512}});
@@ -94,11 +124,15 @@ test('HTTP validates auth, exact hosts, origins, media, methods, versions and bo
   assert.deepEqual((await fs.readdir(f.dir)).sort(),['mcp-cert.pem','mcp-identity.json','mcp-runtime.json','mcp-token-v2']);
 });
 test('HTTP enforces session limit, reclaims DELETE sessions and idle sessions',async t=>{
-  const f=await httpFixture(t,{limits:{sessions:1,idleMs:30}}),first=await f.post(initialize(1)),id=first.headers.get('mcp-session-id');
+  const f=await httpFixture(t,{limits:{sessions:1,idleMs:30}});
+  let now=Date.now();t.mock.method(Date,'now',()=>now);
+  const first=await f.post(initialize(1)),id=first.headers.get('mcp-session-id');
   assert.equal(first.status,200);assert.equal((await f.post(initialize(1))).status,429);
   assert.equal((await f.post(undefined,{'mcp-session-id':id,'mcp-protocol-version':'2025-11-25'},'DELETE')).status,200);
   assert.equal((await f.post(initialize(1))).status,200);
-  await new Promise(resolve=>setTimeout(resolve,90));
+  now+=31;
+  for(let i=0;i<100&&f.ended.length<2;i++)await new Promise(resolve=>setTimeout(resolve,10));
+  assert.equal(f.ended.length,2);
   assert.equal((await f.post(initialize(1))).status,200);assert.equal(f.ended.length,2);
 });
 test('HTTP cancellation isolates requests and pending limit is reclaimed',async t=>{

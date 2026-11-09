@@ -37,6 +37,8 @@ test('stdio SDK cancellation reaches the bridge signal without ending the HTTP s
 });
 test('stdio concurrent calls share one HTTP agent and relay idempotency metadata',{timeout:15000},async t=>{
   const f=await fixture(t,async call=>result(call)),a=await f.connect(),b=await f.connect();
+  const names=(await a.listTools()).tools.map(tool=>tool.name);
+  for(const name of ['list_documents','open_document','create_document','rename_document','duplicate_document','select_page'])assert.ok(names.includes(name),name);
   const calls=await Promise.all(Array.from({length:3},()=>a.callTool({name:'get_context',arguments:{},_meta:{'oh-my-canvas/idempotency-key':'stdio-key'}})));
   for(const call of calls){assert.equal(call.isError,undefined);assert.equal(call.structuredContent.agent,calls[0].structuredContent.agent);assert.equal(call.structuredContent.key,'stdio-key');}
   const other=await b.callTool({name:'get_context',arguments:{}});assert.notEqual(other.structuredContent.agent,calls[0].structuredContent.agent);

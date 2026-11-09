@@ -2,7 +2,7 @@
 <h1 align="center">Oh My Canvas</h1>
 <p align="center"><strong>你的画布。你的文件。你的智能体。</strong></p>
 <p align="center">本地桌面设计工作室，支持可复用组件、MCP 和最多四人协作。</p>
-<p align="center"><img src="assets/readme/badges.svg" alt="本地优先 · 19 个 MCP 工具 · 最多 4 人协作 · macOS arm64 目标" width="660"></p>
+<p align="center"><img src="assets/readme/badges.svg" alt="本地优先 · 31 个 MCP 工具 · 最多 4 人协作 · macOS arm64 目标" width="660"></p>
 <p align="center"><a href="README.md">English</a> · <a href="README-ko.md">한국어</a> · <a href="README-ja.md">日本語</a> · <strong>简体中文</strong></p>
 <p align="center"><a href="#quick-start">快速开始</a> · <a href="#screenshots">截图</a> · <a href="#components">组件</a> · <a href="#mcp">MCP</a> · <a href="#contributing">参与贡献</a></p>
 
@@ -96,11 +96,14 @@ npm run dist:mac
 
 ## 给智能体一张真正的画布
 
-MCP now defaults to the app-owned Streamable HTTP endpoint `https://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. The client must trust this profile's TLS certificate; the app never installs OS trust. Open a canvas and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
+MCP now defaults to the app-owned Streamable HTTP endpoint `https://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. The client must trust this profile's TLS certificate; the app never installs OS trust. Keep the app running and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
 
 > 在当前打开的画布中创建一个 1440 × 900 的仪表盘。使用蓝色、天蓝色、浅薰衣草紫、白色和黑色。将导航和按钮做成可复用组件，最后通过截图检查结果。
 
-先使用 `get_context` 和 `get_guide`，再调用 `create_board`、`write_html`、`update`、`components`、`component` 等工具。共有 **19 个工具**。组件操作应在 `batch` 之外调用；切换变体后可能返回新的选中对象 ID。智能体修改与本地修改使用相同的持久化和协作 Undo 路径。
+Choose a canvas with `list_documents` and `open_document` or `create_document`, then read `get_context` and `get_guide`. Supply its `documentId` to every document mutation; then use `create_board`, `write_html`, `update`, `components`, and `component`. There are **31 tools**. Component actions run outside `batch`; variant switching can return a new selection ID. Agent edits use the same persistence and collaborative Undo path as local edits.
+
+The desktop MCP can list, create, open, rename, and duplicate local canvases without manual library clicks. Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Use stable document IDs with `rename_document` and `duplicate_document`; `select_page` changes the active page. Multiple canvases stay open in tabs, with independent background editors for agents. MCP open/create/duplicate default to background operation; `focus:true` reveals the result. Tab switching preserves each session’s target, and explicit document IDs also separate repositories sharing one transport. In the UI, click the canvas title to edit it in place; Enter or blur saves and Escape cancels. **File → Rename canvas** opens the same inline field. The library also offers **Actions → Rename canvas**. See the [workspace tool contract](docs/MCP.md#documents-and-pages).
+
 
 用户正在输入文字或拖动调整数值时，读取工具仍可使用，智能体修改与 Undo 会返回 `busy`。请等用户事务结束后再重试。MCP 桥接服务需要认证，仅绑定回环地址，并与协作服务分离。**不要转发 MCP 端口，也不要共享 `mcp-runtime.json`。**
 

@@ -1,0 +1,19 @@
+<section data-name="Document tabs and agent targeting" style="display:flex;flex-direction:column;gap:24px;padding:28px;width:960px;background:#f5f5f5;font-family:IBM Plex Sans;color:#202124">
+  <h1 style="font-size:26px">Your tabs. Each agent's own canvas.</h1>
+  <p style="font-size:13px;color:#777">Switch the visible tab without changing an agent's document. Existing white, gray and blue shell tokens.</p>
+  <div data-name="Document tab strip" style="display:grid;grid-template-columns:140px 240px 240px;gap:4px;padding:8px;background:#f0f0f0;border:1px solid #e5e5e5">
+    <div data-name="Library tab" style="width:120px;padding:8px 12px;background:#f0f0f0;border-radius:6px;font-size:13px">Your canvases</div>
+    <div data-name="Active document tab" data-ref="active-tab" style="width:220px;padding:8px 12px;background:#fff;border:1px solid #2563eb;border-radius:6px;font-size:13px">Portfolio exploration</div>
+    <div data-name="Background document tab" style="width:220px;padding:8px 12px;background:#f0f0f0;border:1px solid #e5e5e5;border-radius:6px;font-size:13px">YAI entry · Agent active</div>
+  </div>
+  <section data-name="Background work" style="display:flex;flex-direction:column;gap:12px;padding:20px;background:#fff;border:1px solid #e5e5e5;border-radius:8px">
+    <h2 style="font-size:21px">The visible canvas stays yours.</h2>
+    <p style="font-size:13px">MCP opens canvases in background tabs by default. A writes to Portfolio while B writes to YAI. Clicking either tab does not rebind either agent.</p>
+    <p style="font-size:13px">Close hides a tab while an agent still uses it. The library marks the canvas as open in the background. Closing the tab never deletes the canvas.</p>
+  </section>
+  <section data-name="Compact and error states" style="display:flex;flex-direction:column;gap:12px;padding:20px;background:#fff;border:1px solid #e5e5e5;border-radius:8px">
+    <h2 style="font-size:21px">Tabs stay readable at 960 px.</h2>
+    <p style="font-size:13px">Long names truncate; the strip scrolls horizontally. Arrow keys, Home and End move through tabs. Each tab has a labeled close control.</p>
+    <p style="font-size:13px">A failed save identifies its document. A restarted editor requires fresh MCP context. Other canvases remain usable.</p>
+  </section>
+</section>

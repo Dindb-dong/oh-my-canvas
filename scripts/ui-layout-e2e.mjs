@@ -1,3 +1,4 @@
+import {documentPage,libraryPage} from './desktop-test-pages.mjs';
 // Real renderer geometry across the app shell, editor, menus and dialogs.
 import {_electron} from 'playwright';
 import assert from 'node:assert/strict';
@@ -63,13 +64,13 @@ try{
  for(const [name,width,height,zoom] of [['desktop',1500,980,1],['minimum',960,640,1],['scaled',1200,800,1.25]]){
   await app.evaluate(({BrowserWindow},{width,height,zoom})=>{const w=BrowserWindow.getAllWindows()[0];w.setSize(width,height,false);w.webContents.setZoomFactor(zoom);},{width,height,zoom});await page.waitForFunction(({width,height,zoom})=>Math.abs(innerWidth-width/zoom)<2&&Math.abs(innerHeight-height/zoom)<2,{width,height,zoom});
   await measure(name+'-library-empty');
-  for(const [id,label] of [['mcp','mcp'],['collaborate','collaborate']]){await page.locator('#'+id).click();await page.locator('#dialog[open]').waitFor();await measure(name+'-'+label+'-dialog');if(id==='collaborate'){await page.locator('#tab-join').click();await measure(name+'-join-dialog');}await close();}
-  await page.locator('#start-sample').click();await ready();
+  for(const [id,label] of [['mcp','mcp'],['collaborate','collaborate']]){await page.locator('#'+id).click();await page.locator('#dialog[open]').waitFor();await measure(name+'-'+label+'-dialog');if(id==='collaborate')await measure(name+'-join-dialog');await close();}
+  await page.locator('#start-sample').click();page=await documentPage(app);await app.evaluate(({webContents},{url,zoom})=>webContents.getAllWebContents().find(c=>c.getURL()===url).setZoomFactor(zoom),{url:page.url(),zoom});await ready();
   await measure(name+'-editor');
   for(const type of ['rect','text','frame']){await select(type);await measure(name+'-inspector-'+type);for(const [part,fraction] of [['middle',.5],['bottom',1]]){await page.locator('#right').evaluate((e,f)=>e.scrollTop=(e.scrollHeight-e.clientHeight)*f,fraction);await measure(name+'-inspector-'+type+'-'+part);}if(type==='text'){await page.locator('#right').getByRole('button',{name:'Choose font family',exact:true}).click();await measure(name+'-font-dialog');await close();}}
-  await page.locator('#document-title').click();await page.locator('#name').fill('A long canvas title for checking toolbar spacing with four participants — Design system components and variants');await page.locator('#rename-form button').click();await close();
-  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.send('omc:event',{type:'session',status:{mode:'host',peers:[{id:'a',name:'Alice',host:true},{id:'b',name:'Ben'},{id:'c',name:'Cora'},{id:'d',name:'Dee'}]}}));await page.locator('#peers .avatar').last().waitFor();await measure(name+'-long-title-four-peers');
-  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.send('omc:event',{type:'session',status:{mode:'offline',peers:[]}}));
+  await page.locator('#document-title').click();await page.locator('#title-input').fill('A long canvas title for checking toolbar spacing with four participants — Design system components and variants');await page.locator('#title-input').press('Enter');
+  await app.evaluate(({webContents},{url,message})=>webContents.getAllWebContents().find(c=>c.getURL()===url).send('omc:event',message),{url:page.url(),message:{type:'session',status:{mode:'host',peers:[{id:'a',name:'Alice',host:true},{id:'b',name:'Ben'},{id:'c',name:'Cora'},{id:'d',name:'Dee'}]}}});await page.locator('#peers .avatar').last().waitFor();await measure(name+'-long-title-four-peers');
+  await app.evaluate(({webContents},{url,message})=>webContents.getAllWebContents().find(c=>c.getURL()===url).send('omc:event',message),{url:page.url(),message:{type:'session',status:{mode:'offline',peers:[]}}});
   await page.locator('#editor #stage').click({button:'right',position:{x:30,y:30}});await measure(name+'-context-menu');await page.keyboard.press('Escape');
   await page.locator('#editor .workspace-header').getByRole('button',{name:'Find layers',exact:true}).click();await measure(name+'-find');await page.locator('.find-bar').getByRole('button',{name:'Close find',exact:true}).click();
   for(const group of ['2','3']){await page.locator(`#editor [data-group="${group}"] button[aria-label="More drawing tools"]`).click();await measure(name+'-tools-'+group);await page.keyboard.press('Escape');}
@@ -77,7 +78,7 @@ try{
   await page.locator('#editor').getByRole('button',{name:'+ Style',exact:true}).click();await measure(name+'-style-dialog');await close();
   await page.locator('#editor .workspace-header').getByRole('button',{name:'Quick actions',exact:true}).click();await measure(name+'-commands-dialog');await close();
   await page.locator('#topbar #export').click();await measure(name+'-export-dialog');await close();
-  await page.locator('#home').click();await page.locator('[data-open]').first().waitFor();await measure(name+'-library-populated');await page.locator('#view-list').click();await measure(name+'-library-list');await page.locator('#view-grid').click();await page.locator('[data-more]').first().click();await measure(name+'-file-actions-dialog');await close();
+  await page.locator('#home').click();page=await libraryPage(app);await page.locator('[data-open]').first().waitFor();await measure(name+'-library-populated');await page.locator('#view-list').click();await measure(name+'-library-list');await page.locator('#view-grid').click();await page.locator('[data-more]').first().click();await measure(name+'-file-actions-dialog');await close();
   // Return to a fresh empty library for the next window size, using only this test's files.
   const docs=await page.evaluate(()=>window.omc.invoke('library'));for(const d of docs)await page.evaluate(id=>window.omc.invoke('delete',{id}),d.id);await page.reload();await page.locator('#start-sample').waitFor();
  }

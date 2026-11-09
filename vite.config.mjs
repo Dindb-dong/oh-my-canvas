@@ -47,4 +47,4 @@ export function woff2StaticNames() {
     return {code:code.slice(0,names)+'function createNamedFunction(name,body){return body}'+code.slice(afterNames,invoker)+staticInvoker+code.slice(afterInvoker)+';module.exports=Module;',map:null};
   }};
 }
-export default defineConfig({ plugins:[woff2StaticNames()], base: './', build: { target: 'es2022' }, server: { host: '127.0.0.1', port: 5179, strictPort: true } });
+export default defineConfig({ plugins:[woff2StaticNames()], base: './', build: { target: 'es2022', rollupOptions: { input: ['index.html','document.html'] } }, server: { host: '127.0.0.1', port: 5179, strictPort: true } });

@@ -1,3 +1,4 @@
+import {documentPage,libraryPage} from './desktop-test-pages.mjs';
 // Real macOS dialogs and native window capture: Playwright page screenshots omit native sheet dimming.
 import {_electron} from 'playwright';
 import assert from 'node:assert/strict';
@@ -15,7 +16,7 @@ const wait=async fn=>{for(let i=0;i<200;i++){if(await fn())return;await new Prom
 try{
  app=await _electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},args:[root,`--profile=${profile}`]});
  await app.evaluate(({app})=>app.setAccessibilitySupportEnabled(true));
- const page=await app.firstWindow();await page.locator('#start-sample').click();await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor').inert);
+ let page=await app.firstWindow();await page.locator('#start-sample').click();page=await documentPage(app);await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor').inert);
  const info=await app.evaluate(({BrowserWindow})=>({pid:process.pid,id:BrowserWindow.getAllWindows()[0].getMediaSourceId().split(':')[1]}));
  await app.evaluate(({dialog})=>{globalThis.nativeCalls=[];globalThis.nativePending=0;for(const key of ['showOpenDialog','showSaveDialog']){const original=dialog[key].bind(dialog);dialog[key]=async(...args)=>{globalThis.nativeCalls.push({key,parentAttached:args.length!==1});globalThis.nativePending++;try{return await original(...args);}finally{globalThis.nativePending--;}}}});
  async function snapshot(label){
@@ -32,9 +33,9 @@ try{
  // A renderer-owned input produced enabled=false / RGB204 even after reload before the fix.
  await page.locator('#stage').click({position:{x:30,y:30}});await page.keyboard.press('Meta+Shift+K');
  await wait(()=>app.evaluate(()=>globalThis.nativePending===1));await snapshot('asset-picker-open');
- await page.reload();await page.locator('#new').waitFor();await snapshot('asset-picker-after-reload');await cancel();await snapshot('after-cancel');
+ await page.reload();page=await documentPage(app);await snapshot('asset-picker-after-reload');await cancel();await snapshot('after-cancel');
  // Repeated app import cancel must also leave the renderer usable and white.
- for(let i=0;i<2;i++){await page.locator('#import').click();await wait(()=>app.evaluate(()=>globalThis.nativePending===1));await snapshot('import-open-'+i);await cancel();await page.waitForFunction(()=>!document.querySelector('#editor').inert);await snapshot('import-cancel-'+i);}
- await page.locator('#new').click();await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor').inert);await snapshot('usable-canvas');
+ page=await libraryPage(app);for(let i=0;i<2;i++){await page.locator('#import').click();await wait(()=>app.evaluate(()=>globalThis.nativePending===1));await snapshot('import-open-'+i);await cancel();await page.locator('#import').waitFor();await snapshot('import-cancel-'+i);}
+ await page.locator('#new').click();page=await documentPage(app);await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor').inert);await snapshot('usable-canvas');
  await fs.writeFile(path.join(out,'report.json'),JSON.stringify({pass:true,platform:process.platform,rows},null,2)+'\n');console.log('PASS real native asset picker, renderer reload, repeated import cancellation and canvas usability; no gray veil');
 }finally{await app?.close().catch(()=>{});await fs.rm(profile,{recursive:true,force:true});}

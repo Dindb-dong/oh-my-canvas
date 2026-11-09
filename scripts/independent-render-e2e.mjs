@@ -1,3 +1,4 @@
+import {documentPage} from './desktop-test-pages.mjs';
 /** Fresh post-barrier Electron rendering regressions; no inherited test imports. */
 import {_electron as electron} from 'playwright';
 import {build} from 'esbuild';
@@ -45,16 +46,17 @@ try{
  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].restore());
  // Exercise the actual trusted preload -> main-process export-file -> atomic disk writer.
  await page.evaluate(async()=>globalThis.omc.invoke('create',{title:'Renderer regression',document:globalThis.IndependentRenderQA.currentDocument()}));
+ const runtimePage=await documentPage(app);
  const nativePath=path.join(temporary,'native-save.png');
  await app.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:file});},nativePath);
- const save=await page.evaluate(async data=>{const binary=atob(data),bytes=Uint8Array.from(binary,character=>character.charCodeAt(0));return globalThis.omc.invoke('export-file',{name:'native-save.png',mime:'image/png',bytes});},artifacts.png);
+ const save=await runtimePage.evaluate(async data=>{const binary=atob(data),bytes=Uint8Array.from(binary,character=>character.charCodeAt(0));return globalThis.omc.invoke('export-file',{name:'native-save.png',mime:'image/png',bytes});},artifacts.png);
  const disk=await fs.readFile(nativePath);await fs.writeFile(path.join(output,'independent-render-native-save.png'),disk);
  const nativeChecks=[{name:'Actual main-process native-save disk write',pass:save===true&&disk.equals(Buffer.from(artifacts.png,'base64'))}];
  await app.evaluate(({dialog})=>{dialog.showSaveDialog=async()=>({canceled:true});});
- const cancel=await page.evaluate(()=>globalThis.omc.invoke('export-file',{name:'canceled.png',mime:'image/png',bytes:new Uint8Array([1,2,3])}));nativeChecks.push({name:'Actual main-process native-save cancellation',pass:cancel===false});
+ const cancel=await runtimePage.evaluate(()=>globalThis.omc.invoke('export-file',{name:'canceled.png',mime:'image/png',bytes:new Uint8Array([1,2,3])}));nativeChecks.push({name:'Actual main-process native-save cancellation',pass:cancel===false});
  const blocker=path.join(temporary,'blocker');await fs.writeFile(blocker,'A file, not a directory');
  await app.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:file});},path.join(blocker,'failure.png'));
- const error=await page.evaluate(async()=>{try{await globalThis.omc.invoke('export-file',{name:'failure.png',mime:'image/png',bytes:new Uint8Array([1,2,3])});return '';}catch(error){return String(error);}});nativeChecks.push({name:'Actual main-process native-save write error',pass:/ENOTDIR|EEXIST/.test(error)});
+ const error=await runtimePage.evaluate(async()=>{try{await globalThis.omc.invoke('export-file',{name:'failure.png',mime:'image/png',bytes:new Uint8Array([1,2,3])});return '';}catch(error){return String(error);}});nativeChecks.push({name:'Actual main-process native-save write error',pass:/ENOTDIR|EEXIST/.test(error)});
  result.native=nativeChecks;result.assertions+=nativeChecks.length;for(const check of nativeChecks)result.cases.push({...check,requirements:['EXP-02']});
  const pdfInfo=await execute('/opt/homebrew/bin/pdfinfo',[path.join(output,'independent-render-export.pdf')],{timeout:10000});
  await execute('/opt/homebrew/bin/pdftoppm',['-singlefile','-scale-to-x','380','-scale-to-y','280','-png',path.join(output,'independent-render-export.pdf'),path.join(output,'independent-render-pdf-decoded')],{timeout:10000});
@@ -72,6 +74,6 @@ try{
  if(failures.length||errors.length||!result.background.pass)process.exitCode=1;
  }
 }catch(error){console.error(error);process.exitCode=1;}finally{
- if(app){const child=app.process();await app.evaluate(({app})=>app.exit(0)).catch(()=>{});if(child.exitCode===null)await new Promise(resolve=>{const timer=setTimeout(resolve,5000);child.once('exit',()=>{clearTimeout(timer);resolve();});});}
+ if(app){const child=app.process();await app.close().catch(()=>{});if(child.exitCode===null)await new Promise(resolve=>{const timer=setTimeout(resolve,5000);child.once('exit',()=>{clearTimeout(timer);resolve();});});}
  await fs.rm(temporary,{recursive:true,force:true,maxRetries:10,retryDelay:150});
 }

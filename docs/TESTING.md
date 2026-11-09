@@ -28,6 +28,7 @@ The core suite uses real loopback TLS/HTTPS sockets. An environment that prohibi
 | README, translations, issue/PR forms | `node scripts/check-docs.mjs`; rendered preview | No application rebuild for prose-only changes |
 | Document, commands and geometry | `npx vitest run editor/__tests__/foundation.document.test.ts editor/__tests__/foundation.commands.test.ts editor/__tests__/foundation.geometry.test.ts` | `node --test tests/replica.test.mjs tests/storage.test.mjs`; actual save/reopen |
 | Collaboration, bootstrap and protocol | `node --test tests/collaboration.test.mjs tests/bootstrap.test.mjs` | `npm run test:e2e`; `node scripts/independent-host-e2e.mjs` |
+| Document tabs and background MCP | `node --test tests/document-manager.test.mjs`; `npx vitest run editor/__tests__/mcp.test.ts` | `node scripts/multi-document-e2e.mjs`; `node scripts/workspace-mcp-e2e.mjs`; `node scripts/mcp-http-e2e.mjs` |
 | MCP and author isolation | `node --test tests/mcp.test.mjs`; `npx vitest run editor/__tests__/mcp.test.ts` | `node scripts/mcp-http-e2e.mjs`; retained stdio `node scripts/independent-host-e2e.mjs` |
 | Text, gestures, clipboard and Undo | `npx vitest run editor/__tests__/ui-text-session.test.ts editor/__tests__/ui-canvas-geometry.test.ts editor/__tests__/ui-clipboard-atomic.test.ts` | `node scripts/independent-ui-e2e.mjs` |
 | Components, variants, styles and libraries | `npx vitest run editor/__tests__/components.test.ts editor/__tests__/styles-library.test.ts` | `node scripts/independent-ui-e2e.mjs`; `node scripts/independent-library-e2e.mjs` |
@@ -45,6 +46,8 @@ The HTTP smoke intentionally obstructs its temporary profile's `documents` path 
 
 Use `node scripts/packaged-smoke.mjs` to test that fresh local package, certificate-pinned HTTPS endpoint and bundled stdio CLI with an isolated temporary profile, then `node scripts/check-package-provenance.mjs` for current-byte checks of source/build assets, native notices, WASM, fonts, Electron notices and the standalone CLI. The provenance check also rejects retired vendor/apps/fallback paths in the ASAR index; it does not inspect compiled-code ASTs or establish legal clearance. Packaging directly through a shared `node_modules` symlink can omit runtime packages; the staging helper avoids that problem.
 
+Installed authoring helpers additionally require `OMC_DOCUMENT_ID` and explicitly bind that exact canvas without focusing it. Never run them as part of a source regression.
+
 Legacy `--installed` modes and default-profile scripts are not the current independent-engine acceptance route. Some target an existing `/Applications/Oh My Canvas.app` and its active document. Keep them outside routine checks; an installation check requires explicit scope and a review of its profile/data behavior. Do not replace the installed application or edit global MCP configuration merely to run a source regression.
 
 ## What a useful regression proves
@@ -52,6 +55,7 @@ Legacy `--installed` modes and default-profile scripts are not the current indep
 - **Geometry:** actual editor-generated geometry remains consistent after concurrent X/Y, move/resize, rotation, flip and path changes. Check render bounds, not only scalar properties.
 - **Undo:** explicit current author and user transaction survive the editor → IPC → replica connection. Cancellation does not resurrect an empty layer. Agents cannot mutate inside a live user transaction.
 - **MCP:** official SDK HTTP clients with identical names retain separate sessions/authors; one cannot Undo the other's work. Check a port impostor cannot receive a bearer, persistent credentials/certificate and the same HTTPS URL after restart, failed-close replay/alias/Undo preservation, stale-session rejection, cancellation before mutation, and durable readback. Retain two-process stdio coverage for rollout compatibility.
+- **Document isolation:** use one profile with two documents, two identically named clients, and a shared transport. Switch UI tabs during explicit-ID writes. Assert no cross-document changes, retained typing, background screenshot pixels/fonts, close keepalive, renderer-generation recovery, forged IPC rejection, and durable restart readback. `scripts/desktop-test-pages.mjs` resolves an exact document ID and runtime generation; the first window is only the application shell.
 - **Export:** compare wrapped SVG text to measured lines. Click both native export routes; verify a real file, cancellation, and a visible write error.
 - **Import/storage:** reject malformed metadata before overwrite; list/reopen with damaged files and valid backups. Oversized edits must leave live state unchanged.
 - **Validation cache:** repeated remote replacements do not retain irrelevant old payloads until a false capacity failure; local Undo still works afterward.

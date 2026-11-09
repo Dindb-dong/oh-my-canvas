@@ -12,7 +12,7 @@ A quiet place to create. Personal ownership, clear tools, room to think. White a
 Help a person find a local canvas quickly, design without an account, and bring an agent or up to three teammates into the open document. Success means a visible saved file, a working edit, and a clear connection state. No pretend cloud workspace, AI generation promise, community feed or subscription experience.
 
 ## People and jobs
-The solo designer opens recent work or searches by name. The returning creator stars important files and chooses a dense list. A teammate uses an invitation to join an existing canvas. An agent uses local MCP to inspect and edit the open document. Local ownership is always visible.
+The solo designer opens recent work or searches by name. The returning creator stars important files and chooses a dense list. A teammate uses an invitation to join an existing canvas. An agent uses local MCP to inspect and edit an explicitly identified document, independently of the visible tab. Local ownership is always visible.
 
 ## Information architecture
 Native title strip → library/document identity → app actions. Library: My workspace, search, Recents, All canvases, Starred; content heading, Open/New actions, sort and view controls, canvas cards. Recents and All canvases currently show all files sorted by modification time; name sort is available. Starred filters actual saved preferences. Editor: layers/pages at left, editable canvas in the center, properties at right, tools near the canvas. Export, MCP and collaboration remain available in the title strip.
@@ -34,6 +34,26 @@ Desktop-first Electron, minimum 960 × 640. Main content scrolls independently o
 
 ## Interaction and content
 Use concrete language: New canvas, Open file, Export, Starred. Show actual local dates and file counts. Search and sort act immediately; view and stars persist locally. Saved means persistence succeeded. A failed edit shows an actionable error. Collaboration shows host, guests, capacity, reconnecting and offline conditions. Local MCP does not remove the AI client's own costs or limits.
+
+### Canvas naming and document access (2026-11-09)
+
+The latest user direction replaces the separate Rename button with an inline title field. The editable **Oh My Canvas · Inline naming** document contains **States / Inline canvas title / 2026-11-09** (`2d076472-8553-4ecf-9a23-ebb97430abcc`), with the **Canvas / Editable title** main (`component-5bfa0b92-d2ec-43ad-aa6d-137634983461`) and linked example instance. It was authored in an isolated design profile to avoid changing another session's active canvas. The shareable source is `docs/design/inline-naming.html`. This supersedes the earlier separate-control board in the UI Kit.
+
+Clicking `#document-title` reveals `#title-input` in the same header slot and selects its text. Enter or blur saves; Escape cancels. There is no separate Rename button. Keep the library heading passive. Each readable canvas retains **Actions → Rename canvas** and its focused dialog. **File → Rename canvas** opens the inline field in the editor. Trim names and limit them to 120 characters; persist before publishing. Keep the proposed name after a failed save and prevent duplicate submission. An inactive library rename does not open that canvas.
+
+Use existing IBM Plex Sans, neutral surfaces, blue focus and spacing tokens. Compare at 1500 × 980 and the supported 960 × 640 minimum; long titles truncate in display mode while the focused field scrolls its own text. Mobile remains outside this desktop app's scope. Canvas state previews establish layout intent; runtime keyboard, blur, validation, failure and persistence behavior require separate checks.
+
+The isolated design document was reopened in a fresh process with its board, component and linked instance intact. Real Electron comparison confirms the inline field uses the same title slot, with no extra Rename button, at desktop and minimum sizes. Enter, blur, Escape, synthetic IME composition, invalid names and restart persistence passed the workspace journey. Physical IME input and other operating systems remain unverified.
+
+Desktop MCP adds local document discovery, creation, opening, naming and duplication plus existing-page selection. Document names and IDs are separate from page names and layer aliases. Document mutations require an explicit stable document ID; reads may use the session binding. Opening or focusing another document preserves existing sessions.
+
+### Multiple document tabs (2026-11-09)
+
+The isolated **Oh My Canvas · Inline naming** design document contains **States / Multiple document tabs / 2026-11-09** (`31314c67-1211-4a8e-8741-77d92ddf80e8`), the **Canvas / Document tab** main (`component-042d59c8-753a-4d8c-b206-cd6c893ba922`) and linked instance (`component-c341b76b-9130-487e-bd9f-a1e2b29467fa`). Its shareable editable source is `docs/design/document-tabs.html`. It was reopened before implementation without touching the installed user's active document.
+
+A 40 px shell tab strip stays above the library and document editors. **Your canvases** opens the library, each canvas tab selects its retained editor, and the plus control creates a blank canvas. Keep native traffic-light clearance, neutral chrome and the existing blue selected underline. Long names truncate with a full title tooltip. Close has a separate labeled button. Tab buttons use a roving focus position and Left/Right/Home/End keyboard selection; overflow scrolls horizontally at the 960 px minimum width.
+
+Closing a tab flushes that document. Agents and collaborators can keep it running in the background, with an **Active** marker on open tabs and activity text in the library. MCP navigation defaults to background operation; only explicit focus changes reveal a document. The inline title stays inside each document header. Every editor has an isolated document runtime so typing, selection, page and tool state survive UI tab changes. A failure must identify its document and preserve other work.
 
 ### Selection and layer movement (2026-11-05)
 

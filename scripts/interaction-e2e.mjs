@@ -1,3 +1,4 @@
+import {documentPage,libraryPage} from './desktop-test-pages.mjs';
 import {_electron as electron} from 'playwright';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -37,12 +38,11 @@ async function objects(){const s=await snapshot();return s.document.pagesById[s.
 async function selected(){return page.locator('#editor .layers .row[aria-selected=true]').evaluateAll(nodes=>nodes.map(n=>n.dataset.id));}
 async function fresh(items=[]) {
   await page.mouse.up();await page.keyboard.press('Escape');
-  if(await page.locator('#home').isVisible())await page.locator('#home').click();
-  await page.locator('#import').waitFor({state:'visible'});
+  page=await libraryPage(app,{closeTabs:true});
   const file=path.join(profile,`fixture-${fixtureNumber++}.json`);
   await fs.writeFile(file,JSON.stringify(fixture(items)));
   await app.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},file);
-  await page.locator('#import').click();
+  await page.locator('#import').click();page=await documentPage(app);
   await until(async()=>{const o=await objects();return !!o.board&&Object.keys(o).length===items.length+2;},'fixture did not open');
   await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor')?.inert);
   await page.locator('#editor .ltabs button').filter({hasText:'Layers'}).click();

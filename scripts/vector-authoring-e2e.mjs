@@ -1,3 +1,4 @@
+import {documentPage,libraryPage} from './desktop-test-pages.mjs';
 /** Real Electron authoring regressions, isolated from the user's canvas library. */
 import {_electron as electron} from 'playwright';
 import assert from 'node:assert/strict';
@@ -46,23 +47,22 @@ async function fresh(items=[],boardExtra={}) {
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1500,980));
   await page.keyboard.press('Escape');
   await page.waitForFunction(()=>document.querySelector('#workspace')?.hidden||!document.querySelector('#editor')?.inert);
-  if(!await page.locator('#library').isVisible())await page.locator('#home').click();
-  await page.locator('#import').waitFor();
+  page=await libraryPage(app,{closeTabs:true});
   const file=path.join(temporary,`fixture-${sequence++}.json`);await fs.writeFile(file,JSON.stringify(fixture(items,boardExtra)));
   await app.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},file);
-  await page.locator('#import').click();
+  await page.locator('#import').click();page=await documentPage(app);
   await until(async()=>{const data=await objects();return !!data.board&&Object.keys(data).length===items.length+2;},'fixture did not open');
   await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor')?.inert);
   await page.locator('[data-tool="move"]').click();
 }
 async function select(id){await page.locator(`.layers .row[data-id="${id}"] .name`).click();}
 async function reopenLibrary() {
-  const id=await page.evaluate(async()=>(await window.omc.invoke('snapshot')).id);await page.locator('#home').click();await page.locator(`[data-open="${id}"]`).click();
+  const id=await page.evaluate(async()=>(await window.omc.invoke('snapshot')).id);await page.locator('#home').click();page=await libraryPage(app);await page.locator(`[data-open="${id}"]`).click();page=await documentPage(app,id);
   await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor')?.inert&&!document.querySelector('#workspace')?.hidden);
 }
 async function reopen(file) {
-  await page.waitForFunction(()=>!document.querySelector('#editor')?.inert);await page.locator('#home').click();await page.locator('#import').waitFor();
-  await app.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},file);await page.locator('#import').click();
+  await page.waitForFunction(()=>!document.querySelector('#editor')?.inert);await page.locator('#home').click();page=await libraryPage(app,{closeTabs:true});
+  await app.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},file);await page.locator('#import').click();page=await documentPage(app);
   await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor')?.inert&&!document.querySelector('#workspace')?.hidden);
 }
 async function shot(name){await page.screenshot({path:path.join(output,name+'.png')});}
@@ -266,7 +266,7 @@ try {
 } catch(error) {results.push({name:'runner',status:'failed',error:error.stack});console.error('Window URL:',page?.url());await page?.screenshot({path:path.join(output,'runner-failure.png'),timeout:3000}).catch(error=>console.error('Screenshot failed:',error.message));console.error(error);}
 finally {
   if(page)await Promise.race([page.evaluate(()=>window.omc.invoke('flush')).catch(()=>{}),new Promise(resolve=>setTimeout(resolve,2000))]);
-  if(app){await Promise.race([app.evaluate(({app})=>app.exit(0)).catch(()=>{}),new Promise(resolve=>setTimeout(resolve,2000))]);if(app.process().exitCode===null)app.process().kill('SIGKILL');}
+  if(app){await app.close().catch(()=>{});}
   await fs.rm(temporary,{recursive:true,force:true,maxRetries:5,retryDelay:150});
   const report={passed:results.every(r=>r.status!=='failed')&&errors.length===0,results,rendererErrors:errors,at:new Date().toISOString()};await fs.writeFile(path.join(output,'result.json'),JSON.stringify(report,null,2)+'\n');
   if(!report.passed)process.exitCode=1;console.log(JSON.stringify(report,null,2));

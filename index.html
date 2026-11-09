@@ -1,17 +1,17 @@
 <!doctype html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Oh My Canvas</title></head>
-<body>
+<body class="shell">
+  <nav id="tabbar" aria-label="Canvas tabs"><div id="document-tabs" role="tablist" aria-label="Open canvases"></div><button id="new-tab" aria-label="New canvas" title="New canvas" data-icon="plus"></button></nav>
   <header id="topbar">
     <button id="home" title="Document library" aria-label="Document library"><img class="app-mark" src="/app-icon.png" alt=""><span class="mark">omc</span></button>
-    <span class="separator"></span><button id="toggle-layers" aria-label="Toggle layers panel" aria-controls="left" aria-expanded="true" data-icon="panel" hidden></button><button id="document-title" title="Rename document">Your canvases</button>
+    <span class="separator"></span><button id="document-title" disabled><span id="document-name">Your canvases</span></button>
     <span id="save-state" aria-label="Local save status">Local workspace</span>
-    <div class="bar-actions"><div id="peers" aria-label="Collaborators"></div><button id="components" hidden><span data-icon="components" aria-hidden="true"></span>Components</button><button id="export" hidden><span data-icon="download" aria-hidden="true"></span>Export</button><button id="mcp">MCP</button><button id="collaborate" class="primary">Collaborate <span data-icon="external" aria-hidden="true"></span></button></div>
+    <div class="bar-actions"><button id="mcp">MCP</button><button id="collaborate" class="primary">Join canvas <span data-icon="external" aria-hidden="true"></span></button></div>
   </header>
   <main id="library">
     <aside class="library-sidebar"><div class="workspace-name"><img src="/app-icon.png" alt=""><div>My workspace<small>On this computer</small></div></div><label class="search-field"><span data-icon="search" aria-hidden="true"></span><input id="search" type="search" placeholder="Search canvases" aria-label="Search canvases"></label><nav aria-label="Library"><button data-section="recent" aria-current="page"><span data-icon="clock"></span>Recents</button><button data-section="all"><span data-icon="file"></span>All canvases</button><button data-section="starred"><span data-icon="star"></span>Starred</button></nav><div class="sidebar-bottom"><span class="local-dot"></span> Local workspace<p>Saved here. Ready to share.</p></div></aside>
     <section class="library-content"><div class="library-heading"><div><div class="eyebrow">YOUR WORKSPACE</div><h1 id="section-title">Recents</h1><p>A little room for your next idea.</p></div><div class="actions"><button id="import"><span data-icon="upload" aria-hidden="true"></span>Open file</button><button id="new" class="primary"><span data-icon="plus" aria-hidden="true"></span>New canvas</button></div></div><div class="library-controls"><span id="document-count"></span><div class="actions"><select id="sort" aria-label="Sort canvases"><option value="updated">Last edited</option><option value="title">Name</option></select><button id="view-grid" aria-label="Grid view" aria-pressed="true" data-icon="grid"></button><button id="view-list" aria-label="List view" aria-pressed="false" data-icon="list"></button></div></div><div id="documents"></div><footer>Oh My Canvas <span>Made for ideas that belong to you.</span></footer></section>
   </main>
-  <main id="workspace" hidden><div id="editor"></div><div id="remote-cursors" aria-hidden="true"></div></main>
   <dialog id="dialog"><div id="dialog-content"></div></dialog>
   <div id="toast" role="status" aria-live="polite" hidden></div>
   <script type="module" src="/src/main.js"></script>

@@ -26,5 +26,6 @@ await fs.mkdir('dist/licenses/tabler-icons',{recursive:true});
 for(const name of ['LICENSE','manifest.json'])await fs.copyFile('editor/ui/icons/tabler/'+name,'dist/licenses/tabler-icons/'+name);
 
 await build({entryPoints:['electron/preload.cjs'],bundle:true,platform:'node',external:['electron'],outfile:'dist/preload.cjs'});
+await build({entryPoints:['src/document-factories.ts'],bundle:true,format:'esm',platform:'node',outfile:'dist/document-factories.mjs'});
 await build({entryPoints:['editor/mcp/defs.ts'],bundle:true,format:'esm',platform:'node',outfile:'dist/tool-defs.mjs'});
 await build({entryPoints:['cli/mcp.mjs'],bundle:true,format:'cjs',platform:'node',outfile:'dist/mcp-cli.cjs'});

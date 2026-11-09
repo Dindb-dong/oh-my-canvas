@@ -1,216 +1,281 @@
 import {createFileDialogs} from './file-dialogs.mjs';
-import {app,BrowserWindow,ipcMain,dialog,protocol,Menu,clipboard} from 'electron';
+import {app,BrowserWindow,WebContentsView,ipcMain,dialog,protocol,Menu,clipboard} from 'electron';
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import os from 'node:os';
-import {Store,atomicWrite,decodeFile,encodeFile} from '../core/storage.mjs';
+import {Store,atomicWrite,decodeFile,encodeFile,validId} from '../core/storage.mjs';
 import {Replica} from '../core/replica.mjs';
 import {exportFileData} from '../core/export-file.mjs';
 import {assertDocument,same,MAX_ENVELOPE_BYTES} from '../core/document.mjs';
 import {Collaboration,parseInvite} from '../core/collaboration.mjs';
 import {startMcpBridge,MCP_PORT} from './mcp-bridge.mjs';
+import {canvasTitle} from './document-actions.mjs';
+import {createDocumentManager} from './document-manager.mjs';
+import {createWorkspaceReplay} from './workspace-replay.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 app.setName('oh-my-canvas');
-const profile=process.argv.find(x=>x.startsWith('--profile='))?.slice(10);
+const profile=process.argv.find(value=>value.startsWith('--profile='))?.slice(10);
 if(profile)app.setPath('userData',path.resolve(profile));
 const backgroundTest=!!profile&&process.env.OMC_TEST_BACKGROUND==='1';
 if(backgroundTest&&process.platform==='darwin')app.setActivationPolicy('accessory');
-// Separate profiles permit independent local clients for collaborative acceptance tests.
 if(!app.requestSingleInstanceLock()){app.quit();}else{
 protocol.registerSchemesAsPrivileged([{scheme:'omc',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true,stream:true}}]);
 app.whenReady().then(async()=>{
-const fileDialogs=createFileDialogs(dialog);
-const dir=app.getPath('userData'),store=new Store(path.join(dir,'documents'));
-let win,current,collab,bridge,bridgeError,saveTimer,quitting=false,seq=0;
-let prefs={name:os.userInfo().username},prefsWork=Promise.resolve();
-try{prefs={...prefs,...JSON.parse(await fs.readFile(path.join(dir,'preferences.json'),'utf8'))};}catch{}
-const pendingTools=new Map();
-function cancelTools(reason,agent){
-  for(const [id,pending] of pendingTools){
-    if(agent&&pending.agent!==agent)continue;
-    pending.cancel(reason);
+  const fileDialogs=createFileDialogs(dialog),dir=app.getPath('userData'),store=new Store(path.join(dir,'documents'));
+  const {WORKSPACE_TOOLS,DOCUMENT_MUTATIONS,validateDesktopToolArgs}=await import('../dist/tool-defs.mjs');
+  const {blankDocument,sampleDocument}=await import('../dist/document-factories.mjs');
+  const workspaceNames=new Set(WORKSPACE_TOOLS.map(tool=>tool.name)),mutations=new Set(DOCUMENT_MUTATIONS);
+  const pending=new Map(),senders=new Map(),contexts=new Map(),activeCalls=new Set(),replay=createWorkspaceReplay();
+  let win,bridge,bridgeError,closing=false,quitting=false,prefsWork=Promise.resolve(),shellWork=Promise.resolve();
+  let prefs={name:os.userInfo().username};
+  try{prefs={...prefs,...JSON.parse(await fs.readFile(path.join(dir,'preferences.json'),'utf8'))};}catch{}
+  const sendShell=message=>{if(win&&!win.isDestroyed())win.webContents.send('omc:event',message);};
+  const sendRuntime=(entry,message)=>{const wc=entry.runtime?.sender;if(wc&&!wc.isDestroyed())wc.send('omc:event',{...message,documentId:entry.record.id,generation:entry.generation});};
+  const metadata=entry=>({id:entry.record.id,title:entry.record.title,generation:entry.generation});
+  function cancelRequests(reason,predicate=()=>true){for(const request of [...pending.values()])if(predicate(request))request.cancel(reason);}
+  function layoutViews(){
+    if(!win||win.isDestroyed())return;
+    const [width,height]=win.getContentSize(),active=manager.state().activeTabId;
+    for(const entry of manager.entries.values())if(entry.runtime){entry.runtime.view.setBounds({x:0,y:40,width:Math.max(1,width),height:Math.max(1,height-40)});entry.runtime.view.setVisible(active===entry.record.id);}
   }
-}
-function endAgent(agent){cancelTools('MCP session ended',agent);send({type:'tool-session-end',agent});}
-
-const send=m=>{if(win&&!win.isDestroyed())win.webContents.send('omc:event',m);};
-const snapshot=ack=>current&&({id:current.id,title:current.title,document:current.replica.document,ack:ack??seq});
-let saveWork=Promise.resolve();
-async function save(){clearTimeout(saveTimer);if(current){const record=current;saveWork=store.save(record);await saveWork;send({type:'saved',id:record.id,at:Date.now()});}}
-function dirty(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>save().catch(e=>send({type:'error',message:'Save failed: '+e.message})),400);}
-async function stopSession(){if(collab){const previous=collab;collab=null;await previous.close();}send({type:'session',status:{mode:'offline',peers:[]}});}
-async function open(record){
-  const recovered=!!record.recovered;
-  cancelTools('Document changed');await bridge?.resetSessions?.();
-  await save();await stopSession();current?.unsubscribe?.();current?.replica.destroy();
-  current=record;seq=0;current.bootstrapNonce=randomUUID();current.bootstrapBase=current.replica.document;
-  current.unsubscribe=current.replica.onUpdate(()=>{dirty();send({type:'document',...snapshot()});});
-  await save();return {...snapshot(),recovered,bootstrapNonce:current.bootstrapNonce};
-}
-function bindSession(c){
-  collab=c;c.on('status',status=>send({type:'session',status}));c.on('cursor',data=>send({type:'cursor',...data}));
-  c.on('warning',message=>send({type:'error',message}));
-}
-function requireCurrent(){if(!current)throw Error('Open a document first');return current;}
-function trusted(event){if(event.sender!==win?.webContents||event.senderFrame?.url!=='omc://canvas/index.html')throw Error('Untrusted IPC sender');}
-const limitedTitle=s=>String(s||'Untitled canvas').trim().slice(0,120)||'Untitled canvas';
-const dispatch=async(action,data)=>{
-  switch(action){
-    case 'library':return store.list();
-    case 'snapshot':requireCurrent();return snapshot();
-    case 'preferences':{
-      const task=prefsWork.then(async()=>{
-        if(data){
-          const next={...prefs,name:String(data.name||prefs.name).slice(0,40)};
-          if(typeof data.toggleStar==='string'&&/^[a-zA-Z0-9-]{1,64}$/.test(data.toggleStar)){
-            const starred=new Set(next.starred||[]);if(starred.has(data.toggleStar))starred.delete(data.toggleStar);else if(starred.size<10000)starred.add(data.toggleStar);next.starred=[...starred];
-          }
-          if(['grid','list'].includes(data.view))next.view=data.view;
-          await atomicWrite(path.join(dir,'preferences.json'),JSON.stringify(next));prefs=next;
-        }
-        return structuredClone(prefs);
-      });prefsWork=task.catch(()=>{});return task;
-    }
-    case 'create':{assertDocument(data.document);const record={id:randomUUID(),title:limitedTitle(data.title),createdAt:new Date().toISOString(),replica:new Replica({document:data.document})};return open(record);}
-    case 'open':return open(await store.load(data.id));
-    case 'rename':{requireCurrent();current.title=limitedTitle(data.title);await save();return snapshot();}
-    case 'duplicate':{const original=await store.load(data.id);const record={id:randomUUID(),title:original.title+' copy',createdAt:new Date().toISOString(),replica:new Replica({document:original.replica.document}),thumbnail:original.thumbnail};original.replica.destroy();return open(record);}
-    case 'delete':{if(current?.id===data.id){cancelTools('Document closed');await bridge?.resetSessions?.();await save();await stopSession();current.unsubscribe?.();current.replica.destroy();current=null;}await store.remove(data.id);return true;}
-    case 'bootstrap':{
-      requireCurrent();
-      if(data.id!==current.id||seq!==0||typeof data.nonce!=='string'||data.nonce!==current.bootstrapNonce)throw Error('Invalid canvas initialization');
-      if(!same(current.bootstrapBase,current.replica.document)){
-        current.bootstrapNonce=randomUUID();current.bootstrapBase=current.replica.document;
-        return {...snapshot(),bootstrapNonce:current.bootstrapNonce,bootstrapRetry:true};
-      }
-      current.bootstrapNonce=null;current.bootstrapBase=null;
-      current.replica.patch(data.changes,'Initialize canvas',undefined,{recordHistory:false});
-      await save();return snapshot();
-    }
-    case 'commit':{requireCurrent();if(data.id!==current.id)throw Error('Document changed');if(!Number.isSafeInteger(data.seq))throw Error('Invalid edit sequence');if(data.seq<=seq)return snapshot();current.replica.patch(data.changes,data.label,data.group);await save();seq=data.seq;return snapshot();}
-    case 'undo':{if(data?.requestId&&pendingTools.get(data.requestId)?.agent!==data.agent)throw Error('MCP Undo request cancelled');const r=requireCurrent().replica;if(data?.agent&&r.undo.undoStack.at(-1)?.meta.get('label')!==`agent:${data.agent}`)return false;r.history('undo');await save();return snapshot();}
-    case 'redo':requireCurrent().replica.history('redo');await save();return snapshot();
-    case 'flush':await save();return true;
-    case 'thumbnail':{requireCurrent();if(typeof data.src==='string'&&data.src.startsWith('data:image/')&&data.src.length<500000){current.thumbnail=data.src;dirty();}return true;}
-    case 'import':{
-      const result=await fileDialogs.open({title:'Open canvas',filters:[{name:'Canvas documents',extensions:['omc','json']}],properties:['openFile']});
-      if(result.canceled)return null;
-      const stat=await fs.stat(result.filePaths[0]);if(stat.size>MAX_ENVELOPE_BYTES)throw Error('Document file exceeds 24 MiB');
-      const raw=await fs.readFile(result.filePaths[0],'utf8');
-      if(result.filePaths[0].endsWith('.omc')){
-        const f=decodeFile(raw);
-        // Opening an older portable copy must not erase this device's newer offline edits.
-        try{const existing=await store.load(f.id);try{f.replica.receive(existing.replica.state);}finally{existing.replica.destroy();}}catch(e){if(e.code!=='ENOENT'){f.replica.destroy();throw e;}}
-        return {opened:await open(f)};
-      }
-      return {json:JSON.parse(raw),title:path.basename(result.filePaths[0],'.json')};
-    }
-    case 'export-file':{
-      requireCurrent();const file=exportFileData(data);
-      const result=await fileDialogs.save({defaultPath:file.name,filters:[{name:file.format.toUpperCase(),extensions:[file.format]}]});
-      if(result.canceled)return false;
-      await atomicWrite(result.filePath,file.bytes);return true;
-    }
-    case 'export':{
-      requireCurrent();const format=data.format;
-      if(!['omc','json','svg','png'].includes(format))throw Error('Unsupported export');
-      const result=await fileDialogs.save({defaultPath:current.title.replace(/[\\/:*?"<>|]/g,'-')+'.'+format,filters:[{name:format.toUpperCase(),extensions:[format]}]});
-      if(result.canceled)return false;
-      let content=format==='omc'?encodeFile(current):data.content;
-      if(typeof content!=='string'||content.length>100*1024*1024)throw Error('Invalid export data');
-      if(format==='png')content=Buffer.from(content.replace(/^data:image\/png;base64,/,''),'base64');
-      await atomicWrite(result.filePath,content);return true;
-    }
-    case 'cancel-close':if(!quitting){bridge?.resumeAccepting?.();send({type:'close-cancelled'});}return true;
-    case 'mcp-info':{
-      if(!bridge)return {available:false,error:bridgeError||'MCP is disabled',config:''};
-      const entry=data?.transport==='stdio'
-        ?{command:process.execPath,args:[app.isPackaged?path.join(process.resourcesPath,'mcp-cli.cjs'):path.join(root,'dist/mcp-cli.cjs'),'--runtime',bridge.file],env:{ELECTRON_RUN_AS_NODE:'1'}}
-        :{url:bridge.url,bearer_token_env_var:'OMC_MCP_TOKEN'};
-      const text=JSON.stringify({mcpServers:{'oh-my-canvas':entry}},null,2);
-      if(data?.copy)clipboard.writeText(text);
-      return {available:true,config:text,port:bridge.port,url:bridge.url,runtime:bridge.file,certificatePath:bridge.certFile};
-    }
-    case 'host':{
-      requireCurrent();await stopSession();const c=new Collaboration({replica:current.replica,id:current.id,title:current.title,name:prefs.name});bindSession(c);
-      try{await c.host({port:Number(data?.port)||0});}catch(e){await stopSession();throw e;}
-      const addresses=Object.values(os.networkInterfaces()).flat().filter(a=>a?.family==='IPv4'&&!a.internal).map(a=>a.address);
-      return {port:c.port,addresses};
-    }
-    case 'invite':return collab?.invite(data.address);
-    case 'join':{
-      const invitation=parseInvite(data.invite);await save();await stopSession();
-      let record;
-      try{record=await store.load(invitation.room);}catch(e){if(e.code!=='ENOENT')throw e;}
-      if(!record){
-        // Join a new replica with no seed history. Welcome supplies the host's state.
-        record={id:invitation.room,title:limitedTitle(invitation.title),createdAt:new Date().toISOString(),replica:new Replica()};
-      }
-      const c=new Collaboration({replica:record.replica,id:record.id,title:record.title,name:prefs.name});
-      try{
-        // Do not expose an uninitialized replica to the renderer or autosave.
-        await c.join(data.invite);
-        cancelTools('Document changed');await bridge?.resetSessions?.();await save();current?.unsubscribe?.();current?.replica.destroy();current=record;seq=0;current.bootstrapNonce=randomUUID();current.bootstrapBase=current.replica.document;
-        current.unsubscribe=current.replica.onUpdate(()=>{dirty();send({type:'document',...snapshot()});});bindSession(c);await save();send({type:'session',status:c.status()});return {...snapshot(),bootstrapNonce:current.bootstrapNonce};
-      }catch(e){await c.close();record.replica.destroy();throw e;}
-    }
-    case 'leave':await stopSession();return true;
-    case 'cursor':collab?.cursor(data);return true;
-    default:throw Error('Unknown app action');
+  function secure(wc,url){
+    wc.setWindowOpenHandler(()=>({action:'deny'}));
+    wc.on('will-navigate',(event,next)=>{if(next!==url)event.preventDefault();});
   }
-};
-let operations=Promise.resolve();
-ipcMain.handle('omc:invoke',async(event,action,data)=>{trusted(event);if(action==='pick-files')return fileDialogs.pick(data);if(action==='cursor')return dispatch(action,data);const result=operations.then(()=>dispatch(action,data));operations=result.catch(()=>{});return result;});
-ipcMain.on('omc:tool-result',(event,id,result)=>{trusted(event);const pending=pendingTools.get(id);if(pending){clearTimeout(pending.timer);pendingTools.delete(id);pending.resolve(result);}});
-if(!process.argv.includes('--mcp-disabled'))try{
-  const override=process.argv.find(arg=>arg.startsWith('--mcp-port='))?.slice(11);
-  const port=override===undefined?(profile?0:MCP_PORT):Number(override);
-  if(!Number.isInteger(port)||port<0||port>65535)throw Error('Invalid MCP port');
-  bridge=await startMcpBridge({dir,port,endSession:endAgent,dispatch:(call,{signal}={})=>{
-    if(quitting)throw Error('Editor is closing');
-    if(!current)throw Error('Open a document in Oh My Canvas first');
-    if(!win||win.isDestroyed()||win.webContents.isDestroyed())throw Error('Editor is unavailable');
-    if(pendingTools.size>=8)throw Error('Too many pending MCP requests');
-    if(signal?.aborted)throw Error('MCP request cancelled');
+  function disposeRuntime(entry){
+    const runtime=entry.runtime;if(!runtime)return;
+    cancelRequests('Document runtime closed',request=>request.entry===entry);
+    senders.delete(runtime.sender.id);entry.runtime=null;
+    if(win&&!win.isDestroyed())win.contentView.removeChildView(runtime.view);
+    if(!runtime.sender.isDestroyed())runtime.sender.close({waitForBeforeUnload:false});
+  }
+  function createRuntime(entry){
+    const generation=entry.generation,url=`omc://canvas/document.html?documentId=${entry.record.id}&generation=${generation}`;
+    const view=new WebContentsView({webPreferences:{preload:path.join(root,'dist/preload.cjs'),backgroundThrottling:false,contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}});
+    const runtime={view,sender:view.webContents,url,generation};
+    senders.set(runtime.sender.id,{entry,generation,url});secure(runtime.sender,url);
+    win.contentView.addChildView(view);const [width,height]=win.getContentSize();view.setBounds({x:0,y:40,width:Math.max(1,width),height:Math.max(1,height-40)});view.setVisible(false);
+    const stopped=()=>{if(entry.runtime!==runtime)return;cancelRequests('Document renderer restarted; read fresh context before retrying',request=>request.entry===entry);senders.delete(runtime.sender.id);if(!win.isDestroyed())win.contentView.removeChildView(view);manager.runtimeGone(entry);if(!runtime.sender.isDestroyed())runtime.sender.close({waitForBeforeUnload:false});sendShell({type:'error',message:`${entry.record.title}: document renderer stopped. Reopen its tab to recover.`});};
+    runtime.sender.on('render-process-gone',stopped);runtime.sender.on('destroyed',stopped);
+    void runtime.sender.loadURL(url).catch(error=>manager.ready(entry,generation,error));
+    return runtime;
+  }
+  const manager=createDocumentManager({store,createRuntime,disposeRuntime,flushRuntime:entry=>runtimeRequest(entry,'flush'),canDispose:entry=>![...pending.values()].some(request=>request.entry===entry),onChange:state=>{layoutViews();sendShell({type:'workspace',...state});sendShell({type:'library-changed'});},onEvent:(entry,message)=>{sendRuntime(entry,message);if(message.type==='saved'||message.type==='metadata')sendShell({type:'library-changed'});}});
+  function source(event){
+    if(event.sender===win?.webContents&&event.senderFrame?.url==='omc://canvas/index.html')return {role:'shell'};
+    const registered=senders.get(event.sender.id);
+    if(!registered||registered.entry.runtime?.sender!==event.sender||registered.generation!==registered.entry.generation||event.senderFrame?.url!==registered.url)throw Error('Untrusted IPC sender');
+    return {role:'document',...registered,sender:event.sender};
+  }
+  function checkIdentity(entry,data){if(data?.id!==undefined&&data.id!==entry.record.id||data?.documentId!==undefined&&data.documentId!==entry.record.id||data?.generation!==undefined&&data.generation!==entry.generation)throw Object.assign(Error('Renderer document identity mismatch'),{code:'document_changed'});}
+  function requestRuntime(entry,message,{signal,agent}={}){
+    if(!entry.runtime)throw Object.assign(Error('Document renderer is unavailable; reopen it'),{code:'runtime_restarted'});
+    if(signal?.aborted)throw signal.reason;
+    const runtime=entry.runtime,generation=entry.generation,id=randomUUID();
     return new Promise((resolve,reject)=>{
-      const id=randomUUID();
-      const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);pendingTools.delete(id);};
-      const cancel=reason=>{cleanup();send({type:'tool-cancel',id});reject(Error(reason));};
-      const abort=()=>cancel('MCP request cancelled; inspect the document before retrying');
-      const timer=setTimeout(()=>cancel('Editor tool timed out; inspect the document before retrying'),63000);
-      pendingTools.set(id,{agent:call.agent,timer,cancel,resolve:result=>{cleanup();resolve(result);}});
-      signal?.addEventListener('abort',abort,{once:true});send({type:'tool',id,call});
+      const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);pending.delete(id);};
+      const cancel=reason=>{cleanup();if(!runtime.sender.isDestroyed())runtime.sender.send('omc:event',{type:'tool-cancel',id,documentId:entry.record.id,generation});reject(Object.assign(Error(reason),{code:'cancelled'}));};
+      const abort=()=>cancel('MCP request cancelled; persisted changes are not rolled back. Inspect the addressed document before retrying.');
+      const timer=setTimeout(()=>cancel('Document runtime timed out; inspect its context before retrying'),63000);
+      pending.set(id,{id,entry,generation,sender:runtime.sender,agent,cancel,resolve:result=>{cleanup();resolve(result);}});
+      signal?.addEventListener('abort',abort,{once:true});
+      runtime.sender.send('omc:event',{...message,id,documentId:entry.record.id,generation});
     });
-  }});
-}catch(error){bridgeError=error.code==='EADDRINUSE'?'MCP port is already in use. Close the other listener or choose --mcp-port.':error.message;}
-const mime={'.html':'text/html','.js':'application/javascript','.mjs':'application/javascript','.css':'text/css','.wasm':'application/wasm','.woff2':'font/woff2','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'};
-protocol.handle('omc',async req=>{
-  const u=new URL(req.url);if(u.hostname!=='canvas')return new Response('Not found',{status:404});
-  let name;try{name=decodeURIComponent(u.pathname);}catch{return new Response('Invalid path',{status:400});}
-  const base=path.join(root,'dist'),file=path.resolve(base,'.'+name);
-  if(!file.startsWith(base+path.sep))return new Response('Forbidden',{status:403});
-  try{return new Response(await fs.readFile(file),{headers:{'Content-Type':mime[path.extname(file)]||'application/octet-stream','Content-Security-Policy':"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'"}});}catch{return new Response('Not found',{status:404});}
-});
-win=new BrowserWindow({show:!backgroundTest,width:1500,height:980,minWidth:960,minHeight:640,title:'Oh My Canvas',backgroundColor:'#ffffff',titleBarStyle:'hiddenInset',trafficLightPosition:{x:18,y:20},webPreferences:{preload:path.join(root,'dist/preload.cjs'),backgroundThrottling:false,contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}});
-win.webContents.on('render-process-gone',()=>{cancelTools('Editor renderer stopped');void bridge?.resetSessions?.().catch(()=>{});});
-win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
-win.webContents.on('will-navigate',(event,url)=>{if(url!=='omc://canvas/index.html')event.preventDefault();});
-win.webContents.session.setPermissionRequestHandler((_,__,cb)=>cb(false));
-win.webContents.session.on('will-download',event=>event.preventDefault());
-Menu.setApplicationMenu(Menu.buildFromTemplate([
-  {label:'Oh My Canvas',submenu:[{role:'about'},{type:'separator'},{role:'hide'},{role:'hideOthers'},{type:'separator'},{role:'quit'}]},
-  {label:'File',submenu:[{label:'New canvas',accelerator:'CmdOrCtrl+N',click:()=>send({type:'command',name:'new'})},{label:'Open…',accelerator:'CmdOrCtrl+O',click:()=>send({type:'command',name:'import'})},{label:'Document library',accelerator:'CmdOrCtrl+Shift+L',click:()=>send({type:'command',name:'library'})},{label:'Save',accelerator:'CmdOrCtrl+S',click:()=>save().catch(e=>send({type:'error',message:e.message}))}]},
-  {label:'Edit',submenu:[{label:'Undo',accelerator:'CmdOrCtrl+Z',click:()=>send({type:'command',name:'undo'})},{label:'Redo',accelerator:'CmdOrCtrl+Shift+Z',click:()=>send({type:'command',name:'redo'})},{type:'separator'},{role:'cut'},{role:'copy'},{role:'paste'},{role:'selectAll'}]},
-  {label:'View',submenu:[{role:'togglefullscreen'},...(process.argv.includes('--debug-ui')?[{role:'toggleDevTools'}]:[])]}
-]));
-await win.loadURL('omc://canvas/index.html');
-if(bridgeError)send({type:'error',message:'MCP unavailable: '+bridgeError});
-app.on('second-instance',()=>{if(!backgroundTest){win?.show();win?.focus();}});
-win.on('close',event=>{if(!quitting){event.preventDefault();bridge?.stopAccepting();cancelTools('Editor is closing');send({type:'closing'});}});
-ipcMain.handle('omc:ready-to-close',async event=>{trusted(event);if(quitting)return;quitting=true;bridge?.stopAccepting();cancelTools('Editor is closing');try{await operations;await save();await stopSession();await bridge?.close();app.quit();}catch(e){quitting=false;bridge?.resumeAccepting?.();send({type:'close-cancelled'});send({type:'error',message:'Could not save before closing: '+e.message});}});
-app.on('window-all-closed',()=>app.quit());
+  }
+  function runtimeRequest(entry,name,args={}){return requestRuntime(entry,{type:'runtime-request',name,args}).then(result=>{if(result?.ok===false)throw Object.assign(Error(result.error?.message??'Document operation failed'),{code:result.error?.code??'failed'});return result;});}
+  async function tool(entry,call,signal){
+    const generation=entry.generation,{documentId,...args}=call.args;
+    const result=await requestRuntime(entry,{type:'tool',call:{...call,args,documentId:entry.record.id,generation}},{signal,agent:call.agent});
+    if(entry.generation!==generation)throw Object.assign(Error('Document runtime restarted; read fresh context'),{code:'runtime_restarted'});
+    const structuredContent={...result.structuredContent,documentId:entry.record.id,document:{id:entry.record.id,title:entry.record.title},generation,...call.name==='get_context'?{activeTabId:manager.state().activeTabId,visible:manager.state().activeTabId===entry.record.id}:{}};
+    if(call.name==='get_context'&&!result.isError){if(!contexts.has(call.agent))contexts.set(call.agent,new Map());contexts.get(call.agent).set(entry.record.id,generation);}
+    return {...result,content:[{type:'text',text:JSON.stringify(structuredContent)},...(result.content??[]).filter(content=>content.type!=='text')],structuredContent};
+  }
+  const response=value=>({content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value});
+  async function library(){const docs=await store.list();return docs.map(doc=>{const entry=manager.entries.get(doc.id);return {...doc,...entry?{title:entry.record.title,open:entry.tabOpen,inUse:!!(entry.agents.size||entry.collab||[...pending.values()].some(request=>request.entry===entry))}:{open:false,inUse:false}};});}
+  async function workspaceTool(call,signal){
+    if(call.name==='list_documents'){
+      const docs=(await library()).filter(doc=>doc.title.toLocaleLowerCase().includes((call.args.query??'').toLocaleLowerCase())),offset=call.args.offset??0,limit=call.args.limit??50,state=manager.state();
+      signal?.throwIfAborted();return response({ok:true,documents:docs.slice(offset,offset+limit).map(({thumbnail,...doc})=>doc),total:docs.length,nextOffset:offset+limit<docs.length?offset+limit:null,...state,boundDocumentId:manager.bindings.get(call.agent)??null,view:state.libraryVisible?'library':'editor'});
+    }
+    return replay.run(call.agent,call.context?.idempotencyKey,call.name,call.args,async()=>{
+      signal?.throwIfAborted();
+      if(call.name==='rename_document'){
+        const entry=manager.entries.get(call.args.id);
+        if(entry?.runtime){const context=await tool(entry,{name:'get_context',args:{},agent:call.agent},signal);if(context.isError)return context;if(context.structuredContent.editing)throw Object.assign(Error('A user edit is in progress in this canvas'),{code:'busy'});}
+        const document=await manager.rename(call.args.id,call.args.title,{signal});signal?.throwIfAborted();return response({ok:true,document,documentId:document.id});
+      }
+      const options={agent:call.agent,focus:call.args.focus??false,signal};let entry;
+      if(call.name==='open_document')entry=await manager.open(call.args.id,options);
+      else if(call.name==='create_document')entry=await manager.create(call.args.title,blankDocument(),options);
+      else entry=await manager.duplicate(call.args.id,call.args.title,options);
+      signal?.throwIfAborted();const context=await tool(entry,{name:'get_context',args:{},agent:call.agent},signal);
+      if(context.isError)return context;
+      return response({ok:true,revision:context.structuredContent.revision,document:{id:entry.record.id,title:entry.record.title},documentId:entry.record.id,generation:entry.generation,context:context.structuredContent});
+    });
+  }
+  async function mcpDispatch(call,{signal}={}){
+    if(closing||quitting)throw Error('Application is closing');
+    const invalid=validateDesktopToolArgs(call.name,call.args);if(invalid)throw Object.assign(Error('Invalid tool arguments: '+invalid),{code:'bad_args'});
+    if(workspaceNames.has(call.name))return workspaceTool(call,signal);
+    const id=manager.resolve(call.agent,call.args.documentId,mutations.has(call.name));
+    const admitted=manager.entries.get(id),admittedGeneration=admitted?.runtime||admitted?.starting?admitted.generation:null;
+    const entry=await manager.load(id);
+    signal?.throwIfAborted();
+    if(call.name!=='get_context'&&entry.generation>0&&!entry.runtime&&!entry.starting)throw Object.assign(Error('Document runtime restarted; read get_context before retrying'),{code:'runtime_restarted'});
+    try{await manager.ensureRuntime(entry);signal?.throwIfAborted();}catch(error){await manager.release(entry);throw error;}
+    if(!entry.agents.has(call.agent)){entry.agents.add(call.agent);manager.changed();}
+    const observed=contexts.get(call.agent)?.get(id);
+    if(call.name!=='get_context'&&(admittedGeneration!==null&&entry.generation!==admittedGeneration||observed!==undefined&&observed!==entry.generation))throw Object.assign(Error('Document runtime restarted; read get_context before retrying'),{code:'runtime_restarted'});
+    return tool(entry,call,signal);
+  }
+  async function endAgent(agent){cancelRequests('MCP session ended',request=>request.agent===agent);contexts.delete(agent);replay.end(agent);for(const entry of manager.entries.values())sendRuntime(entry,{type:'tool-session-end',agent});await manager.endAgent(agent);}
+  async function preferences(data){
+    const task=prefsWork.then(async()=>{if(data){const next={...prefs,name:String(data.name||prefs.name).slice(0,40)};if(typeof data.toggleStar==='string'&&/^[a-zA-Z0-9-]{1,64}$/.test(data.toggleStar)){const starred=new Set(next.starred||[]);if(starred.has(data.toggleStar))starred.delete(data.toggleStar);else if(starred.size<10000)starred.add(data.toggleStar);next.starred=[...starred];}if(['grid','list'].includes(data.view))next.view=data.view;await atomicWrite(path.join(dir,'preferences.json'),JSON.stringify(next));prefs=next;}return structuredClone(prefs);});prefsWork=task.catch(()=>{});return task;
+  }
+  async function stopSession(entry){const previous=entry.collab;entry.collab=null;await previous?.close();sendRuntime(entry,{type:'session',status:{mode:'offline',peers:[]}});manager.changed();}
+  function bindSession(entry,collab){entry.collab=collab;collab.on('status',status=>{sendRuntime(entry,{type:'session',status});manager.changed();});collab.on('cursor',data=>sendRuntime(entry,{type:'cursor',...data}));collab.on('warning',message=>sendRuntime(entry,{type:'error',message}));}
+  async function join(data){
+    const invitation=parseInvite(data.invite);let entry,created=false;
+    try{entry=await manager.load(invitation.room);}catch(error){if(error.code!=='ENOENT')throw error;entry=await manager.load(invitation.room,{id:invitation.room,title:canvasTitle(invitation.title??'Shared canvas'),createdAt:new Date().toISOString(),replica:new Replica()});created=true;}
+    entry.holds=(entry.holds??0)+1;let collab,joined=false;
+    try{if(entry.runtime)await runtimeRequest(entry,'flush');await stopSession(entry);collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:prefs.name});await collab.join(data.invite);joined=true;bindSession(entry,collab);await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.activate(entry.record.id);return {document:{id:entry.record.id,title:entry.record.title}};}
+    catch(error){await collab?.close();if(entry.collab===collab)entry.collab=null;throw error;}
+    finally{entry.holds--;if(created&&!joined&&!entry.runtime&&!entry.collab)manager.discard(entry);}
+  }
+  async function importFile(){
+    const result=await fileDialogs.open({title:'Open canvas',filters:[{name:'Canvas documents',extensions:['omc','json']}],properties:['openFile']});if(result.canceled)return null;
+    const stat=await fs.stat(result.filePaths[0]);if(stat.size>MAX_ENVELOPE_BYTES)throw Error('Document file exceeds 24 MiB');
+    const raw=await fs.readFile(result.filePaths[0],'utf8');
+    if(!result.filePaths[0].endsWith('.omc'))return {json:JSON.parse(raw),title:path.basename(result.filePaths[0],'.json')};
+    const record=decodeFile(raw);let entry;
+    if(manager.entries.has(record.id)){entry=await manager.load(record.id,record);}
+    else {try{const existing=await store.load(record.id);try{record.replica.receive(existing.replica.state);}finally{existing.replica.destroy();}}catch(error){if(error.code!=='ENOENT'){record.replica.destroy();throw error;}}entry=await manager.load(record.id,record);}
+    entry.holds=(entry.holds??0)+1;
+    try{await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.activate(entry.record.id);return {opened:metadata(entry)};}
+    finally{entry.holds--;if(!entry.runtime&&!entry.tabOpen&&!entry.agents.size&&!entry.collab)await manager.release(entry);}
+  }
+  function mcpInfo(data){
+    if(!bridge)return {available:false,error:bridgeError||'MCP is disabled',config:''};
+    const entry=data?.transport==='stdio'?{command:process.execPath,args:[app.isPackaged?path.join(process.resourcesPath,'mcp-cli.cjs'):path.join(root,'dist/mcp-cli.cjs'),'--runtime',bridge.file],env:{ELECTRON_RUN_AS_NODE:'1'}}:{url:bridge.url,bearer_token_env_var:'OMC_MCP_TOKEN'};
+    const config=JSON.stringify({mcpServers:{'oh-my-canvas':entry}},null,2);if(data?.copy)clipboard.writeText(config);return {available:true,config,port:bridge.port,url:bridge.url,runtime:bridge.file,certificatePath:bridge.certFile};
+  }
+  async function documentAction(entry,action,data){
+    checkIdentity(entry,data);const generation=entry.generation;
+    switch(action){
+      case 'snapshot':return manager.snapshot(entry);
+      case 'runtime-ready':manager.ready(entry,entry.generation,data?.ok===false||data?.error?data.error??Error('Document renderer failed'):null);return metadata(entry);
+      case 'bootstrap':{
+        if(entry.seq!==0||typeof data?.nonce!=='string'||data.nonce!==entry.bootstrapNonce)throw Error('Invalid canvas initialization');
+        if(!same(entry.bootstrapBase,entry.record.replica.document)){entry.bootstrapNonce=randomUUID();entry.bootstrapBase=entry.record.replica.document;return {...manager.snapshot(entry),bootstrapRetry:true};}
+        entry.bootstrapNonce=null;entry.bootstrapBase=null;entry.record.replica.patch(data.changes,'Initialize canvas',undefined,{recordHistory:false});await manager.save(entry);manager.confirmGeneration(entry,generation);return manager.snapshot(entry);
+      }
+      case 'commit':if(!Number.isSafeInteger(data.seq))throw Error('Invalid edit sequence');if(data.seq<=entry.seq)return manager.snapshot(entry);entry.record.replica.patch(data.changes,data.label,data.group);await manager.save(entry);manager.confirmGeneration(entry,generation);entry.seq=data.seq;return manager.snapshot(entry);
+      case 'undo':{
+        if(data?.requestId){const request=pending.get(data.requestId);if(!request||request.agent!==data.agent||request.entry!==entry)throw Error('MCP Undo request cancelled');}
+        if(data?.agent&&entry.record.replica.undo.undoStack.at(-1)?.meta.get('label')!==`agent:${data.agent}`)return false;
+        entry.record.replica.history('undo');await manager.save(entry);manager.confirmGeneration(entry,generation);return manager.snapshot(entry);
+      }
+      case 'redo':entry.record.replica.history('redo');await manager.save(entry);manager.confirmGeneration(entry,generation);return manager.snapshot(entry);
+      case 'flush':await manager.save(entry);return true;
+      case 'rename':return manager.rename(entry.record.id,data.title);
+      case 'thumbnail':if(typeof data.src==='string'&&data.src.startsWith('data:image/')&&data.src.length<500000){entry.record.thumbnail=data.src;await manager.save(entry);}return true;
+      case 'host':{
+        await stopSession(entry);const collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:prefs.name});bindSession(entry,collab);
+        try{await collab.host({port:Number(data?.port)||0});}catch(error){await stopSession(entry);throw error;}
+        return {port:collab.port,addresses:Object.values(os.networkInterfaces()).flat().filter(address=>address?.family==='IPv4'&&!address.internal).map(address=>address.address)};
+      }
+      case 'invite':return entry.collab?.invite(data.address);
+      case 'leave':await stopSession(entry);return true;
+      case 'cursor':entry.collab?.cursor(data);return true;
+      case 'export-file':{const file=exportFileData(data),result=await fileDialogs.save({defaultPath:file.name,filters:[{name:file.format.toUpperCase(),extensions:[file.format]}]});if(result.canceled)return false;await atomicWrite(result.filePath,file.bytes);return true;}
+      case 'export':{
+        const format=data.format;if(!['omc','json','svg','png'].includes(format))throw Error('Unsupported export');
+        const result=await fileDialogs.save({defaultPath:entry.record.title.replace(/[\\/:*?"<>|]/g,'-')+'.'+format,filters:[{name:format.toUpperCase(),extensions:[format]}]});if(result.canceled)return false;
+        let content=format==='omc'?encodeFile(entry.record):data.content;if(typeof content!=='string'||content.length>100*1024*1024)throw Error('Invalid export data');if(format==='png')content=Buffer.from(content.replace(/^data:image\/png;base64,/,''),'base64');await atomicWrite(result.filePath,content);return true;
+      }
+      default:throw Error('Unknown document action');
+    }
+  }
+  const runtimeActions=new Set(['snapshot','runtime-ready','bootstrap','commit','undo','redo','flush','rename','thumbnail','host','invite','leave','cursor','export','export-file']);
+  ipcMain.handle('omc:invoke',async(event,action,data)=>{
+    const sender=source(event);
+    if(action==='preferences')return preferences(data);
+    if(action==='mcp-info')return mcpInfo(data);
+    if(action==='pick-files')return fileDialogs.pick(data);
+    if(action==='join')return join(data);
+    if(action==='show-library')return manager.showLibrary();
+    if(sender.role==='document'){
+      if(!runtimeActions.has(action))throw Error('Action is unavailable to a document renderer');
+      if(action==='cursor'||action==='runtime-ready'||action==='snapshot')return documentAction(sender.entry,action,data);
+      return manager.enqueue(sender.entry,()=>{manager.confirmGeneration(sender.entry,sender.generation);if(sender.entry.runtime?.sender!==sender.sender)throw Object.assign(Error('Document renderer sender changed before this operation could run'),{code:'runtime_restarted'});return documentAction(sender.entry,action,data);});
+    }
+    if(action==='workspace')return manager.state();
+    if(action==='library')return library();
+    if(action==='activate-document'){const entry=await manager.open(data.id,{focus:true});return {...metadata(entry),...manager.state()};}
+    if(action==='close-document')return manager.closeTab(data.id);
+    if(action==='runtime-command'){const id=data?.id??manager.state().activeTabId;if(!id)throw Error('Select a canvas first');const entry=manager.entries.get(id);if(!entry?.runtime)throw Error('Document renderer is unavailable');return runtimeRequest(entry,'command',{name:data.name});}
+    const operation=shellWork.then(async()=>{
+      if(action==='create'){const document=data?.document?assertDocument(data.document):data?.sample?sampleDocument():blankDocument();const entry=await manager.create(data?.title??(data?.sample?'Studio 01':'Untitled canvas'),document,{focus:data?.focus??true});return {...metadata(entry),...manager.state()};}
+      if(action==='open'){const entry=await manager.open(data.id,{focus:data.focus??true});return {...metadata(entry),...manager.state()};}
+      if(action==='rename')return manager.rename(data.id,data.title);
+      if(action==='duplicate'){const entry=await manager.duplicate(data.id,data.title,{focus:data.focus??true});return {...metadata(entry),...manager.state()};}
+      if(action==='import')return importFile();
+      if(action==='delete'){
+        const entry=manager.entries.get(data.id);if(entry&&(entry.agents.size||entry.collab||[...pending.values()].some(request=>request.entry===entry)))throw Error('Canvas is in use by an agent or collaboration session. End that work before deleting it.');
+        if(entry)await manager.closeTab(data.id);await store.remove(data.id);sendShell({type:'library-changed'});return true;
+      }
+      if(action==='cancel-close'){closing=false;bridge?.resumeAccepting?.();return true;}
+      throw Error('Unknown app action');
+    });shellWork=operation.catch(()=>{});return operation;
+  });
+  ipcMain.on('omc:tool-result',(event,id,result)=>{
+    let sender;try{sender=source(event);}catch{return;}
+    const request=pending.get(id);
+    if(sender.role!=='document'||!request||request.sender!==event.sender||request.entry!==sender.entry||request.generation!==sender.generation)return;
+    request.resolve(result);
+  });
+  if(!process.argv.includes('--mcp-disabled'))try{
+    const override=process.argv.find(value=>value.startsWith('--mcp-port='))?.slice(11),port=override===undefined?(profile?0:MCP_PORT):Number(override);
+    if(!Number.isInteger(port)||port<0||port>65535)throw Error('Invalid MCP port');
+    bridge=await startMcpBridge({dir,port,endSession:endAgent,dispatch:(call,options)=>{const task=mcpDispatch(call,options);activeCalls.add(task);void task.then(()=>activeCalls.delete(task),()=>activeCalls.delete(task));return task;}});
+  }catch(error){bridgeError=error.code==='EADDRINUSE'?'MCP port is already in use. Close the other listener or choose --mcp-port.':error.message;}
+  const mime={'.html':'text/html','.js':'application/javascript','.mjs':'application/javascript','.css':'text/css','.wasm':'application/wasm','.woff2':'font/woff2','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'};
+  protocol.handle('omc',async request=>{
+    const url=new URL(request.url);if(url.hostname!=='canvas')return new Response('Not found',{status:404});
+    let name;try{name=decodeURIComponent(url.pathname);}catch{return new Response('Invalid path',{status:400});}
+    const base=path.join(root,'dist'),file=path.resolve(base,'.'+name);if(!file.startsWith(base+path.sep))return new Response('Forbidden',{status:403});
+    try{return new Response(await fs.readFile(file),{headers:{'Content-Type':mime[path.extname(file)]||'application/octet-stream','Content-Security-Policy':"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'"}});}catch{return new Response('Not found',{status:404});}
+  });
+  win=new BrowserWindow({show:!backgroundTest,width:1500,height:980,minWidth:960,minHeight:640,title:'Oh My Canvas',backgroundColor:'#ffffff',titleBarStyle:'hiddenInset',trafficLightPosition:{x:18,y:10},webPreferences:{preload:path.join(root,'dist/preload.cjs'),backgroundThrottling:false,contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}});
+  secure(win.webContents,'omc://canvas/index.html');
+  win.webContents.session.setPermissionRequestHandler((_,__,callback)=>callback(false));win.webContents.session.on('will-download',event=>event.preventDefault());
+  win.on('resize',layoutViews);
+  function activeCommand(name){const id=manager.state().activeTabId;if(id){const entry=manager.entries.get(id);if(entry)sendRuntime(entry,{type:'command',name});}else sendShell({type:'error',message:'Select a canvas first'});}
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    {label:'Oh My Canvas',submenu:[{role:'about'},{type:'separator'},{role:'hide'},{role:'hideOthers'},{type:'separator'},{role:'quit'}]},
+    {label:'File',submenu:[{label:'New canvas',accelerator:'CmdOrCtrl+N',click:()=>sendShell({type:'command',name:'new'})},{label:'Open…',accelerator:'CmdOrCtrl+O',click:()=>sendShell({type:'command',name:'import'})},{label:'Document library',accelerator:'CmdOrCtrl+Shift+L',click:()=>sendShell({type:'command',name:'library'})},{label:'Rename canvas',click:()=>activeCommand('rename')},{label:'Export canvas',click:()=>activeCommand('export')},{label:'Save',accelerator:'CmdOrCtrl+S',click:()=>activeCommand('save')}]},
+    {label:'Edit',submenu:[{label:'Undo',accelerator:'CmdOrCtrl+Z',click:()=>activeCommand('undo')},{label:'Redo',accelerator:'CmdOrCtrl+Shift+Z',click:()=>activeCommand('redo')},{type:'separator'},{role:'cut'},{role:'copy'},{role:'paste'},{role:'selectAll'}]},
+    {label:'View',submenu:[{role:'togglefullscreen'},...(process.argv.includes('--debug-ui')?[{role:'toggleDevTools'}]:[])]}
+  ]));
+  async function closeApplication(){
+    if(closing||quitting)return;closing=true;bridge?.stopAccepting();cancelRequests('Application is closing');
+    try{
+      await shellWork;await Promise.allSettled([...activeCalls]);
+      const results=await Promise.allSettled([...manager.entries.values()].filter(entry=>entry.runtime).map(async entry=>{try{await runtimeRequest(entry,'close');}catch(error){throw Error(entry.record.title+': '+error.message);}}));
+      const failed=results.find(result=>result.status==='rejected');if(failed)throw failed.reason;
+      for(const entry of manager.entries.values())await stopSession(entry);
+      await manager.flushAll();await bridge?.close();await manager.disposeAll();quitting=true;win.close();app.quit();
+    }catch(error){closing=false;bridge?.resumeAccepting?.();for(const entry of manager.entries.values())sendRuntime(entry,{type:'close-cancelled'});sendShell({type:'error',message:'Could not save before closing: '+error.message});const id=manager.state().activeTabId;if(id)sendRuntime(manager.entries.get(id),{type:'error',message:'Could not save before closing: '+error.message});}
+  }
+  win.on('close',event=>{if(!quitting){event.preventDefault();void closeApplication();}});
+  app.on('before-quit',event=>{if(!quitting){event.preventDefault();void closeApplication();}});
+  ipcMain.handle('omc:ready-to-close',async event=>{source(event);await closeApplication();});
+  app.on('second-instance',()=>{if(!backgroundTest){win.show();win.focus();}});
+  app.on('window-all-closed',()=>{if(quitting)app.quit();});
+  await win.loadURL('omc://canvas/index.html');if(bridgeError)sendShell({type:'error',message:'MCP unavailable: '+bridgeError});
 }).catch(error=>{console.error(error);dialog.showErrorBox('Oh My Canvas could not start',error.message);app.exit(1);});
 }

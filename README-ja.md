@@ -2,7 +2,7 @@
 <h1 align="center">Oh My Canvas</h1>
 <p align="center"><strong>あなたのキャンバス。あなたのファイル。あなたのエージェント。</strong></p>
 <p align="center">再利用できるコンポーネント、MCP、最大4人の共同編集を備えたローカルのデザインスタジオ。</p>
-<p align="center"><img src="assets/readme/badges.svg" alt="ローカルファースト · MCPツール19個 · 最大4人で共同編集 · macOS arm64対象" width="660"></p>
+<p align="center"><img src="assets/readme/badges.svg" alt="ローカルファースト · MCPツール31個 · 最大4人で共同編集 · macOS arm64対象" width="660"></p>
 <p align="center"><a href="README.md">English</a> · <a href="README-ko.md">한국어</a> · <strong>日本語</strong> · <a href="README-zh-CN.md">简体中文</a></p>
 <p align="center"><a href="#quick-start">クイックスタート</a> · <a href="#screenshots">スクリーンショット</a> · <a href="#components">コンポーネント</a> · <a href="#mcp">MCP</a> · <a href="#contributing">貢献する</a></p>
 
@@ -96,11 +96,13 @@ npm run dist:mac
 
 ## エージェントにも本物のキャンバスを
 
-MCP now defaults to the app-owned Streamable HTTP endpoint `https://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. The client must trust this profile's TLS certificate; the app never installs OS trust. Open a canvas and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
+MCP now defaults to the app-owned Streamable HTTP endpoint `https://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. The client must trust this profile's TLS certificate; the app never installs OS trust. Keep the app running and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
 
 > 開いているキャンバスに1440 × 900のダッシュボードを作ってください。青、水色、淡いラベンダー、白、黒を使い、ナビゲーションとボタンを再利用できるコンポーネントにしてください。最後にスクリーンショットで確認してください。
 
-まず `get_context` と `get_guide` を呼び、次に `create_board`、`write_html`、`update`、`components`、`component` などを使用します。ツールは **19個** あります。コンポーネント操作は `batch` の外で呼び出します。バリアント切り替え後は、新しい選択IDが返る場合があります。エージェントの編集も、ユーザーの編集と同じ保存・共同編集Undoの経路を通ります。
+Choose a canvas with `list_documents` and `open_document` or `create_document`, then read `get_context` and `get_guide`. Supply its `documentId` to every document mutation; then use `create_board`, `write_html`, `update`, `components`, and `component`. There are **31 tools**. Component actions run outside `batch`; variant switching can return a new selection ID. Agent edits use the same persistence and collaborative Undo path as local edits.
+
+The desktop MCP can list, create, open, rename, and duplicate local canvases without manual library clicks. Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Use stable document IDs with `rename_document` and `duplicate_document`; `select_page` changes the active page. Multiple canvases stay open in tabs, with independent background editors for agents. MCP open/create/duplicate default to background operation; `focus:true` reveals the result. Tab switching preserves each session’s target, and explicit document IDs also separate repositories sharing one transport. In the UI, click the canvas title to edit it in place; Enter or blur saves and Escape cancels. **File → Rename canvas** opens the same inline field. The library also offers **Actions → Rename canvas**. See the [workspace tool contract](docs/MCP.md#documents-and-pages).
 
 ユーザーが文字を入力したり値をスクラブ操作したりしている間も、読み取りツールは使用できます。エージェントの変更操作とUndoは `busy` を返すので、ユーザーのトランザクション終了後に再試行してください。MCPブリッジは認証付きのループバック専用で、共同編集とは分離されています。**MCPのポートを転送したり、`mcp-runtime.json` を共有したりしないでください。**
 

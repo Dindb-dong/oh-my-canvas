@@ -1,10 +1,33 @@
 # Local MCP connection and recovery
 
-The app owns the HTTPS endpoint `https://127.0.0.1:47831/mcp` during normal operation. It uses the installed official SDK's **2025-11-25 protocol family**, including initialize and session IDs. It does not claim support for the later sessionless protocol. There are 19 tools; start with `get_context` and `get_guide`.
+The app owns the HTTPS endpoint `https://127.0.0.1:47831/mcp` during normal operation. It uses the installed official SDK's **2025-11-25 protocol family**, including initialize and session IDs. It does not claim support for the later sessionless protocol. The desktop catalog has 31 tools. Start with `list_documents`, choose a document, then read `get_context` and `get_guide`. The reusable embedded editor exposes 26 editor tools.
 
-Open a canvas and keep the app running. **MCP → Copy configuration** provides URL configuration without embedding the secret. The app never rewrites global client settings. A failed MCP startup leaves local editing available; inspect the connection dialog rather than forwarding a port or disabling authentication. A port conflict never falls back to a random port during normal operation or terminates another process.
+Keep the app running; document discovery and creation work even in an empty library. **MCP → Copy configuration** provides URL configuration without embedding the secret. The app never rewrites global client settings. A failed MCP startup leaves local editing available; inspect the connection dialog rather than forwarding a port or disabling authentication. A port conflict never falls back to a random port during normal operation or terminates another process.
 
 For isolated development and test profiles, `--profile=/absolute/profile` uses an ephemeral port. `--mcp-port=0` explicitly selects an ephemeral port; `--mcp-port=47832` selects a separate fixed port. `--mcp-disabled` runs the editor without MCP. Use the URL shown by that profile, rather than assuming the normal port.
+
+## Documents and pages
+
+The desktop library belongs to the current app profile. It is not a filesystem browser. Document IDs are stable library IDs, distinct from page IDs and session-local layer aliases.
+
+| Tool | Arguments | Behavior |
+|---|---|---|
+| `list_documents` | `query?`, `offset?`, `limit?` | Return metadata, `total`, `nextOffset`, tabs, `activeTabId`, and the caller's `boundDocumentId`. Default page size 50, maximum 100. No thumbnail or document payload. |
+| `create_document` | `title?`, `focus?` | Create, persist and mount a blank canvas; bind the caller. |
+| `open_document` | `id`, `focus?` | Mount an existing canvas and bind the caller, retaining other document runtimes and sessions. |
+| `rename_document` | `id`, `title` | Persist the specified canvas name without changing the caller's binding or visible tab. |
+| `duplicate_document` | `id`, `title?`, `focus?` | Flush and copy the specified canvas, then bind the caller to the copy. |
+| `select_page` | `documentId`, `id` | Select an existing page inside the specified canvas. No page creation/deletion. |
+
+MCP open/create/duplicate default to `focus:false`; pass `focus:true` to reveal the canvas. UI actions reveal their result. Switching tabs never changes an agent's binding. Reads accept an explicit `documentId` or use the session's bound document. **Every document mutation requires `documentId`**, including `select_page`, `undo`, component actions and `batch`. A batch has one outer document ID; nested overrides are rejected. This also supports several repositories sharing one transport session: use the intended stable document ID on every call.
+
+Titles are trimmed, nonempty strings of at most 120 characters. Unknown properties, invalid IDs and out-of-range pagination fail validation. Lifecycle success waits for persistence and editor initialization. Document edits use the targeted canvas's gesture/dialog guard; another canvas's editing does not block them. Renaming does not rename a portable export or synchronize titles between collaborators.
+
+Example: `list_documents({query:"Product"})` → `open_document({id:"<document ID>"})` → `get_context({documentId:"<document ID>"})` → `select_page({documentId:"<document ID>",id:"<page ID>"})`. Use the resulting context before editing: `create_board({documentId:"<document ID>",name:"Dashboard",width:1440,height:900})`. `rename_document({id:"<document ID>",title:"Product exploration"})` also works for an inactive canvas.
+
+The app keeps an independent editor, page, selection, Undo history and render context for each resident canvas. Closing a tab saves it. If an MCP agent or collaboration session still uses it, its runtime remains available in the background; the library reports that activity. End those sessions before deleting that canvas. Up to eight document runtimes can be resident; an additional open returns `resource_limit` without evicting active work. Close an unused tab or end its agent session to release resources. App shutdown flushes all resident canvases; a save failure keeps the app open and reports the error.
+
+Document deletion, arbitrary file-path import/export, profile switching and collaboration invitations are not MCP tools. The library rename entry is **Actions → Rename canvas**; an open canvas title edits in place on click, with Enter/blur to save and Escape to cancel. **File → Rename canvas** opens the same field.
 
 ## Credentials and registration
 
@@ -34,11 +57,13 @@ Use the HTTP registration on its own. Do not combine `command`, `args`, `ELECTRO
 
 ## Sessions, cancellation, and uncertain results
 
-Every initialized HTTP session receives a separate server-generated agent, even when clients have identical names or JSON-RPC request IDs. Aliases, Undo ownership, and idempotency keys belong to that agent. DELETE, idle expiry, and successful app shutdown end the session. If saving prevents a native close, the app resumes the same session with its aliases, Undo ownership, and completed replay-cache entries intact. A new document mount also replaces the dispatcher. Reconnect with `get_context`; discard old aliases and Undo expectations. A new session may assign `n1` to a different object.
+Every initialized HTTP session receives a separate server-generated agent, even when clients have identical names or JSON-RPC request IDs. Aliases, Undo ownership, and idempotency keys belong to that agent within the targeted document runtime. DELETE, idle expiry, and successful app shutdown end the session. A failed native close resumes the session and its completed replay entries. Tab switching, library navigation and opening another canvas preserve existing sessions and aliases.
+
+Requests capture their explicit document and runtime generation at admission. A renderer restart invalidates only that canvas's in-flight work and aliases; read fresh `get_context` before retrying it. A queued page-scoped mutation fails if that canvas's page context changed, including a switch away and back. The app never redirects a stale request to the visible canvas. Responses identify the addressed `documentId` and generation; `get_context` also reports whether that canvas is visible.
 
 Explicit SDK cancellation stops queued work and font preparation before mutation. Disconnecting a socket is not an explicit cancellation. A write that already applied is not automatically undone when its response is cancelled or lost. Success responses continue to wait for durable persistence.
 
-After a timeout, lost response, or restart, read the current document before deciding whether to issue another write. Never automatically replay `create_board`, `duplicate`, `write_html`, or `undo`. The optional `oh-my-canvas/idempotency-key` metadata deduplicates matching calls only within the live agent's bounded in-memory cache (500 entries / 8 MiB). It does not provide exactly-once behavior across session termination, document replacement, eviction, or app restart.
+After a timeout, lost response, or restart, read the explicitly addressed document before deciding whether to issue another write. Never automatically replay `create_board`, `duplicate`, `write_html`, or `undo`. The optional `oh-my-canvas/idempotency-key` metadata deduplicates matching calls only within the live agent's bounded in-memory cache (500 entries / 8 MiB for editor operations). Workspace mutations keep a separate cache across tab changes, bounded to 100 entries / 1 MiB across live agents. It does not provide exactly-once behavior across session termination, eviction, or app restart; editor-layer replay entries are also lost when that document runtime is disposed or restarted.
 
 ## Stdio rollout and rollback
 
@@ -52,6 +77,6 @@ Existing stdio processes are not automatically killed. End their client connecti
 
 ## Local checks
 
-After building, `node scripts/mcp-http-e2e.mjs` launches an isolated real Electron profile and exercises official SDK sessions over certificate-pinned HTTPS, tools, author isolation, failed-close cache preservation, durable readback, and restart invalidation. `node scripts/packaged-smoke.mjs` checks both certificate-pinned HTTPS and the bundled stdio CLI in the packaged app. Automated Electron checks opt into `OMC_TEST_BACKGROUND=1` with isolated `--profile` directories. The main process suppresses Dock activation and creates the window hidden before loading it; normal development launch is unchanged. The failed-close fixture intentionally replaces its temporary `documents` directory with a file and expects a filesystem error such as `EEXIST` or `ENOTDIR`, then restores the directory. That error is test injection in a synthetic profile, not evidence of a user-profile save failure.
+After building, `node scripts/multi-document-e2e.mjs` exercises same-profile concurrent document targeting, shared transports, background rendering, tab close, IPC identity and renderer restart. `node scripts/workspace-mcp-e2e.mjs` checks empty-library discovery, document lifecycle, session isolation, rename UI and restart persistence using a synthetic profile. `node scripts/mcp-http-e2e.mjs` launches an isolated real Electron profile and exercises official SDK sessions over certificate-pinned HTTPS, tools, author isolation, failed-close cache preservation, durable readback, and restart invalidation. `node scripts/packaged-smoke.mjs` checks both certificate-pinned HTTPS and the bundled stdio CLI in the packaged app. Automated Electron checks opt into `OMC_TEST_BACKGROUND=1` with isolated `--profile` directories. The main process suppresses Dock activation and creates the window hidden before loading it; normal development launch is unchanged. The failed-close fixture intentionally replaces its temporary `documents` directory with a file and expects a filesystem error such as `EEXIST` or `ENOTDIR`, then restores the directory. That error is test injection in a synthetic profile, not evidence of a user-profile save failure.
 
 These checks do not establish certificate trust or credential inheritance by an independently launched Codex GUI.
