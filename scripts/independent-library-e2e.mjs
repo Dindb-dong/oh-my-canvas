@@ -1,3 +1,4 @@
+import {documentPage,libraryPage} from './desktop-test-pages.mjs';
 /** Fresh full-library desktop regression. No inherited test source used. */
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
@@ -77,6 +78,7 @@ async function waitSnapshot(predicate, label, timeout = 45000) {
 }
 async function ready() {
     stage('waiting-editor-ready');
+    page=await documentPage(app);
     await page.waitForFunction(() => window.lvMcp && document.querySelector('#editor')?.inert === false, null, { timeout: 120000 });
     await page.locator('#editor #stage').waitFor({ state: 'visible', timeout: 120000 });
 }
@@ -99,29 +101,8 @@ async function launch() {
 async function close() {
     if (!app)
         return;
-    const closing = app, child = closing.process();
-    const exited = new Promise(resolve => {
-        if (child.exitCode !== null)
-            resolve();
-        else
-            child.once('exit', resolve);
-    });
-    let timer;
-    try {
-        await Promise.race([page.evaluate(() => window.omc.readyToClose()), new Promise((_, reject) => setTimeout(() => reject(Error('Renderer close handshake timeout')), 5000))]).catch(error => {
-            if (!/closed|destroyed/i.test(String(error))) {
-                closing.process().kill('SIGTERM');
-                throw error;
-            }
-        });
-        await Promise.race([exited, new Promise((_, reject) => {
-                timer = setTimeout(() => reject(Error('Desktop close did not finish')), 20000);
-            })]);
-        app = null;
-    }
-    finally {
-        clearTimeout(timer);
-    }
+    await app.close();
+    app=null;
 }
 async function assets() {
     await page.locator('#editor .ltabs').getByRole('button', { name: 'Assets', exact: true }).click();
@@ -240,6 +221,7 @@ try {
     await image('03-main-edit-propagation.png');
     // Navigation finishes queued editor/host commits; portable decode independently verifies the disk result.
     await page.locator('#home').click();
+    page=await libraryPage(app);
     await page.locator(`[data-open="${documentId}"]`).waitFor();
     const persisted = decodeFile(await fs.readFile(path.join(profile, 'documents', `${documentId}.omc`), 'utf8'));
     assert.equal(persisted.replica.document.pagesById[pageId].objects[insertedId].width, mainWidth);

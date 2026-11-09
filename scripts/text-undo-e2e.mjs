@@ -1,3 +1,4 @@
+import {documentPage,libraryPage} from './desktop-test-pages.mjs';
 import {_electron as electron} from 'playwright';
 import {promises as fs} from 'node:fs';import path from 'node:path';import os from 'node:os';import assert from 'node:assert/strict';
 
@@ -5,8 +6,8 @@ const profile=await fs.mkdtemp(path.join(os.tmpdir(),'omc-text-undo-'));
 const agent='text-undo-agent';let app,child;const errors=[];
 try{
   app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath:process.argv.includes('--installed')?'/Applications/Oh My Canvas.app/Contents/MacOS/Oh My Canvas':undefined,args:[process.cwd(),`--profile=${profile}`]});child=app.process();
-  const p=await app.firstWindow();p.setDefaultTimeout(15000);p.on('pageerror',e=>errors.push(e.message));
-  await p.locator('#new').click();await p.waitForFunction(()=>!!window.lvMcp);
+  let p=await app.firstWindow();p.setDefaultTimeout(15000);p.on('pageerror',e=>errors.push(e.message));
+  await p.locator('#new').click();p=await documentPage(app);await p.waitForFunction(()=>!!window.lvMcp);
   const tool=async(name,args={})=>p.evaluate(({agent,name,args})=>window.lvMcp.handleToolCall(agent,name,args),{agent,name,args});
   const call=async(name,args={})=>{const r=await tool(name,args);assert.ok(!r.isError,JSON.stringify(r));return r.structuredContent;};
   const board=(await call('get_context')).boards[0];
@@ -43,6 +44,6 @@ try{
   const result={passed:true,checks:['real textarea typing after MCP edit','durable acknowledgements preserve the live text session and focus','native-menu Undo/Redo routes to active text session','one global Undo restores the whole ended typing session','native-menu Redo restores all keystrokes','agent Undo refuses later user input','separate text sessions remain separate undo steps'],rendererErrors:errors,at:new Date().toISOString()};
   await fs.writeFile('docs/qa/text-undo-result.json',JSON.stringify(result,null,2));console.log('PASS actual Electron text typing, native-menu Undo/Redo, session grouping and agent ownership');
 }finally{
-  if(app){await app.evaluate(({app})=>app.exit(0)).catch(()=>{});if(child.exitCode===null&&child.signalCode===null)await new Promise(resolve=>child.once('exit',resolve));}
+  if(app){await app.close().catch(()=>{});if(child.exitCode===null&&child.signalCode===null)await new Promise(resolve=>child.once('exit',resolve));}
   await fs.rm(profile,{recursive:true,force:true});
 }

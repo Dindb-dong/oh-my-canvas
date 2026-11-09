@@ -1,3 +1,4 @@
+import {documentPage} from './desktop-test-pages.mjs';
 import {_electron as electron} from 'playwright';
 import {promises as fs} from 'node:fs';
 import os from 'node:os';import path from 'node:path';import assert from 'node:assert/strict';
@@ -23,7 +24,8 @@ async function assertPortableLinks(directory){
 }
 try{
   await assertPortableLinks(path.resolve('release/mac-arm64/Oh My Canvas.app'));
-  app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath,args:[`--profile=${dir}`],timeout:30000});child=app.process();const page=await app.firstWindow();assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),false,'Packaged synthetic test window must start hidden');await page.locator('#start-sample').click();await page.waitForFunction(()=>!!window.lvMcp);
+  app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath,args:[`--profile=${dir}`],timeout:30000});child=app.process();let page=await app.firstWindow();assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),false,'Packaged synthetic test window must start hidden');await page.locator('#start-sample').click();page=await documentPage(app);await page.waitForFunction(()=>!!window.lvMcp);
+  const documentId=(await page.evaluate(()=>window.omc.invoke('snapshot'))).id;
   const runtime=await app.evaluate(()=>process.versions.electron),expected=JSON.parse(await fs.readFile('node_modules/electron/package.json','utf8')).version;assert.equal(runtime,expected);
   const archive=path.resolve('release/mac-arm64/Oh My Canvas.app/Contents/Resources/app.asar'),hash=createHash('sha256');
   for(const directory of ['core','electron','dist/assets'])for(const name of (await fs.readdir(directory)).sort()){
@@ -35,7 +37,7 @@ try{
   assert.equal(config.command,executablePath);assert.ok(!config.args[0].includes('app.asar/'));
   client=new Client({name:'packaged-smoke',version:'1'},{capabilities:{}});await client.connect(new StdioClientTransport(config));
   assert.deepEqual((await client.listTools()).tools.map(tool=>tool.name).sort(),TOOLS.map(tool=>tool.name).sort());
-  const result=await client.callTool({name:'create_board',arguments:{name:'Packaged MCP',width:320,height:200}});assert.ok(!result.isError,JSON.stringify(result));
+  const result=await client.callTool({name:'create_board',arguments:{documentId,name:'Packaged MCP',width:320,height:200}});assert.ok(!result.isError,JSON.stringify(result));
   await client.close();client=null;
   const descriptor=JSON.parse(await fs.readFile(path.join(dir,'mcp-runtime.json'),'utf8'));
   assert.equal(descriptor.version,2);assert.equal('token' in descriptor,false);
@@ -43,7 +45,7 @@ try{
   client=new Client({name:'packaged-http-smoke',version:'1'},{capabilities:{}});
   const transport=new StreamableHTTPClientTransport(new URL(`https://127.0.0.1:${descriptor.port}/mcp`),{fetch:createMcpFetch(await fs.readFile(descriptor.certFile,'utf8')),requestInit:{headers:{Authorization:`Bearer ${token}`}}});
   await client.connect(transport);assert.deepEqual((await client.listTools()).tools.map(tool=>tool.name).sort(),TOOLS.map(tool=>tool.name).sort());
-  assert.ok(!(await client.callTool({name:'get_context',arguments:{}})).isError);
+  assert.ok(!(await client.callTool({name:'get_context',arguments:{documentId}})).isError);
   await transport.terminateSession();await client.close();client=null;
   const tree=await page.evaluate(()=>window.lvMcp.handleToolCall('smoke','get_tree',{depth:1}));assert.match(JSON.stringify(tree),/Packaged MCP/);
   await page.screenshot({path:path.join(output,'packaged-app.png')});
@@ -52,6 +54,6 @@ try{
   console.log('PASS packaged macOS app + standalone bundled MCP CLI + persistent edit');
 }catch(error){console.error('PACKAGED CHECK FAILED:',error);throw error;}finally{
   await client?.close().catch(()=>{});
-  if(app){await app.evaluate(({app})=>app.exit(0)).catch(()=>{});if(child)await new Promise(r=>{if(child.exitCode!==null||child.signalCode!==null)r();else child.once('exit',r);});}
+  if(app){await app.close().catch(()=>{});if(child)await new Promise(r=>{if(child.exitCode!==null||child.signalCode!==null)r();else child.once('exit',r);});}
   await fs.rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:150});
 }

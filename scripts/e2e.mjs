@@ -1,3 +1,4 @@
+import {documentPage,libraryPage} from './desktop-test-pages.mjs';
 import {_electron as electron} from 'playwright';
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
@@ -27,6 +28,7 @@ try{
   const host=await launch(0);
   await host.page.screenshot({path:'docs/qa/library-empty.png'});
   await host.page.locator('#start-sample').click();
+  host.page=await documentPage(host.app);pages[0]=host.page;
   await host.page.waitForFunction(()=>!!window.lvMcp,{timeout:20000});
   console.log('PASS Electron opens sample editor');
   await host.page.evaluate(()=>document.fonts.ready);
@@ -36,7 +38,8 @@ try{
   const invite=await host.page.evaluate(port=>window.omc.invoke('invite',{address:`127.0.0.1:${port}`}),hostInfo.port);
   for(let i=1;i<4;i++){
     const guest=await launch(i);
-    await guest.page.locator('#collaborate').click();await guest.page.locator('#tab-join').click();await guest.page.locator('#join-invite').fill(invite);await guest.page.locator('#join-session').click();
+    await guest.page.locator('#collaborate').click();await guest.page.locator('#join-invite').fill(invite);await guest.page.locator('#join-form button').click();
+    guest.page=await documentPage(guest.app);pages[i]=guest.page;
     await guest.page.waitForFunction(()=>!!window.lvMcp,{timeout:20000});
   }
   await waitFor(async()=>await host.page.locator('#peers .avatar').count()===4);
@@ -59,7 +62,8 @@ try{
   client=new Client({name:'oh-my-canvas-e2e',version:'1'},{capabilities:{}});
   await client.connect(new StdioClientTransport({command:process.execPath,args:[path.join(root,'dist/mcp-cli.cjs'),'--runtime',path.join(host.profile,'mcp-runtime.json')]}));
   const tools=await client.listTools();assert.ok(tools.tools.some(t=>t.name==='write_html'));
-  const remote=await client.callTool({name:'get_context',arguments:{}});assert.equal(remote.isError,undefined);
+  const documentId=(await host.page.evaluate(()=>window.omc.invoke('snapshot'))).id;
+  const remote=await client.callTool({name:'get_context',arguments:{documentId}});assert.equal(remote.isError,undefined);
   console.log('PASS official MCP SDK stdio initialize/list/call to actual renderer');
   await client.close();client=null;
   // Exercise native export handlers with test-owned dialog destinations.
@@ -80,8 +84,8 @@ try{
   console.log('PASS saved offline changes merge after rejoining');
   await host.page.locator('#collaborate').click();await host.page.screenshot({path:'docs/qa/collaboration.png'});await host.page.locator('.close').click();
   await host.app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1000,720));await host.page.screenshot({path:'docs/qa/editor-narrow.png'});await host.app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1500,980));
-  await host.page.locator('#home').click();await host.page.locator('[data-open]').first().waitFor();await host.page.screenshot({path:'docs/qa/library-populated.png'});
-  await host.page.locator('[data-open]').first().click();await host.page.waitForFunction(()=>!!window.lvMcp);
+  await host.page.locator('#home').click();const shell=await libraryPage(host.app);await shell.locator('[data-open]').first().waitFor();await shell.screenshot({path:'docs/qa/library-populated.png'});
+  await shell.locator(`[data-open="${documentId}"]`).click();host.page=await documentPage(host.app,documentId);await host.page.waitForFunction(()=>!!window.lvMcp);
   const after=text(await tool(host.page,'get_tree',{depth:1}));assert.ok(after.includes('Peer 4'));
   console.log('PASS local save and reopen retains collaborative changes');
   await host.app.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},path.join(dir,'export.omc'));
@@ -93,6 +97,6 @@ try{
 }finally{
   if(client)await client.close().catch(()=>{});
   for(const page of pages)await page.evaluate(()=>window.omc.invoke('flush')).catch(()=>{});
-  for(const app of apps){await app.evaluate(({app})=>app.exit(0)).catch(()=>{});await new Promise(r=>{if(app.process().exitCode!==null)r();else app.process().once('exit',r);});}
+  for(const app of apps)await app.close().catch(()=>{});
   await fs.rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:150});
 }

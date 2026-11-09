@@ -1,3 +1,4 @@
+import {documentPage,libraryPage} from './desktop-test-pages.mjs';
 import { _electron as electron } from "playwright";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
@@ -150,11 +151,7 @@ async function objects() {
 }
 async function fresh(items = []) {
     await page.keyboard.press("Escape");
-    if (await page.locator("#home").isVisible())
-        await page.locator("#home").click();
-    await page.locator("#import").waitFor({
-        state: "visible"
-    });
+    page=await libraryPage(app,{closeTabs:true});
     const file = path.join(profile, `fixture-${fixtureNumber++}.json`);
     await fs.writeFile(file, JSON.stringify(fixture(items)));
     await app.evaluate(({ dialog }, file) => {
@@ -164,6 +161,7 @@ async function fresh(items = []) {
         });
     }, file);
     await page.locator("#import").click();
+    page=await documentPage(app);
     await until(async () => {
         const o = await objects();
         return o.board && Object.keys(o).length === items.length + 2;

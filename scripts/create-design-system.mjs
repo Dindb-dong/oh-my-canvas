@@ -1,3 +1,4 @@
+import {requireDocumentTarget} from './desktop-test-pages.mjs';
 /** Dogfood the public MCP API: every sample becomes a real main, grouped into variant sets. */
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -81,9 +82,10 @@ if(process.argv.includes('--resume')){
  for(const record of previous.families){const page=Object.values(resumeDoc.pagesById).find(p=>p.objects[resumeDoc.components[record.components[0].componentId].mainId]);records.push({...record,board:Object.values(page.objects).find(s=>s.name?.endsWith('/ '+record.name)).id,set:resumeDoc.components[record.components[0].componentId].variantSetId,components:record.components.map(c=>({...c,id:resumeDoc.components[c.componentId].mainId}))});}
 }
 
-async function call(name,args={}){const r=await c.callTool({name,arguments:args});if(r.isError)throw Error(name+': '+JSON.stringify(r));return r;}
+let documentId;
+async function call(name,args={}){const r=await c.callTool({name,arguments:{...args,documentId}});if(r.isError)throw Error(name+': '+JSON.stringify(r));return r;}
 try{
- await c.connect(new StdioClientTransport({command,args,env:{...process.env,...(process.env.OMC_MCP_COMMAND?{ELECTRON_RUN_AS_NODE:'1'}:{})}}));
+ await c.connect(new StdioClientTransport({command,args,env:{...process.env,...(process.env.OMC_MCP_COMMAND?{ELECTRON_RUN_AS_NODE:'1'}:{})}}));documentId=await requireDocumentTarget(c);
  const context=await call('get_context');assert.ok(context.structuredContent,'Open a document in the app first');
  if(resumeDoc){
   const live=(await call('components')).structuredContent;
