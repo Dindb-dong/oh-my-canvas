@@ -9,19 +9,19 @@ import {createMcpFetch} from '../core/mcp-fetch.mjs';
 
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-http-e2e-'));
 const clients=[],errors=[],checks=[];
-let app,page,port,token,certificate,mcpFetch,documentId,conflictApp;
+let app,page,port,token,certificate,mcpFetch,documentId,conflictApp,appChild,conflictChild;
 const record=name=>{checks.push(name);console.log('PASS '+name);};
 const call=(client,name,args={},meta)=>client.callTool({name,arguments:args,...meta?{_meta:meta}:{}});
 const snapshot=()=>page.evaluate(()=>window.omc.invoke('snapshot'));
 const count=(snap,name)=>Object.values(snap.document.pagesById).flatMap(p=>Object.values(p.objects)).filter(s=>s.name===name).length;
 async function launch(){
   app=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath:process.env.OMC_TEST_EXECUTABLE,args:[...process.env.OMC_TEST_EXECUTABLE?[]:[process.cwd()],`--profile=${dir}`,`--mcp-port=${port??0}`],timeout:30000});
-  page=await app.firstWindow();
+  appChild=app.process();page=await app.firstWindow();
   assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),false,'Synthetic MCP test window must start hidden');
   page.on('pageerror',error=>errors.push(error.message));
   await page.locator('#new').waitFor();
   if(documentId)await page.locator(`[data-open="${documentId}"]`).click();else await page.locator('#start-sample').click();
-  await page.waitForFunction(()=>!!window.lvMcp,null,{timeout:30000});
+  await page.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor').inert,null,{timeout:30000});
   const runtime=JSON.parse(await fs.readFile(path.join(dir,'mcp-runtime.json'),'utf8'));
   assert.equal(runtime.version,2);assert.equal('token' in runtime,false);
   const currentToken=await fs.readFile(path.join(dir,'mcp-token-v2'),'utf8');
@@ -37,16 +37,11 @@ async function connect(){
   clients.push(client);await client.connect(transport);return {client,transport};
 }
 async function gracefulClose(instance){
-  const child=instance.process();let timer;
-  const exited=child.exitCode!==null||child.signalCode!==null?Promise.resolve():new Promise(resolve=>child.once('exit',resolve));
-  try{
-    await Promise.race([(async()=>{
-      try{await instance.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());}
-      catch(error){if(!/Target page, context or browser has been closed/.test(error.message))throw error;}
-      await exited;assert.equal(child.exitCode,0);assert.equal(child.signalCode,null);
-    })(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('App shutdown exceeded 10 seconds')),10000);})]);
-  }finally{clearTimeout(timer);}
+  const child=instance.process();
+  // Official close detaches Playwright's inspector after the app's save-and-quit path.
+  await instance.close();assert.equal(child.exitCode,0);assert.equal(child.signalCode,null);
 }
+
 async function stop(){if(app){await gracefulClose(app);app=null;}}
 
 try{
@@ -55,11 +50,11 @@ try{
   assert.equal(info.available,true);assert.ok(!JSON.stringify(info).includes(token));
   assert.deepEqual(JSON.parse(info.config).mcpServers['oh-my-canvas'],{url:`https://127.0.0.1:${port}/mcp`,bearer_token_env_var:'OMC_MCP_TOKEN'});
   conflictApp=await electron.launch({env:{...process.env,OMC_TEST_BACKGROUND:'1'},executablePath:process.env.OMC_TEST_EXECUTABLE,args:[...process.env.OMC_TEST_EXECUTABLE?[]:[process.cwd()],`--profile=${path.join(dir,'conflict')}`,`--mcp-port=${port}`],timeout:30000});
-  const conflictPage=await conflictApp.firstWindow();
+  conflictChild=conflictApp.process();const conflictPage=await conflictApp.firstWindow();
   assert.equal(await conflictApp.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),false,'Synthetic conflict test window must start hidden');
   await conflictPage.locator('#new').waitFor();
   assert.equal((await conflictPage.evaluate(()=>window.omc.invoke('mcp-info'))).available,false);
-  await conflictPage.locator('#start-sample').click();await conflictPage.waitForFunction(()=>!!window.lvMcp,null,{timeout:30000});
+  await conflictPage.locator('#start-sample').click();await conflictPage.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor').inert,null,{timeout:30000});
   await gracefulClose(conflictApp);
   conflictApp=null;record('secret-free URL configuration and port-conflict editing without fallback');
   const a=await connect(),b=await connect();
@@ -123,9 +118,9 @@ try{
   record('document replacement invalidates the previous HTTP session');
   assert.deepEqual(errors,[]);await stop();
   console.log(JSON.stringify({passed:true,protocol:'2025-11-25',checks,rendererErrors:errors}));
-}finally{
+}catch(error){console.error('HTTP E2E failed:',error.stack);throw error;}finally{
   await Promise.allSettled(clients.map(client=>client.close()));
-  if(conflictApp){const child=conflictApp.process();await conflictApp.evaluate(({app})=>app.exit(0)).catch(()=>{});if(child.exitCode===null&&child.signalCode===null)await new Promise(resolve=>child.once('exit',resolve));}
-  if(app){const child=app.process();await app.evaluate(({app})=>app.exit(0)).catch(()=>{});if(child.exitCode===null&&child.signalCode===null)await new Promise(resolve=>child.once('exit',resolve));}
+  if(conflictApp){const child=conflictChild;await conflictApp.evaluate(({app})=>app.exit(0)).catch(()=>{});if(child.exitCode===null&&child.signalCode===null)await new Promise(resolve=>child.once('exit',resolve));}
+  if(app){const child=appChild;await app.evaluate(({app})=>app.exit(0)).catch(()=>{});if(child.exitCode===null&&child.signalCode===null)await new Promise(resolve=>child.once('exit',resolve));}
   await fs.rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100});
 }
