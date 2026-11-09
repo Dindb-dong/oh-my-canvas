@@ -11,6 +11,7 @@ import {exportFileData} from '../core/export-file.mjs';
 import {assertDocument,same,MAX_ENVELOPE_BYTES} from '../core/document.mjs';
 import {Collaboration,parseInvite} from '../core/collaboration.mjs';
 import {startMcpBridge,MCP_PORT} from './mcp-bridge.mjs';
+import {canvasTitle,renameDocument} from './document-actions.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 app.setName('oh-my-canvas');
@@ -23,13 +24,16 @@ if(!app.requestSingleInstanceLock()){app.quit();}else{
 protocol.registerSchemesAsPrivileged([{scheme:'omc',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true,stream:true}}]);
 app.whenReady().then(async()=>{
 const fileDialogs=createFileDialogs(dialog);
+const {WORKSPACE_TOOLS,validateToolArgs}=await import('../dist/tool-defs.mjs');
+const workspaceNames=new Set(WORKSPACE_TOOLS.map(tool=>tool.name));
 const dir=app.getPath('userData'),store=new Store(path.join(dir,'documents'));
 let win,current,collab,bridge,bridgeError,saveTimer,quitting=false,seq=0;
 let prefs={name:os.userInfo().username},prefsWork=Promise.resolve();
 try{prefs={...prefs,...JSON.parse(await fs.readFile(path.join(dir,'preferences.json'),'utf8'))};}catch{}
 const pendingTools=new Map();
-function cancelTools(reason,agent){
+function cancelTools(reason,agent,exceptId){
   for(const [id,pending] of pendingTools){
+    if(id===exceptId)continue;
     if(agent&&pending.agent!==agent)continue;
     pending.cancel(reason);
   }
@@ -42,13 +46,21 @@ let saveWork=Promise.resolve();
 async function save(){clearTimeout(saveTimer);if(current){const record=current;saveWork=store.save(record);await saveWork;send({type:'saved',id:record.id,at:Date.now()});}}
 function dirty(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>save().catch(e=>send({type:'error',message:'Save failed: '+e.message})),400);}
 async function stopSession(){if(collab){const previous=collab;collab=null;await previous.close();}send({type:'session',status:{mode:'offline',peers:[]}});}
-async function open(record){
+function navigationRequest(data,action){
+  if(data?.mcpRequestId===undefined)return null;
+  const request=pendingTools.get(data.mcpRequestId);
+  if(!request||request.name!==({create:'create_document',open:'open_document',duplicate:'duplicate_document'})[action])throw Error('MCP navigation request cancelled');
+  return {id:data.mcpRequestId,agent:request.agent,check(){if(pendingTools.get(data.mcpRequestId)!==request)throw Error('MCP navigation request cancelled; inspect the library before retrying');}};
+}
+async function open(record,navigation){
   const recovered=!!record.recovered;
-  cancelTools('Document changed');await bridge?.resetSessions?.();
-  await save();await stopSession();current?.unsubscribe?.();current?.replica.destroy();
+  try{navigation?.check();await save();navigation?.check();if(current?.id===record.id)record.replica.receive(current.replica.state);await store.save(record);navigation?.check();
+  cancelTools('Document changed',undefined,navigation?.id);await bridge?.resetSessions?.({exceptAgent:navigation?.agent});
+  navigation?.check();await stopSession();await save();if(current?.id===record.id){record.replica.receive(current.replica.state);await store.save(record);}navigation?.check();current?.unsubscribe?.();current?.replica.destroy();
   current=record;seq=0;current.bootstrapNonce=randomUUID();current.bootstrapBase=current.replica.document;
   current.unsubscribe=current.replica.onUpdate(()=>{dirty();send({type:'document',...snapshot()});});
-  await save();return {...snapshot(),recovered,bootstrapNonce:current.bootstrapNonce};
+  return {...snapshot(),recovered,bootstrapNonce:current.bootstrapNonce};
+  }catch(error){if(record!==current)record.replica.destroy();throw error;}
 }
 function bindSession(c){
   collab=c;c.on('status',status=>send({type:'session',status}));c.on('cursor',data=>send({type:'cursor',...data}));
@@ -74,10 +86,10 @@ const dispatch=async(action,data)=>{
         return structuredClone(prefs);
       });prefsWork=task.catch(()=>{});return task;
     }
-    case 'create':{assertDocument(data.document);const record={id:randomUUID(),title:limitedTitle(data.title),createdAt:new Date().toISOString(),replica:new Replica({document:data.document})};return open(record);}
-    case 'open':return open(await store.load(data.id));
-    case 'rename':{requireCurrent();current.title=limitedTitle(data.title);await save();return snapshot();}
-    case 'duplicate':{const original=await store.load(data.id);const record={id:randomUUID(),title:original.title+' copy',createdAt:new Date().toISOString(),replica:new Replica({document:original.replica.document}),thumbnail:original.thumbnail};original.replica.destroy();return open(record);}
+    case 'create':{const navigation=navigationRequest(data,'create');assertDocument(data.document);const record={id:randomUUID(),title:limitedTitle(data.title),createdAt:new Date().toISOString(),replica:new Replica({document:data.document})};return open(record,navigation);}
+    case 'open':{const navigation=navigationRequest(data,'open');return open(await store.load(data.id),navigation);}
+    case 'rename':return renameDocument(store,current,data.id??requireCurrent().id,data.title);
+    case 'duplicate':{const navigation=navigationRequest(data,'duplicate');await save();navigation?.check();const original=await store.load(data.id);try{const record={id:randomUUID(),title:data.title===undefined?limitedTitle(original.title+' copy'):canvasTitle(data.title),createdAt:new Date().toISOString(),replica:new Replica({document:original.replica.document}),thumbnail:original.thumbnail};return open(record,navigation);}finally{original.replica.destroy();}}
     case 'delete':{if(current?.id===data.id){cancelTools('Document closed');await bridge?.resetSessions?.();await save();await stopSession();current.unsubscribe?.();current.replica.destroy();current=null;}await store.remove(data.id);return true;}
     case 'bootstrap':{
       requireCurrent();
@@ -171,7 +183,8 @@ if(!process.argv.includes('--mcp-disabled'))try{
   if(!Number.isInteger(port)||port<0||port>65535)throw Error('Invalid MCP port');
   bridge=await startMcpBridge({dir,port,endSession:endAgent,dispatch:(call,{signal}={})=>{
     if(quitting)throw Error('Editor is closing');
-    if(!current)throw Error('Open a document in Oh My Canvas first');
+    if(!workspaceNames.has(call.name)&&!current)throw Error('Use list_documents, then open_document or create_document first');
+    const invalid=validateToolArgs(call.name,call.args);if(invalid)throw Error('Invalid tool arguments: '+invalid);
     if(!win||win.isDestroyed()||win.webContents.isDestroyed())throw Error('Editor is unavailable');
     if(pendingTools.size>=8)throw Error('Too many pending MCP requests');
     if(signal?.aborted)throw Error('MCP request cancelled');
@@ -181,8 +194,8 @@ if(!process.argv.includes('--mcp-disabled'))try{
       const cancel=reason=>{cleanup();send({type:'tool-cancel',id});reject(Error(reason));};
       const abort=()=>cancel('MCP request cancelled; inspect the document before retrying');
       const timer=setTimeout(()=>cancel('Editor tool timed out; inspect the document before retrying'),63000);
-      pendingTools.set(id,{agent:call.agent,timer,cancel,resolve:result=>{cleanup();resolve(result);}});
-      signal?.addEventListener('abort',abort,{once:true});send({type:'tool',id,call});
+      pendingTools.set(id,{agent:call.agent,name:call.name,timer,cancel,resolve:result=>{cleanup();resolve(result);}});
+      signal?.addEventListener('abort',abort,{once:true});send({type:'tool',id,call:{...call,documentId:current?.id??null}});
     });
   }});
 }catch(error){bridgeError=error.code==='EADDRINUSE'?'MCP port is already in use. Close the other listener or choose --mcp-port.':error.message;}
@@ -202,7 +215,7 @@ win.webContents.session.setPermissionRequestHandler((_,__,cb)=>cb(false));
 win.webContents.session.on('will-download',event=>event.preventDefault());
 Menu.setApplicationMenu(Menu.buildFromTemplate([
   {label:'Oh My Canvas',submenu:[{role:'about'},{type:'separator'},{role:'hide'},{role:'hideOthers'},{type:'separator'},{role:'quit'}]},
-  {label:'File',submenu:[{label:'New canvas',accelerator:'CmdOrCtrl+N',click:()=>send({type:'command',name:'new'})},{label:'Open…',accelerator:'CmdOrCtrl+O',click:()=>send({type:'command',name:'import'})},{label:'Document library',accelerator:'CmdOrCtrl+Shift+L',click:()=>send({type:'command',name:'library'})},{label:'Save',accelerator:'CmdOrCtrl+S',click:()=>save().catch(e=>send({type:'error',message:e.message}))}]},
+  {label:'File',submenu:[{label:'New canvas',accelerator:'CmdOrCtrl+N',click:()=>send({type:'command',name:'new'})},{label:'Open…',accelerator:'CmdOrCtrl+O',click:()=>send({type:'command',name:'import'})},{label:'Document library',accelerator:'CmdOrCtrl+Shift+L',click:()=>send({type:'command',name:'library'})},{label:'Rename canvas',click:()=>send({type:'command',name:'rename'})},{label:'Save',accelerator:'CmdOrCtrl+S',click:()=>save().catch(e=>send({type:'error',message:e.message}))}]},
   {label:'Edit',submenu:[{label:'Undo',accelerator:'CmdOrCtrl+Z',click:()=>send({type:'command',name:'undo'})},{label:'Redo',accelerator:'CmdOrCtrl+Shift+Z',click:()=>send({type:'command',name:'redo'})},{type:'separator'},{role:'cut'},{role:'copy'},{role:'paste'},{role:'selectAll'}]},
   {label:'View',submenu:[{role:'togglefullscreen'},...(process.argv.includes('--debug-ui')?[{role:'toggleDevTools'}]:[])]}
 ]));

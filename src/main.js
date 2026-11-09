@@ -5,12 +5,15 @@ import {changesBetween,applyPending,same,assertDocument} from '../core/document.
 import {sampleCanvas,blankCanvas} from './sample';
 import fontFaces from './fonts.json';
 import {removeBackground} from '../editor/images/background';
+import {WORKSPACE_TOOLS,validateToolArgs} from '../editor/mcp/defs';
+import {createWorkspaceReplay} from './workspace-mcp';
 
 const $=s=>document.querySelector(s), api=window.omc;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let handle,mcp,active,lastDoc,pending=[],nextSeq=0,queue=Promise.resolve(),mounting=false,unsubscribe;
 let session={mode:'offline',peers:[]},prefs={},toastTimer,thumbnailTimer,libraryVisible=true,dialogFocus,hosting,sessionTab='host';
 let lastRejected,navigating=false,closing=false;
+const workspaceNames=new Set(WORKSPACE_TOOLS.map(tool=>tool.name)),workspaceReplay=createWorkspaceReplay();
 async function navigate(task){
   if(navigating)throw Error('Wait for the current canvas navigation to finish');
   navigating=true;const wasInert=$('#editor').inert;$('#editor').inert=true;
@@ -24,7 +27,7 @@ const run=fn=>async(...args)=>{try{return await fn(...args);}catch(e){toast(e.me
 function modal(title,body){dialogFocus=document.activeElement;const d=$('#dialog');if(d.open)d.close();$('#dialog-content').innerHTML=`<div class="dialog-heading"><h2>${esc(title)}</h2><button class="close" aria-label="Close dialog">${icon('close')}</button></div>${body}`;$('.close').onclick=()=>d.close();d.showModal();}
 $('#dialog').addEventListener('close',()=>dialogFocus?.focus?.());
 $('#dialog').addEventListener('click',e=>{if(e.target===$('#dialog')){const b=e.target.getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)e.target.close();}});
-function setTitle(){ const file=$('#editor .file-name b');if(file&&active)file.textContent=active.title;$('#document-title').textContent=libraryVisible?'Your canvases':active?.title||'Untitled canvas';$('#export').hidden=libraryVisible;$('#components').hidden=libraryVisible;$('#toggle-layers').hidden=libraryVisible;$('#save-state').textContent=libraryVisible?'Local workspace':'Stored on this computer'; }
+function setTitle(){ const file=$('#editor .file-name b');if(file&&active)file.textContent=active.title;($('#document-name')||$('#document-title')).textContent=libraryVisible?'Your canvases':active?.title||'Untitled canvas';$('#document-title').disabled=libraryVisible;$('#document-title').setAttribute('aria-label',libraryVisible?'Your canvases':'Rename canvas: '+active?.title);if($('#rename-canvas'))$('#rename-canvas').hidden=libraryVisible;$('#export').hidden=libraryVisible;$('#components').hidden=libraryVisible;$('#toggle-layers').hidden=libraryVisible;$('#save-state').textContent=libraryVisible?'Local workspace':'Stored on this computer'; }
 async function settle(flushEditor=true){if(mounting&&flushEditor)throw Error('Wait for the canvas to finish opening');if(flushEditor)await handle?.flush?.();await queue;for(const item of [...pending])project(await api.invoke('commit',{id:active.id,...item}));await api.invoke('flush');}
 function history(action,agent,signal,requestId){const task=queue.then(()=>{signal?.throwIfAborted();return api.invoke(action,{agent,requestId});}).then(snap=>{if(snap)project(snap);return !!snap;});queue=task.catch(()=>{});return task;}
 function project(snap){
@@ -92,7 +95,7 @@ async function openSnapshot(snap){
   lastDoc=latest.document;handle.editor.receiveDocument(latest.document);
   setTitle();
   void updateThumbnail();if(snap.recovered)toast('Recovered the last valid backup. Save a portable copy.',true);
-  }catch(error){mcp?.dispose?.();unsubscribe?.();await handle?.destroy().catch(()=>{});handle=null;throw error;}finally{mounting=false;$('#editor').inert=false;}
+  }catch(error){mcp?.dispose?.();unsubscribe?.();await handle?.destroy().catch(()=>{});handle=null;libraryVisible=true;$('#workspace').hidden=true;$('#library').hidden=false;setTitle();try{libraryDocs=await api.invoke('library');renderLibrary();}catch(refreshError){toast('Could not refresh the library: '+refreshError.message,true);}throw error;}finally{mounting=false;$('#editor').inert=false;}
 }
 async function updateThumbnail(){
   if(!handle||!active)return;const id=active.id;
@@ -117,7 +120,8 @@ function renderLibrary(){
   for(const b of document.querySelectorAll('[data-open]'))b.onclick=run(()=>navigate(async()=>{await settle();await openSnapshot(await api.invoke('open',{id:b.dataset.open}));}));
   for(const b of document.querySelectorAll('[data-more]'))b.onclick=()=>{
     const d=docs.find(x=>x.id===b.dataset.more);
-    modal(d.title,`<div class="export-options"><button id="duplicate-doc" ${d.damaged?'disabled':''}>Duplicate canvas</button><button id="delete-doc" class="danger">Delete from this computer…</button></div>`);
+    modal(d.title,`<div class="export-options"><button id="rename-doc" ${d.damaged?'disabled':''}>Rename canvas</button><button id="duplicate-doc" ${d.damaged?'disabled':''}>Duplicate canvas</button><button id="delete-doc" class="danger">Delete from this computer…</button></div>`);
+    $('#rename-doc').onclick=()=>rename(d);
     $('#duplicate-doc').onclick=run(()=>navigate(async()=>{await settle();$('#dialog').close();await openSnapshot(await api.invoke('duplicate',{id:d.id}));}));
     $('#delete-doc').onclick=()=>{modal('Delete canvas?',`<p>Delete “${esc(d.title)}” and its local backup from this computer? Copies on other computers are kept.</p><div class="actions right"><button id="cancel-delete">Cancel</button><button id="confirm-delete" class="danger">Delete canvas</button></div>`);$('#cancel-delete').onclick=()=>$('#dialog').close();$('#confirm-delete').onclick=run(async()=>{await settle();await api.invoke('delete',{id:d.id});if(active?.id===d.id){mcp?.dispose?.();unsubscribe?.();await handle?.destroy();handle=null;active=null;}$('#dialog').close();await library();});};
   };
@@ -128,7 +132,8 @@ async function importFile(){return navigate(async()=>{
   const doc=f.json.pagesById?assertDocument(f.json):importCanvasJson(f.json);
   await openSnapshot(await api.invoke('create',{document:doc,title:f.title}));
 });}
-function rename(){if(!active||libraryVisible)return;modal('Rename canvas',`<form id="rename-form"><label for="name">Canvas name</label><input id="name" value="${esc(active.title)}" maxlength="120" required><div class="actions right"><button class="primary">Rename</button></div></form>`);$('#name').select();$('#rename-form').onsubmit=run(async e=>{e.preventDefault();const result=await api.invoke('rename',{title:$('#name').value});active.title=result.title;setTitle();$('#dialog').close();});}
+async function applyRename(id,title){const result=await api.invoke('rename',{id,title});if(active?.id===id){active.title=result.title;setTitle();}if(libraryVisible){libraryDocs=await api.invoke('library');renderLibrary();}return result;}
+function rename(target){const doc=target?.id?target:(!libraryVisible?active:null);if(!doc)return;modal('Rename canvas',`<form id="rename-form"><label for="name">Canvas name</label><input id="name" value="${esc(doc.title)}" maxlength="120" required><div class="actions right"><button type="button" id="cancel-rename">Cancel</button><button class="primary">Rename</button></div></form>`);$('#name').select();$('#cancel-rename').onclick=()=>$('#dialog').close();$('#rename-form').onsubmit=run(async e=>{e.preventDefault();await applyRename(doc.id,$('#name').value);$('#dialog').close();});}
 function exportDialog(){
   if(!handle)return;
   modal('Export canvas',`<p>A portable .omc file includes the full editable document, embedded images and merge history.</p><div class="export-options"><button data-format="omc">Oh My Canvas <small>Editable .omc document, for backup and sharing</small></button><button data-format="json">Canvas JSON <small>Open interchange format</small></button><button data-format="svg">SVG <small>Vector export of the selected board</small></button><button data-format="png">PNG <small>Raster preview of the selected board</small></button></div>`);
@@ -149,10 +154,41 @@ function exportDialog(){
   });
 }
 const toolRequests=new Map();
+const toolResponse=value=>({content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value});
+async function workspaceTool(call,id,signal){
+  const invalid=validateToolArgs(call.name,call.args);if(invalid)throw Error('Invalid tool arguments: '+invalid);
+  signal.throwIfAborted();
+  if(call.name==='list_documents'){
+    const query=(call.args.query??'').toLocaleLowerCase(),offset=call.args.offset??0,limit=call.args.limit??50;
+    const docs=(await api.invoke('library')).filter(doc=>doc.title.toLocaleLowerCase().includes(query));signal.throwIfAborted();
+    return toolResponse({ok:true,documents:docs.slice(offset,offset+limit).map(({thumbnail,...doc})=>doc),total:docs.length,nextOffset:offset+limit<docs.length?offset+limit:null,activeDocument:active?{...active}:null,view:libraryVisible?'library':'editor'});
+  }
+  return workspaceReplay.run(call.agent,call.context?.idempotencyKey,call.name,call.args,async()=>{
+    signal.throwIfAborted();
+    if(mounting||navigating||$('#dialog').open||handle?.editingText()||handle?.editor.undo.blocked)throw Error('Canvas is busy; finish the current edit or dialog first');
+    if(call.name==='rename_document'){
+      await settle();signal.throwIfAborted();const document=await applyRename(call.args.id,call.args.title);signal.throwIfAborted();return toolResponse({ok:true,document});
+    }
+    return navigate(async()=>{
+      await settle();signal.throwIfAborted();
+      const request={...call.args,mcpRequestId:id};
+      if(call.name==='open_document'&&active?.id===call.args.id&&handle){libraryVisible=false;$('#library').hidden=true;$('#workspace').hidden=false;setTitle();}
+      else {
+        if(call.name==='create_document'){request.document=importCanvasJson(blankCanvas());request.title=call.args.title??'Untitled canvas';}
+        const action={open_document:'open',create_document:'create',duplicate_document:'duplicate'}[call.name];
+        const snap=await api.invoke(action,request);signal.throwIfAborted();await openSnapshot(snap);
+      }
+      signal.throwIfAborted();const result=await mcp.handleToolCall(call.agent,'get_context',{}, {signal});
+      if(result.isError)throw Error('Canvas opened but context is unavailable; inspect the library before retrying');
+      const document={...active},context={...result.structuredContent,document};
+      return toolResponse({ok:true,revision:context.revision,document,context});
+    });
+  });
+}
 async function mcpDialog(){
   const info=await api.invoke('mcp-info');
   if(!info.available){toast('MCP unavailable: '+info.error,true);return;}
-  modal('Connect your agent',`<p>Use a local MCP client to edit the open canvas. No account, API key or credits are needed.</p><label for="mcp-config">MCP client configuration</label><textarea id="mcp-config" readonly rows="9">${esc(info.config)}</textarea><p class="hint">The HTTPS server talks only on loopback. Trust this profile's public certificate in your client before connecting; never disable TLS verification. Supply OMC_MCP_TOKEN from the private mcp-token-v2 file in your app data directory to your client environment, then restart the client. The configuration contains no secret. Public certificate: ${esc(info.certificatePath)}. Keep this app and a canvas open. Reconnect after an app restart and read get_context before editing; do not automatically retry writes.</p><div class="actions right"><button id="copy-mcp" class="primary">Copy configuration</button></div>`);
+  modal('Connect your agent',`<p>Use a local MCP client to find, open, create and edit canvases. No account, API key or credits are needed.</p><label for="mcp-config">MCP client configuration</label><textarea id="mcp-config" readonly rows="9">${esc(info.config)}</textarea><p class="hint">The HTTPS server talks only on loopback. Trust this profile's public certificate in your client before connecting; never disable TLS verification. Supply OMC_MCP_TOKEN from the private mcp-token-v2 file in your app data directory to your client environment, then restart the client. The configuration contains no secret. Public certificate: ${esc(info.certificatePath)}. Keep this app open. Start with list_documents, then open_document or create_document and read get_context before editing. Agent navigation keeps its initiating connection; other clients reconnect. Do not automatically retry writes.</p><div class="actions right"><button id="copy-mcp" class="primary">Copy configuration</button></div>`);
   $('#copy-mcp').onclick=run(async()=>{await api.invoke('mcp-info',{copy:true});toast('MCP configuration copied');});
 }
 function slots(){return Array.from({length:4},(_,i)=>{const p=session.peers?.[i];return `<div class="slot ${p?'active':''}" title="${esc(p?.name||'Available')}">${esc(p?p.name:'Available')}${p?.host?'<br><small>Host</small>':''}</div>`;}).join('');}
@@ -222,11 +258,25 @@ api.on(message=>{
     toolRequests.get(message.id)?.abort();
   }else if(message.type==='tool-session-end'){
     mcp?.endSession(message.agent);
+    workspaceReplay.end(message.agent);
   }else if(message.type==='tool'){
     const controller=new AbortController();toolRequests.set(message.id,controller);
-    void (async()=>{try{if(closing)throw Error('Editor is closing');if(mounting||navigating)throw Error('Canvas is busy opening');if(!mcp||libraryVisible)throw Error('Open a canvas in the editor first');const before=nextSeq;const result=await mcp.handleToolCall(message.call.agent,message.call.name,message.call.args,{...message.call.context,signal:controller.signal,requestId:message.id});await settle(false);if(lastRejected?.seq>before)throw Error(lastRejected.message);api.toolResult(message.id,result);}catch(e){api.toolResult(message.id,{isError:true,content:[{type:'text',text:e.message}],structuredContent:{ok:false,revision:null,error:{code:/busy|opening/i.test(e.message)?'busy':/invalid|exceeds|too large/i.test(e.message)?'bad_args':'failed',message:e.message},documentId:active?.id??null,durableSequence:nextSeq}});}finally{toolRequests.delete(message.id);}})();
+    void (async()=>{try{
+      if(closing)throw Error('Editor is closing');
+      let result;
+      if(workspaceNames.has(message.call.name))result=await workspaceTool(message.call,message.id,controller.signal);
+      else {
+        if(mounting||navigating)throw Error('Canvas is busy opening');if(!mcp||libraryVisible)throw Error('Use list_documents, then open_document or create_document first');
+        if(message.call.documentId!==active?.id)throw Error('Document changed; read get_context before retrying');
+        const before=nextSeq;
+        result=await mcp.handleToolCall(message.call.agent,message.call.name,message.call.args,{...message.call.context,signal:controller.signal,requestId:message.id});
+        await settle(false);if(lastRejected?.seq>before)throw Error(lastRejected.message);
+        if(message.call.name==='get_context'&&!result.isError)result=toolResponse({...result.structuredContent,document:{...active}});
+      }
+      controller.signal.throwIfAborted();api.toolResult(message.id,result);
+    }catch(e){api.toolResult(message.id,{isError:true,content:[{type:'text',text:e.message}],structuredContent:{ok:false,revision:null,error:{code:/busy|opening/i.test(e.message)?'busy':/invalid|exceeds|too large/i.test(e.message)?'bad_args':controller.signal.aborted?'cancelled':'failed',message:controller.signal.aborted?'MCP request cancelled; persisted changes are not rolled back. Inspect the library before retrying.':e.message},documentId:active?.id??null,durableSequence:nextSeq}});}finally{toolRequests.delete(message.id);}})();
   }else if(message.type==='command'){
-    const actions={new:()=>newCanvas(),import:importFile,library,undo:()=>nativeHistory(false),redo:()=>nativeHistory(true)};void run(actions[message.name]||(()=>{}))();
+    const actions={new:()=>newCanvas(),import:importFile,library,rename:()=>rename(),undo:()=>nativeHistory(false),redo:()=>nativeHistory(true)};void run(actions[message.name]||(()=>{}))();
   }else if(message.type==='close-cancelled'){
     closing=false;
   }else if(message.type==='closing'){
@@ -238,6 +288,7 @@ api.on(message=>{
 $('#toggle-layers').onclick=()=>{$('#editor').classList.toggle('collapsed');$('#toggle-layers').setAttribute('aria-expanded',String(!$('#editor').classList.contains('collapsed')));};
 $('#components').onclick=()=>{$('#editor').classList.remove('collapsed');$('#toggle-layers').setAttribute('aria-expanded','true');[...document.querySelectorAll('#editor .ltabs button')].find(b=>b.textContent==='Assets')?.click();};
 $('#home').onclick=run(library);$('#document-title').onclick=rename;$('#new').onclick=run(()=>newCanvas());$('#import').onclick=run(importFile);$('#export').onclick=exportDialog;$('#mcp').onclick=run(mcpDialog);$('#collaborate').onclick=run(collaborationDialog);
+if($('#rename-canvas'))$('#rename-canvas').onclick=()=>rename();
 for(const el of document.querySelectorAll('[data-icon]'))el.innerHTML=icon(el.dataset.icon);
 prefs=await api.invoke('preferences');
 $('#search').oninput=renderLibrary;$('#sort').onchange=renderLibrary;

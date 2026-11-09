@@ -114,9 +114,9 @@ export async function startMcpBridge({dir,dispatch,endSession=()=>{},port=MCP_PO
     for(const session of sessions.values())if(!session.controllers.size&&session.touched<cutoff)void release(session);
     for(const [agent,touched] of legacy)if(touched<cutoff){legacy.delete(agent);void Promise.resolve().then(()=>endSession(agent)).catch(()=>{});}
   },Math.min(budget.idleMs,60000));sweep.unref();
-  async function resetSessions() {
-    await Promise.all([...sessions.values()].map(release));
-    const agents=[...legacy.keys()];legacy.clear();await Promise.allSettled(agents.map(agent=>Promise.resolve().then(()=>endSession(agent))));
+  async function resetSessions({exceptAgent}={}) {
+    await Promise.all([...sessions.values()].filter(session=>session.agent!==exceptAgent).map(release));
+    const agents=[...legacy.keys()].filter(agent=>agent!==exceptAgent);for(const agent of agents)legacy.delete(agent);await Promise.allSettled(agents.map(agent=>Promise.resolve().then(()=>endSession(agent))));
   }
   async function close() {
     if(closing)return closing;
