@@ -12,7 +12,7 @@ A quiet place to create. Personal ownership, clear tools, room to think. White a
 Help a person find a local canvas quickly, design without an account, and bring an agent or up to three teammates into the open document. Success means a visible saved file, a working edit, and a clear connection state. No pretend cloud workspace, AI generation promise, community feed or subscription experience.
 
 ## People and jobs
-The solo designer opens recent work or searches by name. The returning creator stars important files and chooses a dense list. A teammate uses an invitation to join an existing canvas. An agent uses local MCP to inspect and edit the open document. Local ownership is always visible.
+The solo designer opens recent work or searches by name. The returning creator stars important files and chooses a dense list. A teammate uses an invitation to join an existing canvas. An agent uses local MCP to inspect and edit an explicitly identified document, independently of the visible tab. Local ownership is always visible.
 
 ## Information architecture
 Native title strip → library/document identity → app actions. Library: My workspace, search, Recents, All canvases, Starred; content heading, Open/New actions, sort and view controls, canvas cards. Recents and All canvases currently show all files sorted by modification time; name sort is available. Starred filters actual saved preferences. Editor: layers/pages at left, editable canvas in the center, properties at right, tools near the canvas. Export, MCP and collaboration remain available in the title strip.
@@ -45,7 +45,15 @@ Use existing IBM Plex Sans, neutral surfaces, blue focus and spacing tokens. Com
 
 The isolated design document was reopened in a fresh process with its board, component and linked instance intact. Real Electron comparison confirms the inline field uses the same title slot, with no extra Rename button, at desktop and minimum sizes. Enter, blur, Escape, synthetic IME composition, invalid names and restart persistence passed the workspace journey. Physical IME input and other operating systems remain unverified.
 
-Desktop MCP adds local document discovery, creation, opening, naming and duplication plus existing-page selection. Document names and IDs are separate from page names and layer aliases. This increment still uses a single open editor; simultaneous document tabs and stable per-repository targeting require a separate lifecycle design.
+Desktop MCP adds local document discovery, creation, opening, naming and duplication plus existing-page selection. Document names and IDs are separate from page names and layer aliases. Document mutations require an explicit stable document ID; reads may use the session binding. Opening or focusing another document preserves existing sessions.
+
+### Multiple document tabs (2026-11-09)
+
+The isolated **Oh My Canvas · Inline naming** design document contains **States / Multiple document tabs / 2026-11-09** (`31314c67-1211-4a8e-8741-77d92ddf80e8`), the **Canvas / Document tab** main (`component-042d59c8-753a-4d8c-b206-cd6c893ba922`) and linked instance (`component-c341b76b-9130-487e-bd9f-a1e2b29467fa`). Its shareable editable source is `docs/design/document-tabs.html`. It was reopened before implementation without touching the installed user's active document.
+
+A 40 px shell tab strip stays above the library and document editors. **Your canvases** opens the library, each canvas tab selects its retained editor, and the plus control creates a blank canvas. Keep native traffic-light clearance, neutral chrome and the existing blue selected underline. Long names truncate with a full title tooltip. Close has a separate labeled button. Tab buttons use a roving focus position and Left/Right/Home/End keyboard selection; overflow scrolls horizontally at the 960 px minimum width.
+
+Closing a tab flushes that document. Agents and collaborators can keep it running in the background, with an **Active** marker on open tabs and activity text in the library. MCP navigation defaults to background operation; only explicit focus changes reveal a document. The inline title stays inside each document header. Every editor has an isolated document runtime so typing, selection, page and tool state survive UI tab changes. A failure must identify its document and preserve other work.
 
 ### Selection and layer movement (2026-11-05)
 
