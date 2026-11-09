@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {canvasTitle,renameDocument} from '../electron/document-actions.mjs';
+import {canvasTitle,renameDocument,createDocumentWriter} from '../electron/document-actions.mjs';
 import {createWorkspaceReplay} from '../src/workspace-mcp.js';
 
 test('rename validates titles before loading and publishes only after persistence',async()=>{
@@ -21,9 +21,25 @@ test('failed rename preserves the current metadata and releases inactive replica
   let destroyed=0;
   const current={id:'active',title:'Kept',replica:{destroy(){throw Error('Active replica must survive');}}};
   const store={async save(){throw Error('Disk unavailable');},async load(id){return {id,title:'Other',replica:{destroy(){destroyed++;}}};}};
-  await assert.rejects(renameDocument(store,current,'active','Rejected'),/Disk unavailable/);
+  const writer=createDocumentWriter(store);
+  await assert.rejects(writer.rename(current,'active','Rejected'),/Disk unavailable/);
   assert.equal(current.title,'Kept');
-  await assert.rejects(renameDocument(store,current,'inactive','Rejected'),/Disk unavailable/);assert.equal(destroyed,1);
+  await assert.rejects(writer.rename(current,'inactive','Rejected'),/Disk unavailable/);assert.equal(destroyed,1);
+});
+
+test('autosave queued during a pending rename cannot persist the previous title afterward',async()=>{
+  const current={id:'active',title:'Before',replica:{}};let finishRename,persisted;
+  let started;const renameStarted=new Promise(resolve=>{started=resolve;});
+  const writes=[],writer=createDocumentWriter({async save(record){
+    const encodedTitle=record.title;writes.push(encodedTitle);
+    if(writes.length===1){started();await new Promise(resolve=>{finishRename=resolve;});}
+    persisted=encodedTitle;
+  }});
+  const renaming=writer.rename(current,current.id,'After');await renameStarted;
+  const autosave=writer.save(current);await Promise.resolve();
+  assert.deepEqual(writes,['After']);assert.equal(current.title,'Before');
+  finishRename();await renaming;await autosave;
+  assert.deepEqual(writes,['After','After']);assert.equal(current.title,'After');assert.equal(persisted,'After');
 });
 
 test('workspace retries share pending and completed results across editor mounts',async()=>{

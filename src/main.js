@@ -172,11 +172,13 @@ async function workspaceTool(call,id,signal){
     return navigate(async()=>{
       await settle();signal.throwIfAborted();
       const request={...call.args,mcpRequestId:id};
-      if(call.name==='open_document'&&active?.id===call.args.id&&handle){libraryVisible=false;$('#library').hidden=true;$('#workspace').hidden=false;setTitle();}
+      if(call.name==='open_document'&&active?.id===call.args.id&&handle&&(await api.invoke('snapshot')).id===call.args.id){libraryVisible=false;$('#library').hidden=true;$('#workspace').hidden=false;setTitle();}
       else {
         if(call.name==='create_document'){request.document=importCanvasJson(blankCanvas());request.title=call.args.title??'Untitled canvas';}
         const action={open_document:'open',create_document:'create',duplicate_document:'duplicate'}[call.name];
-        const snap=await api.invoke(action,request);signal.throwIfAborted();await openSnapshot(snap);
+        const snap=await api.invoke(action,request);
+        // A committed host switch must reach the renderer even if its caller has cancelled.
+        await openSnapshot(snap);
       }
       signal.throwIfAborted();const result=await mcp.handleToolCall(call.agent,'get_context',{}, {signal});
       if(result.isError)throw Error('Canvas opened but context is unavailable; inspect the library before retrying');

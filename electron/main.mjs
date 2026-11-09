@@ -11,7 +11,7 @@ import {exportFileData} from '../core/export-file.mjs';
 import {assertDocument,same,MAX_ENVELOPE_BYTES} from '../core/document.mjs';
 import {Collaboration,parseInvite} from '../core/collaboration.mjs';
 import {startMcpBridge,MCP_PORT} from './mcp-bridge.mjs';
-import {canvasTitle,renameDocument} from './document-actions.mjs';
+import {canvasTitle,createDocumentWriter} from './document-actions.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 app.setName('oh-my-canvas');
@@ -27,6 +27,7 @@ const fileDialogs=createFileDialogs(dialog);
 const {WORKSPACE_TOOLS,validateToolArgs}=await import('../dist/tool-defs.mjs');
 const workspaceNames=new Set(WORKSPACE_TOOLS.map(tool=>tool.name));
 const dir=app.getPath('userData'),store=new Store(path.join(dir,'documents'));
+const documentWriter=createDocumentWriter(store);
 let win,current,collab,bridge,bridgeError,saveTimer,quitting=false,seq=0;
 let prefs={name:os.userInfo().username},prefsWork=Promise.resolve();
 try{prefs={...prefs,...JSON.parse(await fs.readFile(path.join(dir,'preferences.json'),'utf8'))};}catch{}
@@ -42,8 +43,7 @@ function endAgent(agent){cancelTools('MCP session ended',agent);send({type:'tool
 
 const send=m=>{if(win&&!win.isDestroyed())win.webContents.send('omc:event',m);};
 const snapshot=ack=>current&&({id:current.id,title:current.title,document:current.replica.document,ack:ack??seq});
-let saveWork=Promise.resolve();
-async function save(){clearTimeout(saveTimer);if(current){const record=current;saveWork=store.save(record);await saveWork;send({type:'saved',id:record.id,at:Date.now()});}}
+async function save(){clearTimeout(saveTimer);if(current){const record=current;await documentWriter.save(record);send({type:'saved',id:record.id,at:Date.now()});}}
 function dirty(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>save().catch(e=>send({type:'error',message:'Save failed: '+e.message})),400);}
 async function stopSession(){if(collab){const previous=collab;collab=null;await previous.close();}send({type:'session',status:{mode:'offline',peers:[]}});}
 function navigationRequest(data,action){
@@ -54,9 +54,9 @@ function navigationRequest(data,action){
 }
 async function open(record,navigation){
   const recovered=!!record.recovered;
-  try{navigation?.check();await save();navigation?.check();if(current?.id===record.id)record.replica.receive(current.replica.state);await store.save(record);navigation?.check();
+  try{navigation?.check();await save();navigation?.check();if(current?.id===record.id)record.replica.receive(current.replica.state);await documentWriter.save(record);navigation?.check();
   cancelTools('Document changed',undefined,navigation?.id);await bridge?.resetSessions?.({exceptAgent:navigation?.agent});
-  navigation?.check();await stopSession();await save();if(current?.id===record.id){record.replica.receive(current.replica.state);await store.save(record);}navigation?.check();current?.unsubscribe?.();current?.replica.destroy();
+  navigation?.check();await stopSession();await save();if(current?.id===record.id){record.replica.receive(current.replica.state);await documentWriter.save(record);}navigation?.check();current?.unsubscribe?.();current?.replica.destroy();
   current=record;seq=0;current.bootstrapNonce=randomUUID();current.bootstrapBase=current.replica.document;
   current.unsubscribe=current.replica.onUpdate(()=>{dirty();send({type:'document',...snapshot()});});
   return {...snapshot(),recovered,bootstrapNonce:current.bootstrapNonce};
@@ -88,7 +88,7 @@ const dispatch=async(action,data)=>{
     }
     case 'create':{const navigation=navigationRequest(data,'create');assertDocument(data.document);const record={id:randomUUID(),title:limitedTitle(data.title),createdAt:new Date().toISOString(),replica:new Replica({document:data.document})};return open(record,navigation);}
     case 'open':{const navigation=navigationRequest(data,'open');return open(await store.load(data.id),navigation);}
-    case 'rename':return renameDocument(store,current,data.id??requireCurrent().id,data.title);
+    case 'rename':return documentWriter.rename(current,data.id??requireCurrent().id,data.title);
     case 'duplicate':{const navigation=navigationRequest(data,'duplicate');await save();navigation?.check();const original=await store.load(data.id);try{const record={id:randomUUID(),title:data.title===undefined?limitedTitle(original.title+' copy'):canvasTitle(data.title),createdAt:new Date().toISOString(),replica:new Replica({document:original.replica.document}),thumbnail:original.thumbnail};return open(record,navigation);}finally{original.replica.destroy();}}
     case 'delete':{if(current?.id===data.id){cancelTools('Document closed');await bridge?.resetSessions?.();await save();await stopSession();current.unsubscribe?.();current.replica.destroy();current=null;}await store.remove(data.id);return true;}
     case 'bootstrap':{

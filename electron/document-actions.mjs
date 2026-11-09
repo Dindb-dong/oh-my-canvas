@@ -15,3 +15,13 @@ export async function renameDocument(store,current,id,title) {
     if(record!==current)record.replica.destroy();
   }
 }
+
+export function createDocumentWriter(store) {
+  let work=Promise.resolve();
+  // Defer serialization until earlier renames have published their persisted title.
+  const enqueue=task=>{const result=work.then(task);work=result.catch(()=>{});return result;};
+  return {
+    save:record=>enqueue(()=>store.save(record)),
+    rename:(current,id,title)=>enqueue(()=>renameDocument(store,current,id,title))
+  };
+}
