@@ -11,8 +11,9 @@ const point = obj({ x: num(), y: num() }, ['x', 'y']);
 const stringMap = { type: 'object', additionalProperties: { type: 'string' } };
 const batchNames = ['write_html', 'update', 'move', 'duplicate', 'delete', 'create_board'];
 const tool = (name: string, description: string, inputSchema: Data) => ({ name, description, inputSchema });
-export const TOOLS = [
+export const EDITOR_TOOLS = [
     tool('get_context', 'Read the active page, viewport, selection, revision, and available boards.', obj()),
+    tool('select_page', 'Select a page by its raw page ID and return refreshed context. Refuses active user edits; old page aliases cannot target the new page.', obj({ id: str({ minLength: 1 }) }, ['id'])),
     tool('get_tree', 'Read an ordered layer tree. Depth defaults to 4; output is capped at 400 nodes.', obj({ id: str(), depth: int({ minimum: 1, default: 4 }), detail: enumeration(['concise', 'detailed']) })),
     tool('get_html', 'Export a layer as editable HTML with inline styles.', obj({ id: str() }, ['id'])),
     tool('get_styles', 'Read computed CSS styles of up to 50 layers.', obj({ ids: arr(str(), 1, 50), keys: arr(str(), undefined, 40) }, ['ids'])),
@@ -32,13 +33,23 @@ export const TOOLS = [
     tool('batch', 'Apply 1–100 supported writes atomically as one agent operation.', obj({ ops: arr(obj({ tool: enumeration(batchNames), args: { type: 'object', additionalProperties: true } }, ['tool', 'args']), 1, 100) }, ['ops'])),
     tool('create_board', 'Create a vertically laid-out board to the right of existing boards. Height hugs content when omitted.', obj({ width: num({ minimum: 1 }), height: num({ minimum: 1 }), name: str() }, ['width'])),
     tool('assets', 'Search configured local or optional asset providers. Unconfigured providers return no records.', obj({ query: str(), kind: enumeration(['brand', 'upload', 'stock']) })),
-    tool('get_guide', 'Read practical guidance for layout, text, review, components, vector authoring, or local image editing.', obj({ topic: enumeration(['html', 'layout', 'text', 'review', 'components', 'vector', 'image']) })),
+    tool('get_guide', 'Read practical guidance for layout, text, review, components, vector authoring, or local image editing.', obj({ topic: enumeration(['html', 'layout', 'text', 'review', 'components', 'vector', 'image', 'workspace']) })),
     tool('undo', 'Undo the latest edit only when it belongs to this agent.', obj()),
     tool('components', 'Search reusable components, with pages of at most 200 records.', obj({ query: str(), offset: int({ minimum: 0 }) })),
     tool('component', 'Create or modify reusable components, variants, instances, and typed properties atomically.', obj({ action: enumeration(['create', 'add_variant', 'combine', 'instance', 'variant', 'property', 'edit_property', 'remove_property', 'bind', 'set_property', 'reset', 'detach']), id: str(), ids: arr(str(), 1, 200), source: str(), parent: str(), layer: str(), name: str(), property: str(), propertyType: enumeration(['text', 'boolean', 'swap']), value: str(), x: num(), y: num() }, ['action'])),
     tool('fonts', 'List configured font families, optionally filtering by a case-insensitive query.', obj({ query: str() })),
 ] as const;
-export type LvMcpToolName = typeof TOOLS[number]['name'];
+const documentId = str({ minLength: 36, maxLength: 36, pattern: '^[a-f0-9-]{36}$' });
+const documentTitle = str({ minLength: 1, maxLength: 120, pattern: '\\S' });
+export const WORKSPACE_TOOLS = [
+    tool('list_documents', 'List local canvas metadata without opening a document. Optional query, zero-based offset and limit (default 50, maximum 100). No paths, thumbnails or document content.', obj({ query: str(), offset: int({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }), limit: int({ minimum: 1, maximum: 100, default: 50 }) })),
+    tool('open_document', 'Open a local canvas by its document ID after saving pending edits. Returns document identity and refreshed context. Discard old layer aliases after navigation.', obj({ id: documentId }, ['id'])),
+    tool('create_document', 'Create and open a blank local canvas, optionally named with 1–120 characters. Returns its saved document ID and refreshed context.', obj({ title: documentTitle })),
+    tool('rename_document', 'Rename a local canvas by document ID without switching the open canvas. The trimmed title must contain 1–120 characters.', obj({ id: documentId, title: documentTitle }, ['id', 'title'])),
+    tool('duplicate_document', 'Duplicate and open a local canvas by document ID, optionally naming the copy. Saves pending edits first and returns a new document ID and refreshed context.', obj({ id: documentId, title: documentTitle }, ['id'])),
+] as const;
+export const TOOLS = [...EDITOR_TOOLS, ...WORKSPACE_TOOLS] as const;
+export type LvMcpToolName = typeof EDITOR_TOOLS[number]['name'];
 export function validateToolArgs(name: string, args: unknown): string | null {
     const definition = TOOLS.find(t => t.name === name);
     if (!definition)
@@ -48,10 +59,10 @@ export function validateToolArgs(name: string, args: unknown): string | null {
             if (!value || typeof value !== 'object' || Array.isArray(value))
                 return `${path} must be an object`;
             for (const key of schema.required ?? [])
-                if (!(key in value))
+                if (!Object.hasOwn(value, key))
                     return `${path}.${key} is required`;
             for (const [key, v] of Object.entries(value)) {
-                if (schema.properties?.[key]) {
+                if (Object.hasOwn(schema.properties ?? {}, key)) {
                     const error = check(schema.properties[key], v, `${path}.${key}`);
                     if (error)
                         return error;
@@ -69,7 +80,7 @@ export function validateToolArgs(name: string, args: unknown): string | null {
         }
         if (schema.required && !schema.type)
             for (const key of schema.required)
-                if (!(key in value))
+                if (!Object.hasOwn(value, key))
                     return `${path}.${key} is required`;
         if (schema.type === 'array') {
             if (!Array.isArray(value))
@@ -85,6 +96,10 @@ export function validateToolArgs(name: string, args: unknown): string | null {
         if (schema.type === 'string') {
             if (typeof value !== 'string')
                 return `${path} must be a string`;
+            if (schema.minLength !== undefined && value.length < schema.minLength)
+                return `${path} is too short`;
+            if (schema.pattern !== undefined && !new RegExp(schema.pattern).test(value))
+                return `${path} has an invalid format`;
             if (schema.maxLength !== undefined && value.length > schema.maxLength)
                 return `${path} is too long`;
         }
@@ -93,6 +108,8 @@ export function validateToolArgs(name: string, args: unknown): string | null {
                 return `${path} must be a finite ${schema.type}`;
             if (schema.minimum !== undefined && value < schema.minimum)
                 return `${path} must be at least ${schema.minimum}`;
+            if (schema.maximum !== undefined && value > schema.maximum)
+                return `${path} must be at most ${schema.maximum}`;
         }
         if (schema.enum && !schema.enum.includes(value))
             return `${path} has an unsupported value`;

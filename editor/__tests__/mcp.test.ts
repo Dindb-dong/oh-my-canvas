@@ -5,7 +5,7 @@ import { createComponentService, reconcileComponents, duplicateComponentMain } f
 import { createStyleService, reconcileStyles } from '../styles';
 import { applyLayout } from '../layout';
 import { installLvMcp } from '../mcp';
-import { TOOLS, validateToolArgs } from '../mcp/defs';
+import { TOOLS, EDITOR_TOOLS, WORKSPACE_TOOLS, validateToolArgs } from '../mcp/defs';
 import { resolve } from 'node:path';
 import { combinePaths } from '../render/vector';
 import { textValue } from '../formats/model';
@@ -87,7 +87,9 @@ function fixture(options: Data = {}) {
         editor, view, events, api, call, ok, components, fonts, afterWrite, onHighlight
     };
 }
+const documentId = '12345678-1234-1234-1234-123456789abc';
 const valid: Record<string, Data> = {
+    select_page: { id: 'page' }, list_documents: {}, open_document: { id: documentId }, create_document: {}, rename_document: { id: documentId, title: 'Canvas' }, duplicate_document: { id: documentId },
     image: { id: 'x', action: 'restore', revision: 0 }, outline: { ids: ['a'], kind: 'stroke', revision: 0 }, write_svg: { svg: '<svg/>', target: 'x', position: 'last' }, get_path: { id: 'x' }, edit_path: { id: 'x', revision: 0, action: 'move_nodes', indices: [0], dx: 1, dy: 2 }, boolean: { ids: ['a', 'b'], operation: 'union', revision: 0 },
     get_context: {}, get_tree: {}, get_html: { id: 'x' }, get_styles: { ids: ['x'] }, find: { text: 'x' }, screenshot: {}, write_html: {
         html: '<div/>', target: 'x', position: 'replace'
@@ -96,14 +98,18 @@ const valid: Record<string, Data> = {
     }, duplicate: { id: 'x' }, delete: { ids: ['x'] }, batch: { ops: [{ tool: 'update', args: { id: 'x', text: 'Y' } }] }, create_board: { width: 1 }, assets: {}, get_guide: {}, undo: {}, components: {}, component: { action: 'instance', source: 'component' }, fonts: {}
 };
 const names = [
-    'get_context', 'get_tree', 'get_html', 'get_styles', 'find', 'screenshot', 'write_html', 'write_svg', 'get_path', 'edit_path', 'boolean', 'outline', 'image', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'assets', 'get_guide', 'undo', 'components', 'component', 'fonts'
+    'get_context', 'select_page', 'get_tree', 'get_html', 'get_styles', 'find', 'screenshot', 'write_html', 'write_svg', 'get_path', 'edit_path', 'boolean', 'outline', 'image', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'assets', 'get_guide', 'undo', 'components', 'component', 'fonts', 'list_documents', 'open_document', 'create_document', 'rename_document', 'duplicate_document'
 ];
 describe('MCP-01 frozen schemas', () => {
     it('exposes the vector and existing names with closed argument objects', () => {
         expect(TOOLS.map(t => t.name)).toEqual(names);
-        expect(new Set(TOOLS.map(t => t.name)).size).toBe(25);
+        expect(new Set(TOOLS.map(t => t.name)).size).toBe(31);
         for (const t of TOOLS)
             expect(t.inputSchema.additionalProperties).toBe(false);
+        expect(EDITOR_TOOLS).toHaveLength(26);
+        expect(WORKSPACE_TOOLS).toHaveLength(5);
+        const f = fixture();
+        expect(f.api.tools().map(t => t.name)).toEqual(EDITOR_TOOLS.map(t => t.name));
     });
     it.each(names)('accepts independently specified valid args for %s', name => expect(validateToolArgs(name, valid[name])).toBeNull());
     it.each(names)('rejects unknown properties for %s', name => expect(validateToolArgs(name, { ...valid[name], unexpected: true })).toMatch(/unsupported/));
@@ -120,6 +126,76 @@ describe('MCP-01 frozen schemas', () => {
         Data
     ]>)('rejects semantic/limit case %s %#', (name, args) => expect(validateToolArgs(name, args)).not.toBeNull());
 });
+describe('workspace schemas and page navigation', () => {
+    it('validates document IDs, title bounds and pagination at the dispatch boundary', () => {
+        for (const name of ['open_document', 'rename_document', 'duplicate_document']) {
+            for (const id of ['../outside.omc', 'x', 3, null])
+                expect(validateToolArgs(name, { ...valid[name], id })).not.toBeNull();
+        }
+        for (const name of ['create_document', 'rename_document', 'duplicate_document']) {
+            for (const title of ['', '   \t', 'a'.repeat(121), 3, null])
+                expect(validateToolArgs(name, { ...valid[name], title })).not.toBeNull();
+            expect(validateToolArgs(name, { ...valid[name], title: '한'.repeat(120) })).toBeNull();
+            expect(validateToolArgs(name, { ...valid[name], title: ' Canvas ' })).toBeNull();
+        }
+        for (const args of [{ limit: 0 }, { limit: 101 }, { limit: 1.5 }, { offset: -1 }, { offset: Infinity }, { offset: Number.MAX_SAFE_INTEGER + 1 }])
+            expect(validateToolArgs('list_documents', args)).not.toBeNull();
+        expect(validateToolArgs('list_documents', { query: 'Canvas', offset: 100, limit: 100 })).toBeNull();
+        expect(validateToolArgs('select_page', { id: '' })).not.toBeNull();
+        expect(validateToolArgs('rename_document', Object.create({ id: documentId, title: 'Inherited' }))).not.toBeNull();
+        for (const key of ['constructor', '__proto__'])
+            expect(validateToolArgs('create_document', JSON.parse(`{"${key}":"value"}`))).not.toBeNull();
+        expect(validateToolArgs('batch', { ops: [{ tool: 'select_page', args: { id: 'page' } }] })).not.toBeNull();
+    });
+    it('does not advertise or execute desktop workspace tools in the embedded editor', async () => {
+        const f = fixture();
+        for (const { name } of WORKSPACE_TOOLS)
+            expect((await f.call(name, valid[name])).structuredContent?.error.code).toBe('unknown_tool');
+    });
+    it('selects pages without a history step and rejects stale page aliases even for shared raw IDs', async () => {
+        const f = fixture(), firstId = f.editor.pageId, next = createPage('Other page');
+        insertShape(next, createShape('rect', { id: 'box', name: 'Other box' }));
+        f.editor.transact('seed second page', doc => {
+            doc.pages.push(next.id);
+            doc.pagesById[next.id] = next;
+        });
+        f.editor.setSelection(['box']);
+        const oldAlias = (await f.ok('get_tree', { id: 'box' })).tree.id;
+        const before = f.editor.doc, operation = f.editor.lastOperation, revision = (await f.ok('get_context')).revision;
+        const selected = await f.ok('select_page', { id: next.id });
+        expect(selected.page).toEqual({ id: next.id, name: 'Other page' });
+        expect(selected.selection).toEqual([]);
+        expect(selected.revision).toBeGreaterThan(revision);
+        expect(f.editor.doc).toBe(before);
+        expect(f.editor.lastOperation).toBe(operation);
+        expect((await f.call('update', { id: oldAlias, attrs: { name: 'wrong page' } })).structuredContent?.error.code).toBe('not_found');
+        const otherAlias = (await f.ok('get_tree', { id: 'box' })).tree.id;
+        expect(otherAlias).not.toBe(oldAlias);
+        await f.ok('update', { id: otherAlias, attrs: { name: 'Updated other box' } });
+        expect(f.editor.doc.pagesById[firstId].objects.box.name).toBe('Square');
+        expect(f.editor.page.objects.box.name).toBe('Updated other box');
+        const board = await f.ok('create_board', { width: 100, name: 'Other page board' });
+        expect(f.editor.page.objects[board.rawId]).toBeDefined();
+        expect(f.editor.doc.pagesById[firstId].objects[board.rawId]).toBeUndefined();
+        const shot = await f.call('screenshot', { id: otherAlias });
+        expect(shot.isError).not.toBe(true);
+        expect(f.view.screenshot).toHaveBeenLastCalledWith('box', { mode: 'slice', slice: 0 });
+        await f.ok('select_page', { id: firstId });
+        expect((await f.ok('get_tree', { id: oldAlias })).tree.rawId).toBe('box');
+        for (const id of ['missing-page', '__proto__', 'constructor'])
+            expect((await f.call('select_page', { id })).structuredContent?.error.code).toBe('not_found');
+        expect(f.editor.pageId).toBe(firstId);
+    });
+    it('refuses page navigation during a user gesture or text editing', async () => {
+        const f = fixture();
+        f.editor.begin('User gesture');
+        expect((await f.call('select_page', { id: f.editor.pageId })).structuredContent?.error.code).toBe('busy');
+        expect(f.editor.activeSession).toBeTruthy();
+        f.editor.cancelSession();
+        const typing = fixture({ editing: () => 'text' });
+        expect((await typing.call('select_page', { id: typing.editor.pageId })).structuredContent?.error.code).toBe('busy');
+    });
+});
 describe('MCP-01 all tools and measured envelopes', () => {
     it('executes every tool through real document/component/style domains', async () => {
         const f = fixture(), seen = new Set<string>();
@@ -128,6 +204,7 @@ describe('MCP-01 all tools and measured envelopes', () => {
             return f.ok(name, args);
         };
         const context = await run('get_context');
+        await run('select_page', { id: context.page.id });
         expect(context.boards).toHaveLength(1);
         expect(context.boards[0]).toBeTypeOf('string');
         expect((await run('get_tree', { id: 'board', detail: 'detailed' })).tree.children).toHaveLength(2);
@@ -179,7 +256,7 @@ describe('MCP-01 all tools and measured envelopes', () => {
         expect((await run('components')).components).toHaveLength(1);
         await run('undo');
         expect(f.editor.page.objects.box.isMain).not.toBe(true);
-        expect(seen).toEqual(new Set(names.filter(name => !['write_svg', 'get_path', 'edit_path', 'boolean', 'outline', 'image'].includes(name))));
+        expect(seen).toEqual(new Set(names.filter(name => !['write_svg', 'get_path', 'edit_path', 'boolean', 'outline', 'image', ...WORKSPACE_TOOLS.map(t => t.name)].includes(name))));
         expect(f.afterWrite).toHaveBeenCalled();
         expect(f.onHighlight).toHaveBeenCalled();
         validateDocument(f.editor.doc);

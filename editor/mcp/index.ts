@@ -7,9 +7,9 @@ import { safeUrl } from '../formats/markup';
 import { insertPathNode, deletePathNodes, movePathNodes, setPathHandle, closePath, convertPathNode } from '../commands/path';
 import { identity, pathBounds } from '../geometry';
 import { applyStyles } from './style';
-import { TOOLS, validateToolArgs } from './defs';
+import { EDITOR_TOOLS, validateToolArgs } from './defs';
 import { GUIDES } from './guides';
-export { TOOLS };
+export { EDITOR_TOOLS as TOOLS };
 export interface McpOptions extends Data {
     services?: Partial<EditorServices>;
     fonts?: () => Data[];
@@ -25,7 +25,7 @@ class McpError extends Error {
 }
 const writes = new Set(['write_html', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'component', 'undo', 'write_svg', 'edit_path', 'boolean', 'outline', 'image']);
 interface AgentState {
-    aliases: Map<string, string>;
+    aliases: Map<string, { id: string; pageId: string }>;
     reverse: Map<string, string>;
     counter: number;
 }
@@ -62,6 +62,8 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             revision++;
             latest = { id: uid(), label: 'projection' };
         }
+        else if (event.page)
+            revision++;
     });
     function state(agent: string) {
         let s = agents.get(agent);
@@ -73,14 +75,15 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
     }
     function alias(agent: string, id: string) {
         const s = state(agent);
-        if (!s.reverse.has(id)) {
+        const key = `${editor.pageId}\0${id}`;
+        if (!s.reverse.has(key)) {
             let short = `n${++s.counter}`;
             while (editor.page.objects[short])
                 short = `n${++s.counter}`;
-            s.aliases.set(short, id);
-            s.reverse.set(id, short);
+            s.aliases.set(short, { id, pageId: editor.pageId });
+            s.reverse.set(key, short);
         }
-        return s.reverse.get(id)!;
+        return s.reverse.get(key)!;
     }
     function resolve(agent: string, value: string, page = editor.page): string {
         if (typeof value !== 'string' || !value)
@@ -91,7 +94,10 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
                 throw new McpError(matches.length ? 'invalid' : 'not_found', matches.length ? 'Reference is not unique' : `Reference ${value} was not found`);
             return matches[0].id;
         }
-        const id = page.objects[value] ? value : state(agent).aliases.get(value) ?? value;
+        const mapped = state(agent).aliases.get(value);
+        if (mapped && mapped.pageId !== page.id)
+            throw new McpError('not_found', `Layer alias ${value} belongs to another page; read the current context`);
+        const id = mapped?.id ?? value;
         if (!page.objects[id])
             throw new McpError('not_found', `Layer ${value} was not found`);
         return id;
@@ -99,6 +105,10 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
     const describe = (agent: string, s: Shape, detailed = false): Data => ({ id: alias(agent, s.id), rawId: s.id, name: s.name ?? s.type, kind: s.type, ...s.dataRef || s['data-ref'] ? { ref: s.dataRef ?? s['data-ref'] } : {}, ...detailed ? { x: s.x, y: s.y, width: s.width, height: s.height, hidden: !!s.hidden, locked: !!s.locked, parent: s.parentId === 'root' ? 'root' : alias(agent, s.parentId), ...s.type === 'text' ? { text: textValue(s) } : {}, ...s.layout ? { layout: s.layout } : {}, ...s.fills?.length ? { fills: s.fills } : {}, ...s.childIds ? { childCount: s.childIds.length } : {} } : {} });
     function response(data: Data, images: Data[] = []): ToolResult { return { content: [{ type: 'text', text: JSON.stringify(data) }, ...images], structuredContent: data }; }
     function failure(error: unknown): ToolResult { const e = error as any; return { ...response({ ok: false, error: { code: e?.code ?? 'failed', message: e?.message ?? String(error) }, revision }), isError: true }; }
+    function context(agent: string): ToolResult {
+        const page = editor.page;
+        return response({ ok: true, revision, page: { id: page.id, name: page.name }, pages: editor.doc.pages.map(id => ({ id, name: editor.doc.pagesById[id].name })), viewport: editor.viewport, selection: editor.selection.map(id => alias(agent, id)), boards: (page.objects.root.childIds ?? []).map(id => alias(agent, id)), boardDetails: (page.objects.root.childIds ?? []).map(id => describe(agent, page.objects[id], true)), editing: options.editing?.() ?? null });
+    }
     const busy = () => !!(editor.undo.blocked || editor.activeSession || options.editing?.());
     function destination(agent: string, target: string, position: string, page: Page): {
         parent: string;
@@ -324,13 +334,20 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
     function diagnostics(ids: string[]) { const measured = view.measure(ids.filter(id => editor.page.objects[id])); return [...measured].map(([id, m]) => ({ id, bounds: { x: m.x, y: m.y, width: m.w, height: m.h }, clippedText: m.clippedText, overflowParent: m.overflowParent, ...m.fontFallback ? { fontFallback: m.fontFallback } : {}, ...m.imageFailed ? { imageFailed: true } : {} })); }
     async function execute(agent: string, name: string, args: Data, signal: AbortSignal, requestId?: string): Promise<ToolResult> {
         check(signal);
-        if (!TOOLS.some(t => t.name === name))
+        if (!EDITOR_TOOLS.some(t => t.name === name))
             throw new McpError('unknown_tool', `Unknown tool: ${name}`);
         const invalid = validateToolArgs(name, args);
         if (invalid)
             throw new McpError('bad_args', invalid);
-        if (writes.has(name) && busy())
+        if ((writes.has(name) || name === 'select_page') && busy())
             throw new McpError('busy', 'A user edit is in progress');
+        if (name === 'select_page') {
+            if (!editor.doc.pages.includes(args.id))
+                throw new McpError('not_found', 'Page was not found');
+            editor.setPage(args.id);
+            await settled(signal);
+            return context(agent);
+        }
         if (name === 'undo') {
             const last = latest ?? editor.lastOperation;
             if (!options.undo && last?.label !== `agent:${agent}` && last?.author !== agent)
@@ -458,7 +475,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             return response({ ok: true, revision, id: alias(agent, id), rawId: id, coordinateSpace: 'world', fillRule: shape.fillRule ?? 'nonzero', editable: stored.type === 'path' && isEditable(editor.page, id), segments: shape.content.map((segment: Data, index: number) => ({ ...segment, index })) });
         }
         if (name === 'get_context')
-            return response({ ok: true, revision, page: { id: page.id, name: page.name }, pages: editor.doc.pages.map(id => ({ id, name: editor.doc.pagesById[id].name })), viewport: editor.viewport, selection: editor.selection.map(id => alias(agent, id)), boards: (page.objects.root.childIds ?? []).map(id => alias(agent, id)), boardDetails: (page.objects.root.childIds ?? []).map(id => describe(agent, page.objects[id], true)), editing: options.editing?.() ?? null });
+            return context(agent);
         if (name === 'get_tree') {
             if (args.detail === 'detailed')
                 await settled(signal);
@@ -598,7 +615,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         return task;
     }
     const globalTarget: Data | undefined = options.target ?? (typeof window !== 'undefined' ? window : undefined);
-    const api = { tools: () => TOOLS.map(t => structuredClone(t)), handleToolCall, endSession(agent?: string) {
+    const api = { tools: () => EDITOR_TOOLS.map(t => structuredClone(t)), handleToolCall, endSession(agent?: string) {
             if (agent) {
                 sessions.get(agent)?.abort(new McpError('failed', 'MCP session has ended'));
                 sessions.delete(agent);
