@@ -1,5 +1,6 @@
 /** Public protocol schemas authored from docs/independent/contracts.md. */
 import type { Data } from '../contracts';
+import { AUTOMATION_EDITOR_TOOLS, AUTOMATION_WORKSPACE_TOOLS, validateAutomationArgs } from './automation-defs';
 const str = (extra: Data = {}) => ({ type: 'string', ...extra });
 const num = (extra: Data = {}) => ({ type: 'number', ...extra });
 const int = (extra: Data = {}) => ({ type: 'integer', ...extra });
@@ -9,7 +10,7 @@ const enumeration = (values: string[]) => str({ enum: values });
 const position = enumeration(['before', 'after', 'first', 'last']);
 const point = obj({ x: num(), y: num() }, ['x', 'y']);
 const stringMap = { type: 'object', additionalProperties: { type: 'string' } };
-const batchNames = ['write_html', 'update', 'move', 'duplicate', 'delete', 'create_board'];
+const batchNames = ['write_html', 'update', 'move', 'duplicate', 'delete', 'create_board', 'create_shape', 'edit_shapes', 'edit_text', 'styles', 'libraries', 'document_assets'];
 const tool = (name: string, description: string, inputSchema: Data) => ({ name, description, inputSchema });
 export const EDITOR_TOOLS = [
     tool('get_context', 'Read the active page, viewport, selection, revision, and available boards.', obj()),
@@ -22,7 +23,7 @@ export const EDITOR_TOOLS = [
     tool('write_html', 'Insert sanitized HTML with inline CSS relative to a target layer.', obj({ html: str(), target: str(), position: enumeration(['before', 'after', 'first', 'last', 'replace']) }, ['html', 'target', 'position'])),
     tool('write_svg', 'Insert SVG as editable vector layers; unsupported elements are preserved as pictures with warnings. Standalone operation.', obj({ svg: str({ maxLength: 200000 }), target: str(), position: enumeration(['before', 'after', 'first', 'last', 'replace']) }, ['svg', 'target', 'position'])),
     tool('get_path', 'Read native cubic path segments and node indices in world coordinates. Use the returned revision when editing.', obj({ id: str() }, ['id'])),
-    tool('edit_path', 'Edit native path nodes in world coordinates. Requires the revision from get_path; standalone atomic operation.', obj({ id: str(), revision: int({ minimum: 0 }), action: enumeration(['move_nodes', 'insert_node', 'delete_nodes', 'set_handle', 'convert_node', 'close', 'open']), indices: arr(int({ minimum: 0 }), 1, 1000), index: int({ minimum: 0 }), dx: num(), dy: num(), t: num(), handle: enumeration(['in', 'out']), point, mode: enumeration(['free', 'aligned', 'symmetric']), nodeKind: enumeration(['corner', 'smooth', 'symmetric']) }, ['id', 'revision', 'action'])),
+    tool('edit_path', 'Edit native path nodes in world coordinates. Requires the revision from get_path; standalone atomic operation.', obj({ id: str(), revision: int({ minimum: 0 }), action: enumeration(['move_nodes', 'insert_node', 'delete_nodes', 'set_handle', 'convert_node', 'close', 'open', 'join', 'merge', 'primitive']), otherId: str(), firstStart: { type: 'boolean' }, secondEnd: { type: 'boolean' }, primitive: obj({ kind: enumeration(['polygon', 'star']), count: int({ minimum: 3, maximum: 1000 }), ratio: num({ minimum: 0, maximum: 1 }) }), indices: arr(int({ minimum: 0 }), 1, 1000), index: int({ minimum: 0 }), dx: num(), dy: num(), t: num(), handle: enumeration(['in', 'out']), point, mode: enumeration(['free', 'aligned', 'symmetric']), nodeKind: enumeration(['corner', 'smooth', 'symmetric']) }, ['id', 'revision', 'action'])),
     tool('boolean', 'Combine ordered vector operands non-destructively. Subtract removes later operands from the first. Flatten creates an editable path and hides preserved sources; other operations retain source children. Standalone operation.', obj({ ids: arr(str(), 1, 200), operation: enumeration(['union', 'subtract', 'intersect', 'exclude', 'flatten']), revision: int({ minimum: 0 }) }, ['ids', 'operation', 'revision'])),
     tool('outline', 'Convert strokes or text into editable paths while preserving hidden source layers. Standalone atomic operation.', obj({ ids: arr(str(), 1, 200), kind: enumeration(['stroke', 'text']), revision: int({ minimum: 0 }) }, ['ids', 'kind', 'revision'])),
     tool('image', 'Remove an image background locally or restore its preserved original. Standalone atomic operation.', obj({ id: str(), action: enumeration(['remove_background', 'restore']), revision: int({ minimum: 0 }) }, ['id', 'action', 'revision'])),
@@ -36,20 +37,22 @@ export const EDITOR_TOOLS = [
     tool('get_guide', 'Read practical guidance for layout, text, review, components, vector authoring, or local image editing.', obj({ topic: enumeration(['html', 'layout', 'text', 'review', 'components', 'vector', 'image', 'workspace']) })),
     tool('undo', 'Undo the latest edit only when it belongs to this agent.', obj()),
     tool('components', 'Search reusable components, with pages of at most 200 records.', obj({ query: str(), offset: int({ minimum: 0 }) })),
-    tool('component', 'Create or modify reusable components, variants, instances, and typed properties atomically.', obj({ action: enumeration(['create', 'add_variant', 'combine', 'instance', 'variant', 'property', 'edit_property', 'remove_property', 'bind', 'set_property', 'reset', 'detach']), id: str(), ids: arr(str(), 1, 200), source: str(), parent: str(), layer: str(), name: str(), property: str(), propertyType: enumeration(['text', 'boolean', 'swap']), value: str(), x: num(), y: num() }, ['action'])),
+    tool('component', 'Create or modify reusable components, variants, instances, and typed properties atomically.', obj({ action: enumeration(['create', 'add_variant', 'combine', 'instance', 'variant', 'property', 'edit_property', 'remove_property', 'bind', 'set_property', 'reset', 'detach', 'axes']), variantProperties: arr(obj({ name: str({ minLength: 1, maxLength: 120 }), value: str({ maxLength: 1000 }) }, ['name', 'value']), 0, 100), id: str(), ids: arr(str(), 1, 200), source: str(), parent: str(), layer: str(), name: str(), property: str(), propertyType: enumeration(['text', 'boolean', 'swap']), value: str(), x: num(), y: num() }, ['action'])),
     tool('fonts', 'List configured font families, optionally filtering by a case-insensitive query.', obj({ query: str() })),
+    ...AUTOMATION_EDITOR_TOOLS,
 ] as const;
 const documentId = str({ minLength: 36, maxLength: 36, pattern: '^[a-f0-9-]{36}$' });
 const documentTitle = str({ minLength: 1, maxLength: 120, pattern: '\\S' });
 const focus = { type: 'boolean', default: false };
 export const WORKSPACE_TOOLS = [
-    tool('list_documents', 'List local canvas metadata without opening a document. Optional query, zero-based offset and limit (default 50, maximum 100). No paths, thumbnails or document content.', obj({ query: str(), offset: int({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }), limit: int({ minimum: 1, maximum: 100, default: 50 }) })),
+    tool('list_documents', 'List local canvas metadata without opening a document. Optional query, zero-based offset and limit (default 50, maximum 100). No paths, thumbnails or document content.', obj({ query: str(), starredOnly: { type: 'boolean' }, sort: enumeration(['recent', 'oldest', 'title']), offset: int({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }), limit: int({ minimum: 1, maximum: 100, default: 50 }) })),
     tool('open_document', 'Open and bind a local canvas by its document ID. Keeps other documents and sessions open. focus defaults to false; true reveals its tab. Returns document identity and context.', obj({ id: documentId, focus }, ['id'])),
-    tool('create_document', 'Create and bind a blank local canvas, optionally named with 1–120 characters. focus defaults to false; true reveals its tab. Returns its saved document ID and context.', obj({ title: documentTitle, focus })),
+    tool('create_document', 'Create and bind a blank local canvas, optionally named with 1–120 characters. focus defaults to false; true reveals its tab. Returns its saved document ID and context.', obj({ title: documentTitle, focus, sample: { type: 'boolean' } })),
     tool('rename_document', 'Rename a local canvas by document ID without switching the open canvas. The trimmed title must contain 1–120 characters.', obj({ id: documentId, title: documentTitle }, ['id', 'title'])),
     tool('duplicate_document', 'Flush and duplicate the specified canvas, optionally naming the copy. Binds the caller to the new document. focus defaults to false; true reveals its tab.', obj({ id: documentId, title: documentTitle, focus }, ['id'])),
+    ...AUTOMATION_WORKSPACE_TOOLS,
 ] as const;
-export const DOCUMENT_MUTATIONS = ['write_html', 'write_svg', 'edit_path', 'boolean', 'outline', 'image', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'undo', 'component', 'select_page'];
+export const DOCUMENT_MUTATIONS = ['write_html', 'write_svg', 'edit_path', 'boolean', 'outline', 'image', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'undo', 'component', 'select_page', ...AUTOMATION_EDITOR_TOOLS.map(tool => tool.name)];
 const plainTools = [...EDITOR_TOOLS, ...WORKSPACE_TOOLS];
 export const TOOLS = [...EDITOR_TOOLS.map(definition => {
     const mutation = DOCUMENT_MUTATIONS.includes(definition.name);
@@ -70,6 +73,10 @@ function validateArgs(name: string, args: unknown, definitions: ReadonlyArray<{ 
     if (!definition)
         return 'Unknown tool';
     function check(schema: Data, value: any, path: string): string | null {
+        if (schema.anyOf && !schema.anyOf.some((alternative: Data) => !check(alternative, value, path)))
+            return `${path} does not match an allowed value`;
+        if (schema.type === 'null' && value !== null)
+            return `${path} must be null`;
         if (schema.type === 'object') {
             if (!value || typeof value !== 'object' || Array.isArray(value))
                 return `${path} must be an object`;
@@ -90,8 +97,6 @@ function validateArgs(name: string, args: unknown, definitions: ReadonlyArray<{ 
                         return error;
                 }
             }
-            if (schema.anyOf && !schema.anyOf.some((alternative: Data) => !check(alternative, value, path)))
-                return `${path} requires a search query`;
         }
         if (schema.required && !schema.type)
             for (const key of schema.required)
@@ -127,6 +132,8 @@ function validateArgs(name: string, args: unknown, definitions: ReadonlyArray<{ 
                 return `${path} must be at least ${schema.minimum}`;
             if (schema.maximum !== undefined && value > schema.maximum)
                 return `${path} must be at most ${schema.maximum}`;
+            if (schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum)
+                return `${path} must exceed ${schema.exclusiveMinimum}`;
         }
         if (schema.enum && !schema.enum.includes(value))
             return `${path} has an unsupported value`;
@@ -135,9 +142,11 @@ function validateArgs(name: string, args: unknown, definitions: ReadonlyArray<{ 
     const error = check(definition.inputSchema, args, 'args');
     if (error)
         return error;
+    const automationError = validateAutomationArgs(name, args as Data);
+    if (automationError) return automationError;
     if (name === 'edit_path') {
         const v = args as Data;
-        const required: Record<string, string[]> = { move_nodes: ['indices', 'dx', 'dy'], insert_node: ['index'], delete_nodes: ['indices'], set_handle: ['index', 'handle', 'point'], convert_node: ['index', 'nodeKind'] };
+        const required: Record<string, string[]> = { move_nodes: ['indices', 'dx', 'dy'], insert_node: ['index'], delete_nodes: ['indices'], set_handle: ['index', 'handle', 'point'], convert_node: ['index', 'nodeKind'], primitive: ['primitive'] };
         for (const key of required[v.action] ?? [])
             if (v[key] === undefined)
                 return `${v.action} requires ${key}`;
@@ -153,6 +162,7 @@ function validateArgs(name: string, args: unknown, definitions: ReadonlyArray<{ 
     }
     if (name === 'component') {
         const value = args as Data;
+        if (value.action === 'axes' && !Array.isArray(value.variantProperties)) return 'axes requires variantProperties';
         if (value.action !== 'instance' && !value.id && !value.ids?.length)
             return 'Component action requires id or ids';
         if (value.action === 'instance' && !value.source)
@@ -170,6 +180,7 @@ function validateArgs(name: string, args: unknown, definitions: ReadonlyArray<{ 
     }
     if (name === 'batch')
         for (const [i, op] of (args as Data).ops.entries()) {
+            if (op.tool === 'document_assets' && op.args?.action === 'add') return `ops[${i}]: Asset import must be a standalone operation`;
             const nested = validateToolArgs(op.tool, op.args);
             if (nested)
                 return `ops[${i}]: ${nested}`;

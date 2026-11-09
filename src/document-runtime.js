@@ -67,7 +67,7 @@ async function openSnapshot(snap){
   lastDoc=handle.editor.doc;
   handle.editor.undoStep=()=>{if(handle.editor.undo.blocked)return false;void run(()=>history('undo'))();return true;};
   handle.editor.redoStep=()=>{if(handle.editor.undo.blocked)return false;void run(()=>history('redo'))();return true;};
-  mcp=installLvMcp(handle.editor,handle.view,{services:handle.services,afterWrite:()=>settle(false),fonts:()=>handle.fonts.catalog(),editing:()=>titleEdit?'canvas name':handle.editingText(),onHighlight:handle.highlightAgent,undo:(agent,signal,requestId)=>history('undo',agent,signal,requestId)});
+  mcp=installLvMcp(handle.editor,handle.view,{services:handle.services,afterWrite:()=>settle(false),fonts:()=>handle.fonts.catalog(),editing:()=>titleEdit?'canvas name':handle.editingText(),onHighlight:handle.highlightAgent,undo:(agent,signal,requestId)=>history('undo',agent,signal,requestId),redo:(agent,signal,requestId)=>history('redo',agent,signal,requestId)});
   unsubscribe=handle.editor.on(event=>{
     if(event.projection)return;
     if(event.changes){
@@ -236,6 +236,7 @@ api.on(message=>{
       controller.signal.throwIfAborted();api.toolResult(message.id,result);
     }catch(e){api.toolResult(message.id,{isError:true,content:[{type:'text',text:e.message}],structuredContent:{ok:false,revision:null,error:{code:/busy|opening/i.test(e.message)?'busy':/identity mismatch/i.test(e.message)?'document_mismatch':/invalid|exceeds|too large/i.test(e.message)?'bad_args':controller.signal.aborted?'cancelled':'failed',message:controller.signal.aborted?'MCP request cancelled; persisted changes are not rolled back. Read this document before retrying.':e.message},documentId,document:{...active},generation,durableSequence:nextSeq}});}finally{toolRequests.delete(message.id);}})();
     toolTasks.set(message.id,task);void task.finally(()=>toolTasks.delete(message.id));
+  }else if(message.type==='preferences'){prefs=message.preferences;
   }else if(message.type==='metadata'){
     if(message.document?.id===documentId&&active){active.title=message.document.title;setTitle();}
   }else if(message.type==='runtime-request'){
@@ -257,12 +258,25 @@ async function runtimeRequest(message){
   try{
     assertIdentity(message);
     if(!ready||mounting)throw Error('Canvas is busy opening');
-    if(message.name==='command')await command(message.args?.name);
+    let result={};
+    if(message.name==='inspect')result={busy:!!(closing||titleEdit||handle.editor.undo.blocked||handle.editor.activeSession||handle.editingText())};
+    else if(message.name==='prepare-delete'){
+      if(closing||titleEdit||handle.editor.undo.blocked||handle.editor.activeSession||handle.editingText()||toolTasks.size)throw Error('Canvas is busy editing');
+      closing=true;$('#editor').inert=true;await settle();
+    }else if(message.name==='cancel-delete'){closing=false;$('#editor').inert=false;}
+    else if(message.name==='export-data'){
+      const args=message.args??{},controller=new AbortController();toolRequests.set(message.id,controller);
+      const task=mcp.exportData(args.agent,args,{signal:controller.signal});toolTasks.set(message.id,task);
+      try{
+        const {bytes,mime}=await task;let binary='';for(let index=0;index<bytes.length;index+=32768)binary+=String.fromCharCode(...bytes.subarray(index,index+32768));
+        result={data:btoa(binary),mimeType:mime};
+      }finally{toolRequests.delete(message.id);toolTasks.delete(message.id);}
+    }else if(message.name==='command')await command(message.args?.name);
     else if(message.name==='flush'||message.name==='close'){
       if(message.name==='close'){closing=true;$('#editor').inert=true;for(const controller of toolRequests.values())controller.abort();}
-      await Promise.all([...toolTasks.values()]);await saveTitleEdit();await settle();
+      await Promise.all([...toolTasks.values()]);if(message.args?.guardBusy&&(titleEdit||handle.editor.undo.blocked||handle.editor.activeSession||handle.editingText()))throw Error('Canvas is busy editing');await saveTitleEdit();await settle();
     }else throw Error('Unknown runtime request: '+message.name);
-    api.toolResult(message.id,{ok:true,documentId,generation});
+    api.toolResult(message.id,{ok:true,...result,documentId,generation});
   }catch(error){
     if(message.name==='close'){closing=false;$('#editor').inert=false;}
     api.toolResult(message.id,{ok:false,error:{code:/busy|opening/i.test(error.message)?'busy':'failed',message:error.message},documentId,generation});

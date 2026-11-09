@@ -362,9 +362,10 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             while (board && editor.page.objects[board]?.parentId !== 'root' && editor.page.objects[board]?.parentId !== board)
                 board = editor.page.objects[board]?.parentId;
             const chosen = id ?? (board && editor.page.objects[board]?.type === 'frame' ? board : undefined) ?? roots().find(id => editor.page.objects[id]?.type === 'frame') ?? roots()[0];
-            if (!chosen)
+            const chosenIds = !id && opts.scope === 'page' ? roots() : chosen ? [chosen] : [];
+            if (!chosenIds.length)
                 throw new Error('No layer available for screenshot');
-            const b = boundsOf([resolvedObjects()[chosen]]);
+            const objects = resolvedObjects(), b = boundsOf(chosenIds.map(key => objects[key]));
             let scale = 1, slices = 1;
             if (opts.mode === 'overview')
                 scale = Math.min(1, Math.sqrt(340000 / (b.width * b.height)));
@@ -376,7 +377,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 b.height = Math.min(height, b.height - slice * step);
             }
             const { rasterizeSVG } = await import('../export/raster');
-            let source = view.sceneSvg([chosen], { bounds: b });
+            let source = view.sceneSvg(chosenIds, { bounds: b });
             const css = await options.fonts?.embeddedCss?.();
             if (css)
                 source = source.replace('<defs>', '<defs><style>' + css.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</style>');

@@ -7,7 +7,7 @@ export const MAX_DOCUMENT_RUNTIMES=8;
 const failure=(code,message)=>Object.assign(Error(message),{code});
 
 export function createDocumentManager({store,createRuntime,disposeRuntime,flushRuntime,onChange=()=>{},onEvent=()=>{},canDispose=()=>true,maxResidents=MAX_DOCUMENT_RUNTIMES}) {
-  const entries=new Map(),loading=new Map(),bindings=new Map(),generations=new Map();
+  const entries=new Map(),loading=new Map(),bindings=new Map(),generations=new Map(),deleting=new Set();
   let activeTabId=null;
   const identity=entry=>({id:entry.record.id,title:entry.record.title,generation:entry.generation});
   const state=()=>({tabs:[...entries.values()].filter(entry=>entry.tabOpen).map(entry=>({...identity(entry),inUse:!!(entry.agents.size||entry.collab||!canDispose(entry)),saveError:entry.saveError??null})),activeTabId,libraryVisible:activeTabId===null});
@@ -27,6 +27,7 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
     return entry;
   }
   async function load(id,record){
+    if(deleting.has(id))throw failure('busy','Document is being deleted');
     if(!validId(id))throw failure('bad_args','Invalid document ID');
     if(entries.has(id)){
       const entry=entries.get(id);
@@ -54,6 +55,7 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
     entry.reserved=true;
   }
   async function ensureRuntime(entry){
+    if(deleting.has(entry.record.id))throw failure('busy','Document is being deleted');
     if(entry.disposing)throw failure('runtime_restarted','Document runtime is closing; reopen it before retrying');
     if(entry.starting)return entry.starting;
     if(entry.runtime)return entry;
@@ -73,6 +75,7 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
     const id=documentId??bindings.get(agent);
     if(!id)throw failure('document_required','No document is bound to this MCP session. Use open_document or create_document first.');
     if(!validId(id))throw failure('bad_args','Invalid document ID');
+    if(deleting.has(id))throw failure('busy','Document is being deleted');
     return id;
   }
   function activate(id){
@@ -93,7 +96,7 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
   }
   async function duplicate(id,title,options={}){
     const source=await load(id);source.holds=(source.holds??0)+1;let document,copyTitle;
-    try{if(source.runtime)await flushRuntime(source);await save(source);options.signal?.throwIfAborted();document=source.record.replica.document;copyTitle=title??(source.record.title+' copy').slice(0,120);}
+    try{if(source.runtime)await flushRuntime(source,{guardBusy:!!options.agent,signal:options.signal,agent:options.agent});await save(source);options.signal?.throwIfAborted();document=source.record.replica.document;copyTitle=title??(source.record.title+' copy').slice(0,120);}
     finally{source.holds--;if(!source.runtime&&!source.starting)await release(source);}
     return create(copyTitle,document,options);
   }
@@ -110,16 +113,47 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
     })();
     entry.releasing=work;try{return await work;}finally{if(entry.releasing===work)entry.releasing=null;}
   }
-  async function closeTab(id){
+  async function closeTab(id,options={}){
     const entry=entries.get(id);if(!entry)return state();
-    if(entry.runtime)await flushRuntime(entry);await save(entry);
+    if(entry.runtime)await flushRuntime(entry,options);await save(entry);
     entry.tabOpen=false;if(activeTabId===id)activeTabId=[...entries.values()].filter(item=>item.tabOpen).at(-1)?.record.id??null;
     await release(entry);changed();return state();
   }
   function discard(entry){if(entries.get(entry.record.id)!==entry||entry.runtime||entry.starting||entry.tabOpen||entry.agents.size||entry.collab||entry.holds)return false;clearTimeout(entry.saveTimer);entry.unsubscribe();entry.record.replica.destroy();entries.delete(entry.record.id);changed();return true;}
+  async function releaseAgent(agent,id){
+    const entry=entries.get(id);if(bindings.get(agent)===id)bindings.delete(agent);
+    if(entry){entry.agents.delete(agent);await release(entry);}changed();return state();
+  }
+  async function remove(id,{expectedTitle,beforeRemove=async()=>{},cancelRemove=async()=>{}}={}){
+    let entry;
+    try{entry=await load(id);}catch(original){
+      if(entries.has(id)||loading.has(id)||deleting.has(id))throw original;
+      if(!validId(id))throw original;
+      deleting.add(id);
+      try{
+        const metadata=(await store.list()).find(record=>record.id===id);
+        if(!metadata?.damaged)throw original;
+        if(metadata.title!==expectedTitle)throw failure('stale_title','Canvas title changed; inspect it before deleting');
+        if(entries.has(id)||loading.has(id))throw failure('busy','Canvas became active before deletion');
+        await store.remove(id);changed();return true;
+      }finally{deleting.delete(id);}
+    }
+    if(entry.record.title!==expectedTitle){await release(entry);throw failure('stale_title','Canvas title changed; inspect it before deleting');}
+    if(deleting.has(id)||entry.holds||entry.starting||entry.agents.size||entry.collab||!canDispose(entry))throw failure('busy','Canvas is in use. Release agent bindings and collaboration before deleting');
+    deleting.add(id);entry.holds=(entry.holds??0)+1;
+    try{
+      await beforeRemove(entry);await entry.operations;
+      if(entry.agents.size||entry.collab||!canDispose(entry))throw failure('busy','Canvas became busy before deletion');
+      await save(entry);await store.remove(id);
+      await disposeRuntime(entry);entry.runtime=null;clearTimeout(entry.saveTimer);entry.unsubscribe();entry.record.replica.destroy();entries.delete(id);
+      if(activeTabId===id)activeTabId=[...entries.values()].filter(item=>item.tabOpen).at(-1)?.record.id??null;
+      changed();return true;
+    }catch(error){await Promise.resolve().then(()=>cancelRemove(entry)).catch(()=>{});throw error;}
+    finally{entry.holds--;deleting.delete(id);if(entries.get(id)===entry&&!entry.runtime)await release(entry);}
+  }
   async function endAgent(agent){bindings.delete(agent);for(const entry of [...entries.values()]){entry.agents.delete(agent);await release(entry);}}
   async function flushAll(){for(const entry of entries.values()){if(entry.runtime)await flushRuntime(entry);await entry.operations;await save(entry);}}
   async function disposeAll(){for(const entry of entries.values()){clearTimeout(entry.saveTimer);clearTimeout(entry.readyTimer);await entry.collab?.close();await disposeRuntime(entry);entry.unsubscribe();entry.record.replica.destroy();}entries.clear();bindings.clear();activeTabId=null;}
   function runtimeGone(entry){ready(entry,entry.generation,Error('Document renderer stopped'));entry.runtime=null;entry.generation++;generations.set(entry.record.id,entry.generation);entry.seq=0;changed();}
-  return {entries,bindings,state,identity,snapshot,load,enqueue,confirmGeneration,save,ensureRuntime,ready,bind,resolve,open,create,duplicate,rename,activate,release,discard,showLibrary(){activeTabId=null;changed();return state();},closeTab,endAgent,flushAll,disposeAll,runtimeGone,changed};
+  return {entries,bindings,deleting,state,identity,snapshot,load,enqueue,confirmGeneration,save,ensureRuntime,ready,bind,resolve,open,create,duplicate,rename,activate,release,releaseAgent,remove,discard,showLibrary(){activeTabId=null;changed();return state();},closeTab,endAgent,flushAll,disposeAll,runtimeGone,changed};
 }

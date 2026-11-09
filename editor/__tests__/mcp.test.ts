@@ -7,6 +7,7 @@ import { applyLayout } from '../layout';
 import { installLvMcp } from '../mcp';
 import { TOOLS, EDITOR_TOOLS, WORKSPACE_TOOLS, DOCUMENT_MUTATIONS, validateToolArgs, validateDesktopToolArgs } from '../mcp/defs';
 import { resolve } from 'node:path';
+import { AUTOMATION_EDITOR_TOOLS } from '../mcp/automation-defs';
 import { combinePaths } from '../render/vector';
 import { textValue } from '../formats/model';
 const cleanup: Array<() => void> = [];
@@ -89,6 +90,11 @@ function fixture(options: Data = {}) {
 }
 const documentId = '12345678-1234-1234-1234-123456789abc';
 const valid: Record<string, Data> = {
+    page: { action: 'list' }, create_shape: { type: 'rect' }, edit_shapes: { action: 'translate', ids: ['x'], dx: 1, dy: 2 },
+    edit_text: { action: 'replace', id: 'x', text: 'New' }, styles: { action: 'list' }, libraries: { action: 'list' }, document_assets: { action: 'list' },
+    clipboard: { action: 'copy', ids: ['x'] }, view: { action: 'get' }, export_selection: { format: 'svg', ids: ['x'] }, redo: {},
+    workspace: { action: 'state' }, preferences: { action: 'get' }, save_document: { id: documentId }, delete_document: { id: documentId, expectedTitle: 'Canvas' },
+    import_document: { format: 'json', payload: '{}' }, export_document: { id: documentId, format: 'json' }, import_resource: { documentId, kind: 'image', filePath: '/tmp/image.png' }, collaboration: { action: 'status', documentId },
     select_page: { id: 'page' }, list_documents: {}, open_document: { id: documentId }, create_document: {}, rename_document: { id: documentId, title: 'Canvas' }, duplicate_document: { id: documentId },
     image: { id: 'x', action: 'restore', revision: 0 }, outline: { ids: ['a'], kind: 'stroke', revision: 0 }, write_svg: { svg: '<svg/>', target: 'x', position: 'last' }, get_path: { id: 'x' }, edit_path: { id: 'x', revision: 0, action: 'move_nodes', indices: [0], dx: 1, dy: 2 }, boolean: { ids: ['a', 'b'], operation: 'union', revision: 0 },
     get_context: {}, get_tree: {}, get_html: { id: 'x' }, get_styles: { ids: ['x'] }, find: { text: 'x' }, screenshot: {}, write_html: {
@@ -98,16 +104,16 @@ const valid: Record<string, Data> = {
     }, duplicate: { id: 'x' }, delete: { ids: ['x'] }, batch: { ops: [{ tool: 'update', args: { id: 'x', text: 'Y' } }] }, create_board: { width: 1 }, assets: {}, get_guide: {}, undo: {}, components: {}, component: { action: 'instance', source: 'component' }, fonts: {}
 };
 const names = [
-    'get_context', 'select_page', 'get_tree', 'get_html', 'get_styles', 'find', 'screenshot', 'write_html', 'write_svg', 'get_path', 'edit_path', 'boolean', 'outline', 'image', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'assets', 'get_guide', 'undo', 'components', 'component', 'fonts', 'list_documents', 'open_document', 'create_document', 'rename_document', 'duplicate_document'
+    'get_context', 'select_page', 'get_tree', 'get_html', 'get_styles', 'find', 'screenshot', 'write_html', 'write_svg', 'get_path', 'edit_path', 'boolean', 'outline', 'image', 'update', 'move', 'duplicate', 'delete', 'batch', 'create_board', 'assets', 'get_guide', 'undo', 'components', 'component', 'fonts', 'page', 'create_shape', 'edit_shapes', 'edit_text', 'styles', 'libraries', 'document_assets', 'clipboard', 'view', 'export_selection', 'redo', 'list_documents', 'open_document', 'create_document', 'rename_document', 'duplicate_document', 'workspace', 'preferences', 'save_document', 'delete_document', 'import_document', 'export_document', 'import_resource', 'collaboration'
 ];
 describe('MCP-01 frozen schemas', () => {
     it('exposes the vector and existing names with closed argument objects', () => {
         expect(TOOLS.map(t => t.name)).toEqual(names);
-        expect(new Set(TOOLS.map(t => t.name)).size).toBe(31);
+        expect(new Set(TOOLS.map(t => t.name)).size).toBe(50);
         for (const t of TOOLS)
             expect(t.inputSchema.additionalProperties).toBe(false);
-        expect(EDITOR_TOOLS).toHaveLength(26);
-        expect(WORKSPACE_TOOLS).toHaveLength(5);
+        expect(EDITOR_TOOLS).toHaveLength(37);
+        expect(WORKSPACE_TOOLS).toHaveLength(13);
         const f = fixture();
         expect(f.api.tools().map(t => t.name)).toEqual(EDITOR_TOOLS.map(t => t.name));
     });
@@ -139,7 +145,7 @@ describe('desktop document targeting', () => {
             expect(validateDesktopToolArgs(name, { ...valid[name], documentId: '../outside' })).not.toBeNull();
         }
         expect(EDITOR_TOOLS.find(tool => tool.name === 'get_context')!.inputSchema.properties).not.toHaveProperty('documentId');
-        expect(TOOLS).toHaveLength(31);
+        expect(TOOLS).toHaveLength(50);
     });
     it('validates focus booleans and rejects nested batch document overrides', () => {
         for (const name of ['open_document', 'create_document', 'duplicate_document']) {
@@ -308,7 +314,7 @@ describe('MCP-01 all tools and measured envelopes', () => {
         expect((await run('components')).components).toHaveLength(1);
         await run('undo');
         expect(f.editor.page.objects.box.isMain).not.toBe(true);
-        expect(seen).toEqual(new Set(names.filter(name => !['write_svg', 'get_path', 'edit_path', 'boolean', 'outline', 'image', ...WORKSPACE_TOOLS.map(t => t.name)].includes(name))));
+        expect(seen).toEqual(new Set(names.filter(name => !['write_svg', 'get_path', 'edit_path', 'boolean', 'outline', 'image', ...WORKSPACE_TOOLS.map(t => t.name), ...AUTOMATION_EDITOR_TOOLS.map(t => t.name)].includes(name))));
         expect(f.afterWrite).toHaveBeenCalled();
         expect(f.onHighlight).toHaveBeenCalled();
         validateDocument(f.editor.doc);
