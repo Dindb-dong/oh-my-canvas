@@ -102,7 +102,7 @@ MCP now defaults to the app-owned Streamable HTTP endpoint `https://127.0.0.1:47
 
 まず `get_context` と `get_guide` を呼び、次に `create_board`、`write_html`、`update`、`components`、`component` などを使用します。ツールは **31個** あります。コンポーネント操作は `batch` の外で呼び出します。バリアント切り替え後は、新しい選択IDが返る場合があります。エージェントの編集も、ユーザーの編集と同じ保存・共同編集Undoの経路を通ります。
 
-The desktop MCP can list, create, open, rename, and duplicate local canvases without manual library clicks. Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Use stable document IDs with `rename_document` and `duplicate_document`; `select_page` changes the active page. In the UI, use **Rename** beside the canvas title, **File → Rename canvas**, or **Actions → Rename canvas** in the library. See the [workspace tool contract](docs/MCP.md#documents-and-pages).
+The desktop MCP can list, create, open, rename, and duplicate local canvases without manual library clicks. Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Use stable document IDs with `rename_document` and `duplicate_document`; `select_page` changes the active page. In the UI, click the canvas title to edit it in place; Enter or blur saves and Escape cancels. **File → Rename canvas** opens the same inline field. The library also offers **Actions → Rename canvas**. See the [workspace tool contract](docs/MCP.md#documents-and-pages).
 
 ユーザーが文字を入力したり値をスクラブ操作したりしている間も、読み取りツールは使用できます。エージェントの変更操作とUndoは `busy` を返すので、ユーザーのトランザクション終了後に再試行してください。MCPブリッジは認証付きのループバック専用で、共同編集とは分離されています。**MCPのポートを転送したり、`mcp-runtime.json` を共有したりしないでください。**
 

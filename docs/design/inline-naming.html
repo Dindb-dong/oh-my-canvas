@@ -1,0 +1,17 @@
+<section data-name="Inline canvas naming" style="display:flex;flex-direction:column;gap:24px;padding:28px;width:900px;background:#f5f5f5;font-family:IBM Plex Sans;color:#202124">
+  <h1 style="font-size:26px">Name the canvas where its title lives.</h1>
+  <p style="font-size:13px;color:#777">Desktop title · click to edit · no separate Rename button</p>
+  <section data-name="Title default state" style="display:flex;flex-direction:column;gap:8px;padding:16px;background:#fff;border:1px solid #e5e5e5;border-radius:8px">
+    <span style="font-size:12px;color:#777">Default · title is a keyboard-accessible button</span>
+    <button data-name="Canvas title" data-ref="canvas-title" style="width:260px;height:34px;background:#fff;color:#202124;font-size:14px;font-weight:500;border-radius:6px">Product exploration</button>
+  </section>
+  <section data-name="Title editing state" style="display:flex;flex-direction:column;gap:8px;padding:16px;background:#fff;border:1px solid #e5e5e5;border-radius:8px">
+    <span style="font-size:12px;color:#777">Editing · select current name · title stays in the same slot</span>
+    <div data-name="Focused title input" style="width:260px;height:34px;padding:6px 8px;border:2px solid #2563eb;border-radius:6px;background:#fff;font-size:14px">Product exploration</div>
+    <span style="font-size:12px;color:#777">Enter or blur: save · Escape: cancel · maximum 120 characters</span>
+  </section>
+  <section data-name="Title error and busy state" style="display:flex;flex-direction:column;gap:8px;padding:16px;background:#fff;border:1px solid #e5e5e5;border-radius:8px">
+    <p style="font-size:13px">Saving keeps the input in place. A failed save keeps the proposed name for correction.</p>
+    <p style="font-size:13px">Blank names stay in edit mode with an error. Library Actions keeps its Rename canvas dialog.</p>
+  </section>
+</section>

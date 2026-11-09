@@ -25,7 +25,7 @@ Example sequence: `list_documents({query:"Product"})` → `open_document({id:"<d
 
 **Current concurrency limit:** the desktop still has one globally open editor. Opening a document changes that editor and ends other sessions. It does not yet provide simultaneous document tabs or per-repository session binding. Use separate isolated app profiles for concurrent independent work until those are implemented; switching documents is not a multi-document workflow.
 
-Document deletion, arbitrary file-path import/export, profile switching and collaboration invitations are not MCP tools. The library rename entry is **Actions → Rename canvas**; an open canvas also has a visible **Rename** control and **File → Rename canvas**.
+Document deletion, arbitrary file-path import/export, profile switching and collaboration invitations are not MCP tools. The library rename entry is **Actions → Rename canvas**; an open canvas title edits in place on click, with Enter/blur to save and Escape to cancel. **File → Rename canvas** opens the same field.
 
 ## Credentials and registration
 

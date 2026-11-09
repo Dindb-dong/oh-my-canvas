@@ -102,7 +102,7 @@ MCP now defaults to the app-owned Streamable HTTP endpoint `https://127.0.0.1:47
 
 先使用 `get_context` 和 `get_guide`，再调用 `create_board`、`write_html`、`update`、`components`、`component` 等工具。共有 **31 个工具**。组件操作应在 `batch` 之外调用；切换变体后可能返回新的选中对象 ID。智能体修改与本地修改使用相同的持久化和协作 Undo 路径。
 
-The desktop MCP can list, create, open, rename, and duplicate local canvases without manual library clicks. Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Use stable document IDs with `rename_document` and `duplicate_document`; `select_page` changes the active page. In the UI, use **Rename** beside the canvas title, **File → Rename canvas**, or **Actions → Rename canvas** in the library. See the [workspace tool contract](docs/MCP.md#documents-and-pages).
+The desktop MCP can list, create, open, rename, and duplicate local canvases without manual library clicks. Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Use stable document IDs with `rename_document` and `duplicate_document`; `select_page` changes the active page. In the UI, click the canvas title to edit it in place; Enter or blur saves and Escape cancels. **File → Rename canvas** opens the same inline field. The library also offers **Actions → Rename canvas**. See the [workspace tool contract](docs/MCP.md#documents-and-pages).
 
 
 用户正在输入文字或拖动调整数值时，读取工具仍可使用，智能体修改与 Undo 会返回 `busy`。请等用户事务结束后再重试。MCP 桥接服务需要认证，仅绑定回环地址，并与协作服务分离。**不要转发 MCP 端口，也不要共享 `mcp-runtime.json`。**
