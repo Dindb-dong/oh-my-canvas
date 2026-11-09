@@ -1,5 +1,7 @@
 # Formats and MCP implementation record
 
+This is the historical independent-implementation checkpoint. Its tool counts and verification status describe that checkpoint; the maintained current capability contract is [MCP capability map](../../docs/MCP_PARITY.md).
+
 Status: implementation checkpoint; runtime parity has **not** been established. Regression authoring/execution remains behind the parent's implementation-complete barrier. No old regression tests were copied or run. No commits or uploads were made by this lane.
 
 ## Authoring inputs and source exposure

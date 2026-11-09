@@ -24,13 +24,13 @@ const fields: Data = {
     verticalConstraint: choice('top', 'bottom', 'topAndBottom', 'center', 'scale'),
     gridCell: object, layoutGrids: array, guides: array, shadows: array, effects: array,
     blur: positive, blurHidden: boolean, backgroundBlur: positive, backgroundBlurHidden: boolean,
-    image: object, src: string, objectFit: choice('fill', 'contain', 'cover'), crop: object, adjust: object,
-    svg: string, content: {}, autoResize: choice('none', 'widthAndHeight', 'height', 'width', 'fixed', 'auto'),
+    image: object, src: { type: 'string', maxLength: 16 * 1024 * 1024 }, objectFit: choice('fill', 'contain', 'cover'), crop: object, adjust: object,
+    svg: { type: 'string', maxLength: 2000000 }, content: {}, autoResize: choice('none', 'widthAndHeight', 'height', 'width', 'fixed', 'auto'),
     truncate: boolean, maxLines: { type: 'integer', minimum: 1, maximum: 100000 }, leadingTrim: choice('none', 'capHeight'),
     fillRule: choice('nonzero', 'evenodd'), handleMode: choice('free', 'aligned', 'symmetric'), primitive: object,
     isMaskGroup: boolean, maskType: choice('alpha', 'vector', 'luminance'),
     booleanOperation: choice('union', 'subtract', 'intersect', 'exclude'), exportSettings: array,
-    text: string, textBackground: object,
+    text: string, textBackground: { anyOf: [object, string] },
 };
 export const SHAPE_PROPERTIES = { type: 'object', properties: Object.fromEntries(Object.entries(fields).map(([key, schema]) => [key, { anyOf: [schema, { type: 'null' }] }])), additionalProperties: false };
 export const TEXT_STYLE_PROPERTIES = {
@@ -83,33 +83,74 @@ function recordArray(value: unknown, name: string): Data[] {
     check(array, value, name);
     return value as Data[];
 }
+function colorValue(value: unknown, name: string, depth = 0): void {
+    if (depth > 8) throw Error(`${name} color nesting exceeds eight levels`);
+    if (typeof value === 'string') {
+        if (!/^(?:#[0-9a-f]{3,8}|[a-z]+|(?:rgba?|hsla?|lab|lch|oklab|oklch|color)\([^<>;]*\))$/i.test(value) || value.length > 240 || typeof CSS !== 'undefined' && !CSS.supports('color', value)) throw Error(`${name} has an invalid color`);
+    }
+    else {
+        record(value, name);
+        if (value.color !== undefined) colorValue(value.color, name, depth + 1);
+        else if (value.hex !== undefined) colorValue(value.hex, name, depth + 1);
+        else {
+            if (!['r', 'g', 'b'].some(key => value[key] !== undefined)) throw Error(`${name} needs a color value`);
+            optionalNumbers(value, ['r', 'g', 'b', 'a'], name, 0);
+        }
+    }
+}
+function point(value: unknown, name: string): void {
+    record(value, name); check(number, value.x, `${name}.x`); check(number, value.y, `${name}.y`);
+}
+function matrix(value: unknown, name: string): void {
+    record(value, name);
+    for (const key of ['a', 'b', 'c', 'd', 'e', 'f']) check(number, value[key], `${name}.${key}`);
+}
+function adjustment(value: unknown, name: string): void {
+    record(value, name);
+    for (const key of ['exposure', 'contrast', 'saturation', 'temperature', 'tint', 'highlights', 'shadows']) if (value[key] !== undefined) check({ type: 'number', minimum: -1, maximum: 1 }, value[key], `${name}.${key}`);
+}
+function gradientStops(value: unknown, name: string): void {
+    const stops = recordArray(value, name);
+    if (!stops.length || stops.length > 64) throw Error('Gradients require 1–64 stops');
+    for (const stop of stops) {
+        optionalNumbers(stop, ['offset', 'position', 'opacity'], 'Gradient stop');
+        if (stop.color !== undefined && stop.color !== null) colorValue(stop.color, 'Gradient stop');
+    }
+}
+function gradient(value: Data, name: string): void {
+    optionalNumbers(value, ['x1', 'y1', 'x2', 'y2', 'angle', 'radius'], name);
+    if (value.aspect !== undefined) check({ ...positive, minimum: 0.000001 }, value.aspect, 'Gradient aspect');
+    for (const key of ['start', 'end', 'center']) if (value[key] !== undefined) point(value[key], `Gradient ${key}`);
+    if (value.stops !== undefined) gradientStops(value.stops, `${name}.stops`);
+}
 function paints(value: unknown, name: string): void {
     for (const paint of recordArray(value, name)) {
+        if (paint.color !== undefined && paint.color !== null) colorValue(paint.color, name);
         optionalNumbers(paint, ['opacity'], name, 0);
         optionalNumbers(paint, ['width', 'thickness'], name, 0);
         if (paint.gradient !== undefined && paint.gradient !== null) {
             record(paint.gradient, `${name}.gradient`);
-            optionalNumbers(paint.gradient, ['x1', 'y1', 'x2', 'y2', 'aspect', 'angle'], `${name}.gradient`);
-            if (paint.gradient.stops !== undefined) for (const stop of recordArray(paint.gradient.stops, `${name}.gradient.stops`)) optionalNumbers(stop, ['offset', 'opacity'], 'Gradient stop');
+            gradient(paint.gradient, `${name}.gradient`);
         }
-        if (paint.stops !== undefined) for (const stop of recordArray(paint.stops, `${name}.stops`)) optionalNumbers(stop, ['offset', 'opacity'], 'Gradient stop');
+        if (paint.stops !== undefined || paint.type && !['solid', 'color', 'image'].includes(paint.type)) gradient(paint, name);
         if (paint.image !== undefined && paint.image !== null) image(paint.image, `${name}.image`);
+        if (paint.crop !== undefined && paint.crop !== null) rectangle(paint.crop, `${name}.crop`, true);
+        if (paint.adjust !== undefined && paint.adjust !== null) adjustment(paint.adjust, `${name}.adjust`);
+        for (const key of ['transform', 'imageTransform']) if (paint[key] !== undefined && paint[key] !== null) matrix(paint[key], `${name}.${key}`);
+        if (paint.type === 'image' && !paint.image) image(paint, name);
         for (const key of ['dash', 'dashes', 'strokeDashArray']) if (paint[key] !== undefined) check({ type: 'array', items: positive, maxItems: 200 }, paint[key], `${name}.${key}`);
     }
 }
-function rectangle(value: unknown, name: string): void {
+function rectangle(value: unknown, name: string, crop = false): void {
     record(value, name);
     optionalNumbers(value, ['x', 'y'], name);
-    optionalNumbers(value, ['width', 'height'], name, 0);
+    optionalNumbers(value, ['width', 'height'], name, crop ? 0.000001 : 0);
 }
 function image(value: unknown, name: string): void {
     record(value, name);
     optionalNumbers(value, ['width', 'height', 'tileScale'], name, 0);
-    if (value.crop !== undefined && value.crop !== null) rectangle(value.crop, `${name}.crop`);
-    if (value.adjust !== undefined && value.adjust !== null) {
-        record(value.adjust, `${name}.adjust`);
-        optionalNumbers(value.adjust, ['exposure', 'contrast', 'saturation', 'temperature', 'tint', 'highlights', 'shadows'], `${name}.adjust`);
-    }
+    if (value.crop !== undefined && value.crop !== null) rectangle(value.crop, `${name}.crop`, true);
+    if (value.adjust !== undefined && value.adjust !== null) adjustment(value.adjust, `${name}.adjust`);
 }
 export function validateTextStyleProperties(properties: Data): void {
     record(properties, 'Text style');
@@ -120,15 +161,47 @@ export function validateTextStyleProperties(properties: Data): void {
     }
     validateJson(properties);
     if (properties.fills !== undefined) paints(properties.fills, 'Text fills');
+    if (properties.highlight !== undefined && properties.highlight !== null) {
+        if (properties.highlight.color !== undefined) colorValue(properties.highlight.color, 'Highlight');
+        optionalNumbers(properties.highlight, ['opacity'], 'Highlight', 0);
+    }
 }
 export function validateVisualProperties(properties: Data): void {
     for (const key of ['fills', 'strokes']) if (properties[key] !== undefined && properties[key] !== null) paints(properties[key], key);
     for (const key of ['shadows', 'effects']) if (properties[key] !== undefined && properties[key] !== null) for (const effect of recordArray(properties[key], key)) {
         optionalNumbers(effect, ['offsetX', 'offsetY', 'spread', 'opacity'], key);
         optionalNumbers(effect, ['blur', 'radius'], key, 0);
+        if (effect.offset !== undefined && effect.offset !== null) point(effect.offset, 'Effect offset');
+        if (effect.color !== undefined && effect.color !== null) colorValue(effect.color, 'Effect');
     }
     if (properties.image !== undefined && properties.image !== null) image(properties.image, 'Image');
-    if (properties.crop !== undefined && properties.crop !== null) rectangle(properties.crop, 'Crop');
+    if (properties.adjust !== undefined && properties.adjust !== null) adjustment(properties.adjust, 'Image adjustment');
+    if (properties.crop !== undefined && properties.crop !== null) rectangle(properties.crop, 'Crop', true);
+    if (properties.clip !== undefined && properties.clip !== null) { rectangle(properties.clip, 'Clip'); optionalNumbers(properties.clip, ['radius'], 'Clip', 0); }
+    if (properties.textBackground !== undefined && properties.textBackground !== null) {
+        const background = properties.textBackground;
+        if (typeof background === 'string') colorValue(background, 'Text background');
+        else {
+            record(background, 'Text background');
+            if (background.fills !== undefined && background.fills !== null) paints(background.fills, 'Text background fills');
+            optionalNumbers(background, ['padding'], 'Text background'); optionalNumbers(background, ['radius'], 'Text background', 0);
+        }
+    }
+    if (properties.primitive !== undefined && properties.primitive !== null) {
+        const primitive = properties.primitive; record(primitive, 'Primitive');
+        for (const key of ['kind', 'type']) if (primitive[key] !== undefined) check(choice('polygon', 'star'), primitive[key], 'Primitive kind');
+        for (const key of ['count', 'sides', 'points']) if (primitive[key] !== undefined) check({ type: 'integer', minimum: 3, maximum: 1000 }, primitive[key], 'Primitive count');
+        for (const key of ['ratio', 'innerRatio', 'innerRadius']) if (primitive[key] !== undefined) check({ type: 'number', minimum: 0, maximum: 1 }, primitive[key], 'Primitive ratio');
+    }
+    if (properties.exportSettings !== undefined && properties.exportSettings !== null) for (const setting of recordArray(properties.exportSettings, 'Export settings')) {
+        if (setting.format !== undefined) check(choice('png', 'jpg', 'webp', 'svg', 'pdf'), setting.format, 'Export format');
+        if (setting.suffix !== undefined) check({ type: 'string', maxLength: 240 }, setting.suffix, 'Export suffix');
+        if (setting.constraint !== undefined) {
+            record(setting.constraint, 'Export constraint'); check(choice('scale', 'width', 'height'), setting.constraint.type, 'Export constraint type');
+            check({ ...positive, minimum: 0.000001 }, setting.constraint.value, 'Export constraint value');
+        }
+        if (setting.background !== undefined && setting.background !== null) colorValue(setting.background, 'Export background');
+    }
     if (properties.radii !== undefined && properties.radii !== null) {
         if (typeof properties.radii === 'number') check(positive, properties.radii, 'Radii');
         else if (Array.isArray(properties.radii)) {
@@ -140,6 +213,8 @@ export function validateVisualProperties(properties: Data): void {
     if (properties.layout !== undefined && properties.layout !== null) {
         const layout = properties.layout; record(layout, 'Layout');
         if (layout.type !== undefined) check(choice('flex', 'grid'), layout.type, 'Layout type');
+        if (layout.direction !== undefined) check(choice('row', 'row-reverse', 'column', 'column-reverse'), layout.direction, 'Layout direction');
+        if (layout.wrap !== undefined) check(boolean, layout.wrap, 'Layout wrap');
         for (const axis of ['rows', 'columns']) if (layout[axis] !== undefined) {
             const tracks = layout[axis];
             if (typeof tracks === 'number') check({ type: 'integer', minimum: 1, maximum: 1000 }, tracks, axis);
@@ -170,6 +245,8 @@ export function validateVisualProperties(properties: Data): void {
         else {
             if (item.pattern !== undefined) check(choice('grid', 'columns', 'rows'), item.pattern, 'Grid pattern');
             optionalNumbers(item, ['size', 'count'], 'Grid', 1); optionalNumbers(item, ['gutter', 'offset', 'opacity'], 'Grid');
+            if (item.count !== undefined) check({ type: 'integer', minimum: 1, maximum: 1000 }, item.count, 'Grid count');
+            if (item.color !== undefined) colorValue(item.color, 'Grid');
         }
     }
     if (properties.content !== undefined && properties.content !== null && typeof properties.content !== 'string') {
@@ -180,6 +257,7 @@ export function validateVisualProperties(properties: Data): void {
         }
         else {
             record(content, 'Text content');
+            if (content.verticalAlign !== undefined) check(choice('top', 'center', 'middle', 'bottom'), content.verticalAlign, 'Text vertical alignment');
             for (const paragraph of recordArray(content.children, 'Text paragraphs')) {
                 validateTextStyleProperties(Object.fromEntries(Object.entries(paragraph).filter(([key]) => Object.hasOwn(TEXT_STYLE_PROPERTIES.properties, key))));
                 for (const run of recordArray(paragraph.children, 'Text runs')) {
@@ -194,7 +272,7 @@ export function validateVisualProperties(properties: Data): void {
 export function validateJson(value: unknown, depth = 0, budget = { nodes: 0 }): void {
     if (++budget.nodes > 100000 || depth > 24) throw Error('Property data exceeds the complexity limit');
     if (typeof value === 'number' && (!Number.isFinite(value) || Math.abs(value) > 1e9)) throw Error('Property numbers must be finite and within ±1e9');
-    if (typeof value === 'string' && value.length > 2000000) throw Error('Property string exceeds 2 million characters');
+    if (typeof value === 'string' && value.length > 16 * 1024 * 1024) throw Error('Property string exceeds 16 MiB');
     if (value && typeof value === 'object') {
         if (![Object.prototype, Array.prototype, null].includes(Object.getPrototypeOf(value))) throw Error('Property data must contain JSON records');
         for (const [key, child] of Object.entries(value)) {

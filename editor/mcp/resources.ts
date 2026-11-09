@@ -246,7 +246,7 @@ export function applyResourceOperation(name: string, args: Data, doc: CanvasDocu
 }
 
 export async function prepareResourceOperation(name: string, args: Data, doc: CanvasDocument, pageId: string, services: Data, signal?: AbortSignal): Promise<{ args: Data; release?: () => void }> {
-    if (name === 'clipboard' && args.action === 'paste' && args.payload?.assetDefinitions) {
+    if (name === 'clipboard' && ['paste', 'paste_properties'].includes(args.action) && args.payload?.assetDefinitions) {
         const definitions = args.payload.assetDefinitions;
         if (!definitions || typeof definitions !== 'object' || Array.isArray(definitions) || Object.keys(definitions).length > 100)
             throw Error('Clipboard font definitions must contain at most 100 records');

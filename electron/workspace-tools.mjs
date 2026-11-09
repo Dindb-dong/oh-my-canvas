@@ -7,7 +7,7 @@ import {readExplicitFile,writeExplicitFile,MAX_INLINE_BYTES,MAX_EXPORT_BYTES} fr
 
 export const DESKTOP_TOOL_NAMES=new Set(['workspace','preferences','save_document','delete_document','import_document','export_document','import_resource','collaboration']);
 const error=(code,message)=>Object.assign(Error(message),{code});
-export function createWorkspaceTools({manager,store,profile,sourceRoot,importCanvasJson,exportCanvasJson,runtimeRequest,preferences,notifyPreferences,connection,about,windowState,capabilities,sampleColor,requestQuit,editorTool,join,host,stopSession,checkBusy,context}){
+export function createWorkspaceTools({manager,store,profile,sourceRoot,importCanvasJson,exportCanvasJson,validateImportedDocument,runtimeRequest,preferences,notifyPreferences,connection,about,windowState,capabilities,sampleColor,requestQuit,editorTool,join,host,stopSession,checkBusy,context}){
   async function targeted(id,signal){
     if(!id)throw error('document_required','An explicit documentId is required');
     const entry=await manager.load(id);signal?.throwIfAborted();return entry;
@@ -61,20 +61,21 @@ export function createWorkspaceTools({manager,store,profile,sourceRoot,importCan
       if(bytes.length>MAX_ENVELOPE_BYTES)throw error('bad_args','Document file exceeds 24 MiB');
       const raw=bytes.toString('utf8'),options={agent,focus:args.focus??false,signal};let entry;
       if(args.format==='json'){
-        const document=assertDocument(importCanvasJson(JSON.parse(raw)));
+        const input=JSON.parse(raw);validateImportedDocument(input);const document=assertDocument(importCanvasJson(input));validateImportedDocument(document);
         entry=await manager.create(args.title??(args.filePath?path.basename(args.filePath,path.extname(args.filePath)):'Imported canvas'),document,options);
       }else{
         const record=decodeFile(raw);
+        try{validateImportedDocument(record.replica.document);}catch(error){record.replica.destroy();throw error;}
         if(args.mode==='copy'){try{entry=await manager.create(args.title??record.title,record.replica.document,options);}finally{record.replica.destroy();}}
         else try{
           if(args.title!==undefined)record.title=canvasTitle(args.title);
           const existing=manager.entries.get(record.id);
           if(existing){
             if(existing.agents.size||existing.collab||existing.holds||manager.deleting.has(record.id))throw error('busy','Imported canvas is in use. Release its agent bindings and collaboration first');
-            await checkBusy(existing,agent,signal);
+            await checkBusy(existing,agent,signal);record.replica.receive(existing.record.replica.state);
           }
           if(!existing){try{const saved=await store.load(record.id);try{record.replica.receive(saved.replica.state);}finally{saved.replica.destroy();}}catch(e){if(e.code!=='ENOENT')throw e;}}
-          entry=await manager.load(record.id,record);
+          validateImportedDocument(record.replica.document);entry=await manager.load(record.id,record);
           if(args.title!==undefined)await manager.rename(entry.record.id,args.title,{signal});
           entry.holds=(entry.holds??0)+1;
           try{await manager.save(entry);await manager.open(entry.record.id,options);}finally{entry.holds--;}
@@ -89,7 +90,7 @@ export function createWorkspaceTools({manager,store,profile,sourceRoot,importCan
       else if(args.format==='json'){bytes=Buffer.from(JSON.stringify(exportCanvasJson(entry.record.replica.document)));mimeType='application/json';}
       else{
         await manager.ensureRuntime(entry);
-        const exported=await request(entry,'export-data',{format:args.format,ids:args.ids,scale:args.scale,quality:args.quality,agent});
+        const exported=await request(entry,'export-data',{format:args.format,ids:args.ids,scale:args.scale,quality:args.quality,bounds:args.bounds,background:args.background,omitFill:args.omitFill,constraint:args.constraint,agent});
         if(typeof exported.data!=='string'||exported.data.length>Math.ceil(MAX_EXPORT_BYTES*4/3)+4)throw error('invalid','Invalid or oversized renderer export');
         bytes=Buffer.from(exported.data,'base64');mimeType=exported.mimeType;
       }

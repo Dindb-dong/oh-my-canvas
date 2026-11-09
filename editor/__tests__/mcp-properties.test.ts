@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { validateShapeProperties, validateTextStyleProperties, validateJson } from '../mcp/properties';
+import { Editor, createDocument, createShape, insertShape } from '../document';
+import { SceneWriter } from '../render/scene';
+import { installLvMcp } from '../mcp';
 
 describe('MCP structured property boundaries', () => {
     it('accepts inspector-native paint, layout, text, guide and export representations', () => {
@@ -40,6 +43,21 @@ describe('MCP structured property boundaries', () => {
         { content: { children: [{ children: [{ text: 42 }] }] } },
         { content: { children: [{ lineHeight: 'large', children: [{ text: 'Hello' }] }] } },
         { width: '100' }, { hidden: 'false' }, { radius: -1 }, { opacity: 2 }, { id: 'spoofed' },
+        { textBackground: { fills: {} } }, { textBackground: { fills: [null] } },
+        { textBackground: { fills: [{ gradient: { type: 'diamond', stops: [] } }] } },
+        { textBackground: { padding: [] } }, { textBackground: { radius: {} } },
+        { primitive: { kind: 'star', count: 1000000000 } },
+        { primitive: { kind: 'star', sides: 1000000000 } },
+        { primitive: { kind: 'polygon', points: 1000000000 } },
+        { primitive: { count: 3.5 } }, { primitive: { count: 2 } },
+        { primitive: { kind: 'circle', count: 5 } }, { primitive: { kind: 'star', count: 5, ratio: 2 } },
+        { fills: [{ type: 'diamond', stops: [] }] },
+        { fills: [{ gradient: { type: 'linear', start: [] } }] },
+        { fills: [{ image: { crop: { width: 0, height: 1 } } }] },
+        { fills: [{ imageTransform: { a: 1 } }] },
+        { adjust: { contrast: 'high' } }, { clip: { width: {} } },
+        { exportSettings: [{ constraint: [] }] }, { exportSettings: [{ constraint: { type: 'scale', value: 0 } }] },
+        { effects: [{ offset: [] }] }, { layoutGrids: [{ count: 1000000000 }] },
     ])('rejects malformed native fields before mutation %#', value => {
         expect(() => validateShapeProperties(value)).toThrow();
     });
@@ -52,6 +70,35 @@ describe('MCP structured property boundaries', () => {
         expect(() => validateTextStyleProperties({ text: 'Unexpected replacement' })).toThrow(/Unsupported/);
     });
 
+    it('renders valid text backgrounds, primitives and nested records through the real scene writer', () => {
+        const doc = createDocument(), page = doc.pagesById[doc.pages[0]];
+        const background = { fills: [{ gradient: { type: 'linear', stops: [{ color: '#fff', offset: 0 }, { color: '#ddd', offset: 1 }] } }], padding: 4, radius: 2 };
+        const text = { content: { children: [{ children: [{ text: 'Safe background', fills: [{ color: '#000' }] }] }] }, textBackground: background, clip: { x: 0, y: 0, width: 100, height: 40, radius: 2 } };
+        const polygon = { primitive: { kind: 'polygon', count: 1000, ratio: .5 } };
+        validateShapeProperties(text); validateShapeProperties(polygon);
+        insertShape(page, createShape('text', { ...text, id: 'text' }));
+        insertShape(page, createShape('polygon', { ...polygon, id: 'polygon' }));
+        const source = new SceneWriter(page.objects).svg(['text', 'polygon'], { x: 0, y: 0, width: 300, height: 200 });
+        expect(source).toContain('Safe background');
+        expect(source).toContain('linearGradient');
+        expect(source).not.toMatch(/NaN|Infinity/);
+        expect(page.objects.polygon.content).toHaveLength(1001);
+    });
+
+    it('rejects dangerous creation input in the real dispatcher before mutation and rendering', async () => {
+        const editor = new Editor(createDocument());
+        const render = vi.fn(), view: any = { settled: async () => {}, measure: () => new Map(), render };
+        const api = installLvMcp(editor, view, { global: false });
+        const before = editor.doc;
+        for (const [type, properties] of [['polygon', { primitive: { count: 1000000000 } }], ['text', { textBackground: { fills: {} } }], ['rect', { fills: [{ type: 'diamond', stops: [] }] }]] as const) {
+            const result = await api.handleToolCall('agent', 'create_shape', { type, properties });
+            expect(result.isError).toBe(true);
+            expect(editor.doc).toBe(before);
+        }
+        expect(render).not.toHaveBeenCalled();
+        api.dispose(); editor.destroy();
+    });
+
     it('checks nested URL sources and JSON primitives without evaluating them', () => {
         for (const src of ['file:///private/data', 'javascript:alert(1)', 'j a v a s c r i p t:alert(1)', 'data:text/html;base64,AAAA'])
             expect(() => validateShapeProperties({ fills: [{ image: { src } }] })).toThrow(/Unsafe/);
@@ -61,6 +108,8 @@ describe('MCP structured property boundaries', () => {
         expect(() => validateJson({ arbitrary: () => 1 })).toThrow(/JSON values/);
         expect(() => validateJson({ arbitrary: 1n })).toThrow(/JSON values/);
         expect(() => validateShapeProperties({ fills: [{ image: { src: 'data:image/png;base64,AAAA' } }] })).not.toThrow();
+        for (const mime of ['image/bmp', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/jpg'])
+            expect(() => validateShapeProperties({ image: { src: `data:${mime};base64,AAAA` } })).not.toThrow();
         expect(() => validateJson({ assetDefinitions: { font: { kind: 'font', family: 'Test', src: 'data:font/woff2;base64,AAAA' } } })).not.toThrow();
         expect(() => validateJson({ assetDefinitions: { font: { kind: 'font', family: 'Test', src: 'file:///private/font.woff2' } } })).toThrow(/Unsafe/);
     });

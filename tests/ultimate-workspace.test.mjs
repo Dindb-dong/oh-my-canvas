@@ -14,7 +14,7 @@ async function fixture(t){
   const store=new Store(path.join(profile,'documents')),events=[],runtimeCalls=[];let manager,prefs={name:'Designer',starred:[]},busy=false;
   manager=createDocumentManager({store,createRuntime(entry){queueMicrotask(()=>manager.ready(entry,entry.generation));return {};},async disposeRuntime(){},async flushRuntime(){}});
   const runtimeRequest=async(entry,name,args)=>{runtimeCalls.push({id:entry.record.id,name,args});return name==='export-data'?{data:Buffer.from('<svg/>').toString('base64'),mimeType:'image/svg+xml'}:{};};
-  const invoke=createWorkspaceTools({manager,store,profile,importCanvasJson:value=>value,exportCanvasJson:value=>value,runtimeRequest,
+  const invoke=createWorkspaceTools({manager,store,profile,validateImportedDocument:()=>{},importCanvasJson:value=>value,exportCanvasJson:value=>value,runtimeRequest,
     async checkBusy(){if(busy)throw Object.assign(Error('Busy user'),{code:'busy'});},
     async preferences(data){if(data){prefs={...prefs,...data};if(data.starred!==undefined)prefs.starred=data.starred?[data.documentId]:[];}return structuredClone(prefs);},notifyPreferences(value){events.push(value);},
     connection:()=>({available:true,config:'public config'}),about:()=>({version:'0.1.0'}),windowState:()=>({visible:false}),capabilities:()=>({tools:[]}),requestQuit(){events.push('quit');},

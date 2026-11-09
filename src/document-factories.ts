@@ -5,3 +5,5 @@ export const blankDocument=()=>importCanvasJson(blankCanvas());
 export const sampleDocument=()=>importCanvasJson(sampleCanvas());
 
 export {importCanvasJson,exportCanvasJson} from '../editor/formats/canvas';
+
+export {validateImportedDocument} from '../editor/mcp/import-document';

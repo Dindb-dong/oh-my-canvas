@@ -55,6 +55,7 @@ export function applyEditorOperation(name: string, args: Data, editor: EditorSto
     }
     if (name === 'edit_shapes') {
         const ids = args.ids as string[], roots = topLevelIds(page, ids);
+        validateShapeProperties(Object.fromEntries(['fills', 'layout'].filter(key => args[key] !== undefined).map(key => [key, args[key]])));
         requireEditable(editor, ids, args.action === 'patch' ? args.properties : undefined);
         if (args.action === 'patch') {
             validateShapeProperties(args.properties);

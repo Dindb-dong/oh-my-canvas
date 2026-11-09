@@ -28,7 +28,7 @@ protocol.registerSchemesAsPrivileged([{scheme:'omc',privileges:{standard:true,se
 app.whenReady().then(async()=>{
   const fileDialogs=createFileDialogs(dialog),dir=app.getPath('userData'),store=new Store(path.join(dir,'documents'));
   const {TOOLS,WORKSPACE_TOOLS,DOCUMENT_MUTATIONS,validateDesktopToolArgs}=await import('../dist/tool-defs.mjs');
-  const {blankDocument,sampleDocument,importCanvasJson,exportCanvasJson}=await import('../dist/document-factories.mjs');
+  const {blankDocument,sampleDocument,importCanvasJson,exportCanvasJson,validateImportedDocument}=await import('../dist/document-factories.mjs');
   const workspaceNames=new Set(WORKSPACE_TOOLS.map(tool=>tool.name)),mutations=new Set(DOCUMENT_MUTATIONS);
   const pending=new Map(),senders=new Map(),contexts=new Map(),activeCalls=new Set(),replay=createWorkspaceReplay();
   let win,bridge,bridgeError,closing=false,quitting=false,prefsWork=Promise.resolve(),shellWork=Promise.resolve();
@@ -124,7 +124,7 @@ app.whenReady().then(async()=>{
   async function checkBusy(entry,agent,signal){
     signal?.throwIfAborted();if(entry.runtime){const inspection=await runtimeRequest(entry,'inspect',{}, {signal,agent});if(inspection.busy)throw Object.assign(Error('A user edit is in progress in this canvas'),{code:'busy'});}
   }
-  const desktopTools=createWorkspaceTools({sampleColor:createScreenSampler({screen,desktopCapturer,systemPreferences}),manager,store,profile:dir,sourceRoot:root,importCanvasJson,exportCanvasJson,runtimeRequest,preferences,checkBusy,
+  const desktopTools=createWorkspaceTools({sampleColor:createScreenSampler({screen,desktopCapturer,systemPreferences}),manager,store,profile:dir,sourceRoot:root,importCanvasJson,exportCanvasJson,validateImportedDocument,runtimeRequest,preferences,checkBusy,
     notifyPreferences:value=>{sendShell({type:'preferences',preferences:value});for(const entry of manager.entries.values())sendRuntime(entry,{type:'preferences',preferences:value});},
     editorTool:(entry,call,signal)=>mcpDispatch({...call,args:{...call.args,documentId:entry.record.id}},{signal}),capabilities:()=>({tools:TOOLS,explicitDocumentMutations:DOCUMENT_MUTATIONS,protocol:{explicitTargets:true,implicitVisibleTabTarget:false,idempotency:'session-scoped',clipboard:'private-agent'},platform:{os:process.platform,windowControls:true,devTools:process.argv.includes('--debug-ui'),screenSampling:process.platform!=='darwin'||systemPreferences.getMediaAccessStatus('screen')==='granted'}}),requestQuit:()=>{setTimeout(()=>void closeApplication(),250).unref();},
     connection:mcpInfo,about:()=>({name:app.getName(),version:app.getVersion(),platform:process.platform,license:'MIT',notices:'omc://canvas/licenses/index.html',debugUi:process.argv.includes('--debug-ui')}),
@@ -157,7 +157,7 @@ app.whenReady().then(async()=>{
     data.signal?.throwIfAborted();
     try{entry=await manager.load(invitation.room);}catch(error){if(error.code!=='ENOENT')throw error;entry=await manager.load(invitation.room,{id:invitation.room,title:canvasTitle(invitation.title??'Shared canvas'),createdAt:new Date().toISOString(),replica:new Replica()});created=true;}
     entry.holds=(entry.holds??0)+1;let collab,joined=false;
-    try{if(data.replace===false){if(entry.collab||[...entry.agents].some(agent=>agent!==data.agent))throw Object.assign(Error('Canvas already has an active session; leave it first'),{code:'busy'});await checkBusy(entry,data.agent,data.signal);}if(entry.runtime)await runtimeRequest(entry,'flush');if(data.replace!==false)await stopSession(entry);collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:data.name??prefs.name});await collab.join(data.invite);joined=true;data.signal?.throwIfAborted();bindSession(entry,collab);await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.bind(data.agent,entry);if(data.focus!==false)manager.activate(entry.record.id);else manager.changed();return {documentId:entry.record.id,document:{id:entry.record.id,title:entry.record.title},...collab.status()};}
+    try{if(data.replace===false){if(entry.collab||[...entry.agents].some(agent=>agent!==data.agent))throw Object.assign(Error('Canvas already has an active session; leave it first'),{code:'busy'});await checkBusy(entry,data.agent,data.signal);}if(entry.runtime)await runtimeRequest(entry,'flush');if(data.replace!==false)await stopSession(entry);collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:data.name??prefs.name});await collab.join(data.invite);joined=true;data.signal?.throwIfAborted();if(entry.collab||data.replace===false&&[...entry.agents].some(agent=>agent!==data.agent))throw Object.assign(Error('Canvas acquired another active session while connecting; leave it first'),{code:'busy'});bindSession(entry,collab);await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.bind(data.agent,entry);if(data.focus!==false)manager.activate(entry.record.id);else manager.changed();return {documentId:entry.record.id,document:{id:entry.record.id,title:entry.record.title},...collab.status()};}
     catch(error){await collab?.close();if(entry.collab===collab)entry.collab=null;throw error;}
     finally{entry.holds--;if(created&&!joined&&!entry.runtime&&!entry.collab)manager.discard(entry);}
   }

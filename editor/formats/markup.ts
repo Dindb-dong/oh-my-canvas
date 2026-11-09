@@ -30,7 +30,7 @@ export function entities(s: string): string {
         return ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' } as Data)[v.toLowerCase()];
     });
 }
-export function safeUrl(value: string): boolean { const v = value.replace(/[\u0000-\u0020\u007f]/g, '').toLowerCase(); return !/^(javascript|vbscript|file|blob):/.test(v) && (!v.startsWith('data:') || /^data:image\/(png|jpeg|gif|webp|avif|svg\+xml);/i.test(v)); }
+export function safeUrl(value: string): boolean { const v = value.replace(/[\u0000-\u0020\u007f]/g, '').toLowerCase(); return !/^(javascript|vbscript|file|blob):/.test(v) && (!v.startsWith('data:') || /^data:image\/(png|jpe?g|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon|svg\+xml);/i.test(v)); }
 /** An inert tokenizer: it never creates DOM, fetches resources, or evaluates markup. */
 export function parseMarkup(input: string, options: {
     svg?: boolean;

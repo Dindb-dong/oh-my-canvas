@@ -5,6 +5,7 @@ import { reconcileComponents, createComponentService } from '../components';
 import { reconcileStyles } from '../styles';
 import { installLvMcp } from '../mcp';
 import { richText, textValue } from '../formats/model';
+import { SceneWriter } from '../render/scene';
 
 const disposers: Array<() => void> = [];
 afterEach(() => { while (disposers.length) disposers.pop()!(); });
@@ -22,6 +23,20 @@ function setup(options: Data = {}) {
     return { editor, api, call, ok };
 }
 describe('typed editor MCP parity', () => {
+    it('rejects malformed specialized frame paints and layout before committing a renderable scene', async () => {
+        const { editor, call, ok } = setup(), original = structuredClone(editor.doc);
+        const before = new SceneWriter(editor.page.objects).svg(['a'], { x: 0, y: 0, width: 100, height: 80 });
+        for (const args of [
+            { action: 'frame', ids: ['a'], fills: [{ gradient: { type: 'linear', stops: 'malformed' } }] },
+            { action: 'layout', ids: ['a'], layout: { type: 'grid', columns: [null] } },
+        ]) {
+            expect((await call('edit_shapes', args)).isError).toBe(true);
+            expect(editor.doc).toEqual(original);
+            expect(new SceneWriter(editor.page.objects).svg(['a'], { x: 0, y: 0, width: 100, height: 80 })).toBe(before);
+        }
+        const frame = await ok('edit_shapes', { action: 'frame', ids: ['a'], fills: [{ gradient: { type: 'linear', stops: [{ offset: 0, color: '#123456' }, { offset: 1, color: '#abcdef' }] } }] });
+        expect(new SceneWriter(editor.page.objects).svg(frame.rawIds, { x: 0, y: 0, width: 100, height: 80 })).toContain('#123456');
+    });
     it('creates, copies, names, orders and deletes pages, guards the final page and stale aliases', async () => {
         const { editor, ok, call } = setup();
         const first = editor.pageId, before = await ok('get_tree', { id: 'a' }), alias = before.tree.id;
