@@ -12,12 +12,12 @@ const $=s=>document.querySelector(s), api=window.omc;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let handle,mcp,active,lastDoc,pending=[],nextSeq=0,queue=Promise.resolve(),mounting=false,unsubscribe;
 let session={mode:'offline',peers:[]},prefs={},toastTimer,thumbnailTimer,libraryVisible=true,dialogFocus,hosting,sessionTab='host';
-let lastRejected,navigating=false,closing=false;
+let lastRejected,navigating=false,closing=false,titleEdit=null;
 const workspaceNames=new Set(WORKSPACE_TOOLS.map(tool=>tool.name)),workspaceReplay=createWorkspaceReplay();
 async function navigate(task){
   if(navigating)throw Error('Wait for the current canvas navigation to finish');
   navigating=true;const wasInert=$('#editor').inert;$('#editor').inert=true;
-  try{return await task();}finally{navigating=false;$('#editor').inert=wasInert;}
+  try{await saveTitleEdit();return await task();}finally{navigating=false;$('#editor').inert=wasInert;}
 }
 let libraryDocs=[],section='recent';
 const cursors=new Map(),colors=['#1d4ed8','#0369a1','#6d28d9','#475569'];
@@ -27,7 +27,7 @@ const run=fn=>async(...args)=>{try{return await fn(...args);}catch(e){toast(e.me
 function modal(title,body){dialogFocus=document.activeElement;const d=$('#dialog');if(d.open)d.close();$('#dialog-content').innerHTML=`<div class="dialog-heading"><h2>${esc(title)}</h2><button class="close" aria-label="Close dialog">${icon('close')}</button></div>${body}`;$('.close').onclick=()=>d.close();d.showModal();}
 $('#dialog').addEventListener('close',()=>dialogFocus?.focus?.());
 $('#dialog').addEventListener('click',e=>{if(e.target===$('#dialog')){const b=e.target.getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)e.target.close();}});
-function setTitle(){ const file=$('#editor .file-name b');if(file&&active)file.textContent=active.title;($('#document-name')||$('#document-title')).textContent=libraryVisible?'Your canvases':active?.title||'Untitled canvas';$('#document-title').disabled=libraryVisible;$('#document-title').setAttribute('aria-label',libraryVisible?'Your canvases':'Rename canvas: '+active?.title);if($('#rename-canvas'))$('#rename-canvas').hidden=libraryVisible;$('#export').hidden=libraryVisible;$('#components').hidden=libraryVisible;$('#toggle-layers').hidden=libraryVisible;$('#save-state').textContent=libraryVisible?'Local workspace':'Stored on this computer'; }
+function setTitle(){ const file=$('#editor .file-name b');if(file&&active)file.textContent=active.title;$('#document-name').textContent=libraryVisible?'Your canvases':active?.title||'Untitled canvas';const editing=!!titleEdit&&!libraryVisible&&titleEdit.id===active?.id;$('#document-title').hidden=editing;$('#title-form').hidden=!editing;$('#document-title').disabled=libraryVisible;$('#document-title').setAttribute('aria-label',libraryVisible?'Your canvases':'Rename canvas: '+active?.title);$('#export').hidden=libraryVisible;$('#components').hidden=libraryVisible;$('#toggle-layers').hidden=libraryVisible;$('#save-state').textContent=libraryVisible?'Local workspace':'Stored on this computer'; }
 async function settle(flushEditor=true){if(mounting&&flushEditor)throw Error('Wait for the canvas to finish opening');if(flushEditor)await handle?.flush?.();await queue;for(const item of [...pending])project(await api.invoke('commit',{id:active.id,...item}));await api.invoke('flush');}
 function history(action,agent,signal,requestId){const task=queue.then(()=>{signal?.throwIfAborted();return api.invoke(action,{agent,requestId});}).then(snap=>{if(snap)project(snap);return !!snap;});queue=task.catch(()=>{});return task;}
 function project(snap){
@@ -64,7 +64,7 @@ async function openSnapshot(snap){
   lastDoc=handle.editor.doc;
   handle.editor.undoStep=()=>{if(handle.editor.undo.blocked)return false;void run(()=>history('undo'))();return true;};
   handle.editor.redoStep=()=>{if(handle.editor.undo.blocked)return false;void run(()=>history('redo'))();return true;};
-  mcp=installLvMcp(handle.editor,handle.view,{services:handle.services,afterWrite:()=>settle(false),fonts:()=>handle.fonts.catalog(),editing:()=>navigating?'navigation':handle.editingText(),onHighlight:handle.highlightAgent,undo:(agent,signal,requestId)=>history('undo',agent,signal,requestId)});
+  mcp=installLvMcp(handle.editor,handle.view,{services:handle.services,afterWrite:()=>settle(false),fonts:()=>handle.fonts.catalog(),editing:()=>titleEdit?'canvas name':navigating?'navigation':handle.editingText(),onHighlight:handle.highlightAgent,undo:(agent,signal,requestId)=>history('undo',agent,signal,requestId)});
   unsubscribe=handle.editor.on(event=>{
     if(event.projection)return;
     if(event.changes){
@@ -102,12 +102,11 @@ async function updateThumbnail(){
   try{const shot=await handle.view.screenshot(undefined,{mode:'overview'});if(active?.id===id&&shot?.data)await api.invoke('thumbnail',{src:`data:${shot.mimeType};base64,${shot.data}`});}catch{}
 }
 async function newCanvas(sample=false){return navigate(async()=>{await settle();const doc=importCanvasJson(sample?sampleCanvas():blankCanvas());await openSnapshot(await api.invoke('create',{title:sample?'Studio 01':'Untitled canvas',document:doc}));});}
-async function library(){
-  if(navigating)throw Error('Wait for the current canvas navigation to finish');
+async function library(){return navigate(async()=>{
   await settle();libraryVisible=true;$('#workspace').hidden=true;$('#library').hidden=false;setTitle();
   const docs=await api.invoke('library');
   libraryDocs=docs;renderLibrary();
-}
+});}
 function renderLibrary(){
   const search=$('#search').value.trim().toLowerCase();
   const docs=libraryDocs.filter(d=>(section!=='starred'||(prefs.starred||[]).includes(d.id))&&d.title.toLowerCase().includes(search)).sort((a,b)=>$('#sort').value==='title'?a.title.localeCompare(b.title):new Date(b.updatedAt)-new Date(a.updatedAt));
@@ -133,7 +132,27 @@ async function importFile(){return navigate(async()=>{
   await openSnapshot(await api.invoke('create',{document:doc,title:f.title}));
 });}
 async function applyRename(id,title){const result=await api.invoke('rename',{id,title});if(active?.id===id){active.title=result.title;setTitle();}if(libraryVisible){libraryDocs=await api.invoke('library');renderLibrary();}return result;}
-function rename(target){const doc=target?.id?target:(!libraryVisible?active:null);if(!doc)return;modal('Rename canvas',`<form id="rename-form"><label for="name">Canvas name</label><input id="name" value="${esc(doc.title)}" maxlength="120" required><div class="actions right"><button type="button" id="cancel-rename">Cancel</button><button class="primary">Rename</button></div></form>`);$('#name').select();$('#cancel-rename').onclick=()=>$('#dialog').close();$('#rename-form').onsubmit=run(async e=>{e.preventDefault();await applyRename(doc.id,$('#name').value);$('#dialog').close();});}
+function editTitle(){
+  if(!active||libraryVisible||mounting||navigating||closing)return;
+  if(!titleEdit){titleEdit={id:active.id};$('#title-input').value=active.title;$('#title-input').readOnly=false;}
+  setTitle();$('#title-input').focus();$('#title-input').select();
+}
+function cancelTitleEdit(){if(!titleEdit||titleEdit.saving)return;titleEdit=null;setTitle();$('#document-title').focus();}
+async function saveTitleEdit(){
+  const edit=titleEdit;if(!edit)return;if(edit.saving)return edit.saving;
+  if(edit.id!==active?.id||libraryVisible){titleEdit=null;setTitle();throw Error('Canvas changed; select its current title to rename it');}
+  const input=$('#title-input'),value=input.value.trim();
+  if(edit.composing||edit.composingKey){input.focus();throw Error('Finish composing the canvas name first');}
+  if(!value||value.length>120){input.focus();throw Error('Use a canvas name with 1–120 characters');}
+  input.readOnly=true;
+  edit.saving=(async()=>{try{
+    if(value!==active?.title)await applyRename(edit.id,value);
+    const focused=document.activeElement===input;
+    if(titleEdit===edit){titleEdit=null;setTitle();if(focused)$('#document-title').focus();}
+  }catch(error){if(titleEdit===edit){input.readOnly=false;input.focus();}throw error;}finally{edit.saving=null;}})();
+  return edit.saving;
+}
+function rename(target){if(!target?.id)return editTitle();const doc=target;modal('Rename canvas',`<form id="rename-form"><label for="name">Canvas name</label><input id="name" value="${esc(doc.title)}" maxlength="120" required><div class="actions right"><button type="button" id="cancel-rename">Cancel</button><button class="primary">Rename</button></div></form>`);$('#name').select();$('#cancel-rename').onclick=()=>$('#dialog').close();$('#rename-form').onsubmit=run(async e=>{e.preventDefault();await applyRename(doc.id,$('#name').value);$('#dialog').close();});}
 function exportDialog(){
   if(!handle)return;
   modal('Export canvas',`<p>A portable .omc file includes the full editable document, embedded images and merge history.</p><div class="export-options"><button data-format="omc">Oh My Canvas <small>Editable .omc document, for backup and sharing</small></button><button data-format="json">Canvas JSON <small>Open interchange format</small></button><button data-format="svg">SVG <small>Vector export of the selected board</small></button><button data-format="png">PNG <small>Raster preview of the selected board</small></button></div>`);
@@ -165,7 +184,7 @@ async function workspaceTool(call,id,signal){
   }
   return workspaceReplay.run(call.agent,call.context?.idempotencyKey,call.name,call.args,async()=>{
     signal.throwIfAborted();
-    if(mounting||navigating||$('#dialog').open||handle?.editingText()||handle?.editor.undo.blocked)throw Error('Canvas is busy; finish the current edit or dialog first');
+    if(mounting||navigating||titleEdit||$('#dialog').open||handle?.editingText()||handle?.editor.undo.blocked)throw Error('Canvas is busy; finish the current edit or dialog first');
     if(call.name==='rename_document'){
       await settle();signal.throwIfAborted();const document=await applyRename(call.args.id,call.args.title);signal.throwIfAborted();return toolResponse({ok:true,document});
     }
@@ -284,13 +303,19 @@ api.on(message=>{
   }else if(message.type==='closing'){
     closing=true;
     for(const controller of toolRequests.values())controller.abort();
-    void run(async()=>{try{await settle();await api.readyToClose();}catch(error){await api.invoke('cancel-close');throw error;}})();
+    void run(async()=>{try{await saveTitleEdit();await settle();await api.readyToClose();}catch(error){await api.invoke('cancel-close');throw error;}})();
   }
 });
 $('#toggle-layers').onclick=()=>{$('#editor').classList.toggle('collapsed');$('#toggle-layers').setAttribute('aria-expanded',String(!$('#editor').classList.contains('collapsed')));};
 $('#components').onclick=()=>{$('#editor').classList.remove('collapsed');$('#toggle-layers').setAttribute('aria-expanded','true');[...document.querySelectorAll('#editor .ltabs button')].find(b=>b.textContent==='Assets')?.click();};
-$('#home').onclick=run(library);$('#document-title').onclick=rename;$('#new').onclick=run(()=>newCanvas());$('#import').onclick=run(importFile);$('#export').onclick=exportDialog;$('#mcp').onclick=run(mcpDialog);$('#collaborate').onclick=run(collaborationDialog);
-if($('#rename-canvas'))$('#rename-canvas').onclick=()=>rename();
+$('#home').onclick=run(library);$('#document-title').onclick=editTitle;$('#new').onclick=run(()=>newCanvas());$('#import').onclick=run(importFile);$('#export').onclick=exportDialog;$('#mcp').onclick=run(mcpDialog);$('#collaborate').onclick=run(collaborationDialog);
+$('#title-form').noValidate=true;
+$('#title-form').onsubmit=run(async event=>{event.preventDefault();if(!titleEdit?.composing&&!titleEdit?.composingKey)await saveTitleEdit();});
+$('#title-input').onblur=()=>{void run(saveTitleEdit)();};
+$('#title-input').oncompositionstart=()=>{if(titleEdit)titleEdit.composing=true;};
+$('#title-input').oncompositionend=()=>{if(titleEdit)titleEdit.composing=false;};
+$('#title-input').onkeydown=event=>{const composing=event.isComposing||titleEdit?.composing||event.keyCode===229;if(titleEdit)titleEdit.composingKey=composing;if(composing)return;if(event.key==='Escape'){event.preventDefault();event.stopPropagation();cancelTitleEdit();}};
+$('#title-input').onkeyup=()=>{if(titleEdit)titleEdit.composingKey=false;};
 for(const el of document.querySelectorAll('[data-icon]'))el.innerHTML=icon(el.dataset.icon);
 prefs=await api.invoke('preferences');
 $('#search').oninput=renderLibrary;$('#sort').onchange=renderLibrary;
