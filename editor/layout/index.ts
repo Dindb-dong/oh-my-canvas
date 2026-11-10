@@ -74,6 +74,11 @@ function reconcileInlineGeometry(objects: Record<string, Shape>, previous: Recor
             update('left', current.x, current.contentWidth);
             update('top', current.y, current.contentHeight);
         }
+        if (shape.maxWidth !== old.maxWidth && css['max-width'] === old.inlineStyles?.['max-width']) {
+            next ??= { ...css };
+            if (Number.isFinite(shape.maxWidth)) next['max-width'] = `${shape.maxWidth}px`;
+            else delete next['max-width'];
+        }
         update('width', current.width, current.contentWidth);
         update('height', current.height, current.contentHeight);
         if (next)
@@ -137,6 +142,8 @@ export function applyLayout(doc: CanvasDocument, before?: CanvasDocument, option
                 const oldParent = before?.pagesById[page.id]?.objects[parent.id], oldChild = before?.pagesById[page.id]?.objects[child.id];
                 const responsive = !!before && (!oldChild || !oldParent || parent.width !== oldParent.width || parent.height !== oldParent.height);
                 const percentage = (value: any, extent: number, fallback: number) => typeof value === 'string' && /^[-+]?\d*\.?\d+%$/.test(value.trim()) ? parseFloat(value) * extent / 100 : fallback;
+                if (mode(parent, 'width') !== 'hug' && typeof css['max-width'] === 'string' && /^[-+]?\d*\.?\d+%$/.test(css['max-width'].trim()))
+                    child.maxWidth = Math.max(0, percentage(css['max-width'], contentWidth, child.maxWidth));
                 const width = !responsive || mode(parent, 'width') === 'hug' ? child.width : percentage(css.width, contentWidth, child.width), height = !responsive || mode(parent, 'height') === 'hug' ? child.height : percentage(css.height, contentHeight, child.height);
                 let x = child.x, y = child.y;
                 if (child.absolute && responsive) {

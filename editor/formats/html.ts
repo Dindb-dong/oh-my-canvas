@@ -188,7 +188,7 @@ export function importHtml(html: string, options: ImportOptions = {}): Imported 
             const inlineOnly = node.children.length > 0 && node.children.every(n => n.tag === '#text' || inlineTags.has(n.tag));
             if (inlineOnly) {
                 const intrinsic = ['flex', 'inline-flex', 'grid', 'inline-grid'].includes(display);
-                const content = rich(node, css), fontSize = number(css['font-size'], 16), t = shape('text', { id: makeId(), parentId: s.id, enclosingFrameId: s.id, x: x + p[3], y: y + p[0], width: Math.max(0, w - p[1] - p[3]), height: content.children.length * fontSize * 1.2, content, maxWidth: intrinsic ? Math.max(0, w - p[1] - p[3]) : undefined, autoResize: intrinsic ? 'widthAndHeight' : 'height', widthSizing: intrinsic ? 'hug' : 'fill' });
+                const content = rich(node, css), fontSize = number(css['font-size'], 16), t = shape('text', { id: makeId(), parentId: s.id, enclosingFrameId: s.id, x: x + p[3], y: y + p[0], width: Math.max(0, w - p[1] - p[3]), height: content.children.length * fontSize * 1.2, content, inlineStyles: intrinsic ? { 'max-width': '100%' } : undefined, maxWidth: intrinsic ? Math.max(0, w - p[1] - p[3]) : undefined, autoResize: intrinsic ? 'widthAndHeight' : 'height', widthSizing: intrinsic ? 'hug' : 'fill' });
                 objects[t.id] = t;
                 s.childIds = [t.id];
             }

@@ -320,6 +320,26 @@ export async function runAll(inputs: Data[]) {
             const wrapped = importHtml(`<div style="display:${display};justify-content:center;align-items:center;place-items:center;width:80px;height:80px;font-size:16px">Two long words</div>`, {width: 120, height: 120});
             const wrappingLabel = wrapped.shapes.find(s => s.type === 'text')!;
             assert(wrappingLabel.width <= 80.5 && wrappingLabel.height > 20, `${display} long label still wraps within its button`);
+            const wide = importHtml(`<div style="display:${display};justify-content:center;align-items:center;place-items:center;width:160px;height:100px;font-size:16px">Two long words</div>`, {parentId: 'board', width: 200, height: 120});
+            f.editor.transact('Import resizable key', draft => {
+                Object.assign(draft.pagesById['qa-page'].objects, wide.objects);
+                draft.pagesById['qa-page'].objects.board.childIds!.push(...wide.rootIds);
+            });
+            const wideId = wide.rootIds[0], labelId = wide.shapes.find(s => s.type === 'text')!.id;
+            for (const width of [60, 160]) {
+                f.editor.transact('Resize key', draft => { draft.pagesById['qa-page'].objects[wideId].width = width; });
+                await f.view.settled();
+                const parent = f.editor.page.objects[wideId], child = f.editor.page.objects[labelId];
+                assert(child.width <= width + .5, `${display} resized label stays within parent`);
+                near(child.x + child.width / 2, parent.x + parent.width / 2, `${display} resized label remains centered`);
+                assert(width === 60 ? child.height > 20 : child.height < 25, `${display} label reflows after resizing`);
+            }
+            f.editor.transact('Set label max width', draft => { draft.pagesById['qa-page'].objects[labelId].maxWidth = 50; });
+            await f.view.settled();
+            assert(f.editor.page.objects[labelId].maxWidth === 50 && f.editor.page.objects[labelId].width <= 50.5, `${display} explicit maximum width is retained`);
+            f.editor.transact('Clear label max width', draft => { delete draft.pagesById['qa-page'].objects[labelId].maxWidth; });
+            await f.view.settled();
+            assert(f.editor.page.objects[labelId].maxWidth === undefined && f.editor.page.objects[labelId].width > 50, `${display} clearing maximum width is retained`);
             f.destroy();
         }
     });

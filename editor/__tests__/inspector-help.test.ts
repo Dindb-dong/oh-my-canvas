@@ -48,3 +48,14 @@ it('preserves a disabled action’s specific availability explanation', () => {
     expect(document.querySelector('[role=tooltip]')?.textContent).toContain('unavailable on this platform');
     help.destroy();
 });
+
+it('dismisses help when a focused field is edited', () => {
+    const root = section('Geometry'), field = input('W', 80, () => {}, 'number');
+    root.append(field); document.body.append(root);
+    const help = createInspectorHelp(root), control = field.querySelector('input')!;
+    control.focus(); expect(document.querySelector('[role=tooltip]')).not.toBeNull();
+    control.dispatchEvent(new Event('input', {bubbles:true}));
+    expect(document.querySelector('[role=tooltip]')).toBeNull();
+    expect(control.hasAttribute('aria-describedby')).toBe(false);
+    help.destroy();
+});

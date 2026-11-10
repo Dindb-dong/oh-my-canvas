@@ -156,6 +156,8 @@ export function createInspectorHelp(root: HTMLElement) {
     root.addEventListener('focusin', event => { const node = target(event); if (node) { hide(); show(node, false); } }, options);
     root.addEventListener('focusout', hide, options);
     root.addEventListener('pointerdown', hide, options);
+    root.addEventListener('input', hide, options);
+    root.addEventListener('change', hide, options);
     root.addEventListener('scroll', hide, { ...options, capture: true });
     window.addEventListener('keydown', event => {
         if (event.key === 'Escape' && control) { event.preventDefault(); event.stopPropagation(); hide(); }
