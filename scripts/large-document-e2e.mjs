@@ -4,6 +4,7 @@
  * Requires a built app and a native display (xvfb-run is suitable on Linux CI).
  * All profiles are temporary. Results distinguish UI paint, durability and complete
  * MCP operations; frame intervals include native input automation, not GPU-only time.
+ * --journey-timeout sets the global deadline in milliseconds (default 600000).
  */
 import {_electron as electron} from 'playwright';
 import {promises as fs, createReadStream} from 'node:fs';
@@ -15,24 +16,54 @@ import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 
 const args=Object.fromEntries(process.argv.slice(2).reduce((out,value,index,all)=>value.startsWith('--')?[...out,[value.slice(2),all[index+1]?.startsWith('--')?true:all[index+1]??true]]:out,[]));
-const root=path.resolve(args['app-root']??process.cwd()),source=args.source,output=args.output,label=String(args.label??'current'),timeout=Number(args.timeout??300000),samples=Number(args.samples??90);
+const root=path.resolve(args['app-root']??process.cwd()),source=args.source,output=args.output,label=String(args.label??'current'),timeout=Number(args.timeout??300000),samples=Number(args.samples??90),journeyTimeout=Number(args['journey-timeout']??600000);
 assert.ok(typeof source==='string'&&path.isAbsolute(source),'--source requires an absolute .fig/.sketch/.json/.omc path');
 assert.ok(typeof output==='string'&&path.isAbsolute(output),'--output requires an absolute evidence directory');
 assert.ok(Number.isFinite(timeout)&&timeout>=1000&&Number.isSafeInteger(samples)&&samples>=5&&samples<=600,'Invalid timeout/samples');
+assert.ok(Number.isSafeInteger(journeyTimeout)&&journeyTimeout>=1000&&journeyTimeout<=3600000,'--journey-timeout must be 1000–3600000 milliseconds');
 await fs.mkdir(output,{recursive:true});
 const temporary=await fs.mkdtemp(path.join(os.tmpdir(),'omc-large-qa-')),profile=path.join(temporary,'original');
 const requireFromApp=createRequire(path.join(root,'package.json'));
-const result={schemaVersion:1,label,at:new Date().toISOString(),source:{path:source,bytes:(await fs.stat(source)).size},environment:{platform:process.platform,arch:process.arch,node:process.version,cpu:os.cpus()[0]?.model,logicalCPUs:os.cpus().length,totalMemory:os.totalmem()},checks:[],phases:{},rendererErrors:[],consoleErrors:[],limitations:['Single native process run per revision; automated input frame intervals include driver scheduling.','A screenshot is evidence of the rendered result, not a comparison against the Figma original.','Harness waits do not change the app worker/runtime deadlines.','Gesture samples are warmed by a completed native save/settle before sampling; page-entry timing is recorded separately.','Reopen measures document open in a fresh process after app launch, not cold-disk or app-start latency; startup library listing may already have read/warmed storage or overlap the open.']};
+const result={schemaVersion:1,label,at:new Date().toISOString(),source:{path:source,bytes:(await fs.stat(source)).size},environment:{platform:process.platform,arch:process.arch,node:process.version,cpu:os.cpus()[0]?.model,logicalCPUs:os.cpus().length,totalMemory:os.totalmem()},checks:[],phases:{},rendererErrors:[],consoleErrors:[],failedResponses:[],failedRequests:[],limitations:['Single native process run per revision; automated input frame intervals include driver scheduling.','A screenshot is evidence of the rendered result, not a comparison against the Figma original.','Harness waits do not change the app worker/runtime deadlines.','Gesture samples are warmed by a completed native save/settle before sampling; page-entry timing is recorded separately.','Reopen measures document open in a fresh process after app launch, not cold-disk or app-start latency; startup library listing may already have read/warmed storage or overlap the open.']};
 try{result.revision=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();}catch{}
 for(const name of ['electron','playwright','fflate','openfig-core'])try{result.environment[name]=requireFromApp(name+'/package.json').version;}catch{}
-let app,shell,page;
+let app,shell,page,ownedChild,expired=false,watchdog,watchdogTask,expireJourney;
+const journeyError=Error('Global native journey exceeded '+journeyTimeout+' milliseconds');
+const journeyExpired=new Promise(resolve=>{expireJourney=resolve;});
+function assertJourney(){if(expired)throw journeyError;}
+function terminateOwned(){
+  if(!ownedChild||ownedChild.exitCode!==null||ownedChild.signalCode!==null)return {pid:ownedChild?.pid,running:false};
+  return {pid:ownedChild.pid,signal:'SIGKILL',sent:ownedChild.kill('SIGKILL')};
+}
 const observed=new WeakSet();
 const hashFile=async file=>{const hash=createHash('sha256');for await(const bytes of createReadStream(file))hash.update(bytes);return hash.digest('hex');};
 result.source.sha256=await hashFile(source);
-const checkpoint=()=>fs.writeFile(path.join(output,'result.json'),JSON.stringify(result,null,2)+'\n');
-async function check(name,fn,{fatal=false}={}){const started=performance.now();try{const value=await fn();result.checks.push({name,passed:true,ms:performance.now()-started});console.log('PASS',label,name);await checkpoint();return value;}catch(error){result.checks.push({name,passed:false,ms:performance.now()-started,error:error.stack??String(error)});console.error('FAIL',label,name,error.message);await page?.screenshot({path:path.join(output,'failure-'+result.checks.length+'.png'),timeout:15000}).catch(()=>{});await checkpoint();if(fatal)throw error;}}
-function observe(target){if(observed.has(target))return;observed.add(target);target.setDefaultTimeout(30000);target.on('pageerror',error=>result.rendererErrors.push({url:target.url(),message:error.message}));target.on('console',message=>{if(message.type()==='error')result.consoleErrors.push({url:target.url(),message:message.text().slice(0,1000)});});}
-async function launch(directory){await fs.mkdir(directory,{recursive:true});app=await electron.launch({executablePath:requireFromApp('electron'),args:[root,`--profile=${directory}`,'--mcp-port=0'],env:{...process.env,OMC_TEST_BACKGROUND:'1'},timeout:60000});app.context().on('page',observe);shell=await app.firstWindow();observe(shell);await shell.locator('#import').waitFor({timeout});await app.evaluate(({BrowserWindow})=>{const window=BrowserWindow.getAllWindows()[0];window.setSize(1500,980);window.showInactive();});result.environment.visibleWindow=true;result.environment.electronRuntime=await app.evaluate(()=>process.versions);result.environment.gpu=await app.evaluate(({app})=>app.getGPUFeatureStatus());result.environment.gpuInfo=await app.evaluate(async({app})=>{try{return await app.getGPUInfo('basic');}catch(error){return{error:error.message};}});}
+let writing=Promise.resolve();
+function checkpoint(){const text=JSON.stringify(result,null,2)+'\n';writing=writing.catch(()=>{}).then(async()=>{const temporary=path.join(output,'result.json.tmp');await fs.writeFile(temporary,text);await fs.rename(temporary,path.join(output,'result.json'));});return writing;}
+async function check(name,fn,{fatal=false}={}){
+  assertJourney();const started=performance.now();
+  result.pendingCheck={name,startedAt:new Date().toISOString()};
+  console.log('START',label,name);await checkpoint();assertJourney();
+  try{
+    const value=await Promise.race([Promise.resolve().then(fn),journeyExpired.then(()=>{throw journeyError;})]);
+    assertJourney();result.checks.push({name,passed:true,ms:performance.now()-started});delete result.pendingCheck;
+    console.log('PASS',label,name);await checkpoint();return value;
+  }catch(error){
+    if(!expired){result.checks.push({name,passed:false,ms:performance.now()-started,error:error.stack??String(error)});delete result.pendingCheck;}
+    console.error('FAIL',label,name,error.message);
+    if(!expired)await page?.screenshot({path:path.join(output,'failure-'+result.checks.length+'.png'),timeout:15000}).catch(()=>{});
+    await checkpoint();if(fatal||expired)throw error;
+  }
+}
+function observe(target){
+  if(observed.has(target))return;observed.add(target);target.setDefaultTimeout(30000);
+  target.on('pageerror',error=>result.rendererErrors.push({url:target.url(),message:error.message}));
+  target.on('console',message=>{if(message.type()==='error')result.consoleErrors.push({url:target.url(),message:message.text().slice(0,1000),location:message.location()});});
+  // Network failures are diagnostic, including the deliberately requested missing bitmap.
+  target.on('response',response=>{if(response.status()>=400)result.failedResponses.push({pageUrl:target.url(),url:response.url(),status:response.status(),statusText:response.statusText(),resourceType:response.request().resourceType()});});
+  target.on('requestfailed',request=>result.failedRequests.push({pageUrl:target.url(),url:request.url(),resourceType:request.resourceType(),error:request.failure()?.errorText}));
+}
+async function launch(directory){assertJourney();await fs.mkdir(directory,{recursive:true});assertJourney();app=await electron.launch({executablePath:requireFromApp('electron'),args:[root,`--profile=${directory}`,'--mcp-port=0'],env:{...process.env,OMC_TEST_BACKGROUND:'1'},timeout:60000});ownedChild=app.process();if(expired){result.journeyTimeout.lateTermination=terminateOwned();await checkpoint();throw journeyError;}app.context().on('page',observe);shell=await app.firstWindow();observe(shell);await shell.waitForFunction(()=>typeof document.querySelector('#import')?.onclick==='function',null,{timeout:30000,polling:100}).catch(error=>{throw Error('Shell JavaScript did not bind Import within 30 seconds; inspect consoleErrors and failedResponses',{cause:error});});await app.evaluate(({BrowserWindow})=>{const window=BrowserWindow.getAllWindows()[0];window.setSize(1500,980);window.showInactive();});result.environment.visibleWindow=true;result.environment.electronRuntime=await app.evaluate(()=>process.versions);result.environment.gpu=await app.evaluate(({app})=>app.getGPUFeatureStatus());result.environment.gpuInfo=await app.evaluate(async({app})=>{try{return await app.getGPUInfo('basic');}catch(error){return{error:error.message};}});}
 async function documentPage(id){const until=Date.now()+timeout;while(Date.now()<until){const state=await shell.evaluate(()=>window.omc.invoke('workspace'));const wanted=id??state.activeTabId,tab=state.tabs.find(tab=>tab.id===wanted);const found=tab&&app.context().pages().find(item=>{try{const url=new URL(item.url());return url.pathname==='/document.html'&&url.searchParams.get('documentId')===wanted&&Number(url.searchParams.get('generation'))===tab.generation;}catch{return false;}});if(found){observe(found);await found.waitForFunction(()=>!!window.lvMcp&&!document.querySelector('#editor')?.inert,null,{timeout});return found;}await new Promise(resolve=>setTimeout(resolve,100));}throw Error('Document did not become ready within harness deadline');}
 async function close(){
   if(!app)return;
@@ -79,10 +110,23 @@ async function selectLeaf(){const candidate=await page.evaluate(async()=>{const 
 async function exportFile(format){if(await page.locator('#dialog').evaluate(dialog=>dialog.open))await page.locator('#dialog button[aria-label="Close dialog"]').click();const file=path.join(output,'export.'+format);await app.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:file});},file);await page.locator('#export').click();await watchErrors(page);const began=performance.now();await page.locator(`[data-format="${format}"]`).click();await page.waitForFunction(()=>window.__largeDocumentError?.message||!document.querySelector('#dialog')?.open,null,{timeout});const error=await page.evaluate(()=>window.__largeDocumentError?.message);if(error)throw Error('Native export: '+error);const stat=await fs.stat(file);assert.ok(stat.size>20);result.phases['export-'+format]={ms:performance.now()-began,bytes:stat.size};return file;}
 async function inspectPortableText(file,kind){const input=createReadStream(file,{encoding:'utf8'});let tail='',localReference=false,hasData=false,remoteImage=false;for await(const text of input){const part=tail+text;localReference ||= /omc-asset:sha256:|omc:\/\/canvas\/assets\//.test(part);hasData ||= /data:image\//.test(part);remoteImage ||= kind==='SVG'&&/<image\b[^>]*(?:href|xlink:href)=["'](?!data:)[^"']+["']/i.test(part);tail=part.slice(-1000);}assert.equal(localReference,false,kind+' contains workspace-only URLs');assert.equal(remoteImage,false,'SVG contains an unresolved image URL');if(kind==='JSON'&&result.document.assets)assert.ok(hasData,kind+' has no embedded image sources');return{localReference,hasData,remoteImage};}
 
+result.journey={startedAt:new Date().toISOString(),timeoutMs:journeyTimeout};
+watchdog=setTimeout(()=>{
+  expired=true;result.passed=false;
+  result.journeyTimeout={at:new Date().toISOString(),timeoutMs:journeyTimeout,pendingCheck:result.pendingCheck};
+  result.checks.push({name:result.pendingCheck?.name??'journey cleanup',passed:false,timeout:true,error:journeyError.message});
+  console.error('TIMEOUT',label,result.pendingCheck?.name??'journey cleanup');
+  watchdogTask=(async()=>{
+    try{await checkpoint();}catch(error){console.error('Could not checkpoint timeout:',error.message);}
+    try{result.journeyTimeout.termination=terminateOwned();}catch(error){result.journeyTimeout.terminationError=error.message;}
+    finally{expireJourney();}
+    await checkpoint().catch(error=>console.error('Could not checkpoint termination:',error.message));
+  })();
+},journeyTimeout);
 try{
   await check('native launch',()=>launch(profile),{fatal:true});
   await check('source import and ready',async()=>{result.phases.importMs=await importFile(source);result.document=await metadata();assert.equal(result.document.missingAssets.length,0);if(args['expect-pages'])assert.equal(result.document.pages.length,Number(args['expect-pages']));if(path.basename(source)==='iOS-and-iPadOS-27.fig'){assert.equal(result.document.pages.length,46);assert.equal(result.document.assets,160);}result.document.objects=result.document.pages.reduce((sum,item)=>sum+item.objects,0);result.phases.afterImportMemory=await memory();},{fatal:true});
-  await installProbe();
+  await check('install measurement probes',installProbe,{fatal:true});
   const cover=result.document.pages.find(item=>item.name==='Cover')??result.document.pages[0],examples=result.document.pages.find(item=>item.name==='Examples')??[...result.document.pages].sort((a,b)=>b.objects-a.objects)[0];
   await check('Cover page entry',async()=>{result.phases.coverEntry=await selectPage(cover.id);});
   await check('page rename UI paint and durable save',async()=>{await flush();await page.locator('button[aria-label="Page actions"]').click();await page.locator('.omc-dialog').getByRole('button',{name:'Rename',exact:true}).click();await page.locator('.omc-dialog input').fill('Cover — native performance '+label);await start('rename-ui');await page.locator('.omc-dialog').getByRole('button',{name:'Save',exact:true}).evaluate(button=>button.click());result.phases.renameUI=await finish({save:true});assert.ok(result.phases.renameUI.ackMs!==null&&result.phases.renameUI.durableMs!==null);});
@@ -97,5 +141,5 @@ try{
   await check('portable OMC export',async()=>{await exportFile('omc');});
   await check('fresh process reopen retains all pages and edits',async()=>{await flush();await close();await launch(profile);const began=performance.now();await shell.evaluate(id=>window.omc.invoke('open',{id,focus:true}),result.document.id);page=await documentPage(result.document.id);result.phases.reopenMs=performance.now()-began;const meta=await metadata();assert.equal(meta.pages.length,result.document.pages.length);assert.equal(meta.assets,result.document.assets);assert.equal(meta.pages.reduce((sum,item)=>sum+item.objects,0),result.document.objects);assert.equal(meta.pages.find(item=>item.id===cover.id).name,'Cover — verified '+label);await close();});
   for(const format of ['omc','json'])await check('fresh-profile '+format+' round trip',async()=>{const file=path.join(output,'export.'+format);await fs.stat(file);await close();await launch(path.join(temporary,'roundtrip-'+format));result.phases[format+'RoundTripMs']=await importFile(file);const meta=await metadata();assert.equal(meta.pages.length,result.document.pages.length);assert.equal(meta.assets,result.document.assets);assert.equal(meta.missingAssets.length,0);assert.equal(meta.pages.reduce((sum,item)=>sum+item.objects,0),result.document.objects);result[format+'RoundTrip']={pages:meta.pages.length,objects:meta.pages.reduce((sum,item)=>sum+item.objects,0),assets:meta.assets,externalHashes:meta.externalHashes.length};await close();});
-  result.passed=result.checks.every(item=>item.passed)&&result.rendererErrors.length===0&&!result.forcedCloses?.length;
-}catch(error){result.passed=false;result.failure=error.stack??String(error);}finally{await close().catch(error=>{result.closeError=error.message;result.passed=false;});await fs.rm(temporary,{recursive:true,force:true,maxRetries:5,retryDelay:100});result.finishedAt=new Date().toISOString();await checkpoint();console.log(JSON.stringify({label,passed:result.passed,checks:result.checks.map(({name,passed})=>({name,passed})),output}));if(!result.passed)process.exitCode=1;}
+  result.passed=!expired&&result.checks.every(item=>item.passed)&&result.rendererErrors.length===0&&!result.forcedCloses?.length;
+}catch(error){result.passed=false;result.failure=error.stack??String(error);}finally{await close().catch(error=>{result.closeError=error.message;result.passed=false;});clearTimeout(watchdog);await watchdogTask;await fs.rm(temporary,{recursive:true,force:true,maxRetries:5,retryDelay:100});result.finishedAt=new Date().toISOString();await checkpoint();console.log(JSON.stringify({label,passed:result.passed,checks:result.checks.map(({name,passed})=>({name,passed})),output}));if(!result.passed)process.exitCode=1;}

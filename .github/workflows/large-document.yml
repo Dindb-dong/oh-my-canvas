@@ -2,6 +2,11 @@ name: Large document validation
 
 on:
   workflow_dispatch:
+    inputs:
+      compare_reference:
+        description: Also measure the historical PR 11 reference on this runner
+        type: boolean
+        default: false
   push:
     branches: [perf/large-document-core]
     paths:
@@ -33,6 +38,7 @@ jobs:
           lfs: true
           persist-credentials: false
       - name: Check out historical reference
+        if: github.event_name == 'workflow_dispatch' && inputs.compare_reference
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: 3c94d043fa97711d98f014a196977cc3d003ad28
@@ -68,22 +74,36 @@ jobs:
           npm run build 2>&1 | tee ../evidence/current-build.log
       - name: Build historical reference
         id: reference-build
+        if: github.event_name == 'workflow_dispatch' && inputs.compare_reference
         continue-on-error: true
         working-directory: baseline
         run: |
           set -o pipefail
           npm ci
           npm run build 2>&1 | tee ../evidence/baseline-build.log
-      - name: Measure historical reference
-        if: steps.reference-build.outcome == 'success'
-        continue-on-error: true
-        working-directory: baseline
-        run: |
-          xvfb-run --auto-servernum node ../candidate/scripts/large-document-e2e.mjs --source "$GITHUB_WORKSPACE/candidate/fixtures/design-files/iOS-and-iPadOS-27.fig" --output "$GITHUB_WORKSPACE/evidence/baseline" --label pr11
       - name: Measure candidate
+        timeout-minutes: 12
         working-directory: candidate
         run: |
           xvfb-run --auto-servernum node scripts/large-document-e2e.mjs --source "$GITHUB_WORKSPACE/candidate/fixtures/design-files/iOS-and-iPadOS-27.fig" --output "$GITHUB_WORKSPACE/evidence/current" --label candidate
+      - name: Retain candidate evidence before reference measurement
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: large-document-current-${{ github.run_id }}
+          path: |
+            evidence/current/result.json
+            evidence/current/*.png
+            evidence/*.log
+          retention-days: 7
+          if-no-files-found: error
+      - name: Measure historical reference
+        if: success() && steps.reference-build.outcome == 'success'
+        timeout-minutes: 22
+        continue-on-error: true
+        working-directory: baseline
+        run: |
+          xvfb-run --auto-servernum node ../candidate/scripts/large-document-e2e.mjs --source "$GITHUB_WORKSPACE/candidate/fixtures/design-files/iOS-and-iPadOS-27.fig" --output "$GITHUB_WORKSPACE/evidence/baseline" --label pr11 --journey-timeout 1200000
       - name: Retain validation evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

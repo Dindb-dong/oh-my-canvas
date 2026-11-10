@@ -1,5 +1,6 @@
 import {DESIGN_FILE_LIMIT,MAX_PORTABLE_BYTES} from '../core/capacity.mjs';
-import {persistDesignImport,portableAssetDocument,assetResponse} from './document-assets.mjs';
+import {persistDesignImport,portableAssetDocument} from './document-assets.mjs';
+import {createCanvasProtocolHandler} from './canvas-protocol.mjs';
 import {readDesignFile} from './design-import.mjs';
 import {readExplicitFile} from './file-transfer.mjs';
 import {createFileDialogs} from './file-dialogs.mjs';
@@ -277,14 +278,7 @@ app.whenReady().then(async()=>{
     if(!Number.isInteger(port)||port<0||port>65535)throw Error('Invalid MCP port');
     bridge=await startMcpBridge({dir,port,endSession:endAgent,dispatch:(call,options)=>{const task=mcpDispatch(call,options);activeCalls.add(task);void task.then(()=>activeCalls.delete(task),()=>activeCalls.delete(task));return task;}});
   }catch(error){bridgeError=error.code==='EADDRINUSE'?'MCP port is already in use. Close the other listener or choose --mcp-port.':error.message;}
-  const mime={'.html':'text/html','.js':'application/javascript','.mjs':'application/javascript','.css':'text/css','.wasm':'application/wasm','.woff2':'font/woff2','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'};
-  protocol.handle('omc',async request=>{
-    const url=new URL(request.url);if(url.hostname!=='canvas')return new Response('Not found',{status:404});
-    let name;try{name=decodeURIComponent(url.pathname);}catch{return new Response('Invalid path',{status:400});}
-    if(name.startsWith('/assets/'))return assetResponse(store.assets,name.slice('/assets/'.length));
-    const base=path.join(root,'dist'),file=path.resolve(base,'.'+name);if(!file.startsWith(base+path.sep))return new Response('Forbidden',{status:403});
-    try{return new Response(await fs.readFile(file),{headers:{'Content-Type':mime[path.extname(file)]||'application/octet-stream','Content-Security-Policy':"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'"}});}catch{return new Response('Not found',{status:404});}
-  });
+  protocol.handle('omc',createCanvasProtocolHandler({directory:path.join(root,'dist'),assets:store.assets}));
   win=new BrowserWindow({show:!backgroundTest,width:1500,height:980,minWidth:960,minHeight:640,title:'Oh My Canvas',backgroundColor:'#ffffff',titleBarStyle:'hiddenInset',trafficLightPosition:{x:18,y:10},webPreferences:{preload:path.join(root,'dist/preload.cjs'),backgroundThrottling:false,contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}});
   secure(win.webContents,'omc://canvas/index.html');
   win.webContents.session.setPermissionRequestHandler((_,__,callback)=>callback(false));win.webContents.session.on('will-download',event=>event.preventDefault());

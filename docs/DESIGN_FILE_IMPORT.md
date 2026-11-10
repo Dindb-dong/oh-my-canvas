@@ -20,19 +20,19 @@ These are implemented contracts, not a claim that all acceptance targets below h
 
 The verified 160,627,671-byte source produced 46 pages, 39,363 objects and 160 external bitmap blobs containing 90,234,314 original bytes. The editable JSON is 41,452,401 bytes and its initial Yjs state is 107,305,531 bytes. Separating the images does not eliminate the remaining geometry, text or CRDT representation costs.
 
-One core-process journey on Linux x64, Node 24.22.1, Intel Xeon Platinum 8573C measured the following phases with `scripts/benchmark-document-core.mjs`. The source replica was closed before the single reopen observation. Explicit garbage collection was enabled. These measurements exclude Electron IPC, editor initialization/reconciliation, native rendering, image decoding for display, portable export and visual fidelity.
+One core-process journey on Linux x64, Node 24.22.1, Intel Xeon Platinum 8573C measured the following phases with `scripts/benchmark-document-core.mjs`, after direct checkpoint hydration and single-pass initial encoding were implemented in commit `37fec9158fa17e1032f1f632b1ad48cb62578834`. The source replica was closed before the single reopen observation. Explicit garbage collection was enabled. These measurements exclude Electron IPC, editor initialization/reconciliation, native rendering, image decoding for display, portable export and visual fidelity.
 
 | Core phase | Observed time | Scope |
 | --- | --- | --- |
-| Worker import | 18.83 s | Includes 8.62 s of full worker validation |
-| Persist original bitmap blobs | 2.32 s | Verified durable blob writes |
-| Initial replica | 30.40 s | Includes 11.71 s of projection/validation and 2.34 s of state encoding |
-| Initial checkpoint | 2.03 s | Initial working-storage checkpoint |
-| Reopen | 22.86 s | One observation after closing the source replica; process launch excluded |
-| First page rename | 18.60 ms | Patch translation, replica acceptance and fsynced journal |
-| Five subsequent page renames | 2.89 ms median; 6.79 ms maximum | Same core path, after the first edit; nearest-rank p95 equals the maximum for five samples |
+| Worker import | 14.48 s | Includes 6.48 s of full worker validation |
+| Persist original bitmap blobs | 2.26 s | Verified durable blob writes |
+| Initial replica | 16.30 s | Includes 5.89 s of projection/validation and 2.19 s of state encoding |
+| Initial checkpoint | 0.84 s | Initial working-storage checkpoint |
+| Reopen | 12.07 s | One observation after closing the source replica; process launch excluded |
+| First page rename | 12.75 ms | Patch translation, replica acceptance and fsynced journal |
+| Five subsequent page renames | 2.94 ms median; 3.64 ms maximum | Same core path, after the first edit; nearest-rank p95 equals the maximum for five samples |
 
-The warm rename samples were 3.45, 6.79, 2.86, 2.12 and 2.89 ms. Each produced a 49-byte Yjs update and a 319-byte journal record, with no full-state encoding during validation. The edited page contained 18,380 objects. This establishes bounded small-edit work in that core path, not a desktop input-latency or frame-rate result. Initial import and reopen remain expensive and do not meet a responsiveness claim.
+The warm rename samples were 3.31, 3.64, 2.94, 2.01 and 2.05 ms. Each produced a 49-byte Yjs update and a 319-byte journal record, with no full-state encoding during validation. The edited page contained 18,380 objects. The process snapshot after reopen reported 1,344,315,392 bytes RSS and 590,392,904 bytes of used JavaScript heap; these are not peaks and do not include a desktop renderer. This establishes bounded small-edit work in that core path, not a desktop input-latency or frame-rate result. Initial import and reopen remain expensive and do not meet a responsiveness claim.
 
 The [testing guide](TESTING.md#large-design-file-journey) describes the separate native journey, including UI paint versus durable acknowledgment, pan/hover/drag, portable exports and fresh-profile reopen. The native runner records its actual GPU environment and failures; a timeout is a failed acceptance. The historical macOS timings below must not be treated as a same-host comparison with these Linux core observations.
 
