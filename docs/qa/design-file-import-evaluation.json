@@ -5,7 +5,8 @@
   "source": {
     "url": "https://www.figma.com/community/file/1651309003795292092/ios-and-ipados-27",
     "bytes": 160627671,
-    "redistributed": false
+    "redistributed": true,
+    "repositoryPath": "fixtures/design-files/iOS-and-iPadOS-27.fig"
   },
   "environment": {
     "platform": "macOS",
@@ -14,7 +15,7 @@
     "sampling": "one run; no p95 or detailed cold/warm classification"
   },
   "runner": "node scripts/design-library-e2e.mjs <absolute-local-fig-path>",
-  "runnerAvailability": "paused implementation branch; not introduced by this documentation PR",
+  "runnerAvailability": "included in the implementation checkpoint",
   "result": {
     "journeyPassed": true,
     "pages": 46,

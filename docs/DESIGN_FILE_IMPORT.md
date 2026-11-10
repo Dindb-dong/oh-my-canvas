@@ -1,8 +1,8 @@
 # Design-file import: prototype status and architecture proposal
 
-Status: **unmerged prototype; implementation paused**. Updated 2026-11-10.
+Status: **prototype checkpoint published for integration; architecture improvements paused**. Updated 2026-11-10.
 
-This document records the `.fig` / `.sketch` work completed so far, the measured limits of a real large library, and recommendations from a read-only GPT-6 Astra review at high reasoning effort. It is a development proposal, not a claim that these features or file versions are available on the default branch. The prototype remains on `feat/design-file-import`; this documentation change does not publish or resume that implementation.
+This document records the `.fig` / `.sketch` prototype, measured limits of a real large library, and recommendations from a read-only GPT-6 Astra review at high reasoning effort. PR #10 initially published documentation only. The subsequent implementation checkpoint includes the paused code and [full source fixture in Git LFS](../fixtures/design-files/README.md) for integration by the ongoing architecture work. The proposed redesign below is not implemented.
 
 ## Outcome and target
 
@@ -76,7 +76,7 @@ Every page was selected and settled. A fresh process reopened the document with 
 | Native synthetic format journey | Figma and Sketch import, plus Figma drop through worker/IPC/CSP, passed | Small synthetic inputs |
 | Actual target journey | All pages selected; rename, save, and fresh-process reopen passed | Single-machine run with substantial latency |
 
-The prototype runners were `node scripts/design-import-e2e.mjs` and `node scripts/design-library-e2e.mjs <absolute-local-fig-path>`. They use isolated temporary profiles and remove their own test profiles. These runners belong to the paused implementation and are not introduced by this documentation PR. Application tests were `npm run test:editor`, `npm test`, `node --test tests/storage.test.mjs`, `npm run check`, and `npm run build`.
+The prototype runners were `node scripts/design-import-e2e.mjs` and `node scripts/design-library-e2e.mjs <absolute-local-fig-path>`. They use isolated temporary profiles and remove their own test profiles. These runners are included in the published implementation checkpoint. Application tests were `npm run test:editor`, `npm test`, `node --test tests/storage.test.mjs`, `npm run check`, and `npm run build`.
 
 ## Astra review: findings and confidence
 
@@ -155,4 +155,4 @@ These are targets for future work, **not measured achievements**. Use the same m
 
 Implementation remains paused pending a chosen architecture and staged verification. Exact blob storage, journal/checkpoint format, migration strategy, wire protocol, cache budgets, and fidelity thresholds have not been selected. The existing prototype is a useful checkpoint, not a merge-ready large-library editor.
 
-The original `.fig`, generated `.omc`/JSON, detailed internal logs, and source-derived screenshots are not distributed with this document. This PR publishes the status, sanitized measurements, and proposed engineering contract. No release, app installation, protocol migration, merge, or deployment is implied.
+The full third-party `.fig` is now available through the linked Git LFS fixture at the user’s explicit request. A [native runtime screenshot](qa/design-file-import-examples.png) records the Examples page. Generated documents and detailed internal logs remain unpublished. The code checkpoint retains the documented correctness and latency gaps; no architecture redesign, packaged release, or deployment is implied.
