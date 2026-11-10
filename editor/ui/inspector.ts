@@ -1,7 +1,7 @@
 import type { Data, EditorServices, Shape, MountOptions } from "../contracts";
 import { moveTree, resizeTree, topLevelIds, isEditable, ancestors } from "../document";
 import { rotateShapes, setPathHandle, movePathNodes, convertPathNode } from "../commands";
-import { el, button, iconButton, labeledIconButton, input, select, check, section, row, clone, jsonEditor, askName, modal, toast, download } from "./dom";
+import { el, button, iconButton, labeledIconButton, input, syncInputValue, select, check, section, row, clone, jsonEditor, askName, modal, toast, download } from "./dom";
 import { chooseFiles, readImageFile } from "./picker";
 import type { createTextSession } from "../interaction/text";
 import type { createCanvasInteraction } from "../interaction/canvas";
@@ -27,6 +27,10 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
     const editor = services.editor;
     const pickerAbort = new AbortController();
     let destroyed = false, rendering = false, numericSession = false;
+    const geometryKeys = new Set(["x", "y", "width", "height", "rotation", "box", "corners", "transform", "inverseTransform"]);
+    const geometryInputs = new Map<string, HTMLInputElement>();
+    let renderedState: {shapes: Shape[]; dependencies: unknown[]} | null = null;
+    let rebuilds = 0, geometryUpdates = 0, skippedRefreshes = 0;
     const processing = new Set<string>();
     const processingErrors = new Map<string, string>();
     function asyncAction(label: string, pending: string, key: string, run: () => Promise<unknown>) {
@@ -55,7 +59,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
         return control;
     }
     const selected = () => editor.selection.map(id => editor.page.objects[id]).filter((s): s is Shape => !!s);
-    const applyChange = (label: string, apply: (doc: Data) => void) => {
+    const applyChange = (label: string, apply: (doc: Data) => void, completed?: () => void) => {
         const pageId = editor.pageId;
         const commit = () => {
             if (destroyed || editor.pageId !== pageId)
@@ -64,6 +68,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
                 editor.preview(apply);
             else
                 editor.transact(label, apply);
+            completed?.();
         };
         if (rendering)
             queueMicrotask(commit);
@@ -81,7 +86,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
         };
         applyChange(label, apply);
     };
-    const patch = (key: string, value: any) => {
+    const patch = (key: string, nextValue: any) => {
         const ids = [...editor.selection];
         const apply = (doc: Data) => {
             const page = doc.pagesById[editor.pageId];
@@ -92,11 +97,11 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
                 if (!shape || !allowed)
                     continue;
                 if (key === "rotation") {
-                    rotateShapes(page, [id], value - shape.rotation);
+                    rotateShapes(page, [id], nextValue - shape.rotation);
                     continue;
                 }
                 if (key === "x" || key === "y") {
-                    moveTree(page, id, key === "x" ? value - shape.x : 0, key === "y" ? value - shape.y : 0);
+                    moveTree(page, id, key === "x" ? nextValue - shape.x : 0, key === "y" ? nextValue - shape.y : 0);
                     continue;
                 }
                 if (key === "width" || key === "height") {
@@ -105,31 +110,42 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
                         y: shape.y,
                         width: shape.width,
                         height: shape.height,
-                        [key]: Math.max(0.01, value)
+                        [key]: Math.max(0.01, nextValue)
                     };
                     if (shape.constrainProportions) {
                         if (key === "width")
-                            rect.height = shape.height * value / shape.width;
+                            rect.height = shape.height * nextValue / shape.width;
                         else
-                            rect.width = shape.width * value / shape.height;
+                            rect.width = shape.width * nextValue / shape.height;
                     }
                     resizeTree(page, id, rect);
                     continue;
                 }
-                if (value === undefined)
+                if (nextValue === undefined)
                     delete shape[key];
                 else
-                    shape[key] = clone(value);
+                    shape[key] = clone(nextValue);
             }
         };
-        applyChange("Set " + key, apply);
+        applyChange("Set " + key, apply, () => {
+            const control = geometryInputs.get(key);
+            if (control && ids.length === editor.selection.length && ids.every((id, index) => id === editor.selection[index]))
+                // Reconciliation may clamp the requested number, or reject it
+                // without publishing a document event. Finish with the live value.
+                syncInputValue(control, value(key, 0));
+        });
     };
     const value = (key: string, fallback: any = "") => {
         const shapes = selected();
         const values = shapes.map(s => s[key]);
         return values.every(v => JSON.stringify(v) === JSON.stringify(values[0])) ? values[0] ?? fallback : "";
     };
-    const num = (label: string, key: string, fallback = 0) => input(label, value(key, fallback), v => patch(key, v), "number");
+    const num = (label: string, key: string, fallback = 0) => {
+        const control = input(label, value(key, fallback), v => patch(key, v), "number");
+        if (["x", "y", "width", "height", "rotation"].includes(key))
+            geometryInputs.set(key, control.querySelector("input")!);
+        return control;
+    };
     const optionalNum = (label: string, key: string) => {
         const wrap = input(label, value(key, ""), () => {
         }, "number"), field = wrap.querySelector("input")!;
@@ -1126,6 +1142,49 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
         }
         return panel;
     }
+    function inspectorState() {
+        const shapes = selected();
+        const dependencies: unknown[] = [editor.pageId, editor.doc.components, editor.doc.styles, editor.doc.libraries,
+            editor.doc.assets, editor.showRulers, editor.pixelSnap, editor.snapping, text.active, text.id,
+            canvas.pathId, (canvas.selectedPathNodes ?? []).join(","), editor.page.guides];
+        if (!shapes.length)
+            dependencies.push(editor.page.name);
+        for (const shape of shapes)
+            dependencies.push(...ancestors(editor.page, shape.id));
+        return {shapes, dependencies};
+    }
+    function refreshFromDocument() {
+        if (destroyed)
+            return;
+        const next = inspectorState(), previous = renderedState;
+        const sameDependencies = previous && previous.dependencies.length === next.dependencies.length &&
+            previous.dependencies.every((value, index) => Object.is(value, next.dependencies[index]));
+        const sameSelection = previous && previous.shapes.length === next.shapes.length &&
+            previous.shapes.every((shape, index) => shape.id === next.shapes[index].id);
+        if (sameDependencies && sameSelection) {
+            if (previous.shapes.every((shape, index) => shape === next.shapes[index])) {
+                skippedRefreshes++;
+                return;
+            }
+            // Keep controls and their focus during simple geometry previews. All
+            // other changes take the complete inspector path, including paths,
+            // boolean operands, component metadata and ancestor editability.
+            const geometryOnly = next.shapes.length > 0 && next.shapes.every((shape, index) => {
+                if (shape.type === "path" || shape.type === "boolean")
+                    return false;
+                const old = previous.shapes[index];
+                return [...new Set([...Object.keys(old), ...Object.keys(shape)])].every(key => geometryKeys.has(key) || Object.is(old[key], shape[key]));
+            });
+            if (geometryOnly) {
+                for (const [key, control] of geometryInputs)
+                    syncInputValue(control, value(key, 0), control === document.activeElement);
+                renderedState = next;
+                geometryUpdates++;
+                return;
+            }
+        }
+        refresh();
+    }
     function refresh() {
         if (destroyed || rendering)
             return;
@@ -1155,6 +1214,9 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             }
         };
         rendering = true;
+        rebuilds++;
+        geometryInputs.clear();
+        renderedState = inspectorState();
         root.replaceChildren();
         const design = el("div", "design");
         root.append(design);
@@ -1199,13 +1261,14 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
         for (const keys of [["radiusTopLeft", "radiusTopRight"], ["radiusBottomLeft", "radiusBottomRight"]])
             appearance.append(row(...keys.map(key => num(key.replace("radius", "R "), key))));
         appearance.append(num("Smoothing", "cornerSmoothing"));
-        appearance.append(button("Clip rectangle", () => jsonEditor("Clip rectangle", shape.clip ?? {
-            x: 0,
-            y: 0,
-            width: shape.width,
-            height: shape.height,
-            radius: 0
-        }, value => patch("clip", value))));
+        appearance.append(button("Clip rectangle", () => {
+            const current = editor.page.objects[shape.id];
+            if (!current)
+                return;
+            jsonEditor("Clip rectangle", current.clip ?? {
+                x: 0, y: 0, width: current.width, height: current.height, radius: 0
+            }, value => patch("clip", value));
+        }));
         if (shape.clip)
             appearance.append(button("Remove clip rectangle", () => patch("clip", undefined)));
         design.append(appearance);
@@ -1397,7 +1460,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             return;
         if (text.active && !event.selection && !event.projection)
             return;
-        refresh();
+        refreshFromDocument();
     });
     root.addEventListener("pointerdown", event => {
         if (text.active) {
@@ -1409,6 +1472,9 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
     refresh();
     return {
         refresh,
+        get diagnostics() {
+            return {rebuilds, geometryUpdates, skippedRefreshes};
+        },
         finishScrub() {
             if (numericSession) {
                 numericSession = false;

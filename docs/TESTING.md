@@ -71,6 +71,17 @@ This journey opens the real synthetic component-library fixture through the desk
 
 Smaller synthetic tests do not substitute for the complete library journey. Measure on an idle machine and distinguish rendering, agent/IPC response, and durable save time when recording additional benchmarks. Earlier private-engine benchmark numbers do not establish current latency or a hard service-level guarantee.
 
+### Editing and SVG update benchmark
+
+```sh
+node scripts/benchmark-canvas.mjs
+node scripts/benchmark-canvas.mjs --baseline=/absolute/path/to/baseline-checkout --nodes=1000 --samples=12
+```
+
+This reproducible Node/jsdom benchmark measures a committed single-layer move and a synchronous burst of eight gesture previews followed by a commit. It runs the editor's document reconciliation and validation, SVG generation and DOM updates, then reads the final scene to include any queued work. Each revision runs in a separate process with three warm-up samples. Output includes median/p95 durations, SVG update counts, DOM insertions/removals and whether edited and untouched elements retain their identity. Each workload also checks final geometry and Undo/Redo.
+
+The fixture contains rectangles only. Results do not measure native browser layout/paint, FPS, physical input timing, text shaping, image decoding, Electron IPC or durable saving. The eight-preview workload measures event coalescing within one JavaScript turn; it is not an eight-frame drag. Run the native render, UI and library journeys above before accepting visual or desktop performance claims. Use `--output=/path/to/report.json` to retain a report; the benchmark does not write generated files by default.
+
 ## Current evidence and limits
 
 The final current-source run passed 340 editor tests across 12 files and 38 host tests. Actual native UI acceptance passed 37/37 cases with zero renderer errors. Rendering coverage includes 32 scenarios and 830 assertions, plus eight large-fixture/cache assertions. The real library, four-client Electron/TLS plus official SDK/offline/export journey, packaged-app smoke and package-provenance checks passed; the current provenance report has no mismatches.

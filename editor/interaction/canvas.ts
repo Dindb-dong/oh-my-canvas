@@ -40,6 +40,32 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
     let gesture: Data | null = null, pathId: string | null = null, nodeSelection = new Set<number>(), space = false, pen: Data | null = null, marquee: HTMLElement | null = null, drawId: string | null = null, selectedGradient: Data | null = null;
     const pointers = new Map<number, Point>();
     const agents = new Map<string, string[]>();
+    const decorations = el("div", "frame-decorations");
+    Object.assign(decorations.style, {position: "absolute", inset: "0", pointerEvents: "none"});
+    let destroyed = false, pendingOverlay: number | null = null;
+    let overlayState: unknown[] | null = null, decorationState: unknown[] | null = null;
+    let decorationObjects: Record<string, Shape> | null = null, decorationShapes: Shape[] = [];
+    let overlayBuilds = 0, decorationBuilds = 0;
+    const sameState = (before: unknown[] | null, after: unknown[]) => !!before && before.length === after.length && before.every((value, index) => Object.is(value, after[index]));
+    function cancelOverlayFrame() {
+        if (pendingOverlay !== null) {
+            cancelAnimationFrame(pendingOverlay);
+            pendingOverlay = null;
+        }
+    }
+    function scheduleOverlays() {
+        // A real renderer publishes its completed frame through onRender. Keep
+        // standalone interaction mounts synchronous, and never defer commands.
+        if (typeof services.view.onRender !== "function" || typeof requestAnimationFrame !== "function") {
+            renderOverlays(false);
+            return;
+        }
+        if (pendingOverlay === null)
+            pendingOverlay = requestAnimationFrame(() => {
+                pendingOverlay = null;
+                renderOverlays(false);
+            });
+    }
     let lastTap: {
         time: number;
         id: string | null;
@@ -313,9 +339,19 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             overlay.append(n);
         }
     }
-    function renderOverlays() {
+    function renderOverlays(force = true) {
+        if (destroyed)
+            return;
+        cancelOverlayFrame();
+        const state: unknown[] = [editor.pageId, editor.page.objects, editor.page.guides, editor.selection, editor.viewport,
+            editor.tool, editor.showGrids, editor.showRulers, editor.pixelSnap, text.active, pathId, pen, selectedGradient,
+            space, services.view.renderRevision];
+        if (!force && sameState(overlayState, state))
+            return;
+        overlayState = state;
+        overlayBuilds++;
         const retained = Array.from(overlay.querySelectorAll(".snap-line,.marquee"));
-        overlay.replaceChildren(...retained);
+        overlay.replaceChildren(...retained, decorations);
         drawFrameDecorations();
         const selection = editor.selection.map(id => services.view.projectedShape?.(id) ?? editor.page.objects[id]).filter(Boolean);
         if (selection.length) {
@@ -392,6 +428,10 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                 x: guide.position,
                 y: guide.position
             });
+            const coordinate = guide.axis === "x" ? p.x : p.y;
+            const extent = guide.axis === "x" ? stage.clientWidth : stage.clientHeight;
+            if (extent > 0 && (coordinate < -1 || coordinate > extent + 1))
+                continue;
             Object.assign(n.style, guide.axis === "x" ? {
                 left: `${p.x}px`,
                 top: "0",
@@ -434,12 +474,33 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         stage.style.backgroundImage = editor.pixelSnap && zoom >= 4 ? "linear-gradient(to right,#b4bfd533 1px,transparent 1px),linear-gradient(to bottom,#b4bfd533 1px,transparent 1px)" : "";
         stage.style.backgroundSize = `${zoom}px ${zoom}px`;
         stage.style.backgroundPosition = `${-editor.viewport.vbox.x * zoom}px ${-editor.viewport.vbox.y * zoom}px`;
-        for (const frame of Object.values(editor.page.objects))
+        if (decorationObjects !== editor.page.objects) {
+            decorationObjects = editor.page.objects;
+            decorationShapes = Object.values(decorationObjects).filter(shape => shape.id !== "root" &&
+                (shape.guides?.length || shape.type === "frame" && shape.layoutGrids?.length));
+        }
+        const state: unknown[] = [editor.pageId, zoom, editor.viewport.vbox.x, editor.viewport.vbox.y,
+            stage.clientWidth, stage.clientHeight, editor.showGrids, editor.tool];
+        for (const shape of decorationShapes)
+            state.push(shape, ancestorEditable(shape));
+        if (sameState(decorationState, state))
+            return;
+        decorationState = state;
+        decorationBuilds++;
+        decorations.replaceChildren();
+        const viewport = {x: editor.viewport.vbox.x - 1 / zoom, y: editor.viewport.vbox.y - 1 / zoom,
+            width: (stage.clientWidth + 2) / zoom, height: (stage.clientHeight + 2) / zoom};
+        const hasViewport = stage.clientWidth > 0 && stage.clientHeight > 0;
+        for (const frame of decorationShapes)
             for (const [index, guide] of (frame.id !== "root" && !frame.hidden && !frame.flipX && !frame.flipY && Math.abs(frame.rotation % 360) < 0.000001 && ancestorEditable(frame) ? frame.guides ?? [] : []).entries()) {
                 const line = el("div", "guide-line"), position = guide.position + (guide.axis === "x" ? frame.x : frame.y), p = screen({
                     x: position,
                     y: position
                 });
+                const lineBounds = guide.axis === "x" ? {x: position, y: frame.y, width: 1 / zoom, height: frame.height} :
+                    {x: frame.x, y: position, width: frame.width, height: 1 / zoom};
+                if (hasViewport && !intersects(lineBounds, viewport))
+                    continue;
                 Object.assign(line.style, guide.axis === "x" ? {
                     left: `${p.x}px`,
                     top: `${screen(frame).y}px`,
@@ -467,18 +528,26 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                         };
                 };
                 line.ondblclick = () => editor.transact("Delete frame guide", doc => doc.pagesById[editor.pageId].objects[frame.id].guides.splice(index, 1));
-                overlay.append(line);
+                decorations.append(line);
             }
         if (editor.showGrids === false)
             return;
-        for (const shape of Object.values(editor.page.objects)) {
+        for (const shape of decorationShapes) {
             if (shape.type !== "frame" || shape.hidden || shape.id === "root")
+                continue;
+            // Grid overlays use CSS rotation, which may differ from an imported
+            // shape's arbitrary affine matrix. Cull using the pixels drawn here.
+            const angle = (shape.rotation ?? 0) * Math.PI / 180, cos = Math.abs(Math.cos(angle)), sin = Math.abs(Math.sin(angle));
+            const width = shape.width * cos + shape.height * sin, height = shape.width * sin + shape.height * cos;
+            const gridBounds = {x: shape.x + (shape.width - width) / 2, y: shape.y + (shape.height - height) / 2, width, height};
+            if (hasViewport && !intersects(gridBounds, viewport))
                 continue;
             const origin = screen(shape);
             for (const grid of shape.layoutGrids ?? []) {
                 if (grid.hidden)
                     continue;
                 const frame = el("div");
+                frame.dataset.frameGrid = shape.id;
                 Object.assign(frame.style, {
                     position: "absolute",
                     pointerEvents: "none",
@@ -517,7 +586,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                         frame.append(band);
                     }
                 }
-                overlay.append(frame);
+                decorations.append(frame);
             }
         }
     }
@@ -1424,7 +1493,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                 id
             };
         }
-        renderOverlays();
+        renderOverlays(false);
         callbacks.changed();
     }
     function penDown(event: PointerEvent, point: Point) {
@@ -1579,7 +1648,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         overlay.querySelectorAll(".snap-line").forEach(n => n.remove());
         nodeSelection.clear();
         editor.cancelSession();
-        renderOverlays();
+        renderOverlays(false);
     }
     function nodeKey(event: KeyboardEvent) {
         if (event.key === "Escape" && (pen || gesture || pathId)) {
@@ -1772,13 +1841,22 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             gesture = null;
             editor.cancelSession();
         }
-        renderOverlays();
+        if (event.hover)
+            return;
+        if (event.deltas && editor.undo.blocked && !event.changes && !event.projection && !event.page && !event.selection && !event.tool)
+            scheduleOverlays();
+        else
+            renderOverlays(false);
     });
-    const offRender = services.view.onRender?.(() => renderOverlays()) ?? (() => {
+    const offRender = services.view.onRender?.(() => renderOverlays(false)) ?? (() => {
     });
     renderOverlays();
     return {
         render: renderOverlays,
+        flush: () => renderOverlays(false),
+        get diagnostics() {
+            return {overlayBuilds, decorationBuilds, pendingOverlay: pendingOverlay !== null};
+        },
         world,
         screen,
         hit,
@@ -1847,6 +1925,8 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             return !!gesture || !!pen;
         },
         destroy() {
+            destroyed = true;
+            cancelOverlayFrame();
             abort.abort();
             unsubscribe();
             offRender();

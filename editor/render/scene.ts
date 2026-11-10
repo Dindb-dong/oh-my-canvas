@@ -1,5 +1,6 @@
 import type { Data, Shape, Rect, Point } from '../contracts';
 import { unsafeMarkupElement, safeUrl, cssDeclarations } from '../formats/markup';
+import { resourceScope, type SceneNodeCache } from './retained';
 export const escape = (s: any) => String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;'
 }[c]!));
@@ -90,6 +91,9 @@ export interface SceneOptions {
     outlineWidth?: number;
     typography?: Data;
     textFragments?: Map<string, TextFragment[]>;
+    /** Screen-only retained serialization; omitted by every export path. */
+    nodeCache?: SceneNodeCache;
+    stableIds?: boolean;
 }
 const blends = new Set(['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity']);
 const blend = (v: any) => {
@@ -121,10 +125,13 @@ export function textHTML(s: Shape, options: Data = {}): string {
 export class SceneWriter {
     defs: string[] = [];
     counter = 0;
+    generatedNodes = 0;
+    cachedNodes = 0;
+    private scope = '';
     constructor(public objects: Record<string, Shape>, public options: SceneOptions = {}) {
     }
     id(prefix: string) {
-        return (this.options.idPrefix ?? 'omc') + '-' + prefix + '-' + (++this.counter);
+        return (this.options.idPrefix ?? 'omc') + (this.scope ? '-' + this.scope : '') + '-' + prefix + '-' + (++this.counter);
     }
     paint(p: Data, s: Shape): {
         value: string;
@@ -247,6 +254,25 @@ export class SceneWriter {
         return ` filter="url(#${id})"`;
     }
     node(s: Shape, asMask = false, backdrop = ''): string {
+        const key = s.id + (asMask ? '\0mask' : '\0shape');
+        const cached = this.options.nodeCache?.get(key);
+        if (cached) {
+            this.cachedNodes++;
+            this.defs.push(...cached.defs);
+            return cached.source;
+        }
+        const scope = this.scope, counter = this.counter, start = this.defs.length;
+        if (this.options.stableIds) { this.scope = resourceScope(s.id, asMask); this.counter = 0; }
+        this.generatedNodes++;
+        try {
+            const source = this.writeNode(s, asMask, backdrop);
+            this.options.nodeCache?.put(key, source, this.defs.slice(start));
+            return source;
+        } finally {
+            if (this.options.stableIds) { this.scope = scope; this.counter = counter; }
+        }
+    }
+    private writeNode(s: Shape, asMask = false, backdrop = ''): string {
         if (s.hidden || s.visible === false)
             return '';
         const path = shapePath(s), transform = shapeMatrix(s);

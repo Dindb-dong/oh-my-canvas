@@ -1,11 +1,12 @@
 /** Original isolated transaction and gesture-session editor. */
 import type { CanvasDocument, Page, EditorStore, EditorOptions, EditorEvent, Operation, Mutator, Viewport, Tool } from '../contracts';
-import { updateGeometry, reconcileShapeGeometry } from '../geometry';
+import { reconcileShapeGeometry } from '../geometry';
 import { clone, newId, ROOT_ID } from './factory';
 import { refreshFrames } from './tree';
 import { validateDocument } from './validation';
-import { share, patches, applyPatches } from './journal';
+import { share, patches, applyPatches, inversePatches, type Patch } from './journal';
 import { normalizePathContent } from '../geometry/svg-path';
+import { geometryUnchanged } from './geometry-state';
 export * from './factory';
 export * from './tree';
 export * from './validation';
@@ -32,8 +33,8 @@ export class Editor implements EditorStore {
     private session: Session | null = null;
     private past: {
         bytes: number;
-        before: CanvasDocument;
-        after: CanvasDocument;
+        forward: Patch[];
+        reverse: Patch[];
         operation: Operation;
     }[] = [];
     private future: typeof this.past = [];
@@ -97,7 +98,9 @@ export class Editor implements EditorStore {
             const page = doc.pagesById[pageId];
             for (const s of Object.values(page.objects)) {
                 normalizePathContent(s, true);
-                reconcileShapeGeometry(before?.pagesById[pageId]?.objects[s.id], s);
+                const previous = before?.pagesById[pageId]?.objects[s.id];
+                if (!geometryUnchanged(previous, s))
+                    reconcileShapeGeometry(previous, s);
             }
             refreshFrames(page);
         }
@@ -158,11 +161,12 @@ export class Editor implements EditorStore {
             this.nestedFailure = null;
         }
         if (this.doc !== before) {
-            this.recordHistory({ before, after: this.doc, operation: op });
+            const changes = patches(before, this.doc);
+            this.recordHistory(before, changes, op);
             this.future = [];
             this.prune();
             this.lastOperation = op;
-            const event: EditorEvent = { changes: patches(before, this.doc), operation: op };
+            const event: EditorEvent = { changes, operation: op };
             for (const queued of this.pending)
                 Object.assign(event, queued);
             this.pending = [];
@@ -176,12 +180,11 @@ export class Editor implements EditorStore {
         }
         return result!;
     }
-    private recordHistory(entry: {
-        before: CanvasDocument;
-        after: CanvasDocument;
-        operation: Operation;
-    }): void {
-        this.past.push({ ...entry, bytes: new TextEncoder().encode(JSON.stringify(patches(entry.before, entry.after))).byteLength });
+    private recordHistory(before: CanvasDocument, changes: Patch[], operation: Operation): void {
+        // Event listeners receive their own patch objects. History must remain
+        // immutable even if a listener annotates or otherwise changes an event.
+        const forward = clone(changes), reverse = inversePatches(before, forward);
+        this.past.push({ forward, reverse, operation, bytes: new TextEncoder().encode(JSON.stringify(forward)).byteLength });
         let bytes = 0;
         for (let i = this.past.length - 1; i >= 0; i--) {
             bytes += this.past[i].bytes;
@@ -244,7 +247,7 @@ export class Editor implements EditorStore {
         const changes = patches(session.base, this.doc);
         if (!changes.length)
             return false;
-        this.recordHistory({ before: session.base, after: this.doc, operation: session.operation });
+        this.recordHistory(session.base, changes, session.operation);
         this.future = [];
         this.lastOperation = session.operation;
         this.emit({ changes, operation: session.operation });
@@ -319,7 +322,11 @@ export class Editor implements EditorStore {
         this.normalize(remote);
         if (this.session) {
             const previousBase = this.session.base;
+            const rebased = new Map<CanvasDocument, CanvasDocument>();
             const rebase = (snapshot: CanvasDocument): CanvasDocument => {
+                const existing = rebased.get(snapshot);
+                if (existing)
+                    return existing;
                 const changes = patches(previousBase, snapshot).filter(change => {
                     const path = change.path;
                     if (path[0] !== 'pagesById')
@@ -340,7 +347,9 @@ export class Editor implements EditorStore {
                     return true;
                 });
                 const candidate = applyPatches(remote, changes);
-                return this.prepare(remote, candidate);
+                const prepared = this.prepare(remote, candidate);
+                rebased.set(snapshot, prepared);
+                return prepared;
             };
             const history = this.session.history.map(rebase), future = this.session.future.map(rebase), current = rebase(this.doc);
             this.session.base = remote;
@@ -369,7 +378,7 @@ export class Editor implements EditorStore {
         const entry = this.past.at(-1);
         if (!entry)
             return false;
-        const before = this.doc, next = this.prepare(before, applyPatches(before, patches(entry.after, entry.before)));
+        const before = this.doc, next = this.prepare(before, applyPatches(before, entry.reverse));
         this.doc = next;
         this.past.pop();
         this.future.push(entry);
@@ -394,7 +403,7 @@ export class Editor implements EditorStore {
         const entry = this.future.at(-1);
         if (!entry)
             return false;
-        const before = this.doc, next = this.prepare(before, applyPatches(before, patches(entry.before, entry.after)));
+        const before = this.doc, next = this.prepare(before, applyPatches(before, entry.forward));
         this.doc = next;
         this.future.pop();
         this.past.push(entry);
