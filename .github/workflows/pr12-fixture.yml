@@ -1,0 +1,36 @@
+name: Verify PR12 design fixture
+on:
+  push:
+    branches: [chore/pr12-fixture-check]
+permissions:
+  contents: read
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 3c94d043fa97711d98f014a196977cc3d003ad28
+          lfs: true
+          persist-credentials: false
+          sparse-checkout: fixtures/design-files
+      - name: Verify exact original bytes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, pathlib
+          source = pathlib.Path("fixtures/design-files/iOS-and-iPadOS-27.fig")
+          content = source.read_bytes()
+          assert len(content) == 160627671, f"Unexpected byte count: {len(content)}"
+          digest = hashlib.sha256(content).hexdigest()
+          assert digest == "c7c4fdbe469ae451c9a3d3d384a2102fa08dfaa220a1277e2df17fc2146c5ee7", digest
+          print(f"Verified {source.name}: {len(content)} bytes, sha256={digest}")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr12-verified-fig-source
+          path: fixtures/design-files/iOS-and-iPadOS-27.fig
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
