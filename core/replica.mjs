@@ -10,14 +10,15 @@ const canonicalChanges=changes=>changes?.some(([key])=>{
     p[0]==='meta'&&['pages','pagesById','assets','components','styles','libraries'].includes(p[1]);
 });
 export class Replica {
-  constructor({ state, document, onMetric } = {}) {
+  constructor({ state, updates = [], document, onMetric } = {}) {
     this.ydoc = new Y.Doc();
     this.fields = this.ydoc.getMap('fields');
     this.local = Symbol('local');
     this.validationDoc=null;this.cachedDocument=undefined;this.cachedState=undefined;this.encodedStateCeiling=undefined;
     this.revision=0;this.updateLog=[];this.updateLogBytes=0;this.retainedAssetRefs=new Set();this.onMetric=onMetric;
-    this.fields.observe(event=>{for(const field of event.keysChanged)collectAssetRefs(this.fields.get(field),this.retainedAssetRefs);});
-    this.ydoc.on('update',update=>{
+    const observe=()=>{
+      this.fields.observe(event=>{for(const field of event.keysChanged)collectAssetRefs(this.fields.get(field),this.retainedAssetRefs);});
+      this.ydoc.on('update',update=>{
       this.cachedDocument=this.publishingDocument;this.cachedState=undefined;this.encodedStateCeiling=this.publishingCeiling;
       this.revision++;
       // Persistence readers that fall behind this bounded log receive a fresh
@@ -29,11 +30,32 @@ export class Replica {
         while(this.updateLog.length>512||this.updateLogBytes>4*1024*1024){this.updateLogBytes-=this.updateLog.shift().update.byteLength;}
       }
       if(this.validationDoc)Y.applyUpdate(this.validationDoc,update,'mirror');
-    });
-    if (state) {if(state.byteLength>(documentModel.MAX_LARGE_STATE_BYTES??MAX_STATE_BYTES))throw Error('CRDT history exceeds the storage limit');Y.applyUpdate(this.ydoc, state, 'load');this.rememberStateAssets();}
-    else if (document) this.ydoc.transact(() => { for (const [k,v] of flatten(assertDocument(document))) this.fields.set(k,v); }, 'seed');
-    this.undo = new Y.UndoManager(this.fields, { trackedOrigins: new Set([this.local]), captureTimeout: Infinity });
-    if(state||document)this.cachedDocument=this.validateState(this.ydoc);
+      });
+    };
+    try{
+      if(!Array.isArray(updates)||updates.length&&!state)throw Error('Journal updates require a checkpoint');
+      if(state){
+        const maximum=documentModel.MAX_LARGE_STATE_BYTES??MAX_STATE_BYTES;
+        if(!(state instanceof Uint8Array)||state.byteLength>maximum)throw Error('CRDT history exceeds the storage limit');
+        try{Y.applyUpdate(this.ydoc,state,'load');}catch(error){throw Object.assign(error,{hydrationPhase:'checkpoint'});}
+        let journalBytes=0;
+        for(const update of updates){
+          if(!(update instanceof Uint8Array)||update.byteLength>maximum||(journalBytes+=update.byteLength)>(documentModel.MAX_PORTABLE_BYTES??384*1024*1024))throw Error('Save journal updates exceed the storage limit');
+          Y.applyUpdate(this.ydoc,update,'load-journal');
+        }
+        // Hydrate directly into the final replica. There are no subscribers to
+        // publish intermediate states or re-encode each load as an update event.
+        this.revision=1;this.rememberStateAssets();observe();
+      }else{
+        if(document){
+          this.ydoc.transact(()=>{for(const [key,value] of flatten(assertDocument(document)))this.fields.set(key,value);},'seed');
+          this.revision=1;this.rememberStateAssets();
+        }
+        observe();
+      }
+      this.undo=new Y.UndoManager(this.fields,{trackedOrigins:new Set([this.local]),captureTimeout:Infinity});
+      if(state||document)this.cachedDocument=this.validateState(this.ydoc);
+    }catch(error){this.undo?.destroy();this.ydoc.destroy();throw error;}
   }
   get document() { return this.cachedDocument??=assertDocument(materialize(this.fields)); }
   get state() {

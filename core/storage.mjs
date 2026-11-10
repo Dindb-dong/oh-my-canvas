@@ -2,7 +2,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import * as Y from 'yjs';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { Replica } from './replica.mjs';
 import * as limits from './document.mjs';
@@ -212,21 +211,18 @@ export class Store {
     if (!materialize) return details;
     const state = await readBounded(files.state, MAX_STATE_BYTES);
     if (state.length !== manifest.checkpoint.bytes || checksum(state) !== manifest.checkpoint.sha256) throw Error('Damaged canvas checkpoint');
-    const doc = new Y.Doc(); let replica;
+    let replica;
     try {
-      Y.applyUpdate(doc, state, 'checkpoint');
       try {
-        for (const update of updates) Y.applyUpdate(doc, update, 'journal');
-        replica = new Replica({ state: Y.encodeStateAsUpdate(doc) });
+        replica = new Replica({ state, updates, onMetric: event => this.metric({ ...event, phase: 'store-load' }) });
       } catch (error) {
-        if (updates.length) throw Object.assign(Error(`Invalid save journal state: ${error.message}`), { code: 'JOURNAL_CORRUPT' });
+        if (updates.length && error.hydrationPhase !== 'checkpoint') throw Object.assign(Error(`Invalid save journal state: ${error.message}`), { code: 'JOURNAL_CORRUPT' });
         throw error;
       }
       for (const hash of replica.retainedAssetRefs) if (!retainedAssets.has(hash)) throw Error('Canvas asset manifest is incomplete');
       for (const hash of retainedAssets) { await this.assets.get(hash); replica.retainedAssetRefs.add(hash); }
       return { ...details, replica };
     } catch (error) { replica?.destroy(); throw error; }
-    finally { doc.destroy(); }
   }
   async load(id) {
     await this.pending.get(id);

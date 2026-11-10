@@ -182,6 +182,28 @@ test('a complete malformed Yjs journal record never silently falls back to a hea
   await assert.rejects(new Store(store.dir).load(record.id), error => error.code === 'JOURNAL_CORRUPT');
 });
 
+test('reopen hydrates checkpoint plus journals into one fully validated replica',async t=>{
+  const {store,record}=await fixture(t);await store.save(record);
+  for(const name of ['Replay one','Replay two','Replay three']){renameShape(record,name);await store.save(record);}
+  const events=[],reader=new Store(store.dir,{onMetric:event=>events.push(event)}),loaded=await reopen(t,reader,record.id);
+  assert.equal(loaded.replica.document.pagesById.page.objects.label.name,'Replay three');
+  const validations=events.filter(event=>event.stage==='replica-validation'&&event.phase==='store-load');
+  assert.equal(validations.length,1);assert.equal(validations[0].incremental,false);assert.equal(validations[0].sizeValidation,'exact');
+  assert.equal(loaded.replica.updateLog.length,0);
+  renameShape(loaded,'After reopen');await reader.save(loaded);
+  assert.equal(events.filter(event=>event.stage==='store-journal').at(-1).updateBytes<1024,true);
+});
+
+test('a checksum-matching malformed checkpoint still recovers its backup even when the damaged generation has a journal',async t=>{
+  const {store,record}=await fixture(t,{checkpointRecords:1});await store.save(record);
+  renameShape(record,'Backup journal edit');await store.save(record);renameShape(record,'New checkpoint');await store.save(record);renameShape(record,'Current journal edit');await store.save(record);
+  const manifest=await manifestFor(store,record.id),files=store.generationFiles(record.id,manifest.generation),invalid=Buffer.from([255,255,255]);
+  assert.ok((await fs.stat(files.journal)).size>0);
+  manifest.checkpoint={bytes:invalid.length,sha256:createHash('sha256').update(invalid).digest('hex')};
+  await fs.writeFile(files.state,invalid);await fs.writeFile(store.file(record.id),JSON.stringify(manifest));
+  const recovered=await reopen(t,new Store(store.dir),record.id);assert.equal(recovered.recovered,true);assert.equal(recovered.replica.document.pagesById.page.objects.label.name,'Backup journal edit');
+});
+
 test('stale concurrent Store writers fail instead of truncating another writer journal or replacing its checkpoint', async t => {
   const { store, record } = await fixture(t); await store.save(record);
   const other = new Store(store.dir, { checkpointRecords: 0 }), stale = await reopen(t, other, record.id);

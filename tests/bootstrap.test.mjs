@@ -28,7 +28,9 @@ test('system replacements collect superseded payloads and keep speculative/live 
       patch(r,s=>{s.name=`${i}:`+'x'.repeat(2*1024*1024);});
       assert.equal(r.undo.undoStack.length,0);
       assert.ok(r.state.byteLength<3*1024*1024,'System history must not accumulate ten large prior names');
-      assert.deepEqual(r.validateState(r.validationDoc),r.document);
+      // Scalar edits need not allocate a speculative document. Request one
+      // explicitly here to check both its lazy seed and later live updates.
+      assert.deepEqual(r.validateState(r.validator()),r.document);
     }
     patch(r,s=>{s.y=45;},true);r.history('undo');assert.equal(r.document.pagesById.page.objects.label.y,40);
   }finally{r.destroy();}
