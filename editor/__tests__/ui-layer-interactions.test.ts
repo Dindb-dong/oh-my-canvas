@@ -9,10 +9,13 @@ const cleanup: Array<() => Promise<void>> = [];
 beforeEach(() => {
     vi.stubGlobal("CSS", { escape: (value: string) => value });
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    HTMLDialogElement.prototype.showModal = function() { this.open = true; };
+    HTMLDialogElement.prototype.close = function() { this.open = false; this.dispatchEvent(new Event("close")); };
 });
 afterEach(async () => {
     for (const dispose of cleanup.splice(0)) await dispose();
     document.body.replaceChildren();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
 });
 function setup() {
@@ -22,7 +25,7 @@ function setup() {
     insertShape(page, createShape("rect", { id: "child", name: "Child", parentId: "frame", x: 420, width: 20, height: 20 }));
     const editor = new Editor(doc), root = document.createElement("div");
     document.body.append(root);
-    const services = { editor, view: { element: () => null, settled: async () => {} }, fonts: { ensure: async () => {}, catalog: () => [], add: () => {} } } as unknown as EditorServices;
+    const services = { editor, view: { element: () => null, settled: async () => {} }, fonts: { ensure: async () => {}, catalog: () => [], add: () => {} }, components: { list: () => ({ components: [] }) }, styles: { list: () => [] }, libraries: { list: () => [] } } as unknown as EditorServices;
     services.commands = createCommands(editor, services);
     const workspace = mountWorkspace(root, services, { document: doc });
     cleanup.push(async () => { await workspace.destroy(); services.commands.destroy?.(); editor.destroy(); });
@@ -125,4 +128,73 @@ it("rejects self/descendant and locked destinations and clears previews after dr
     window.dispatchEvent(new Event("dragend")); expect(t.root.querySelector("[data-drop]")).toBeNull();
     drag(t.row("r1"), "dragstart"); drag(t.row("r2"), "dragover");
     t.root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); expect(t.root.querySelector("[data-drop]")).toBeNull();
+});
+
+it("uses page rows for one/two pages and an accessible picker from three, retaining page actions", async () => {
+    const t = setup();
+    const add = async () => { t.root.querySelector<HTMLButtonElement>('[aria-label="Add page"]')!.click(); await Promise.resolve(); };
+    expect(t.root.querySelectorAll(".page-row")).toHaveLength(1);
+    await add();
+    expect(t.root.querySelectorAll(".page-row")).toHaveLength(2);
+    await add();
+    expect(t.root.querySelectorAll(".page-row")).toHaveLength(0);
+    let picker = t.root.querySelector<HTMLSelectElement>('[aria-label="Current page"]')!;
+    expect(picker.options).toHaveLength(3);
+    expect(picker.value).toBe(t.editor.pageId);
+    picker.value = t.editor.doc.pages[0]; picker.dispatchEvent(new Event("change")); await Promise.resolve();
+    expect(t.editor.pageId).toBe(t.editor.doc.pages[0]);
+    t.root.querySelector<HTMLButtonElement>('[aria-label="Page actions"]')!.click();
+    document.querySelector<HTMLButtonElement>('.omc-dialog [aria-label="Move down"]')!.click(); await Promise.resolve();
+    expect(t.editor.doc.pages[1]).toBe(t.editor.pageId);
+    t.root.querySelector<HTMLButtonElement>('[aria-label="Page actions"]')!.click();
+    document.querySelector<HTMLButtonElement>('.omc-dialog [aria-label="Delete"]')!.click(); await Promise.resolve();
+    expect(t.root.querySelector('[aria-label="Current page"]')).toBeNull();
+    expect(t.root.querySelectorAll(".page-row")).toHaveLength(2);
+});
+it("reveals external selections within the layer scroller without jumping for row clicks or edits", async () => {
+    const t = setup();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) {
+        const top = this.classList.contains("layers") ? 100 : this.dataset.id === "r1" ? 600 : 100;
+        return { x: 0, y: top, top, bottom: top + (this.classList.contains("layers") ? 200 : 31), left: 0, right: 240, width: 240, height: 31, toJSON() {} };
+    });
+    t.editor.setSelection(["r1"]);
+    expect(t.root.querySelector(".layers")!.scrollTop).toBe(500);
+    expect(t.root.querySelector("#left")!.scrollTop).toBe(0);
+    await t.click("r10");
+    expect(t.root.querySelector(".layers")!.scrollTop).toBe(500);
+    t.editor.transact("Rename", doc => { doc.pagesById[t.editor.pageId].objects.r10.name = "Renamed"; });
+    expect(t.root.querySelector(".layers")!.scrollTop).toBe(500);
+    t.editor.setSelection([]);
+    expect(t.root.querySelectorAll('.layers [aria-selected="true"]')).toHaveLength(0);
+});
+it("reveals the nearest enclosing frame, opens its ancestors and keeps the frame collapsed", () => {
+    const t = setup();
+    t.editor.transact("Nest frame", doc => {
+        const page = doc.pagesById[t.editor.pageId];
+        insertShape(page, createShape("frame", { id: "inner", parentId: "frame", childIds: [], width: 100, height: 100 }));
+        insertShape(page, createShape("rect", { id: "nested", parentId: "inner", width: 20, height: 20 }));
+    });
+    t.row("inner").querySelector<HTMLButtonElement>('[aria-label="Expand layer"]')!.click();
+    t.row("frame").querySelector<HTMLButtonElement>('[aria-label="Expand layer"]')!.click();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) {
+        const top = this.classList.contains("layers") ? 100 : this.dataset.id === "inner" ? 450 : 600;
+        return { x: 0, y: top, top, bottom: top + 31, left: 0, right: 240, width: 240, height: 31, toJSON() {} };
+    });
+    t.editor.setSelection(["nested"]);
+    expect(t.editor.selection).toEqual(["nested"]);
+    expect(t.row("frame").getAttribute("aria-expanded")).toBe("true");
+    expect(t.row("inner").getAttribute("aria-expanded")).toBe("false");
+    expect(t.row("nested")).toBeNull();
+    expect(t.root.querySelector(".layers")!.scrollTop).toBe(350);
+});
+it("reveals selections hidden by a filter and leaves the Assets tab active", () => {
+    const t = setup();
+    const filter = t.root.querySelector<HTMLInputElement>('[aria-label="Filter layers"]')!;
+    filter.value = "Rectangle 1"; filter.dispatchEvent(new Event("input"));
+    t.editor.setSelection(["child"]);
+    expect(t.root.querySelector<HTMLInputElement>('[aria-label="Filter layers"]')!.value).toBe("");
+    expect(t.row("frame").hidden).toBe(false);
+    t.root.querySelector<HTMLButtonElement>('.ltabs [aria-label="Assets"]')!.click();
+    t.editor.setSelection(["r1"]);
+    expect(t.root.querySelector('.ltabs [aria-label="Assets"]')!.getAttribute("aria-pressed")).toBe("true");
 });
