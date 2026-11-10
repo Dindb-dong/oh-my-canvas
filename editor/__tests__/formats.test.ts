@@ -3,6 +3,25 @@ import { createDocument, createShape, createPage, insertShape, validateDocument 
 import { importCanvasJson, exportCanvasJson, importHtml, exportHtml, importSvg, parseSvgPath } from '../formats';
 import { textValue } from '../formats/model';
 import { sampleCanvas, blankCanvas } from '../../src/sample.js';
+import {applyLayout} from '../layout';
+it('keeps anonymous flex labels intrinsic instead of filling the button width', () => {
+    const imported = importHtml('<div style="display:flex;align-items:center;justify-content:center;width:80px;height:80px;font-size:28px">8</div>');
+    const label = imported.shapes.find(s => s.type === 'text')!;
+    expect(label.autoResize).toBe('widthAndHeight');
+    expect(label.widthSizing).toBe('hug');
+    expect(imported.objects[imported.rootIds[0]].layout.wrap).toBe(false);
+});
+it('does not interpret legacy CSS nowrap as enabled wrapping', () => {
+    const imported = importHtml('<div style="display:flex;align-items:center;justify-content:center;width:80px;height:80px"><div style="width:20px;height:20px"></div></div>');
+    const parent = imported.objects[imported.rootIds[0]];
+    parent.layout.wrap = 'nowrap';
+    const document = createDocument(), page = document.pagesById[document.pages[0]];
+    Object.assign(page.objects, imported.objects);
+    page.objects.root.childIds = imported.rootIds;
+    applyLayout(document);
+    const child = imported.objects[parent.childIds![0]];
+    expect(child.y - parent.y).toBe(30);
+});
 // Independently authored synthetic interchange documents; no application/user fixtures.
 describe('FMT-02 / DOC-02 Canvas interchange', () => {
     it.each([sampleCanvas, blankCanvas])('opens the authored host sample/default without invalid legacy types', make => {

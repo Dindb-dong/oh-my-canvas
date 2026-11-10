@@ -16,6 +16,7 @@ function padding(layout: Data): number[] {
 function gaps(layout: Data) {
     return { row: finite(layout.gap?.row ?? layout.rowGap, finite(layout.gap)), column: finite(layout.gap?.column ?? layout.columnGap, finite(layout.gap)) };
 }
+const wraps = (layout: Data) => layout.wrap === true || layout.wrap === 'wrap' || layout.wrap === 'wrap-reverse';
 function alignment(value: string, free: number, count: number): {
     offset: number;
     extra: number;
@@ -178,7 +179,7 @@ export function applyLayout(doc: CanvasDocument, before?: CanvasDocument, option
                 let occupied = 0;
                 for (const child of children) {
                     const width = mode(child, 'width') === 'fill' ? 0 : child.width;
-                    if (layout.wrap && occupied && occupied + gap.column + width > available) {
+                    if (wraps(layout) && occupied && occupied + gap.column + width > available) {
                         lines.push([]);
                         occupied = 0;
                     }
@@ -230,7 +231,7 @@ export function applyLayout(doc: CanvasDocument, before?: CanvasDocument, option
                 const mainGap = vertical ? gap.row : gap.column;
                 const total = children.reduce((sum, child) => sum + child[main], 0) + Math.max(0, children.length - 1) * mainGap;
                 let extent = Math.max(0, ...children.map(child => child[cross]));
-                if (layout.wrap && mode(shape, main) !== 'hug') {
+                if (wraps(layout) && mode(shape, main) !== 'hug') {
                     const available = vertical ? shape.height - top - bottom : shape.width - left - right;
                     const crossGap = vertical ? gap.column : gap.row;
                     let occupied = 0, lineExtent = 0, totalExtent = 0;
@@ -280,8 +281,8 @@ export function applyLayout(doc: CanvasDocument, before?: CanvasDocument, option
                         const spanX = Math.max(1, finite(cell.columnSpan, 1)), spanY = Math.max(1, finite(cell.rowSpan, 1));
                         const availableWidth = cols.slice(column, column + spanX).reduce((a, b) => a + b, 0) + gap.column * (spanX - 1), availableHeight = rows.slice(row, row + spanY).reduce((a, b) => a + b, 0) + gap.row * (spanY - 1);
                         const width = mode(child, 'width') === 'fill' ? availableWidth : child.width, height = mode(child, 'height') === 'fill' ? availableHeight : child.height;
-                        const x = inner.x + cols.slice(0, column).reduce((a, b) => a + b, 0) + column * gap.column + alignment(cell.hAlign, availableWidth - width, 1).offset;
-                        const y = inner.y + rows.slice(0, row).reduce((a, b) => a + b, 0) + row * gap.row + alignment(cell.vAlign, availableHeight - height, 1).offset;
+                        const x = inner.x + cols.slice(0, column).reduce((a, b) => a + b, 0) + column * gap.column + alignment(cell.hAlign ?? layout.justifyItems, availableWidth - width, 1).offset;
+                        const y = inner.y + rows.slice(0, row).reduce((a, b) => a + b, 0) + row * gap.row + alignment(cell.vAlign ?? layout.alignItems, availableHeight - height, 1).offset;
                         placeItem(child, { x, y, width, height });
                     });
                 }
@@ -292,7 +293,7 @@ export function applyLayout(doc: CanvasDocument, before?: CanvasDocument, option
                     let used = 0;
                     for (const child of items) {
                         const extent = mode(child, main) === 'fill' ? 0 : child[main];
-                        if (layout.wrap && used && used + mainGap + extent > available) {
+                        if (wraps(layout) && used && used + mainGap + extent > available) {
                             lines.push([]);
                             used = 0;
                         }
@@ -333,7 +334,7 @@ export function applyLayout(doc: CanvasDocument, before?: CanvasDocument, option
                         const effectiveJustify = overflowFallback ? (reverse && justify === 'space-between' ? 'end' : 'start') : reverse ? (justify === 'start' || justify === 'flex-start' ? 'end' : justify === 'end' || justify === 'flex-end' ? 'start' : justify) : justify;
                         const distribution = alignment(effectiveJustify, free, line.length);
                         let position = distribution.offset;
-                        const extent = !layout.wrap ? across : extents[lineIndex] + (layout.alignContent === 'stretch' ? (across - required) / lines.length : 0);
+                        const extent = !wraps(layout) ? across : extents[lineIndex] + (layout.alignContent === 'stretch' ? (across - required) / lines.length : 0);
                         const baseline = Math.max(0, ...line.map(child => baselineOf(child)));
                         line.forEach((child, index) => {
                             const align = child.alignSelf ?? layout.alignItems ?? 'start';

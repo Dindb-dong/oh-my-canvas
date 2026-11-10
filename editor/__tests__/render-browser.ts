@@ -300,6 +300,29 @@ export async function runAll(inputs: Data[]) {
         assert(css.includes('data:'), 'loaded font embeds actual bytes');
         assert(css.includes('unicode-range'), 'unicode font ranges retained');
     });
+    await run('imported calculator labels center on first render in flex and grid buttons', ['TEXT-03', 'FMT-03'], async () => {
+        for (const display of ['flex', 'grid']) {
+            const f = fixture([], {width: 120, height: 120});
+            await f.fonts.ensure('8', 'IBM Plex Sans');
+            const imported = importHtml(`<div style="display:${display};justify-content:center;align-items:center;place-items:center;width:80px;height:80px;font-family:IBM Plex Sans;font-size:28px">8</div>`, {parentId: 'board', width: 120, height: 120});
+            f.editor.transact('Import centered key', draft => {
+                Object.assign(draft.pagesById['qa-page'].objects, imported.objects);
+                draft.pagesById['qa-page'].objects.board.childIds!.push(...imported.rootIds);
+            });
+            await f.view.settled();
+            const button = f.editor.page.objects[imported.rootIds[0]];
+            const label = imported.shapes.find(s => s.type === 'text')!;
+            const lines = f.view.textLines(label.id);
+            assert(lines.length === 1, `${display} label renders immediately`);
+            near(lines[0].x + lines[0].width / 2, button.x + button.width / 2, `${display} horizontal text center`);
+            const actual = f.editor.page.objects[label.id];
+            near(actual.y + actual.height / 2, button.y + button.height / 2, `${display} vertical line box center`);
+            const wrapped = importHtml(`<div style="display:${display};justify-content:center;align-items:center;place-items:center;width:80px;height:80px;font-size:16px">Two long words</div>`, {width: 120, height: 120});
+            const wrappingLabel = wrapped.shapes.find(s => s.type === 'text')!;
+            assert(wrappingLabel.width <= 80.5 && wrappingLabel.height > 20, `${display} long label still wraps within its button`);
+            f.destroy();
+        }
+    });
     await run('rich multiline CJK emoji content and measured SVG text positions', ['TEXT-01', 'TEXT-03'], async () => {
         const value = 'Hello 한글 😀 mixed words and wrapping continue';
         const rich = { type: 'richText', verticalAlign: 'center', children: [{ lineHeight: 1.4, paragraphSpacing: 7, children: [{
