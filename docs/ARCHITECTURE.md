@@ -65,6 +65,8 @@ The top SVG export and layer SVG exports reuse the renderer's measured text layo
 
 The actual four-process Electron/TLS journey passed, including official SDK stdio, offline rejoin, local exports and durable reopen. The full 1,065-object component library passed its 170-variant/254-binding workflows and all 16 rendered Assets previews on initial open and reopen. Current packaged-app smoke and exact-byte package provenance checks passed. These are scoped local results; final independent review and a clean publication snapshot remain pending. See [VERIFICATION.md](independent/VERIFICATION.md) for detailed evidence and limits.
 
+For the paused, unmerged large-library import prototype and its proposed architecture, see [Design-file import](DESIGN_FILE_IMPORT.md). Its measurements and proposed limits do not describe default-branch behavior.
+
 ## Review before changing
 
 A storage, protocol, geometry, or Undo change can affect offline replicas and old files. Add a regression at the actual boundary; comparing two final JSON trees alone does not prove the rendered geometry or native save action works. See the [test matrix](TESTING.md) and the [current verification record](independent/VERIFICATION.md).
