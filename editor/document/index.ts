@@ -31,6 +31,7 @@ export class Editor implements EditorStore {
     private candidate: CanvasDocument | null = null;
     private session: Session | null = null;
     private past: {
+        bytes: number;
         before: CanvasDocument;
         after: CanvasDocument;
         operation: Operation;
@@ -180,10 +181,10 @@ export class Editor implements EditorStore {
         after: CanvasDocument;
         operation: Operation;
     }): void {
-        this.past.push(entry);
+        this.past.push({ ...entry, bytes: new TextEncoder().encode(JSON.stringify(patches(entry.before, entry.after))).byteLength });
         let bytes = 0;
         for (let i = this.past.length - 1; i >= 0; i--) {
-            bytes += new TextEncoder().encode(JSON.stringify(patches(this.past[i].before, this.past[i].after))).byteLength;
+            bytes += this.past[i].bytes;
             if (i < this.past.length - 100 || bytes > 16 * 1024 * 1024) {
                 this.past.splice(0, i + 1);
                 break;

@@ -329,3 +329,25 @@ describe('adversarial projections and geometry publication', () => {
     });
 });
 it('creates transparent structural groups while retaining explicitly supplied fills',()=>{expect(createShape('group').fills).toEqual([]);expect(createShape('group',{fills:[{color:'#ff0000'}]}).fills).toEqual([{color:'#ff0000'}]);});
+
+it('does not serialize unchanged shared branches when producing patches', async () => {
+    const {patches} = await import('../document/journal');
+    const shared = {toJSON: vi.fn(() => ({value: 1}))};
+    expect(patches(shared, shared)).toEqual([]);
+    expect(shared.toJSON).not.toHaveBeenCalled();
+    expect(patches({a: 1}, {a: 2})).toEqual([{path: ['a'], value: 2, old: 1}]);
+});
+
+it('reuses immutable history byte sizes instead of diffing all earlier edits again', () => {
+    const e = setup(), initial = e.doc;
+    e.transact('First', d => { d.pagesById[e.pageId].objects.a.x = 20; });
+    const stringify = vi.spyOn(JSON, 'stringify');
+    try {
+        e.transact('Second', d => { d.pagesById[e.pageId].objects.a.x = 30; });
+        expect(stringify.mock.calls.some(([value]) => value === initial)).toBe(false);
+    } finally { stringify.mockRestore(); }
+    expect(e.undoStep()).toBe(true); expect(e.page.objects.a.x).toBe(20);
+    expect(e.undoStep()).toBe(true); expect(e.page.objects.a.x).toBe(10);
+    expect(e.redoStep()).toBe(true); expect(e.page.objects.a.x).toBe(20);
+    e.destroy();
+});

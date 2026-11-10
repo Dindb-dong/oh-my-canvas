@@ -23,7 +23,7 @@ export interface Patch {
     remove?: boolean;
 }
 export function patches(before: any, after: any, path: string[] = []): Patch[] {
-    if (JSON.stringify(before) === JSON.stringify(after))
+    if (Object.is(before, after) || JSON.stringify(before) === JSON.stringify(after))
         return [];
     if (!before || !after || typeof before !== 'object' || typeof after !== 'object' || Array.isArray(before) || Array.isArray(after))
         return [{ path, value: clone(after), old: clone(before) }];
