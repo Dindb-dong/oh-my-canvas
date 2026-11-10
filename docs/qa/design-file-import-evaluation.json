@@ -1,0 +1,276 @@
+{
+  "schemaVersion": 1,
+  "recordedOn": "2026-11-10",
+  "status": "unmerged-prototype-implementation-paused",
+  "source": {
+    "url": "https://www.figma.com/community/file/1651309003795292092/ios-and-ipados-27",
+    "bytes": 160627671,
+    "redistributed": false
+  },
+  "environment": {
+    "platform": "macOS",
+    "runtime": "native Electron",
+    "profile": "isolated temporary test profile",
+    "sampling": "one run; no p95 or detailed cold/warm classification"
+  },
+  "runner": "node scripts/design-library-e2e.mjs <absolute-local-fig-path>",
+  "runnerAvailability": "paused implementation branch; not introduced by this documentation PR",
+  "result": {
+    "journeyPassed": true,
+    "pages": 46,
+    "objectsIncludingPageRoots": 39363,
+    "referencedBitmapAssets": 160,
+    "checks": [
+      "All 46 source pages persisted",
+      "Page rename accepted in the full imported library",
+      "All 46 pages selected and settled",
+      "Fresh-process reopen retains every page and shared image"
+    ],
+    "pageErrors": []
+  },
+  "timingsMs": {
+    "import": 22760.629125,
+    "reopenExcludingProcessLaunch": 19045.195624999993,
+    "pageRenameEndToEnd": 20294.300125,
+    "finalFlushAfterCompletedRename": 180.3880410000129
+  },
+  "pageSelections": [
+    {
+      "name": "Cover",
+      "objectsIncludingRoot": 3,
+      "selectionAndSettleMs": 109.95266700000138
+    },
+    {
+      "name": "Examples",
+      "objectsIncludingRoot": 18380,
+      "selectionAndSettleMs": 6005.426708000003
+    },
+    {
+      "name": "Product Bezels",
+      "objectsIncludingRoot": 88,
+      "selectionAndSettleMs": 646.1998749999984
+    },
+    {
+      "name": "System",
+      "objectsIncludingRoot": 3680,
+      "selectionAndSettleMs": 1388.0022499999977
+    },
+    {
+      "name": "Buttons",
+      "objectsIncludingRoot": 1166,
+      "selectionAndSettleMs": 400.5227920000034
+    },
+    {
+      "name": "Keyboards",
+      "objectsIncludingRoot": 3834,
+      "selectionAndSettleMs": 1141.9582500000033
+    },
+    {
+      "name": "Getting Started",
+      "objectsIncludingRoot": 5,
+      "selectionAndSettleMs": 137.68695899999875
+    },
+    {
+      "name": "---",
+      "objectsIncludingRoot": 1,
+      "selectionAndSettleMs": 107.97016599999915
+    },
+    {
+      "name": "---",
+      "objectsIncludingRoot": 1,
+      "selectionAndSettleMs": 104.88199999999779
+    },
+    {
+      "name": "Colors",
+      "objectsIncludingRoot": 442,
+      "selectionAndSettleMs": 230.22204200000124
+    },
+    {
+      "name": "Materials",
+      "objectsIncludingRoot": 403,
+      "selectionAndSettleMs": 262.9800000000032
+    },
+    {
+      "name": "Text Styles and Dynamic Type",
+      "objectsIncludingRoot": 327,
+      "selectionAndSettleMs": 412.12975000000006
+    },
+    {
+      "name": "Layout Guides",
+      "objectsIncludingRoot": 1089,
+      "selectionAndSettleMs": 664.8207079999993
+    },
+    {
+      "name": "\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014",
+      "objectsIncludingRoot": 1,
+      "selectionAndSettleMs": 113.42024999999558
+    },
+    {
+      "name": "Action Sheets",
+      "objectsIncludingRoot": 25,
+      "selectionAndSettleMs": 119.96358300000429
+    },
+    {
+      "name": "Activity Views",
+      "objectsIncludingRoot": 591,
+      "selectionAndSettleMs": 388.76716699999815
+    },
+    {
+      "name": "Alerts",
+      "objectsIncludingRoot": 101,
+      "selectionAndSettleMs": 159.296666000002
+    },
+    {
+      "name": "App Icons",
+      "objectsIncludingRoot": 128,
+      "selectionAndSettleMs": 330.59475000000384
+    },
+    {
+      "name": "Color Pickers",
+      "objectsIncludingRoot": 411,
+      "selectionAndSettleMs": 290.52508300000045
+    },
+    {
+      "name": "Contextual Menus",
+      "objectsIncludingRoot": 465,
+      "selectionAndSettleMs": 310.05887500000244
+    },
+    {
+      "name": "Date and Time Pickers",
+      "objectsIncludingRoot": 550,
+      "selectionAndSettleMs": 353.4094580000019
+    },
+    {
+      "name": "Empty States",
+      "objectsIncludingRoot": 51,
+      "selectionAndSettleMs": 134.65379100000428
+    },
+    {
+      "name": "Face ID",
+      "objectsIncludingRoot": 22,
+      "selectionAndSettleMs": 117.57637499999691
+    },
+    {
+      "name": "Lists",
+      "objectsIncludingRoot": 438,
+      "selectionAndSettleMs": 320.25737500000105
+    },
+    {
+      "name": "Menus",
+      "objectsIncludingRoot": 1285,
+      "selectionAndSettleMs": 712.4684169999964
+    },
+    {
+      "name": "Notifications",
+      "objectsIncludingRoot": 167,
+      "selectionAndSettleMs": 197.82141599999886
+    },
+    {
+      "name": "Page Controls",
+      "objectsIncludingRoot": 220,
+      "selectionAndSettleMs": 209.47983300000487
+    },
+    {
+      "name": "Popovers",
+      "objectsIncludingRoot": 132,
+      "selectionAndSettleMs": 170.7672920000041
+    },
+    {
+      "name": "Pop-up Buttons",
+      "objectsIncludingRoot": 14,
+      "selectionAndSettleMs": 115.26691700000083
+    },
+    {
+      "name": "Progress Indicators",
+      "objectsIncludingRoot": 129,
+      "selectionAndSettleMs": 169.53308399999514
+    },
+    {
+      "name": "Segmented Controls",
+      "objectsIncludingRoot": 193,
+      "selectionAndSettleMs": 196.99245900000096
+    },
+    {
+      "name": "Sheets",
+      "objectsIncludingRoot": 151,
+      "selectionAndSettleMs": 183.6894170000014
+    },
+    {
+      "name": "Sidebars",
+      "objectsIncludingRoot": 748,
+      "selectionAndSettleMs": 574.0231669999994
+    },
+    {
+      "name": "Sliders",
+      "objectsIncludingRoot": 441,
+      "selectionAndSettleMs": 317.7971250000046
+    },
+    {
+      "name": "Status Bars and Menu Bars",
+      "objectsIncludingRoot": 387,
+      "selectionAndSettleMs": 291.25
+    },
+    {
+      "name": "Steppers",
+      "objectsIncludingRoot": 52,
+      "selectionAndSettleMs": 135.7111670000013
+    },
+    {
+      "name": "Tab Bars",
+      "objectsIncludingRoot": 1041,
+      "selectionAndSettleMs": 585.1024170000019
+    },
+    {
+      "name": "Text Fields",
+      "objectsIncludingRoot": 77,
+      "selectionAndSettleMs": 152.35479200000555
+    },
+    {
+      "name": "Toggles",
+      "objectsIncludingRoot": 81,
+      "selectionAndSettleMs": 145.2609169999996
+    },
+    {
+      "name": "Toolbars",
+      "objectsIncludingRoot": 1715,
+      "selectionAndSettleMs": 920.752999999997
+    },
+    {
+      "name": "Widgets",
+      "objectsIncludingRoot": 205,
+      "selectionAndSettleMs": 230.7123339999962
+    },
+    {
+      "name": "Windows",
+      "objectsIncludingRoot": 50,
+      "selectionAndSettleMs": 133.71375000000262
+    },
+    {
+      "name": "\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014",
+      "objectsIncludingRoot": 1,
+      "selectionAndSettleMs": 108.10825000000477
+    },
+    {
+      "name": "Change log",
+      "objectsIncludingRoot": 50,
+      "selectionAndSettleMs": 233.2289579999997
+    },
+    {
+      "name": "License",
+      "objectsIncludingRoot": 4,
+      "selectionAndSettleMs": 173.48500000000058
+    },
+    {
+      "name": "_Kit Helpers",
+      "objectsIncludingRoot": 18,
+      "selectionAndSettleMs": 158.6209170000002
+    }
+  ],
+  "limitations": [
+    "Source visual/semantic parity not qualified",
+    "No phase-level attribution of edit latency",
+    "No large-library collaboration qualification",
+    "No full-journey peak-memory measurement",
+    "No packaged or cross-platform qualification"
+  ]
+}
