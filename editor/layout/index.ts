@@ -75,9 +75,10 @@ function reconcileInlineGeometry(objects: Record<string, Shape>, previous: Recor
             update('top', current.y, current.contentHeight);
         }
         if (shape.maxWidth !== old.maxWidth && css['max-width'] === old.inlineStyles?.['max-width']) {
-            next ??= { ...css };
-            if (Number.isFinite(shape.maxWidth)) next['max-width'] = `${shape.maxWidth}px`;
-            else delete next['max-width'];
+            const target: Data = next ?? { ...css };
+            next = target;
+            if (Number.isFinite(shape.maxWidth)) target['max-width'] = `${shape.maxWidth}px`;
+            else delete target['max-width'];
         }
         update('width', current.width, current.contentWidth);
         update('height', current.height, current.contentHeight);
