@@ -76,7 +76,10 @@ export const workspaceStyle = `
 #left {
   grid-column:1;
   grid-row:2/4;
-  overflow:auto;
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+  overflow:hidden;
   background:#fff;
   border-right:1px solid var(--line);
   z-index:5;
@@ -90,6 +93,7 @@ export const workspaceStyle = `
   z-index:5;
 }
 .ltabs {
+  flex:none;
   display:flex;
   border-bottom:1px solid var(--line);
   padding:8px;
@@ -103,9 +107,24 @@ export const workspaceStyle = `
   flex:1;
 }
 .pages {
+  flex:none;
   padding:12px 8px;
   border-bottom:1px solid var(--line);
 }
+.page-selector {
+  display:flex;
+  align-items:center;
+  gap:4px;
+}
+.page-selector .field {
+  min-width:0;
+  height:34px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:#fff;
+}
+.page-selector .field-label { display:none; }
+.page-selector select { height:100%; }
 .panel-heading {
   display:flex;
   align-items:center;
@@ -179,9 +198,16 @@ export const workspaceStyle = `
   text-align:center;
 }
 .layers {
+  flex:1;
+  min-height:0;
+  overflow:auto;
+  overflow-anchor:none;
   padding:7px 0;
 }
 .assets {
+  flex:1;
+  min-height:0;
+  overflow:auto;
   padding:8px;
 }
 .assets-search {
@@ -747,6 +773,7 @@ export const workspaceStyle = `
     z-index:50;
     visibility:visible;
   }
+  .lv-editor.mobile-left #left { display:flex; }
   .lv-editor.mobile-right #right {
     right:0;
   }
@@ -791,6 +818,7 @@ export const workspaceStyle = `
   padding:5px;
 }
 .layer-filter {
+  flex:none;
   padding:8px;
 }
 .layer-filter input {
