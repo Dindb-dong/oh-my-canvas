@@ -8,7 +8,7 @@ import { combinePaths } from './vector';
 import { measureTextScene } from './text';
 import { textMetricRevision } from './metric-cache';
 import { SceneNodeCache, sceneChanges, parseScene, reconcileScene, resourceScope } from './retained';
-import { hasBackdropDependency, ViewportPreparation } from './viewport';
+import { hasBackdropDependency, ViewportPreparation, type ViewportChanges } from './viewport';
 export { measureTextScene } from './text';
 export { combinePaths } from './vector';
 let thumbnailNamespace = 0;
@@ -39,7 +39,19 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
     let visualRevision = 0, booleanRevision = 0, pendingRender = false, cancelScheduled: (() => void) | undefined;
     const nodeCache = new SceneNodeCache(), scenePrefix = 'omc-view-' + (++sceneNamespace);
     const preparation = new ViewportPreparation();
+    let preparedPage = '', preparedSource: Record<string, Shape> | undefined;
+    let observedPage = editor.pageId, observedSource = editor.page.objects;
+    let pendingShapeIds: Set<string> | undefined = new Set();
     const viewportBounds = () => ({ x: editor.viewport.vbox.x, y: editor.viewport.vbox.y, width: editor.viewport.vport.width / editor.viewport.zoom, height: editor.viewport.vport.height / editor.viewport.zoom });
+    function prepareScreen() {
+        const source = editor.page.objects, pageId = editor.pageId;
+        const changes: ViewportChanges | undefined = pendingShapeIds && preparedSource && preparedPage === pageId && observedPage === pageId && observedSource === source ?
+            { before: preparedSource, after: source, ids: pendingShapeIds } : undefined;
+        const changed = preparation.update(source, viewportBounds(), editor.selection, changes);
+        preparedPage = observedPage = pageId; preparedSource = observedSource = source;
+        pendingShapeIds = new Set();
+        return changed;
+    }
     const screenObjects = () => preparation.objects;
     const resolveImageSource = (source: string): string => options.resolveImageSource?.(source) ?? source;
     function resourceVisible(shape: Shape, objects: Record<string, Shape>, cache: Map<string, boolean>, seen = new Set<string>()): boolean {
@@ -267,7 +279,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             return;
         cancelScheduled?.(); cancelScheduled = undefined; pendingRender = false;
         revision++;
-        preparation.update(editor.page.objects, viewportBounds(), editor.selection);
+        prepareScreen();
         discoverImages();
         discoverBooleans();
         measureText();
@@ -670,15 +682,25 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         }
     };
     const off = editor.on(event => {
+        const source = editor.page.objects;
+        if (event.page || observedPage !== editor.pageId) {
+            preparation.clear(); pendingShapeIds = undefined;
+        } else if (source !== observedSource) {
+            // Absence means unknown, whereas an explicit empty scope means no
+            // shape changed. Union every skipped preview up to the next render.
+            if (!event.changedShapeIds) pendingShapeIds = undefined;
+            else if (pendingShapeIds) for (const id of event.changedShapeIds[editor.pageId] ?? []) pendingShapeIds.add(id);
+        }
+        observedPage = editor.pageId; observedSource = source;
         if (event.changes || event.projection || event.page || renderedOutlines !== !!editor.showOutlines)
             render();
         else if (event.deltas) {
             if (editor.undo.blocked) requestRender(); else render();
         }
         else if (event.viewport) {
-            if (pendingRender || preparation.update(editor.page.objects, viewportBounds(), editor.selection)) render(); else updateViewport();
+            if (pendingRender || prepareScreen()) render(); else updateViewport();
         }
-        else if (event.selection && preparation.enabled && preparation.update(editor.page.objects, viewportBounds(), editor.selection)) {
+        else if (event.selection && preparation.enabled && prepareScreen()) {
             render();
         }
     });

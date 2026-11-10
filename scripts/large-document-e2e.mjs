@@ -124,6 +124,103 @@ async function selectLeaf(){const candidate=await page.evaluate(async()=>{const 
 async function exportFile(format){if(await page.locator('#dialog').evaluate(dialog=>dialog.open))await page.locator('#dialog button[aria-label="Close dialog"]').click();const file=path.join(output,'export.'+format);await app.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:file});},file);await page.locator('#export').click();await watchErrors(page);const began=performance.now();await page.locator(`[data-format="${format}"]`).click();await page.waitForFunction(()=>window.__largeDocumentError?.message||!document.querySelector('#dialog')?.open,null,{timeout});const error=await page.evaluate(()=>window.__largeDocumentError?.message);if(error)throw Error('Native export: '+error);const stat=await fs.stat(file);assert.ok(stat.size>20);result.phases['export-'+format]={ms:performance.now()-began,bytes:stat.size};return file;}
 async function inspectPortableText(file,kind){const input=createReadStream(file,{encoding:'utf8'});let tail='',localReference=false,hasData=false,remoteImage=false;for await(const text of input){const part=tail+text;localReference ||= /omc-asset:sha256:|omc:\/\/canvas\/assets\//.test(part);hasData ||= /data:image\//.test(part);remoteImage ||= kind==='SVG'&&/<image\b[^>]*(?:href|xlink:href)=["'](?!data:)[^"']+["']/i.test(part);tail=part.slice(-1000);}assert.equal(localReference,false,kind+' contains workspace-only URLs');assert.equal(remoteImage,false,'SVG contains an unresolved image URL');if(kind==='JSON'&&result.document.assets)assert.ok(hasData,kind+' has no embedded image sources');return{localReference,hasData,remoteImage};}
 
+function traceUnionMs(intervals){
+  let total=0,end=-Infinity;
+  for(const [start,stop] of intervals.sort((a,b)=>a[0]-b[0]||a[1]-b[1])){total+=Math.max(0,stop-Math.max(start,end));end=Math.max(end,stop);}
+  return total/1000;
+}
+function tracePhase(name){
+  if(/^(?:V8\.GC|BlinkGC|MinorGC|MajorGC|GC\b)/.test(name))return 'garbageCollection';
+  if(/^(?:Layout|UpdateLayoutTree|RecalculateStyles|RecalculateStyle|UpdateStyle|HitTest)$/.test(name))return 'styleAndLayout';
+  if(/^(?:Decode Image|DecodeImage|ImageDecodeTask)$/.test(name))return 'imageDecode';
+  if(/^(?:Paint|PaintImage|PrePaint|UpdateLayerTree|Layerize|CompositeLayers|Commit|RasterTask|Rasterize)$/.test(name))return 'paintAndComposite';
+  if(/^(?:FunctionCall|EvaluateScript|RunMicrotasks|EventDispatch|FireAnimationFrame|TimerFire|CompileScript|CompileCode|V8\.Execute|v8\.run|v8\.run_microtasks)$/.test(name))return 'scriptAndCallbacks';
+  return null;
+}
+function summarizePanTrace(events,startName,endName,deadline){
+  if(!Array.isArray(events)||events.length>250000)throw Error('Pan trace has no event array or exceeds the 250,000-event summary limit');
+  const start=events.find(event=>event.name===startName&&Number.isFinite(event.ts)),end=events.find(event=>event.name===endName&&Number.isFinite(event.ts));
+  if(!start||!end||start.pid!==end.pid||start.tid!==end.tid||end.ts<=start.ts)throw Error('Pan trace has no matching renderer time markers');
+  const threads=new Map();
+  for(const event of events)if(event.ph==='M'&&event.name==='thread_name')threads.set(`${event.pid}:${event.tid}`,String(event.args?.name??''));
+  const pending=new Map(),complete=[];let unmatchedEnds=0;
+  const add=(event,stop)=>{if(Number.isFinite(event.ts)&&Number.isFinite(stop)&&stop>event.ts)complete.push({name:String(event.name??''),pid:event.pid,tid:event.tid,start:event.ts,end:stop,dispatchType:event.args?.data?.type,callback:event.name==='FunctionCall'?{name:event.args?.data?.functionName??'',url:event.args?.data?.url??event.args?.data?.scriptName??'',line:event.args?.data?.lineNumber}:undefined});};
+  for(const event of events.filter(event=>['X','B','E'].includes(event.ph)).sort((a,b)=>a.ts-b.ts)){
+    if(performance.now()>deadline)throw Error('Pan trace summary exceeded the diagnostic deadline');
+    if(event.ph==='X'){add(event,event.ts+event.dur);continue;}
+    const key=`${event.pid}:${event.tid}`,stack=pending.get(key)??[];pending.set(key,stack);
+    if(event.ph==='B')stack.push(event);else{const begin=stack.pop();if(begin)add(begin,event.ts);else unmatchedEnds++;}
+  }
+  const clipped=complete.filter(event=>event.end>start.ts&&event.start<end.ts).map(event=>({...event,from:Math.max(start.ts,event.start),to:Math.min(end.ts,event.end)}));
+  const main=clipped.filter(event=>event.pid===start.pid&&event.tid===start.tid);
+  // Pick the innermost classified synchronous event for each interval. An inner
+  // Layout/GC/Paint event is excluded from its enclosing JS callback, so these
+  // buckets partition the window instead of summing nested inclusive timings.
+  const phases=['garbageCollection','styleAndLayout','imageDecode','paintAndComposite','scriptAndCallbacks','otherObserved','idleOrUnobserved'];
+  const totals=Object.fromEntries(phases.map(name=>[name,0])),edges=[{at:start.ts},{at:end.ts}],active=new Set(),heap=[];
+  const preferred=(a,b)=>a.start>b.start||a.start===b.start&&(a.end<b.end||a.end===b.end&&phases.indexOf(a.phase)<phases.indexOf(b.phase));
+  const push=entry=>{let index=heap.push(entry)-1;while(index){const parent=(index-1)>>1;if(!preferred(heap[index],heap[parent]))break;[heap[index],heap[parent]]=[heap[parent],heap[index]];index=parent;}};
+  const pop=()=>{const last=heap.pop();if(!heap.length)return;heap[0]=last;let index=0;while(index*2+1<heap.length){let child=index*2+1;if(child+1<heap.length&&preferred(heap[child+1],heap[child]))child++;if(!preferred(heap[child],heap[index]))break;[heap[index],heap[child]]=[heap[child],heap[index]];index=child;}};
+  main.forEach((event,id)=>{const entry={...event,id,phase:tracePhase(event.name)};edges.push({at:event.from,enter:true,entry},{at:event.to,enter:false,entry});});
+  edges.sort((a,b)=>a.at-b.at);let previous=start.ts,observed=0;
+  for(let index=0;index<edges.length;){
+    if(performance.now()>deadline)throw Error('Pan trace attribution exceeded the diagnostic deadline');
+    const at=edges[index].at;while(heap.length&&!active.has(heap[0].id))pop();
+    totals[heap[0]?.phase??(observed?'otherObserved':'idleOrUnobserved')]+=at-previous;
+    while(index<edges.length&&edges[index].at===at){const {entry,enter}=edges[index++];if(!entry)continue;observed+=enter?1:-1;if(entry.phase){if(enter){active.add(entry.id);push(entry);}else active.delete(entry.id);}}
+    previous=at;
+  }
+  const rounded=value=>Math.round(value*1000)/1000;
+  const eventSummary=items=>{
+    const groups=new Map();for(const event of items){const group=groups.get(event.name)??[];group.push(event);groups.set(event.name,group);}
+    return [...groups].map(([name,group])=>({name,events:group.length,inclusiveUnionMsNotAdditive:rounded(traceUnionMs(group.map(event=>[event.from,event.to]))),maxEventMs:rounded(group.reduce((maximum,event)=>Math.max(maximum,(event.to-event.from)/1000),0))})).sort((a,b)=>b.inclusiveUnionMsNotAdditive-a.inclusiveUnionMsNotAdditive).slice(0,20);
+  };
+  const otherThreads=new Map();for(const event of clipped)if(event.pid===start.pid&&event.tid!==start.tid){const group=otherThreads.get(event.tid)??[];group.push(event);otherThreads.set(event.tid,group);}
+  const callbacks=new Map();for(const event of main)if(event.callback){const key=JSON.stringify(event.callback),group=callbacks.get(key)??[];group.push(event);callbacks.set(key,group);}
+  const taskName=['RunTask','ThreadControllerImpl::RunTask','TaskQueueManager::ProcessTaskFromWorkQueue'].find(name=>main.some(event=>event.name===name)),tasks=main.filter(event=>event.name===taskName).map(event=>(event.to-event.from)/1000).sort((a,b)=>a-b);
+  return {windowMs:rounded((end.ts-start.ts)/1000),renderer:{pid:start.pid,tid:start.tid,threadName:threads.get(`${start.pid}:${start.tid}`)??null,identifiedBy:'paired public Performance API markers'},eventCount:events.length,rendererMainEventCount:main.length,wheelDispatchEvents:main.filter(event=>event.name==='EventDispatch'&&event.dispatchType==='wheel').length,exclusiveMainThreadMs:Object.fromEntries(Object.entries(totals).map(([name,us])=>[name,rounded(us/1000)])),mainThreadTasks:taskName?{eventName:taskName,count:tasks.length,over50ms:tasks.filter(ms=>ms>=50).length,maxMs:rounded(tasks.at(-1)??0),p95Ms:rounded(tasks[Math.ceil(tasks.length*.95)-1]??0)}:null,eventsInclusiveNotAdditive:eventSummary(main),callbacksInclusiveNotAdditive:[...callbacks].map(([key,group])=>({...JSON.parse(key),events:group.length,inclusiveUnionMsNotAdditive:rounded(traceUnionMs(group.map(event=>[event.from,event.to])))})).sort((a,b)=>b.inclusiveUnionMsNotAdditive-a.inclusiveUnionMsNotAdditive).slice(0,10),otherRendererThreadsNotAdditive:[...otherThreads].map(([tid,group])=>({tid,name:threads.get(`${start.pid}:${tid}`)??null,observedUnionMs:rounded(traceUnionMs(group.map(event=>[event.from,event.to]))),eventsInclusiveNotAdditive:eventSummary(group).slice(0,5)})).sort((a,b)=>b.observedUnionMs-a.observedUnionMs).slice(0,8),unpairedSynchronousEvents:{begins:[...pending.values()].reduce((count,stack)=>count+stack.length,0),ends:unmatchedEnds},method:'Main-thread interval attribution, not CPU utilization. Exclusive buckets partition the marked window; per-name/callback rows overlap and must not be added. Other threads run concurrently. Async events and other processes, including GPU work, are outside this attribution.'};
+}
+async function diagnosePanTrace(){
+  const started=performance.now(),deadline=started+30000,workDeadline=deadline-2000,maxBytes=32*1024*1024;
+  const report={available:false,wheelEventsRequested:6,wheelEventsSent:0,timeoutMs:30000,maxBytes,description:'Separate diagnostic after the measured pan; tracing overhead is excluded from phases.pan.'};
+  let client,stream,tracing=false,closing=false,completeListener;
+  const bounded=async(run,until=workDeadline)=>{const left=until-performance.now();if(left<=0)throw Error('Pan trace diagnostic exceeded 30 seconds');let timer;try{return await Promise.race([Promise.resolve().then(run),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Pan trace diagnostic exceeded 30 seconds')),left);})]);}finally{clearTimeout(timer);}};
+  try{
+    report.rendererOSProcessId=await bounded(()=>app.evaluate(({webContents},url)=>webContents.getAllWebContents().find(contents=>contents.getURL()===url)?.getOSProcessId()??null,page.url()));
+    client=await bounded(()=>page.context().newCDPSession(page).then(session=>{client=session;if(closing)void session.detach().catch(()=>{});return session;}));
+    const completion=new Promise(resolve=>{completeListener=value=>{stream=value.stream;resolve(value);};client.on('Tracing.tracingComplete',completeListener);});
+    tracing=true;
+    await bounded(()=>client.send('Tracing.start',{transferMode:'ReturnAsStream',streamFormat:'json',streamCompression:'none',traceConfig:{recordMode:'recordUntilFull',traceBufferSizeInKb:8192,enableSampling:false,includedCategories:['devtools.timeline','disabled-by-default-devtools.timeline','blink.user_timing','v8']}}));
+    await bounded(frames);
+    const marker='omc-pan-diagnostic-'+Date.now(),startName=marker+'-start',endName=marker+'-end';
+    await bounded(()=>page.evaluate(name=>performance.mark(name),startName));
+    for(let index=0;index<6;index++){assertJourney();await bounded(()=>page.mouse.wheel(index%2?14:-14,0));report.wheelEventsSent++;await bounded(tick);}
+    await bounded(frames);await bounded(()=>page.evaluate(name=>performance.mark(name),endName));
+    await bounded(()=>client.send('Tracing.end'));tracing=false;
+    const finished=await bounded(()=>completion);report.dataLossOccurred=!!finished.dataLossOccurred;
+    if(!stream)throw Error('CDP returned no trace stream');
+    const chunks=[];let bytes=0;
+    while(true){
+      const part=await bounded(()=>client.send('IO.read',{handle:stream,size:256*1024}));
+      if(typeof part.data!=='string'||part.data.length>maxBytes*4/3+8)throw Error('Pan trace chunk exceeds the 32-MiB diagnostic limit');
+      const chunk=Buffer.from(part.data,part.base64Encoded?'base64':'utf8');bytes+=chunk.length;
+      if(bytes>maxBytes)throw Error('Pan trace exceeds the 32-MiB diagnostic limit');chunks.push(chunk);
+      if(part.eof)break;if(!chunk.length)throw Error('CDP trace stream made no progress');
+    }
+    const trace=Buffer.concat(chunks,bytes);report.traceBytes=bytes;
+    report.summary=summarizePanTrace(JSON.parse(trace.toString('utf8')).traceEvents,startName,endName,workDeadline);
+    await bounded(()=>fs.writeFile(path.join(output,'pan-trace.json'),trace));
+    report.rawTraceFile='pan-trace.json';report.available=true;report.complete=!report.dataLossOccurred;
+  }catch(error){report.error=String(error.message??error).slice(0,1000);}
+  finally{
+    closing=true;
+    const cleanup=async run=>{const pending=Promise.resolve().then(run);try{await bounded(()=>pending,deadline);}catch(error){pending.catch(()=>{});(report.cleanupErrors??=[]).push(String(error.message??error).slice(0,300));}};
+    if(client){if(tracing)await cleanup(()=>client.send('Tracing.end'));if(stream)await cleanup(()=>client.send('IO.close',{handle:stream}));if(completeListener)client.off('Tracing.tracingComplete',completeListener);await cleanup(()=>client.detach());}
+    report.durationMs=performance.now()-started;
+  }
+  return report;
+}
+
 result.journey={startedAt:new Date().toISOString(),timeoutMs:journeyTimeout};
 watchdog=setTimeout(()=>{
   expired=true;result.passed=false;
@@ -147,6 +244,8 @@ try{
   await check('page rename complete MCP operation',async()=>{const began=performance.now();await tool('page',{action:'rename',pageId:cover.id,name:'Cover — verified '+label});result.phases.renameMcpEndToEndMs=performance.now()-began;await flush();});
   await check('Examples page entry and layer window',async()=>{result.phases.examplesEntry=await selectPage(examples.id);const size=await page.locator('#editor #stage').boundingBox();await tool('view',{action:'set',viewport:{vport:{width:size.width,height:size.height},vbox:{x:examples.focusRoot?.x??0,y:examples.focusRoot?.y??0,width:size.width,height:size.height},zoom:1}});await frames();result.phases.examplesFocus=examples.focusRoot;result.phases.examplesInitialDom=await page.evaluate(()=>({sceneNodes:document.querySelectorAll('#view *').length,shapeNodes:document.querySelectorAll('#view [data-shape-id]').length,layerRows:document.querySelectorAll('.layers .row[data-id]').length}));await page.screenshot({path:path.join(output,'examples.png')});});
   await check('pure pan has no document writes',async()=>{const box=await page.locator('#editor #stage').boundingBox();await page.mouse.move(box.x+box.width*.6,box.y+box.height*.5);await flush();await start('pure-pan');for(let i=0;i<samples;i++){await page.mouse.wheel(i%2?14:-14,0);await tick();}result.phases.pan=await finish();assert.equal(result.phases.pan.notifications.filter(event=>['document','document-delta'].includes(event.type)).length,0);});
+  result.phases.panTrace=result.phases.pan?await diagnosePanTrace():{available:false,error:'The measured pan did not complete'};
+  console.log('PAN TRACE',label,JSON.stringify(result.phases.panTrace));await checkpoint();
   await check('hover has no document writes',async()=>{const box=await page.locator('#editor #stage').boundingBox();await start('hover');for(let i=0;i<samples;i++){await page.mouse.move(box.x+40+(i*47)%Math.max(1,box.width-80),box.y+40+(i*31)%Math.max(1,box.height-80));await tick();}result.phases.hover=await finish();assert.equal(result.phases.hover.notifications.filter(event=>['document','document-delta'].includes(event.type)).length,0);});
   await check('single leaf drag preview and commit',async()=>{const leaf=await selectLeaf(),view=await tool('view',{action:'get'}),box=await page.locator('#editor #stage').boundingBox(),viewport=view.viewport;const x=box.x+(leaf.x+leaf.width/2-viewport.vbox.x)*viewport.zoom,y=box.y+(leaf.y+leaf.height/2-viewport.vbox.y)*viewport.zoom;await page.mouse.move(x,y);await flush();await start('leaf-drag');const modifier=process.platform==='darwin'?'Meta':'Control';await page.keyboard.down(modifier);await page.mouse.down();await page.keyboard.up(modifier);try{const selection=await page.locator('.layers .row[aria-selected="true"][data-id]').evaluateAll(rows=>rows.map(row=>row.dataset.id));assert.deepEqual(selection,[leaf.id],'Hit test selected a different layer; this would not measure a single-leaf drag');for(let i=1;i<=24;i++){await page.mouse.move(x+i*2,y+i);await tick();}await page.evaluate(()=>window.__largeDocumentQA.mark('releaseMs'));}finally{await page.mouse.up();}result.phases.drag=await finish({save:true});const moved=await page.evaluate(async id=>{const state=await window.omc.invoke('snapshot'),pageId=document.querySelector('select[aria-label="Current page"]').value,s=state.document.pagesById[pageId].objects[id];return{x:s.x,y:s.y};},leaf.id);assert.ok(moved.x!==leaf.x||moved.y!==leaf.y,'The selected leaf did not move');result.phases.drag.target={id:leaf.id,before:{x:leaf.x,y:leaf.y},after:moved};result.phases.drag.releaseToDurableMs=result.phases.drag.durableMs-result.phases.drag.releaseMs;result.phases.afterGestureMemory=await memory();});
   await check('asset closure and native missing-asset response',async()=>{const meta=await metadata();assert.equal(meta.missingAssets.length,0);result.assetClosure={assetDefinitions:meta.assets,externalHashes:meta.externalHashes.length,inlineSources:meta.inlineSources};if(!meta.externalHashes.length){result.assetClosure.route='not applicable: baseline retains inline originals';return;}for(const hash of meta.externalHashes){const file=path.join(profile,'documents','assets',hash.slice(0,2),hash);assert.equal(await hashFile(file),hash,'Persisted bitmap hash mismatch');}const fetches=await page.evaluate(async({hash,missing})=>{const present=await fetch('omc://canvas/assets/'+hash),bytes=await present.arrayBuffer(),sum=await crypto.subtle.digest('SHA-256',bytes);const absent=await fetch('omc://canvas/assets/'+missing);return{presentStatus:present.status,presentHash:[...new Uint8Array(sum)].map(byte=>byte.toString(16).padStart(2,'0')).join(''),mime:present.headers.get('content-type'),missingStatus:absent.status,missingBytes:(await absent.arrayBuffer()).byteLength};},{hash:meta.externalHashes[0],missing:'0'.repeat(64)});assert.equal(fetches.presentStatus,200);assert.equal(fetches.presentHash,meta.externalHashes[0]);assert.equal(fetches.missingStatus,404);result.assetClosure.route=fetches;});

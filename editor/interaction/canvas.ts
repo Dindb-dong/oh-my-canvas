@@ -702,7 +702,9 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         gesture = {
             kind,
             start: world(local(event)),
-            base: clone(editor.page.objects),
+            // Published objects are immutable; geometry helpers only read this
+            // fixed origin and copy fields into each isolated preview draft.
+            base: editor.page.objects,
             bounds: shapes.length === 1 ? {
                 x: shapes[0].x,
                 y: shapes[0].y,
@@ -1012,7 +1014,9 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                 gesture = {
                     kind: "move",
                     start: point,
-                    base: clone(editor.page.objects),
+                    // Capture after the duplicate preview so new IDs are part
+                    // of the fixed immutable origin for the entire gesture.
+                    base: editor.page.objects,
                     ids,
                     bounds: bounds(ids.map(id => editor.page.objects[id])),
                     moved: false,

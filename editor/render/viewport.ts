@@ -31,6 +31,19 @@ function keepChildrenTogether(shape: Shape): boolean {
         shape.isMaskGroup !== false && !!(shape.isMaskGroup || shape.maskType || shape.maskMode || shape.mask?.mode);
 }
 
+/** Complete changes between these exact immutable maps, including derived edits. */
+export interface ViewportChanges {
+    before: Record<string, Shape>;
+    after: Record<string, Shape>;
+    ids: ReadonlySet<string>;
+}
+
+function topologyChanged(before: Shape | undefined, after: Shape | undefined): boolean {
+    if (!before || !after || before.id !== after.id || before.type !== after.type || before.parentId !== after.parentId) return true;
+    const a = before.childIds ?? [], b = after.childIds ?? [];
+    return a.length !== b.length || a.some((id, index) => id !== b[index]);
+}
+
 /** A conservative screen-only bound. Unknown ink is retained, never silently clipped.
  * Clipped frames bound their descendants, including unknown text/SVG ink. */
 export function subtreeScreenBounds(objects: Record<string, Shape>, id: string, memo = new Map<string, Rect | null>(), visiting = new Set<string>(), geometryCache?: WeakMap<Shape, Rect | null>): Rect | null {
@@ -72,34 +85,57 @@ export class ViewportPreparation {
     private geometry = new WeakMap<Shape, Rect | null>();
     private selectedKey = '';
     private backdrop = false;
+    private backdropIds = new Set<string>();
     private count = 0;
     roots: string[] = [];
     objects: Record<string, Shape> = {};
     enabled = false;
-    update(source: Record<string, Shape>, viewport: Rect, selected: string[] = []): boolean {
-        let sourceChanged = this.source !== source;
+    update(source: Record<string, Shape>, viewport: Rect, selected: string[] = [], changes?: ViewportChanges): boolean {
+        const previous = this.source, sourceChanged = previous !== source;
+        let rebuild = false;
         if (sourceChanged) {
+            // A missed event or a page/document replacement cannot reuse bounds.
+            // Topology edits use the complete path until they have a measured need
+            // for a separate structural invalidation index.
+            const ids = previous && changes?.before === previous && changes.after === source ?
+                [...changes.ids].filter(id => previous[id] !== source[id]) : undefined;
+            rebuild = !ids || ids.some(id => topologyChanged(previous?.[id], source[id]));
+            if (rebuild) {
+                this.allRoots = source.root?.childIds ?? Object.values(source).filter(s => s.parentId === 'root' && s.id !== 'root').map(s => s.id);
+                this.count = Object.keys(source).length;
+                this.backdropIds = new Set(Object.values(source).filter(hasBackdropDependency).map(shape => shape.id));
+            } else {
+                for (const id of ids!) {
+                    if (hasBackdropDependency(source[id])) this.backdropIds.add(id); else this.backdropIds.delete(id);
+                }
+                // Walk each graph separately: a node already seen in the old graph
+                // must not prevent visiting a different parent in the new graph.
+                const invalidate = (objects: Record<string, Shape>) => {
+                    const visited = new Set<string>();
+                    for (let id of ids!) while (objects[id] && !visited.has(id)) {
+                        visited.add(id); this.bounds.delete(id); id = objects[id].parentId;
+                    }
+                };
+                invalidate(previous!); invalidate(source);
+            }
             this.source = source;
-            this.allRoots = source.root?.childIds ?? Object.values(source).filter(s => s.parentId === 'root' && s.id !== 'root').map(s => s.id);
-            this.count = Object.keys(source).length;
         }
         const enabled = this.count > 512 && viewport.width > 0 && viewport.height > 0;
-        if (sourceChanged || enabled !== this.enabled) {
-            sourceChanged = true;
-            this.enabled = enabled;
-            this.backdrop = this.enabled && Object.values(source).some(hasBackdropDependency);
-            this.bounds = new Map();
-            if (this.enabled && !this.backdrop) for (const id of this.allRoots) subtreeScreenBounds(source, id, this.bounds, new Set(), this.geometry);
-        }
+        const backdrop = enabled && this.backdropIds.size > 0, modeChanged = enabled !== this.enabled || backdrop !== this.backdrop;
+        if (rebuild || modeChanged) this.bounds.clear();
+        this.enabled = enabled; this.backdrop = backdrop;
         const selectedNodes = new Set(selected.filter(id => !!source[id])), selectedAncestors = new Set<string>();
         for (let id of selectedNodes) {
             const seen = new Set<string>();
             while (source[id] && !seen.has(id)) { seen.add(id); selectedAncestors.add(id); id = source[id].parentId; }
         }
         const selectedKey = [...selectedNodes].sort().join('\0');
-        if (!sourceChanged && selectedKey === this.selectedKey && this.area && contains(this.area, viewport)) return false;
+        if (!sourceChanged && !modeChanged && selectedKey === this.selectedKey && this.area && contains(this.area, viewport)) return false;
         this.selectedKey = selectedKey;
-        this.area = { x: viewport.x - viewport.width / 2, y: viewport.y - viewport.height / 2, width: viewport.width * 2, height: viewport.height * 2 };
+        // Editing inside the prepared area must not recenter it and introduce
+        // unrelated mount/unmount work during an otherwise small gesture.
+        if (!this.area || !contains(this.area, viewport))
+            this.area = { x: viewport.x - viewport.width / 2, y: viewport.y - viewport.height / 2, width: viewport.width * 2, height: viewport.height * 2 };
         let objects: Record<string, Shape> = source, next = this.allRoots;
         if (this.enabled && !this.backdrop) {
             objects = {};
@@ -118,12 +154,13 @@ export class ViewportPreparation {
         }
         // Descendant membership can change while every root remains mounted. A new
         // subset invalidates retained ancestor serialization through sceneChanges().
-        const changed = sourceChanged || next.length !== this.roots.length || next.some((id, index) => id !== this.roots[index]) ||
-            Object.keys(objects).length !== Object.keys(this.objects).length || Object.keys(objects).some(id => !this.objects[id]);
+        const rootsChanged = next.length !== this.roots.length || next.some((id, index) => id !== this.roots[index]);
+        const changed = rootsChanged || Object.keys(objects).length !== Object.keys(this.objects).length ||
+            Object.keys(objects).some(id => objects[id] !== this.objects[id]);
         if (!changed) return false;
-        this.roots = [...next];
+        if (rootsChanged) this.roots = [...next];
         this.objects = objects;
         return true;
     }
-    clear() { this.source = undefined; this.area = undefined; this.objects = {}; this.roots = []; this.bounds.clear(); this.geometry = new WeakMap(); }
+    clear() { this.source = undefined; this.area = undefined; this.objects = {}; this.roots = []; this.allRoots = []; this.count = 0; this.enabled = false; this.backdrop = false; this.backdropIds.clear(); this.bounds.clear(); this.geometry = new WeakMap(); }
 }

@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { Editor, createDocument, createShape, insertShape } from '../document';
+import { Editor, createDocument, createPage, createShape, insertShape } from '../document';
 import { createRenderer } from '../render';
 import { ViewportPreparation } from '../render/viewport';
 import * as text from '../render/text';
-import type { Shape } from '../contracts';
+import type { EditorEvent, Shape } from '../contracts';
 
 const cleanups: (() => void)[] = [];
 beforeEach(() => {
@@ -13,11 +13,12 @@ beforeEach(() => {
     Object.defineProperty(document, 'fonts', { configurable: true, value: Object.assign(new EventTarget(), { ready: Promise.resolve() }) });
 });
 afterEach(() => { cleanups.splice(0).reverse().forEach(fn => fn()); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-function fixture(extra: Shape[] = [], options = {}, paddingParent = 'root') {
+function fixture(extra: Shape[] = [], options = {}, paddingParent = 'root', filterEvent?: (event: EditorEvent) => EditorEvent) {
     const doc = createDocument(), page = doc.pagesById[doc.pages[0]];
     for (const shape of extra) insertShape(page, shape);
     for (let i = 0; i < 600; i++) insertShape(page, createShape('rect', { id: `r${i}`, parentId: paddingParent, x: i * 1000, width: 80, height: 80, fills: [{ color: '#abcdef' }] }));
     const editor = new Editor(doc), stage = document.createElement('div');
+    if (filterEvent) { const on = editor.on.bind(editor); editor.on = listener => on(event => listener(filterEvent(event))); }
     editor.setViewport({ zoom: 1, vport: { width: 800, height: 600 }, vbox: { x: 0, y: 0, width: 800, height: 600 } });
     document.body.append(stage);
     const view = createRenderer(editor, stage, options);
@@ -158,4 +159,66 @@ it.each([
     preparation.update(objects, { x: 0, y: 0, width: 800, height: 600 });
     expect(preparation.objects.first).toBe(objects.first);
     expect(preparation.objects.far).toBe(objects.far);
+});
+it('unions queued preview scopes and consumes them safely during selection, cancellation, Undo, and page changes', () => {
+    const callbacks: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callbacks.push(callback); return callbacks.length; });
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    const t = fixture(), initial = t.editor.page.objects;
+    const update = vi.spyOn(ViewportPreparation.prototype, 'update');
+    t.editor.begin('Drag');
+    t.editor.preview(doc => { doc.pagesById[t.editor.pageId].objects.r20.x = 20; });
+    t.editor.preview(doc => { doc.pagesById[t.editor.pageId].objects.r21.x = 30; });
+    expect(callbacks).toHaveLength(1); expect(t.stage.querySelector('[data-shape-id="r20"]')).toBeNull();
+    callbacks[0](0);
+    expect(t.view.element('r20')).not.toBeNull(); expect(t.view.element('r21')).not.toBeNull();
+    const span = update.mock.calls[0][3]!;
+    expect(span.before).toBe(initial); expect(span.after).toBe(t.editor.page.objects);
+    expect(span.ids).toEqual(new Set(['r20', 'r21']));
+    update.mockClear(); const previous = t.editor.page.objects;
+    t.editor.preview(doc => { doc.pagesById[t.editor.pageId].objects.r22.x = 40; });
+    t.editor.setSelection(['r23']);
+    expect(t.view.element('r22')).not.toBeNull(); expect(t.view.element('r23')).not.toBeNull();
+    expect(update.mock.calls[0][3]).toEqual({ before: previous, after: t.editor.page.objects, ids: new Set(['r22']) });
+    update.mockClear(); const selectedSource = t.editor.page.objects;
+    t.editor.preview(doc => { doc.pagesById[t.editor.pageId].objects.r24.x = 150; });
+    t.editor.setViewport({ ...t.editor.viewport, vbox: { x: 100, y: 0, width: 800, height: 600 } });
+    expect(t.view.element('r24')).not.toBeNull();
+    expect(update.mock.calls[0][3]).toEqual({ before: selectedSource, after: t.editor.page.objects, ids: new Set(['r24']) });
+    t.editor.cancelSession();
+    expect(t.view.element('r20')).toBeNull(); expect(t.view.element('r21')).toBeNull(); expect(t.view.element('r22')).toBeNull();
+    expect(t.view.element('r24')).toBeNull();
+    t.editor.setSelection([]);
+    t.editor.transact('Bring into view', doc => { doc.pagesById[t.editor.pageId].objects.r30.x = 50; });
+    expect(t.view.element('r30')).not.toBeNull();
+    t.editor.undoStep(); expect(t.view.element('r30')).toBeNull();
+    t.editor.redoStep(); expect(t.view.element('r30')).not.toBeNull();
+    const first = t.editor.pageId;
+    t.editor.transact('Add page', doc => { const page = createPage('Other', 'other'); doc.pages.push(page.id); doc.pagesById[page.id] = page; });
+    update.mockClear(); t.editor.setPage('other');
+    expect(update.mock.calls[0][3]).toBeUndefined(); expect(t.view.element('r30')).toBeNull();
+    t.editor.setPage(first); expect(t.view.element('r30')).not.toBeNull();
+});
+it('keeps an unknown event gap unknown until preparation has consumed the full source', () => {
+    const callbacks: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callbacks.push(callback); return callbacks.length; });
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    let omitScope = false;
+    const t = fixture([], {}, 'root', event => { const { changedShapeIds, ...legacy } = event; return omitScope ? legacy : event; });
+    const update = vi.spyOn(ViewportPreparation.prototype, 'update');
+    t.editor.begin('Legacy event gap');
+    t.editor.preview(doc => { doc.pagesById[t.editor.pageId].objects.r20.x = 20; });
+    omitScope = true;
+    t.editor.preview(doc => { doc.pagesById[t.editor.pageId].objects.r21.x = 30; });
+    omitScope = false;
+    t.editor.preview(doc => { doc.pagesById[t.editor.pageId].objects.r22.x = 40; });
+    callbacks[0](0);
+    expect(update.mock.calls[0][3]).toBeUndefined();
+    for (const id of ['r20', 'r21', 'r22']) expect(t.view.element(id)).not.toBeNull();
+    update.mockClear(); const before = t.editor.page.objects;
+    t.editor.preview(doc => { doc.pagesById[t.editor.pageId].objects.r23.x = 50; });
+    callbacks[1](0);
+    expect(update.mock.calls[0][3]).toEqual({ before, after: t.editor.page.objects, ids: new Set(['r23']) });
+    t.editor.cancelSession();
+    for (const id of ['r20', 'r21', 'r22', 'r23']) expect(t.view.element(id)).toBeNull();
 });

@@ -74,6 +74,74 @@ it.each([0.25, 1, 2])("uses a screen-space move threshold at %sx zoom and a pann
     expect(t.editor.undoStep()).toBe(true);
     expect(t.editor.page.objects.a.x).toBe(100);
 });
+function freezeTree(value: any): void {
+    if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
+    for (const child of Object.values(value)) freezeTree(child);
+    Object.freeze(value);
+}
+it("keeps a frozen gesture origin through repeated previews, session Undo and pointer cancellation", () => {
+    const t = setup(true), before = t.editor.doc, objects = t.editor.page.objects;
+    const original = structuredClone(objects);
+    freezeTree(objects);
+    t.editor.setSelection(["a"]);
+    t.send("pointerdown", 120, 120);
+    t.send("pointermove", 150, 130);
+    expect(t.editor.page.objects.a).toMatchObject({x: 130, y: 110});
+    t.send("pointermove", 170, 150);
+    expect(t.editor.page.objects.a).toMatchObject({x: 150, y: 130});
+    expect(t.editor.undoSession()).toBe(true);
+    expect(t.editor.page.objects.a).toMatchObject({x: 130, y: 110});
+    t.send("pointermove", 180, 160);
+    expect(t.editor.page.objects.a).toMatchObject({x: 160, y: 140});
+    expect(objects).toEqual(original);
+    t.send("pointercancel", 180, 160);
+    expect(t.editor.doc).toBe(before);
+    expect(t.editor.page.objects).toEqual(original);
+    expect(t.editor.activeSession).toBe(false);
+    expect(t.canvas.active).toBe(false);
+    expect(t.editor.undoStep()).toBe(false);
+});
+it("captures duplicated layers after creation and leaves the original immutable page untouched", () => {
+    const t = setup(), before = t.editor.doc, original = structuredClone(t.editor.page.objects);
+    freezeTree(t.editor.page.objects);
+    t.editor.setSelection(["a"]);
+    t.send("pointerdown", 120, 120, {altKey: true});
+    const duplicate = t.editor.selection[0];
+    expect(duplicate).not.toBe("a");
+    expect(t.editor.page.objects[duplicate]).toMatchObject({x: 100, y: 100});
+    const origin = t.editor.page.objects;
+    freezeTree(origin);
+    t.send("pointermove", 150, 130, {altKey: true});
+    t.send("pointermove", 170, 150, {altKey: true});
+    expect(t.editor.page.objects[duplicate]).toMatchObject({x: 150, y: 130});
+    expect(origin[duplicate]).toMatchObject({x: 100, y: 100});
+    expect(t.editor.page.objects.a).toEqual(original.a);
+    t.send("pointercancel", 170, 150);
+    expect(t.editor.doc).toBe(before);
+    expect(t.editor.page.objects).toEqual(original);
+    expect(t.editor.undoStep()).toBe(false);
+});
+it("retains the fixed gesture origin across a remote rebase and cancels only local geometry", () => {
+    const t = setup(), before = t.editor.doc, objects = t.editor.page.objects;
+    const original = structuredClone(objects);
+    freezeTree(objects);
+    t.editor.setSelection(["a"]);
+    t.send("pointerdown", 120, 120);
+    t.send("pointermove", 150, 130);
+    const remote = structuredClone(before);
+    remote.pagesById[t.editor.pageId].objects.a.name = "Peer name";
+    remote.pagesById[t.editor.pageId].objects.b.x = 280;
+    t.editor.receiveDocument(remote);
+    t.send("pointermove", 170, 150);
+    expect(t.editor.page.objects.a).toMatchObject({x: 150, y: 130, name: "Peer name"});
+    expect(t.editor.page.objects.b.x).toBe(280);
+    expect(objects).toEqual(original);
+    t.send("pointercancel", 170, 150);
+    expect(t.editor.page.objects.a).toMatchObject({x: 100, y: 100, name: "Peer name"});
+    expect(t.editor.page.objects.b.x).toBe(280);
+    expect(t.editor.activeSession).toBe(false);
+    expect(t.editor.undoStep()).toBe(false);
+});
 it("marquees partially intersecting children from empty frame space without moving the frame", () => {
     const t = setup(true);
     t.send("pointerdown", 60, 60);
