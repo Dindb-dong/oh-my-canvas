@@ -176,6 +176,10 @@ export class Replica {
       documentModel.fieldParts(row[0]);collectAssetRefs(row[1]);
     }
     const writes=[...this.recoveryFields(),...changes];
+    // An empty acknowledgement/bootstrap patch has no state to validate. Keep
+    // recovery declarations above: an empty input can still repair a page whose
+    // last live declaration was removed by concurrent edits.
+    if(!writes.length)return;
     let simple;
     try{simple=this.simpleCandidate(writes);}catch(error){this.rejectValidation();throw error;}
     if(simple){

@@ -42,7 +42,7 @@ function assertIdentity(value){
 }
 const cursors=new Map(),colors=['#1d4ed8','#0369a1','#6d28d9','#475569'];
 const thumbnails=createThumbnailScheduler({
-  current:()=>handle&&active&&!closing?{id:active.id,view:handle.view,pageId:handle.editor.pageId,objects:handle.editor.page.objects,assets:handle.editor.doc.assets,viewport:handle.editor.viewport}:null,
+  current:()=>handle&&active&&ready&&!mounting&&!closing?{id:active.id,view:handle.view,pageId:handle.editor.pageId,objects:handle.editor.page.objects,assets:handle.editor.doc.assets,viewport:handle.editor.viewport}:null,
   save:shot=>api.invoke('thumbnail',{src:`data:${shot.mimeType};base64,${shot.data}`}),
 });
 window.addEventListener('pagehide',()=>thumbnails.reset());
@@ -123,7 +123,9 @@ async function openSnapshot(snap){
     if(candidate.bootstrapNonce){
       const initialized=await startupStep('startup.bootstrap',()=>api.invoke('bootstrap',{id:snap.id,nonce:candidate.bootstrapNonce,changes:initialization}));assertIdentity(initialized);
       if(initialized.bootstrapRetry){await handle.destroy();handle=null;candidate=initialized;continue;}
-      startupSync('startup.bootstrapReceive',()=>handle.editor.receiveDocument(initialized.document));
+      // Keep the runtime inert until the mandatory fresh snapshot below. That
+      // snapshot includes bootstrap and any intervening host edits, so applying
+      // this intermediate document would repeat a full validation needlessly.
     }else if(initialization.length){throw Error('Canvas initialization token is missing');}
     break;
   }
@@ -348,7 +350,7 @@ try{
   prefs=await startupStep('startup.preferences',()=>api.invoke('preferences'));
   await openSnapshot(await startupStep('startup.snapshot',()=>api.invoke('snapshot')));
   // The host only dispatches document calls after this mount and bootstrap have completed.
-  ready=true;assertIdentity(await startupStep('startup.ready',()=>api.invoke('runtime-ready')));startupComplete=true;
+  ready=true;assertIdentity(await startupStep('startup.ready',()=>api.invoke('runtime-ready')));startupComplete=true;thumbnails.schedule();
 }catch(error){
   startupTiming('startup.failure',performance.now()-startupAt);startupComplete=true;
   ready=false;toast('Could not open canvas: '+error.message,true);

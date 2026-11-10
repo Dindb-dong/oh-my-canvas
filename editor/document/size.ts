@@ -1,8 +1,8 @@
+import { jsonPrimitiveBytes, jsonStringBytes, utf8Bytes } from '../../core/json-bytes.mjs';
 interface Size { bytes: number; members: number; }
 interface Paths { terminal: boolean; children: Map<string, Paths>; }
-const encoder = new TextEncoder(), sizes = new WeakMap<object, Size>();
+const sizes = new WeakMap<object, Size>();
 const fallback = Symbol('native JSON size');
-const bytes = (value: string) => encoder.encode(value).byteLength;
 const plain = (value: any) => value && typeof value === 'object' && !Array.isArray(value) && [null, Object.prototype].includes(Object.getPrototypeOf(value));
 function pathTree(paths: readonly (readonly string[])[]): Paths {
     const root: Paths = { terminal: false, children: new Map() };
@@ -29,7 +29,7 @@ export function documentJSONBytes(value: any, incremental = false, changes?: { b
     const visiting = new Set<object>();
     const measure = (input: any, arrayItem = false, previous?: any, paths?: Paths): number | undefined => {
         if (input === undefined || typeof input === 'function' || typeof input === 'symbol') return arrayItem ? 4 : undefined;
-        if (!input || typeof input !== 'object') return bytes(JSON.stringify(input));
+        if (!input || typeof input !== 'object') return jsonPrimitiveBytes(input);
         if (visiting.has(input)) throw new TypeError('Cyclic document');
         if (incremental && sizes.has(input)) return sizes.get(input)!.bytes;
         const prototype = Object.getPrototypeOf(input);
@@ -46,7 +46,7 @@ export function documentJSONBytes(value: any, incremental = false, changes?: { b
             for (const [key, child] of paths!.children) {
                 const old = Object.getOwnPropertyDescriptor(previous, key)?.enumerable ? measure(previous[key]) : undefined;
                 const next = Object.getOwnPropertyDescriptor(input, key)?.enumerable ? measure(input[key], false, previous[key], child) : undefined;
-                const keyBytes = bytes(JSON.stringify(key)) + 1;
+                const keyBytes = jsonStringBytes(key) + 1;
                 if (old !== undefined) { size -= keyBytes + old; count--; }
                 if (next !== undefined) { size += keyBytes + next; count++; }
             }
@@ -58,7 +58,7 @@ export function documentJSONBytes(value: any, incremental = false, changes?: { b
         else for (const key of Object.keys(input)) {
             const length = measure(input[key]);
             if (length === undefined) continue;
-            size += bytes(JSON.stringify(key)) + 1 + length + (count++ ? 1 : 0);
+            size += jsonStringBytes(key) + 1 + length + (count++ ? 1 : 0);
         }
         visiting.delete(input);
         sizes.set(input, { bytes: size, members: count });
@@ -67,6 +67,6 @@ export function documentJSONBytes(value: any, incremental = false, changes?: { b
     try { return measure(value, false, changes?.before, changes ? pathTree(changes.paths) : undefined)!; }
     catch (error) {
         if (error !== fallback) throw error;
-        return bytes(JSON.stringify(value));
+        return utf8Bytes(JSON.stringify(value));
     }
 }

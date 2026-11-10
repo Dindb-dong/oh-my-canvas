@@ -5,6 +5,31 @@ import {changesBetween,flatten,materialize} from '../core/document.mjs';
 import {documentFixture} from './helpers.mjs';
 import * as Y from 'yjs';
 test('document model roundtrips through field-level representation',()=>{const doc=documentFixture();assert.deepEqual(materialize(flatten(doc)),doc);});
+test('an empty patch preserves state, revision and history without creating a validation mirror',()=>{
+ const replica=new Replica({document:documentFixture()});
+ try{
+  replica.patch([[JSON.stringify(['page','page','name']),'Existing edit']],'Rename','one');
+  const document=replica.document,state=replica.state,revision=replica.revision,history=[...replica.undo.undoStack],ceiling=replica.encodedStateCeiling;
+  assert.equal(replica.validationDoc,null);
+  replica.validator=()=>{throw Error('A no-op must not allocate a validation mirror');};
+  replica.patch([],'No change','different');
+  assert.equal(replica.document,document);assert.equal(replica.state,state);assert.equal(replica.revision,revision);assert.equal(replica.encodedStateCeiling,ceiling);
+  assert.deepEqual(replica.undo.undoStack,history);assert.equal(replica.undo.undoStack[0],history[0]);assert.equal(history[0].meta.get('label'),'Rename');assert.equal(history[0].meta.get('group'),'one');
+  assert.equal(replica.validationDoc,null);
+ }finally{replica.destroy();}
+});
+test('an empty input patch still publishes missing recovery declarations',()=>{
+ const seed=new Replica({document:documentFixture()}),raw=new Y.Doc();Y.applyUpdate(raw,seed.state);seed.destroy();
+ const alive=JSON.stringify(['page','page','alive']),root=JSON.stringify(['shape','page','root','alive']);
+ raw.transact(()=>{raw.getMap('fields').set(alive,false);raw.getMap('fields').set(root,false);});
+ const replica=new Replica({state:Y.encodeStateAsUpdate(raw)});raw.destroy();
+ try{
+  assert.equal(replica.fields.get(alive),false);assert.equal(replica.fields.get(root),false);assert.equal(replica.document.pages.length,1);
+  const revision=replica.revision;replica.patch([],'Recover');
+  assert.equal(replica.fields.get(alive),true);assert.equal(replica.fields.get(root),true);assert.ok(replica.revision>revision);
+  assert.deepEqual(replica.document,materialize(replica.fields));
+ }finally{replica.destroy();}
+});
 test('document seeding performs one full state encode and retains first-edit capture semantics',t=>{
  const write=Y.Item.prototype.write;let encodedItems=0;
  t.mock.method(Y.Item.prototype,'write',function(...args){encodedItems++;return write.apply(this,args);});

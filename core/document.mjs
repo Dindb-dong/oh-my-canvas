@@ -1,4 +1,5 @@
 import {geometricField,geometryEntries,restoreGeometry} from './geometry.mjs';
+import {jsonPrimitiveBytes,jsonStringBytes,utf8Bytes} from './json-bytes.mjs';
 // Shared pure model adapter. Shape properties merge separately; containment is repaired
 // deterministically so concurrent insert/move/delete never leaves dangling child lists.
 export const ROOT = 'root';
@@ -6,20 +7,19 @@ import {documentLimits} from './capacity.mjs';
 export {documentLimits,MAX_DOCUMENT_BYTES,MAX_STATE_BYTES,MAX_ENVELOPE_BYTES,MAX_LARGE_STATE_BYTES,MAX_PORTABLE_BYTES,MAX_DESIGN_INPUT_BYTES,MAX_DESIGN_EXPANDED_BYTES} from './capacity.mjs';
 const blocked = new Set(['__proto__', 'constructor', 'prototype']);
 const validatedDocuments = new WeakSet(), objectCounts = new WeakMap(), jsonSizes = new WeakMap();
-const utf8 = new TextEncoder();
 // Exact JSON UTF-8 size, including escapes, punctuation, omitted properties and
 // array nulls. Only immutable, previously validated branches reuse cached sizes.
 function jsonBytes(value,reuse=false,name='',stack=new Set()){
   if(value&&typeof value.toJSON==='function'){
     const encoded=JSON.stringify({[name]:value});
-    return encoded==='{}'?undefined:utf8.encode(encoded).byteLength-utf8.encode(JSON.stringify(name)).byteLength-3;
+    return encoded==='{}'?undefined:utf8Bytes(encoded)-jsonStringBytes(name)-3;
   }
   if(value===null||typeof value!=='object'){
-    const encoded=JSON.stringify(value);return encoded===undefined?undefined:utf8.encode(encoded).byteLength;
+    return jsonPrimitiveBytes(value);
   }
   const proto=Object.getPrototypeOf(value);
   if(!Array.isArray(value)&&proto!==Object.prototype&&proto!==null){
-    const encoded=JSON.stringify({[name]:value});return encoded==='{}'?undefined:utf8.encode(encoded).byteLength-utf8.encode(JSON.stringify(name)).byteLength-3;
+    const encoded=JSON.stringify({[name]:value});return encoded==='{}'?undefined:utf8Bytes(encoded)-jsonStringBytes(name)-3;
   }
   if(reuse&&jsonSizes.has(value))return jsonSizes.get(value);
   if(stack.has(value))throw Error('Cyclic document value');stack.add(value);
@@ -28,7 +28,7 @@ function jsonBytes(value,reuse=false,name='',stack=new Set()){
     const size=jsonBytes(value[i],reuse,String(i),stack);bytes+=(size??4)+(count++?1:0);
   }else for(const [k,v] of Object.entries(value)){
     const size=jsonBytes(v,reuse,k,stack);if(size===undefined)continue;
-    bytes+=utf8.encode(JSON.stringify(k)).byteLength+1+size+(count++?1:0);
+    bytes+=jsonStringBytes(k)+1+size+(count++?1:0);
   }
   stack.delete(value);jsonSizes.set(value,bytes);return bytes;
 }

@@ -138,6 +138,18 @@ describe('incremental transaction boundaries', () => {
 });
 
 describe('exact incremental document sizing', () => {
+    it('remeasures mutable full snapshots and custom serializers after string-cache reuse', () => {
+        const custom = { value: '한글', toJSON(key: string) { return { key, value: this.value }; } };
+        const value: any = { text: 'initial', array: [undefined, NaN, -0, true], nested: { count: 1 }, custom };
+        for (const text of ['initial', '"\\\n\ud800', '😀'.repeat(1000), 'changed']) {
+            value.text = text; value.nested.count *= 1e7; custom.value = text;
+            expect(documentJSONBytes(value)).toBe(nativeBytes(value));
+        }
+        delete value.custom;
+        expect(documentJSONBytes(value)).toBe(nativeBytes(value));
+        value.nested.cycle = value;
+        expect(() => documentJSONBytes(value)).toThrow(/Cyclic/);
+    });
     it('matches native JSON bytes for escapes, array omissions, repeated objects and custom serializers', () => {
         const shared = { text: '한글 😀 \ud800 " \\ \n', optional: undefined };
         const values = [{ shared, again: shared, array: [undefined, NaN, Infinity, -0, null] }, { a: new Date('2020-01-01'), b: new Uint8Array([1, 2]) }];
