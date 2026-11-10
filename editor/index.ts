@@ -21,6 +21,17 @@ export {screenToWorld,worldToScreen} from './geometry';
 export * from './contracts';
 
 export async function mountEditor(root:HTMLElement,options:MountOptions) {
+  const report=(phase:string,ms:number)=>{try{options.onTiming?.(phase,ms);}catch{}};
+  function measure<T>(phase:string,run:()=>T):T {
+    if(!options.onTiming)return run();
+    const start=performance.now();report(phase+'.start',0);
+    try{return run();}finally{report(phase,performance.now()-start);}
+  }
+  async function measureAsync<T>(phase:string,run:()=>Promise<T>):Promise<T> {
+    if(!options.onTiming)return run();
+    const start=performance.now();report(phase+'.start',0);
+    try{return await run();}finally{report(phase,performance.now()-start);}
+  }
   const previousInert=root.inert;
   root.inert=true;root.setAttribute('aria-busy','true');
   const cleanup:Array<()=>unknown|Promise<unknown>>=[];
@@ -33,16 +44,16 @@ export async function mountEditor(root:HTMLElement,options:MountOptions) {
     return errors;
   }
   try {
-  const workspace=createWorkspaceRoot(root,options);
-  const initial=importCanvasJson(options.document);
-  normalizeLibraries(initial);
-  const fonts=createFontCatalog(options.faces??[],options);
+  const workspace=measure('mount.workspace',()=>createWorkspaceRoot(root,options));
+  const initial=measure('mount.import',()=>importCanvasJson(options.document));
+  measure('mount.libraries',()=>normalizeLibraries(initial));
+  const fonts=measure('mount.fontCatalog',()=>createFontCatalog(options.faces??[],options));
   cleanup.push(()=>fonts.destroy());
   fonts.syncAssets(initial.assets??{});
-  const initialText=Object.values(initial.pagesById).flatMap(page=>Object.values(page.objects)).filter(shape=>shape.type==='text').map(shape=>typeof shape.content==='string'?shape.content:JSON.stringify(shape.content??shape.text??'')).join('\n');
-  await fonts.ensure(initialText);
-  applyLayout(initial,undefined,options);
-  const editor=new Editor(initial,{
+  const initialText=measure('mount.textDiscovery',()=>Object.values(initial.pagesById).flatMap(page=>Object.values(page.objects)).filter(shape=>shape.type==='text').map(shape=>typeof shape.content==='string'?shape.content:JSON.stringify(shape.content??shape.text??'')).join('\n'));
+  await measureAsync('mount.fonts',()=>fonts.ensure(initialText));
+  measure('mount.layout',()=>applyLayout(initial,undefined,options));
+  const editor=measure('mount.editor',()=>new Editor(initial,{
     reconcileChanges(before,draft,scope){
       const globalChange=['components','styles','libraries','assets'].some(key=>scope.documentFields.has(key));
       if(!globalChange&&!scope.shapes.size&&!scope.topologyPages.size)return;
@@ -65,11 +76,11 @@ export async function mountEditor(root:HTMLElement,options:MountOptions) {
     validate(draft){assertDocument(draft);},
     validateChanges(before,draft){assertDocumentChanges(before,draft);},
     onTiming:options.onTiming,
-  });
+  }));
   cleanup.push(()=>editor.destroy());
   // Constructor normalization creates the immutable editor baseline. Prime its
   // core validation proof during load, so the first small edit is incremental.
-  assertDocument(editor.doc);
+  measure('mount.coreValidation',()=>assertDocument(editor.doc));
   const images=createImageService(editor,options);
   cleanup.push(()=>images.destroy());
   let projectedAssets=editor.doc.assets;
@@ -81,7 +92,7 @@ export async function mountEditor(root:HTMLElement,options:MountOptions) {
   const styles=createStyleService(editor);
   const assets=createAssetService(editor);
   const libraries=createLibraryService(editor);
-  const view=createRenderer(editor,workspace.stage,{...options,fonts,fontCatalog:fonts});
+  const view=measure('mount.renderer',()=>createRenderer(editor,workspace.stage,{...options,fonts,fontCatalog:fonts}));
   cleanup.push(()=>view.destroy());
   const exporter=createExporter(editor,view,{...options,fonts,fontCatalog:fonts,saveFile:options.exportFile});
   const registry={
@@ -102,7 +113,7 @@ export async function mountEditor(root:HTMLElement,options:MountOptions) {
   };
   const services:EditorServices=Object.assign(registry,{commands:createCommands(editor,registry)});
   cleanup.push(()=>services.commands.destroy?.());
-  const interaction=mountWorkspace(root,services,options);
+  const interaction=measure('mount.ui',()=>mountWorkspace(root,services,options));
   cleanup.push(()=>interaction.destroy());
   if(interaction.assets?.open)Object.assign(assets,{open:interaction.assets.open});
   // Commands receive the same mutable service registry; callbacks arrive after
@@ -125,7 +136,7 @@ export async function mountEditor(root:HTMLElement,options:MountOptions) {
       if(errors.length)throw new AggregateError(errors,'Editor cleanup failed');
     },
   };
-  await services.view.settled();
+  await measureAsync('mount.settled',()=>services.view.settled());
   return handle;
   }catch(error){await dispose();throw error;}finally{root.inert=previousInert;root.removeAttribute('aria-busy');}
 }

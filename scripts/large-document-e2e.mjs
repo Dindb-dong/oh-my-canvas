@@ -24,7 +24,7 @@ assert.ok(Number.isSafeInteger(journeyTimeout)&&journeyTimeout>=1000&&journeyTim
 await fs.mkdir(output,{recursive:true});
 const temporary=await fs.mkdtemp(path.join(os.tmpdir(),'omc-large-qa-')),profile=path.join(temporary,'original');
 const requireFromApp=createRequire(path.join(root,'package.json'));
-const result={schemaVersion:1,label,at:new Date().toISOString(),source:{path:source,bytes:(await fs.stat(source)).size},environment:{platform:process.platform,arch:process.arch,node:process.version,cpu:os.cpus()[0]?.model,logicalCPUs:os.cpus().length,totalMemory:os.totalmem()},checks:[],phases:{},rendererErrors:[],consoleErrors:[],failedResponses:[],failedRequests:[],limitations:['Single native process run per revision; automated input frame intervals include driver scheduling.','A screenshot is evidence of the rendered result, not a comparison against the Figma original.','Harness waits do not change the app worker/runtime deadlines.','Gesture samples are warmed by a completed native save/settle before sampling; page-entry timing is recorded separately.','Reopen measures document open in a fresh process after app launch, not cold-disk or app-start latency; startup library listing may already have read/warmed storage or overlap the open.']};
+const result={schemaVersion:1,label,at:new Date().toISOString(),source:{path:source,bytes:(await fs.stat(source)).size},environment:{platform:process.platform,arch:process.arch,node:process.version,cpu:os.cpus()[0]?.model,logicalCPUs:os.cpus().length,totalMemory:os.totalmem()},checks:[],phases:{},rendererErrors:[],consoleErrors:[],startupDiagnostics:[],failedResponses:[],failedRequests:[],limitations:['Single native process run per revision; automated input frame intervals include driver scheduling.','A screenshot is evidence of the rendered result, not a comparison against the Figma original.','Harness waits do not change the app worker/runtime deadlines.','Gesture samples are warmed by a completed native save/settle before sampling; page-entry timing is recorded separately.','Reopen measures document open in a fresh process after app launch, not cold-disk or app-start latency; startup library listing may already have read/warmed storage or overlap the open.']};
 try{result.revision=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();}catch{}
 for(const name of ['electron','playwright','fflate','openfig-core'])try{result.environment[name]=requireFromApp(name+'/package.json').version;}catch{}
 let app,shell,page,ownedChild,expired=false,watchdog,watchdogTask,expireJourney;
@@ -58,7 +58,13 @@ async function check(name,fn,{fatal=false}={}){
 function observe(target){
   if(observed.has(target))return;observed.add(target);target.setDefaultTimeout(30000);
   target.on('pageerror',error=>result.rendererErrors.push({url:target.url(),message:error.message}));
-  target.on('console',message=>{if(message.type()==='error')result.consoleErrors.push({url:target.url(),message:message.text().slice(0,1000),location:message.location()});});
+  target.on('console',message=>{
+    if(message.type()==='error')result.consoleErrors.push({url:target.url(),message:message.text().slice(0,1000),location:message.location()});
+    if(message.type()==='info'&&message.text().startsWith('[omc-startup]')){
+      result.startupDiagnostics.push({at:new Date().toISOString(),url:target.url(),message:message.text().slice(0,4000),location:message.location()});
+      console.log(message.text());void checkpoint().catch(error=>console.error('Could not checkpoint startup diagnostic:',error.message));
+    }
+  });
   // Network failures are diagnostic, including the deliberately requested missing bitmap.
   target.on('response',response=>{if(response.status()>=400)result.failedResponses.push({pageUrl:target.url(),url:response.url(),status:response.status(),statusText:response.statusText(),resourceType:response.request().resourceType()});});
   target.on('requestfailed',request=>result.failedRequests.push({pageUrl:target.url(),url:request.url(),resourceType:request.resourceType(),error:request.failure()?.errorText}));

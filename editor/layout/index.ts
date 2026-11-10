@@ -130,6 +130,7 @@ function affectedRoots(objects: Record<string, Shape>, previous: Record<string, 
 }
 /** Measure intrinsic containers bottom-up, then assign available space top-down. */
 export function applyLayout(doc: CanvasDocument, before?: CanvasDocument, options: Data = {}, scope?: EditorChangeScope): void {
+    options = { ...options, assets: doc.assets };
     const pageIds = scope ? [...new Set([...scope.shapes.keys(), ...scope.topologyPages])] : Object.keys(doc.pagesById);
     for (const pageId of pageIds) {
         const page = doc.pagesById[pageId];

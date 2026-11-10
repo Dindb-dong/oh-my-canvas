@@ -18,6 +18,25 @@ let lastRejected,closing=false,titleEdit=null,ready=false,saveFailed=false;
 let projection;
 const params=new URLSearchParams(location.search),documentId=params.get('documentId'),generation=Number(params.get('generation'));
 if(!documentId||!Number.isSafeInteger(generation)||generation<1)throw Error('Invalid document runtime identity');
+const startupDiagnostics=params.get('startupDiagnostics')==='1',startupAt=performance.now();
+let startupReports=0,startupComplete=false;
+function startupTiming(value,ms){
+  if(!startupDiagnostics||startupComplete||startupReports>=128)return;
+  const phase=typeof value==='string'?value:value?.phase,duration=typeof value==='string'?ms:value?.ms;
+  if(typeof phase!=='string'||phase.length>80||!/^[-.\w]+$/.test(phase)||!Number.isFinite(duration))return;
+  startupReports++;
+  console.info('[omc-startup]',JSON.stringify({phase,ms:Math.round(duration*100)/100,elapsedMs:Math.round((performance.now()-startupAt)*100)/100}));
+}
+function startupSync(phase,run){
+  if(!startupDiagnostics)return run();
+  const start=performance.now();startupTiming(phase+'.start',0);
+  try{return run();}finally{startupTiming(phase,performance.now()-start);}
+}
+async function startupStep(phase,run){
+  if(!startupDiagnostics)return run();
+  const start=performance.now();startupTiming(phase+'.start',0);
+  try{return await run();}finally{startupTiming(phase,performance.now()-start);}
+}
 function assertIdentity(value){
   if(!value||(value.documentId??value.id)!==documentId||value.generation!==generation)throw Error('Document runtime identity mismatch');
 }
@@ -88,22 +107,23 @@ async function openSnapshot(snap){
   assertIdentity(snap);
   mounting=true;$('#editor').inert=true;
   try {thumbnails.reset();mcp?.dispose?.();unsubscribe?.();await handle?.destroy();handle=null;cursors.clear();$('#remote-cursors').replaceChildren();
-  projection=new DocumentProjection(snap);nextSeq=0;lastRejected=null;saveFailed=false;active={id:snap.id,title:snap.title};setTitle();
+  projection=startupSync('startup.projection',()=>new DocumentProjection(snap));nextSeq=0;lastRejected=null;saveFailed=false;active={id:snap.id,title:snap.title};setTitle();
   let candidate=snap;
   for(let attempt=0;attempt<8;attempt++){
-    handle=await mountEditor($('#editor'),{
+    handle=await startupStep('startup.mount',()=>mountEditor($('#editor'),{
+      onTiming:startupDiagnostics?startupTiming:undefined,
       removeBackground:async(src,signal)=>removeBackground(isExternalImageSource(src)?await embedImageSource(src,resolveImageSource,{left:16*1024*1024},signal):src,signal),
       resolveImageSource,
       importDesignFile:(bytes,format)=>api.invoke('import-design',{bytes,format}),
       pickFiles:async options=>{const files=await api.invoke('pick-files',options);const mime={svg:'image/svg+xml',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',avif:'image/avif',bmp:'image/bmp',ico:'image/x-icon',json:'application/json',woff:'font/woff',woff2:'font/woff2',ttf:'font/ttf',otf:'font/otf'};return files.map(file=>new File([file.bytes],file.name,{type:mime[file.name.split('.').pop().toLowerCase()]||'application/octet-stream'}));},
       exportFile:async(blob,name)=>api.invoke('export-file',{name,mime:blob.type,bytes:new Uint8Array(await blob.arrayBuffer())}),
       document:candidate.document,title:candidate.title,subtitle:'Oh My Canvas',faces:fontFaces.map(face=>({...face,url:new URL(face.url,location.href).href})),defaultFamily:'IBM Plex Sans',fallbacks:['Noto Sans KR','sans-serif'],wasmUrl:new URL('/canvaskit.wasm',location.href).href,
-    });
-    const initialization=changesBetween(candidate.document,handle.editor.doc);
+    }));
+    const initialization=startupSync('startup.diff',()=>changesBetween(candidate.document,handle.editor.doc));
     if(candidate.bootstrapNonce){
-      const initialized=await api.invoke('bootstrap',{id:snap.id,nonce:candidate.bootstrapNonce,changes:initialization});assertIdentity(initialized);
+      const initialized=await startupStep('startup.bootstrap',()=>api.invoke('bootstrap',{id:snap.id,nonce:candidate.bootstrapNonce,changes:initialization}));assertIdentity(initialized);
       if(initialized.bootstrapRetry){await handle.destroy();handle=null;candidate=initialized;continue;}
-      handle.editor.receiveDocument(initialized.document);
+      startupSync('startup.bootstrapReceive',()=>handle.editor.receiveDocument(initialized.document));
     }else if(initialization.length){throw Error('Canvas initialization token is missing');}
     break;
   }
@@ -129,12 +149,12 @@ async function openSnapshot(snap){
   $('#editor button[aria-label="Collapse sidebar"]')?.remove();
   $('#editor button[aria-label="Comment (not available)"]')?.remove();
   $('#toggle-layers').setAttribute('aria-expanded','true');
-  const latest=await api.invoke('snapshot');assertIdentity(latest);
-  active.title=latest.title;projection=new DocumentProjection(latest);lastDoc=latest.document;handle.editor.receiveDocument(latest.document);
+  const latest=await startupStep('startup.finalSnapshot',()=>api.invoke('snapshot'));assertIdentity(latest);
+  active.title=latest.title;projection=startupSync('startup.finalProjection',()=>new DocumentProjection(latest));lastDoc=latest.document;startupSync('startup.finalReceive',()=>handle.editor.receiveDocument(latest.document));
   setTitle();
   thumbnails.schedule();if(snap.recovered)toast('Recovered the last valid backup. Save a portable copy.',true);
   }catch(error){mcp?.dispose?.();unsubscribe?.();await handle?.destroy().catch(()=>{});handle=null;throw error;}finally{mounting=false;$('#editor').inert=false;}
-  await resync.wait();
+  await startupStep('startup.resync',()=>resync.wait());
 }
 async function applyRename(id,title){const result=await api.invoke('rename',{id,title});if(active?.id===id){active.title=result.title;setTitle();}return result;}
 function editTitle(){
@@ -325,11 +345,12 @@ $('#title-input').onkeydown=event=>{const composing=event.isComposing||titleEdit
 $('#title-input').onkeyup=()=>{if(titleEdit)titleEdit.composingKey=false;};
 for(const el of document.querySelectorAll('[data-icon]'))el.innerHTML=icon(el.dataset.icon);
 try{
-  prefs=await api.invoke('preferences');
-  await openSnapshot(await api.invoke('snapshot'));
+  prefs=await startupStep('startup.preferences',()=>api.invoke('preferences'));
+  await openSnapshot(await startupStep('startup.snapshot',()=>api.invoke('snapshot')));
   // The host only dispatches document calls after this mount and bootstrap have completed.
-  ready=true;assertIdentity(await api.invoke('runtime-ready'));
+  ready=true;assertIdentity(await startupStep('startup.ready',()=>api.invoke('runtime-ready')));startupComplete=true;
 }catch(error){
+  startupTiming('startup.failure',performance.now()-startupAt);startupComplete=true;
   ready=false;toast('Could not open canvas: '+error.message,true);
   await api.invoke('runtime-ready',{ok:false,error:{message:error.message}}).catch(()=>{});
 }

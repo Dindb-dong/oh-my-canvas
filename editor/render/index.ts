@@ -225,7 +225,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             measuredText.delete(id); fragments.delete(id); textSizes.delete(id);
         }
         if (!Object.keys(changed).length) { measuredMetricRevision = textMetricRevision(); measuredFontRevision = fontRevision; return; }
-        const measured = measureTextScene(changed, measurements, options);
+        const measured = measureTextScene(changed, measurements, { ...options, assets: editor.doc.assets, resolveImageSource });
         for (const shape of Object.values(changed)) measuredText.set(shape.id, shape);
         measuredMetricRevision = textMetricRevision(); measuredFontRevision = fontRevision;
         for (const [id, list] of measured.fragments)
@@ -502,7 +502,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             });
             document.body.append(holder);
             try {
-                const measured = measureTextScene(objects, holder, options), bounds = boundsOf([objects[id]]);
+                const measured = measureTextScene(objects, holder, { ...options, assets, resolveImageSource }), bounds = boundsOf([objects[id]]);
                 const svg = new SceneWriter(objects, { assets, textFragments: measured.fragments, typography: options, resolveImageSource, idPrefix: 'omc-thumb-' + (++thumbnailNamespace) }).svg([id], bounds);
                 const { inlineSVGImages } = await import('../export/raster');
                 return inlineSVGImages(svg);

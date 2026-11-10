@@ -120,7 +120,7 @@ export function textHTML(s: Shape, options: Data = {}): string {
             const fill = fills.find((p: Data) => p.visible !== false && !p.hidden);
             const c = fill ? color(fill.color ?? fill) : r.color ?? s.color ?? '#111827';
             const deco = r.textDecoration ?? 'none';
-            return `<span data-run="true" data-paints="${escape(JSON.stringify(fills))}" style="font-family:${escape(family)},${escape((options.fallbacks ?? ['sans-serif']).join(','))};font-size:${size}px;font-weight:${escape(r.fontWeight ?? s.fontWeight ?? 400)};font-style:${escape(r.fontStyle ?? s.fontStyle ?? 'normal')};font-variation-settings:${escape(r.fontVariationSettings ?? 'normal')};letter-spacing:${num(r.letterSpacing ?? s.letterSpacing)}px;color:${escape(c)};font-variant-caps:${(r.textTransform ?? s.textTransform) === 'smallCaps' ? 'small-caps' : 'normal'};text-transform:${escape((r.textTransform ?? s.textTransform) === 'smallCaps' ? 'none' : r.textTransform ?? s.textTransform ?? 'none')};text-decoration:${escape(deco)};text-decoration-style:${escape(r.textDecorationStyle ?? 'solid')};text-decoration-thickness:${typeof r.textDecorationThickness === 'number' ? r.textDecorationThickness + 'px' : escape(r.textDecorationThickness ?? 'auto')};background:${escape(r.highlight ? `color-mix(in srgb, ${color(r.highlight)} ${num(r.highlight.opacity, 1) * 100}%, transparent)` : 'transparent')}">${fill && (fill.gradient || fill.image || fills.length > 1 || num(fill.opacity, 1) !== 1) ? `<span style="color:transparent;background-image:${escape(cssPaintLayers(fills))};background-clip:text;-webkit-background-clip:text;background-size:100% 100%">${escape(r.text ?? '') || '<br/>'}</span>` : escape(r.text ?? '') || '<br/>'}</span>`;
+            return `<span data-run="true" data-paints="${escape(JSON.stringify(fills))}" style="font-family:${escape(family)},${escape((options.fallbacks ?? ['sans-serif']).join(','))};font-size:${size}px;font-weight:${escape(r.fontWeight ?? s.fontWeight ?? 400)};font-style:${escape(r.fontStyle ?? s.fontStyle ?? 'normal')};font-variation-settings:${escape(r.fontVariationSettings ?? 'normal')};letter-spacing:${num(r.letterSpacing ?? s.letterSpacing)}px;color:${escape(c)};font-variant-caps:${(r.textTransform ?? s.textTransform) === 'smallCaps' ? 'small-caps' : 'normal'};text-transform:${escape((r.textTransform ?? s.textTransform) === 'smallCaps' ? 'none' : r.textTransform ?? s.textTransform ?? 'none')};text-decoration:${escape(deco)};text-decoration-style:${escape(r.textDecorationStyle ?? 'solid')};text-decoration-thickness:${typeof r.textDecorationThickness === 'number' ? r.textDecorationThickness + 'px' : escape(r.textDecorationThickness ?? 'auto')};background:${escape(r.highlight ? `color-mix(in srgb, ${color(r.highlight)} ${num(r.highlight.opacity, 1) * 100}%, transparent)` : 'transparent')}">${fill && (fill.gradient || fill.image || fill.type === 'image' || fills.length > 1 || num(fill.opacity, 1) !== 1) ? `<span style="color:transparent;background-image:${escape(cssPaintLayers(fills, options))};background-clip:text;-webkit-background-clip:text;background-size:100% 100%">${escape(r.text ?? '') || '<br/>'}</span>` : escape(r.text ?? '') || '<br/>'}</span>`;
         }).join('')}</div>`;
     }).join('');
     const vertical = content.verticalAlign ?? s.verticalAlign ?? 'top';
@@ -343,7 +343,7 @@ export class SceneWriter {
                 }).join('');
             }
             else
-                body += `<foreignObject x="${s.x}" y="${s.y}" width="${Math.max(1, s.width)}" height="${Math.max(1, s.height)}" overflow="visible">${textHTML(s, this.options.typography)}</foreignObject>`;
+                body += `<foreignObject x="${s.x}" y="${s.y}" width="${Math.max(1, s.width)}" height="${Math.max(1, s.height)}" overflow="visible">${textHTML(s, { ...this.options.typography, assets: this.options.assets, imageSource: this.options.imageSource, resolveImageSource: this.options.resolveImageSource })}</foreignObject>`;
         }
         else if (s.type === 'svg' && s.svg) {
             const raw = sanitizeSVG(String(s.svg));
@@ -524,10 +524,14 @@ function sanitizeSVG(source: string): string {
     }
     return new XMLSerializer().serializeToString(doc.documentElement);
 }
-function cssPaintLayers(paints: Data[]): string {
+function cssPaintLayers(paints: Data[], options: Data = {}): string {
     return [...paints].reverse().filter(p => !p.hidden && p.visible !== false).map(p => {
-        if (p.image)
-            return `url(${JSON.stringify(p.image.src ?? p.image.id)})`;
+        if (p.image || p.type === 'image') {
+            const image = p.image ?? p;
+            const source = (options.imageSource?.(image) ?? imageSource(image, options.assets)) || p.src || '';
+            const resolved = options.resolveImageSource?.(source) ?? source;
+            return resolved ? `url(${JSON.stringify(resolved)})` : 'none';
+        }
         const shape = { x: 0, y: 0, width: 256, height: 256 } as Shape;
         const writer = new SceneWriter({});
         const paint = writer.paint(p, shape);

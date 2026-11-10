@@ -61,7 +61,7 @@ app.whenReady().then(async()=>{
     if(!runtime.sender.isDestroyed())runtime.sender.close({waitForBeforeUnload:false});
   }
   function createRuntime(entry){
-    const generation=entry.generation,url=`omc://canvas/document.html?documentId=${entry.record.id}&generation=${generation}`;
+    const generation=entry.generation,url=`omc://canvas/document.html?documentId=${entry.record.id}&generation=${generation}${backgroundTest?'&startupDiagnostics=1':''}`;
     const view=new WebContentsView({webPreferences:{preload:path.join(root,'dist/preload.cjs'),backgroundThrottling:false,contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}});
     const runtime={view,sender:view.webContents,url,generation};
     senders.set(runtime.sender.id,{entry,generation,url});secure(runtime.sender,url);
