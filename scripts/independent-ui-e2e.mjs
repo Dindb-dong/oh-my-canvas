@@ -845,7 +845,8 @@ try {
         await until(async () => (await snapshot()).document.pages.length === 3, "page clone failed");
         s = await snapshot();
         const cloneId = s.document.pages.find(key => key !== "page" && key !== id);
-        await page.locator(".page-row[data-id=\"" + cloneId + "\"] button[aria-label=\"Page actions\"]").click();
+        await page.getByRole("combobox", { name: "Current page", exact: true }).selectOption(cloneId);
+        await page.locator(".page-selector button[aria-label=\"Page actions\"]").click();
         await page.locator(".omc-dialog").getByRole("button", {
             name: "Delete",
             exact: true
