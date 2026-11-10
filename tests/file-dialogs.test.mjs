@@ -31,3 +31,17 @@ test('desktop picker exposes only user-selected, bounded supported files without
     selection=[file];await writeFile(file,Buffer.alloc(32*1024*1024+1));await assert.rejects(dialogs.pick({kind:'image'}),/size limit/);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('design asset picker accepts Figma and Sketch files using binary bytes',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'omc-design-picker-'));
+  try{
+    const selected=[path.join(dir,'Design.FIG'),path.join(dir,'Design.sketch')];
+    for(const file of selected)await writeFile(file,Buffer.from([80,75,3,4]));
+    let options;
+    const dialogs=createFileDialogs({showOpenDialog:async value=>{options=value;return {canceled:false,filePaths:selected};}});
+    const files=await dialogs.pick({kind:'assets',multiple:true});
+    assert.equal(files.length,2);assert.ok(options.filters[0].extensions.includes('fig'));assert.ok(options.filters[0].extensions.includes('sketch'));
+    assert.deepEqual(files[0].bytes,Buffer.from([80,75,3,4]));
+  }finally{await rm(dir,{recursive:true,force:true});}
+});

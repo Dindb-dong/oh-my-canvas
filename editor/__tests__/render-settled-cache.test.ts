@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { Editor, createDocument, createShape, insertShape } from '../document';
+import { Editor, createDocument, createPage, createShape, insertShape } from '../document';
 import { createRenderer } from '../render';
+import * as text from '../render/text';
 import { invalidateTextMetrics } from '../render/metric-cache';
 
 const cleanup: (() => void)[] = [];
@@ -84,4 +85,38 @@ it('still waits for newly discovered image decoding without replacing unchanged 
     decoded!(); await pending;
     expect(complete).toBe(true); expect(attach).not.toHaveBeenCalled();
     expect(view.measure(['image']).get('image')!.imageFailed).toBeUndefined();
+});
+
+it('loads shared image assets once per active page and releases them on departure', async () => {
+    const create = vi.fn(() => 'blob:shared'), revoke = vi.fn();
+    vi.stubGlobal('URL', { createObjectURL: create, revokeObjectURL: revoke });
+    vi.stubGlobal('Image', class { complete = true; naturalWidth = 1; set src(_value: string) {} });
+    const { editor, view } = setup();
+    let second = '';
+    editor.transact('Shared images', doc => {
+        doc.assets = { bitmap: { src: 'data:image/png;base64,AA==' } };
+        const page = doc.pagesById[editor.pageId];
+        for (const id of ['image-a', 'image-b']) insertShape(page, createShape('image', { id, width: 10, height: 10, image: { assetId: 'bitmap' } }));
+        const next = createPage('Empty'); second = next.id; doc.pages.push(next.id); doc.pagesById[next.id] = next;
+    });
+    await view.settled();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(view.sceneSvg(['image-a'])).toContain('data:image/png;base64,AA==');
+    expect(view.sceneSvg(['image-a'])).not.toContain('blob:');
+    editor.setPage(second); await view.settled();
+    expect(revoke).toHaveBeenCalledWith('blob:shared');
+    expect((view as any).imageCacheDiagnostics()).toEqual({ loadedImages: 0, assetURLs: 0 });
+});
+
+it('defers hidden descendants until their parent becomes visible', async () => {
+    vi.spyOn(text, 'measureTextScene').mockImplementation(objects => ({ fragments: new Map(), textSizes: new Map(Object.keys(objects).map(id => [id, { width: 10, height: 10, scrollWidth: 10, scrollHeight: 10 }])) }));
+    const { editor, view } = setup();
+    editor.transact('Hidden subtree', doc => {
+        const page = doc.pagesById[editor.pageId];
+        insertShape(page, createShape('group', { id: 'hidden', hidden: true }));
+        insertShape(page, createShape('text', { id: 'hidden-text', content: 'Wait' }), 'hidden');
+    });
+    await view.settled(); expect(view.textSize('hidden-text')).toBeUndefined();
+    editor.transact('Reveal', doc => { doc.pagesById[editor.pageId].objects.hidden.hidden = false; });
+    await view.settled(); expect(view.textSize('hidden-text')).toBeDefined();
 });

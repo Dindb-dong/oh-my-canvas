@@ -1,3 +1,8 @@
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {importDesignFile} from '../formats/design-file';
+import {figFixture,sketchFixture} from './fixtures/design-files';
 import { describe, expect, it, vi } from 'vitest';
 import { validateImportedDocument } from '../mcp/import-document';
 import { importCanvasJson, exportCanvasJson } from '../formats/canvas';
@@ -52,5 +57,24 @@ describe('MCP imported document boundary', () => {
         const before = structuredClone(document);validateImportedDocument(document);expect(document).toEqual(before);
         const legacy = exportCanvasJson(document);validateImportedDocument(legacy);const converted = importCanvasJson(legacy);validateImportedDocument(converted);
         expect(converted.pagesById[converted.pages[0]].objects.shape.width).toBe(100);
+    });
+});
+
+
+describe('MCP binary design imports', () => {
+    it.each(['fig','sketch'])('imports %s from an explicit local file and retains every page', async format => {
+        const directory = await mkdtemp(path.join(os.tmpdir(),'omc-design-mcp-'));
+        try {
+            const filePath = path.join(directory,'Design.'+format), bytes = format==='fig'?figFixture().zip:sketchFixture();
+            await writeFile(filePath,bytes);
+            const create = vi.fn(async(title,document)=>({record:{id:'imported',title,replica:{document}}}));
+            const invoke = createWorkspaceTools({readDesignFile:importDesignFile,validateImportedDocument,manager:{create},context:async()=>({})});
+            const result = await invoke({name:'import_document',agent:'test',args:{format,filePath}});
+            expect(result.ok).toBe(true);expect(create.mock.calls[0][0]).toBe('Design');
+            expect(create.mock.calls[0][1].pages).toHaveLength(format==='fig'?1:2);
+            expect(create.mock.calls[0][2].focus).toBe(false);
+            await expect(invoke({name:'import_document',agent:'test',args:{format,payload:'not binary'}})).rejects.toThrow(/filePath/);
+            expect(create).toHaveBeenCalledTimes(1);
+        } finally {await rm(directory,{recursive:true,force:true});}
     });
 });

@@ -1,3 +1,4 @@
+import {imageSource} from '../images/assets';
 import type { CanvasDocument, Data, Shape, RenderView } from '../contracts';
 import { applyLayout } from '../layout';
 import { SceneWriter } from '../render';
@@ -263,6 +264,7 @@ export function exportHtml(doc: CanvasDocument, pageId: string, ids: string[], o
             style.opacity = String(s.opacity);
         if (s.rotation)
             style.transform = `rotate(${s.rotation}deg)`;
+        if(s.fills?.[0]?.image)style['background-image']=`url(${JSON.stringify(imageSource(s.fills[0].image,doc.assets))})`;
         if (s.fills?.[0]?.color)
             style['background-color'] = s.fills[0].color;
         if (s.strokes?.[0])
@@ -284,13 +286,13 @@ export function exportHtml(doc: CanvasDocument, pageId: string, ids: string[], o
         const attrs = `${options.alias ? ` data-id="${escapeAttr(options.alias(id))}"` : ''} data-name="${escapeAttr(s.name ?? s.type)}"${s.dataRef || s['data-ref'] ? ` data-ref="${escapeAttr(s.dataRef ?? s['data-ref'])}"` : ''} style="${escapeAttr(Object.entries(style).map(([k, v]) => `${k}:${v}`).join(';'))}"`;
         if (complex) {
             const bounds = { x: s.x, y: s.y, width: s.width, height: s.height };
-            const svg = view?.sceneSvg?.([id], { bounds }) ?? new SceneWriter(objects, { exporting: true }).svg([id], bounds);
+            const svg = view?.sceneSvg?.([id], { bounds }) ?? new SceneWriter(objects, { assets:doc.assets, exporting: true }).svg([id], bounds);
             return `<div${attrs}>${svg.replace('<svg ', '<svg overflow="visible" ')}</div>`;
         }
         if (s.type === 'image')
-            return `<img${attrs} src="${escapeAttr(s.image?.src ?? '')}" alt="${escapeAttr(s.alt ?? '')}">`;
+            return `<img${attrs} src="${escapeAttr(imageSource(s.image,doc.assets))}" alt="${escapeAttr(s.alt ?? '')}">`;
         if (s.type === 'svg')
-            return `<img${attrs} src="${escapeAttr(s.image?.src ?? '')}">`;
+            return `<img${attrs} src="${escapeAttr(imageSource(s.image,doc.assets))}">`;
         if (s.type === 'text') {
             const content = s.content?.children;
             if (!content)

@@ -1,3 +1,4 @@
+import {detachImageAsset} from '../images/assets';
 import type { CanvasDocument, Data, EditorStore, Page, Shape } from '../contracts';
 import { copy, uid, geometry, cloneTree, validateComponents, locate } from '../components/model';
 import { createShape, refreshFrames } from '../document';
@@ -249,6 +250,7 @@ export function createAssetService(editor: EditorStore) {
             return editor.transact('asset:remove', doc => {
                 if (!doc.assets?.[id])
                     throw Error('Unknown asset');
+                for(const page of Object.values(doc.pagesById))detachImageAsset(page.objects,id,doc.assets[id].src);
                 delete doc.assets[id];
                 return true;
             });

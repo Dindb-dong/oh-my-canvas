@@ -1,4 +1,5 @@
 /** Original validation implementation from independent editor interoperability and behavior contracts. */
+import {documentLimits} from '../../core/capacity.mjs';
 import type { CanvasDocument } from '../contracts';
 import { ROOT_ID } from './factory';
 export function validateDocument(doc: CanvasDocument): void {
@@ -55,6 +56,7 @@ export function validateDocument(doc: CanvasDocument): void {
         if (visited.size !== Object.keys(page.objects).length)
             throw new Error('Orphaned layers');
     }
-    if (new TextEncoder().encode(JSON.stringify(doc)).byteLength > 16 * 1024 * 1024)
-        throw new Error('Document exceeds 16 MiB limit');
+    const limit=documentLimits(doc).bytes;
+    if (new TextEncoder().encode(JSON.stringify(doc)).byteLength > limit)
+        throw new Error(`Document exceeds ${limit/1024/1024} MiB limit`);
 }

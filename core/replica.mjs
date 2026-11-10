@@ -1,5 +1,6 @@
+import {documentLimits,MAX_LARGE_BYTES} from './capacity.mjs';
 import * as Y from 'yjs';
-import { flatten, materialize, assertDocument,MAX_STATE_BYTES } from './document.mjs';
+import { flatten, materialize, assertDocument } from './document.mjs';
 export class Replica {
   constructor({ state, document } = {}) {
     this.ydoc = new Y.Doc();
@@ -10,16 +11,19 @@ export class Replica {
       this.cachedDocument=this.publishingDocument;this.cachedState=undefined;
       if(this.validationDoc)Y.applyUpdate(this.validationDoc,update,'mirror');
     });
-    if (state) {if(state.byteLength>MAX_STATE_BYTES)throw Error('CRDT history exceeds 16 MiB');Y.applyUpdate(this.ydoc, state, 'load');}
+    if (state) {if(state.byteLength>MAX_LARGE_BYTES)throw Error('CRDT history exceeds 256 MiB');Y.applyUpdate(this.ydoc, state, 'load');}
     else if (document) this.ydoc.transact(() => { for (const [k,v] of flatten(assertDocument(document))) this.fields.set(k,v); }, 'seed');
     this.undo = new Y.UndoManager(this.fields, { trackedOrigins: new Set([this.local]), captureTimeout: Infinity });
-    if(state||document)this.validateState(this.ydoc);
+    if(state||document)this.cachedDocument=this.validateState(this.ydoc);
   }
   get document() { return this.cachedDocument??=assertDocument(materialize(this.fields)); }
   get state() { return this.cachedState??=Y.encodeStateAsUpdate(this.ydoc); }
   validateState(doc){
     const document=assertDocument(materialize(doc.getMap('fields')));
-    if(Y.encodeStateAsUpdate(doc).byteLength>MAX_STATE_BYTES)throw Error('Document and history exceed 16 MiB. Duplicate the canvas to start a fresh history, or use smaller images.');
+    const limit=documentLimits(document).bytes;
+    const state=Y.encodeStateAsUpdate(doc);
+    if(state.byteLength>limit)throw Error(`Document and history exceed ${limit/1024/1024} MiB. Duplicate the canvas to start a fresh history, or use smaller images.`);
+    if(doc===this.ydoc)this.cachedState=state;
     return document;
   }
   trial(){const trial=new Y.Doc({gc:false});Y.applyUpdate(trial,this.state);return trial;}
@@ -69,7 +73,7 @@ export class Replica {
     if(recordHistory&&entry){entry.meta.set('label',label);entry.meta.set('group',group);}
   }
   receive(update) {
-    if (!(update instanceof Uint8Array) || update.byteLength > MAX_STATE_BYTES) throw Error('Update exceeds 16 MiB');
+    if (!(update instanceof Uint8Array) || update.byteLength > MAX_LARGE_BYTES) throw Error('Update exceeds 256 MiB');
     const trial=this.validator();let document;
     try{Y.applyUpdate(trial,update);document=this.validateState(trial);}
     catch(e){this.rejectValidation();throw e;}

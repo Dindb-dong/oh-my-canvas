@@ -1,3 +1,4 @@
+import {imageSource} from '../images/assets';
 import type { Data, Shape, Rect, Point } from '../contracts';
 import { unsafeMarkupElement, safeUrl, cssDeclarations } from '../formats/markup';
 import { resourceScope, type SceneNodeCache } from './retained';
@@ -83,6 +84,8 @@ export interface TextFragment {
     paragraph: number;
 }
 export interface SceneOptions {
+    assets?: Data;
+    imageSource?: (image: Data) => string;
     bounds?: Rect;
     idPrefix?: string;
     omitFill?: boolean;
@@ -145,7 +148,7 @@ export class SceneWriter {
             const image = p.image ?? p;
             const adjust = p.adjust ?? image.adjust;
             const adjustment = this.imageAdjustment(adjust);
-            const href = image.src ?? image.url ?? image.id ?? p.src ?? '';
+            const href = (this.options.imageSource?.(image) ?? imageSource(image,this.options.assets)) || p.src || '';
             const id = this.id('image');
             const mode = p.objectFit ?? p.scaleMode ?? image.scaleMode ?? p.mode ?? 'fill';
             const tile = mode === 'tile';

@@ -53,6 +53,14 @@ Undo/Redo stacks are session-local and are not restored when a document is reope
 
 Do not use another participant's local replica as your only backup. Deleting a document removes this computer's primary and backup after confirmation; other participants' replicas remain.
 
+## Import design files
+
+Open `.fig` (Figma Design) or `.sketch` (Sketch 43+) using **Import**, or place them through the editor's asset picker or drag and drop. Document import retains all pages; placement inserts the layers of every page into the current page. MCP `import_document` accepts `format:"fig"` or `format:"sketch"` with an explicit absolute `filePath`.
+
+Conversion runs locally in a bounded desktop worker. Frames/groups, basic shapes, vector paths, text and embedded PNG/JPEG/GIF/WebP images remain editable. Design-file input is limited to 256 MiB and expanded archives to 512 MiB. Imported design libraries use the large-document budget below. Repeated bitmap bytes are stored once and referenced by layers; only the active page prepares its image resources. Files exceeding these limits are rejected without modifying the current canvas.
+
+Compatibility is partial: component/symbol links and overrides, variables, mixed text formatting, effects, unsupported paints, masks and complex transforms may differ. Import warnings are shown and saved in document metadata. Auto layout uses saved positions. Install the original fonts for matching typography. Pixel-perfect parity with a particular source file requires testing that actual file; general format support does not establish it.
+
 ## Export formats
 
 | Route | Output |
@@ -67,11 +75,11 @@ Design exports use an explicit native save dialog. Cancel leaves the export unsa
 
 ## Capacity and file versions
 
-The current document and encoded CRDT state each have a 16 MiB limit. The portable file and network envelope have a 24 MiB limit, including base64/metadata overhead. The graph permits up to 100 pages and 20,000 shapes. These are validation limits, not a performance guarantee at that size.
+Ordinary canvases retain a 16 MiB document/state budget and 20,000 shapes. Imported design libraries opt into 256 MiB for the document and encoded CRDT state, with 100,000 shapes. Both profiles allow up to 100 pages. Portable files and network envelopes are bounded to 384 MiB. These are validation limits, not a performance guarantee: rendering is page-specific, but document validation, collaboration and edits still involve the complete document. A single complex page can take seconds to open.
 
 Large embedded images consume the document budget. Resize assets before placing them. If accumulated history is too large, duplicate the current document to start new history. Invalid or oversized local/remote edits and Undo/Redo are checked before live mutation.
 
-The writer emits `.omc` v2 and reads v1. Existing files are not a license to open a new v2 document in an old app. Keep portable backups when upgrading and update all collaborators to the same current protocol. Unknown versions and malformed metadata are rejected. A damaged saved file is isolated in the library rather than breaking the entire list.
+The writer emits `.omc` v2 for ordinary states and v3 (gzip-compressed state) above 16 MiB, and reads v1/v2/v3. Older apps cannot open v3 files. Large-library listings validate the envelope; full CRDT validation happens when opening the document. Existing files are not a license to open a new v2 document in an old app. Keep portable backups when upgrading and update all collaborators to the same current protocol. Unknown versions and malformed metadata are rejected. A damaged saved file is isolated in the library rather than breaking the entire list.
 
 ## Local MCP
 

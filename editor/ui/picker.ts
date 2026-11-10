@@ -2,7 +2,7 @@ import type { MountOptions } from "../contracts";
 export type FilePickerRequest = { kind: "image" | "assets" | "library"; multiple?: boolean };
 const accepts = {
     image: "image/*,.svg",
-    assets: "image/*,.svg,.woff,.woff2,.ttf,.otf,.json",
+    assets: "image/*,.svg,.woff,.woff2,.ttf,.otf,.json,.fig,.sketch",
     library: ".json"
 };
 /** Desktop delegates to its host. Browser inputs remain attached until change/cancel. */

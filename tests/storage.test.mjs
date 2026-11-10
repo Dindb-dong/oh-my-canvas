@@ -1,4 +1,4 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {promises as fs} from 'node:fs';import os from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {promises as fs} from 'node:fs';import os from 'node:os';import path from 'node:path';import {randomUUID,createHash} from 'node:crypto';
 import {Store,decodeFile,encodeFile} from '../core/storage.mjs';import {Replica} from '../core/replica.mjs';import {documentFixture} from './helpers.mjs';
 import {changesBetween,MAX_ENVELOPE_BYTES} from '../core/document.mjs';
 test('atomic local save, portable file, backup recovery, and traversal refusal',async t=>{
@@ -80,4 +80,27 @@ test('revision changes during an in-flight save retain ordering and duplicate ca
   let duplicateFinished=false;const duplicate=store.save(record).then(()=>{duplicateFinished=true;});
   record.title='Second';const second=store.save(record);await Promise.resolve();assert.equal(duplicateFinished,false);release();await Promise.all([first,duplicate,second]);assert.equal(writes,2);
   const read=await store.load(record.id);t.after(()=>read.replica.destroy());assert.equal(read.title,'Second');
+});
+
+test('large libraries opt into a bounded budget and reopen with shared assets intact',()=>{
+  const document=documentFixture();document.assets={image:{src:'data:image/png;base64,'+'A'.repeat(17*1024*1024)}};
+  assert.throws(()=>new Replica({document}),/16 MiB/);
+  document.capacity='large';const replica=new Replica({document});
+  try{const encoded=encodeFile({id:randomUUID(),title:'Library',replica});assert.equal(JSON.parse(encoded).version,3);const loaded=decodeFile(encoded);try{assert.deepEqual(loaded.replica.document,replica.document);assert.equal(loaded.state,undefined);}finally{loaded.replica.destroy();}}
+  finally{replica.destroy();}
+});
+
+test('library listing coalesces concurrent reads and refreshes metadata after external changes',async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-list-cache-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const store=new Store(dir),record={id:randomUUID(),title:'First',replica:new Replica({document:documentFixture()})};t.after(()=>record.replica.destroy());await store.save(record);
+  const read=fs.readFile;let reads=0;t.mock.method(fs,'readFile',async(...args)=>{reads++;return read(...args);});
+  const results=await Promise.all([store.list(),store.list(),store.list()]);assert.equal(reads,1);assert.ok(results.every(items=>items[0].title==='First'));
+  await store.list();assert.equal(reads,1);
+  record.title='External rename';await fs.writeFile(store.file(record.id),encodeFile(record));assert.equal((await store.list())[0].title,record.title);assert.equal(reads,2);
+});
+
+test('compressed envelopes reject invalid payloads even with a matching checksum',()=>{
+  const replica=new Replica({document:documentFixture()});
+  try{const file=JSON.parse(encodeFile({id:randomUUID(),title:'Invalid compressed state',replica}));file.version=3;file.state=Buffer.from('not gzip').toString('base64');file.sha256=createHash('sha256').update(file.state).digest('hex');assert.throws(()=>decodeFile(JSON.stringify(file)),/header|compression|gzip/i);}
+  finally{replica.destroy();}
 });

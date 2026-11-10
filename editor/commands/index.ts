@@ -1,4 +1,5 @@
 /** Independently authored command registry. No inherited editor implementation is used. */
+import {referencedAssets} from '../images/assets';
 import type { EditorStore, Commands, Data, Page, Shape, CanvasDocument, Tool, Point } from '../contracts';
 import { createShape, createPage, addPage, deletePage, duplicatePage, clone, newId, ROOT_ID, descendants, ancestors, topLevelIds, insertShape, removeShapes, reparentShapes, cloneShapes, moveTree, resizeTree, refreshFrames, isEditable, remapReferences } from '../document';
 import { bounds, unionBounds, shapeBounds, rectOf, center, moveShape, resizeShape, updateGeometry, rotationMatrix, zoomAt, fitViewport, polygonPoints, identity, pathBounds, setShapeOrientation } from '../geometry';
@@ -395,7 +396,7 @@ export function createCommands(editor: EditorStore, services: Data = {}): Comman
         const chosen = topLevelIds(editor.page, ids(args));
         if (!chosen.length)
             return false;
-        await writeClipboard({ kind: 'oh-my-canvas/shapes', version: 1, roots: chosen, shapes: chosen.flatMap(id => descendants(editor.page, id, true)).map(clone), pageId: editor.pageId, origin: unionBounds(chosen.map(id => shapeBounds(editor.page.objects[id]))) });
+        await writeClipboard({ kind: 'oh-my-canvas/shapes', version: 1, capacity:editor.doc.capacity, assets:referencedAssets(chosen.flatMap(id=>descendants(editor.page,id,true)),editor.doc.assets),roots: chosen, shapes: chosen.flatMap(id => descendants(editor.page, id, true)).map(clone), pageId: editor.pageId, origin: unionBounds(chosen.map(id => shapeBounds(editor.page.objects[id]))) });
         return true;
     }
     register('edit.copy', 'Copy', copy, () => editor.selection.length > 0);
@@ -460,6 +461,11 @@ export function createCommands(editor: EditorStore, services: Data = {}): Comman
         if (!shapes.length || !Array.isArray(roots) || !roots.length)
             throw new Error('Prepared clipboard payload has no root layers');
         editor.transact('Paste layers', doc => {
+            if(payload.capacity==='large')doc.capacity='large';
+            for(const [id,asset] of Object.entries<Data>(payload.assets??{})){
+                if(doc.assets?.[id]&&JSON.stringify(doc.assets[id])!==JSON.stringify(asset))throw Error('Clipboard asset ID conflicts with this canvas');
+                (doc.assets??={})[id]=clone(asset);
+            }
             const page = doc.pagesById[editor.pageId], replaced = mode === 'paste-replace' ? editable(args) : [], parentId = args.parentId ?? (replaced.length ? page.objects[replaced[0]].parentId : ROOT_ID), original = payload.origin ?? unionBounds(shapes.filter(s => roots.includes(s.id)).map(shapeBounds)), targetIds = mode === 'paste-in-place' ? editable(args) : replaced, target = targetIds.length ? unionBounds(targetIds.map(id => shapeBounds(page.objects[id]))) : null, offset = mode === 'paste-in-place' ? 0 : 10 * (++pasteCount), dx = target ? target.x + (mode === 'paste-in-place' ? (target.width - original.width) / 2 : 0) - original.x : args.x !== undefined ? args.x - original.x : offset, dy = target ? target.y + (mode === 'paste-in-place' ? (target.height - original.height) / 2 : 0) - original.y : args.y !== undefined ? args.y - original.y : offset;
             for (const s of shapes) {
                 const oldId = s.id;

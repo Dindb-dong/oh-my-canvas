@@ -2,11 +2,8 @@ import {geometricField,geometryEntries,restoreGeometry} from './geometry.mjs';
 // Shared pure model adapter. Shape properties merge separately; containment is repaired
 // deterministically so concurrent insert/move/delete never leaves dangling child lists.
 export const ROOT = 'root';
-// One capacity contract: 16 MiB document and binary CRDT state, 24 MiB wire/file
-// envelopes (base64 plus metadata). History is included in the state budget.
-export const MAX_DOCUMENT_BYTES = 16 * 1024 * 1024;
-export const MAX_STATE_BYTES = 16 * 1024 * 1024;
-export const MAX_ENVELOPE_BYTES = 24 * 1024 * 1024;
+import {documentLimits} from './capacity.mjs';
+export {MAX_DOCUMENT_BYTES,MAX_STATE_BYTES,MAX_ENVELOPE_BYTES} from './capacity.mjs';
 const blocked = new Set(['__proto__', 'constructor', 'prototype']);
 export const same = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
 const key = (...parts) => JSON.stringify(parts);
@@ -141,17 +138,17 @@ export function applyPending(doc, patches) {
 
 export function assertDocument(doc) {
   if (!doc || typeof doc !== 'object' || !Array.isArray(doc.pages) || !doc.pages.length || doc.pages.length > 100 || !doc.pagesById) throw Error('Invalid document: pages are required');
-  let count = 0;
+  const limits=documentLimits(doc);let count = 0;
   for (const pid of doc.pages) {
     if (typeof pid !== 'string' || blocked.has(pid)) throw Error('Invalid page ID');
     const page = doc.pagesById[pid];
     if (!page?.objects?.[ROOT] || page.objects[ROOT].type !== 'frame') throw Error('Invalid document root');
     for (const [id, s] of Object.entries(page.objects)) {
-      if (++count > 20000 || blocked.has(id) || !s || s.id !== id || !['frame','group','boolean','rect','ellipse','path','text','image','svg'].includes(s.type)) throw Error('Invalid or oversized shape graph');
+      if (++count > limits.shapes || blocked.has(id) || !s || s.id !== id || !['frame','group','boolean','rect','ellipse','path','text','image','svg'].includes(s.type)) throw Error('Invalid or oversized shape graph');
       for (const n of ['x','y','width','height']) if (s[n] !== undefined && (!Number.isFinite(s[n]) || Math.abs(s[n]) > 1e8)) throw Error('Invalid geometry');
     }
   }
   const json = JSON.stringify(doc);
-  if (new TextEncoder().encode(json).byteLength > MAX_DOCUMENT_BYTES) throw Error('Document exceeds 16 MiB; use smaller embedded images');
+  if (new TextEncoder().encode(json).byteLength > limits.bytes) throw Error(`Document exceeds ${limits.bytes/1024/1024} MiB; use smaller embedded images`);
   return doc;
 }
