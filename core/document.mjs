@@ -6,10 +6,10 @@ export const ROOT = 'root';
 import {documentLimits} from './capacity.mjs';
 export {documentLimits,MAX_DOCUMENT_BYTES,MAX_STATE_BYTES,MAX_ENVELOPE_BYTES,MAX_LARGE_STATE_BYTES,MAX_PORTABLE_BYTES,MAX_DESIGN_INPUT_BYTES,MAX_DESIGN_EXPANDED_BYTES} from './capacity.mjs';
 const blocked = new Set(['__proto__', 'constructor', 'prototype']);
-const validatedDocuments = new WeakSet(), objectCounts = new WeakMap(), jsonSizes = new WeakMap();
+const validatedDocuments = new WeakSet(), objectCounts = new WeakMap(), jsonSizes = new WeakMap(), jsonMembers = new WeakMap();
 // Exact JSON UTF-8 size, including escapes, punctuation, omitted properties and
 // array nulls. Only immutable, previously validated branches reuse cached sizes.
-function jsonBytes(value,reuse=false,name='',stack=new Set()){
+function jsonBytes(value,reuse=false,name='',stack=new Set(),dictionaryChanges){
   if(value&&typeof value.toJSON==='function'){
     const encoded=JSON.stringify({[name]:value});
     return encoded==='{}'?undefined:utf8Bytes(encoded)-jsonStringBytes(name)-3;
@@ -24,13 +24,28 @@ function jsonBytes(value,reuse=false,name='',stack=new Set()){
   if(reuse&&jsonSizes.has(value))return jsonSizes.get(value);
   if(stack.has(value))throw Error('Cyclic document value');stack.add(value);
   let bytes=2,count=0;
-  if(Array.isArray(value))for(let i=0;i<value.length;i++){
-    const size=jsonBytes(value[i],reuse,String(i),stack);bytes+=(size??4)+(count++?1:0);
+  const changes=reuse&&dictionaryChanges?.get(value);
+  if(changes&&jsonSizes.has(changes.before)&&jsonMembers.has(changes.before)&&!Array.isArray(value)){
+    // This key set is derived independently by the shape validation pass below,
+    // including additions and removals. No caller-provided path hint is trusted.
+    // Reuse the prior dictionary punctuation and adjust only serialized members.
+    const previous=changes.before,oldCount=jsonMembers.get(previous);
+    bytes=jsonSizes.get(previous);count=oldCount;
+    for(const key of changes.keys){
+      const old=Object.prototype.propertyIsEnumerable.call(previous,key)?jsonBytes(previous[key],reuse,key,stack,dictionaryChanges):undefined;
+      const next=Object.prototype.propertyIsEnumerable.call(value,key)?jsonBytes(value[key],reuse,key,stack,dictionaryChanges):undefined;
+      const keyBytes=jsonStringBytes(key)+1;
+      if(old!==undefined){bytes-=keyBytes+old;count--;}
+      if(next!==undefined){bytes+=keyBytes+next;count++;}
+    }
+    bytes+=Math.max(0,count-1)-Math.max(0,oldCount-1);
+  }else if(Array.isArray(value))for(let i=0;i<value.length;i++){
+    const size=jsonBytes(value[i],reuse,String(i),stack,dictionaryChanges);bytes+=(size??4)+(count++?1:0);
   }else for(const [k,v] of Object.entries(value)){
-    const size=jsonBytes(v,reuse,k,stack);if(size===undefined)continue;
+    const size=jsonBytes(v,reuse,k,stack,dictionaryChanges);if(size===undefined)continue;
     bytes+=jsonStringBytes(k)+1+size+(count++?1:0);
   }
-  stack.delete(value);jsonSizes.set(value,bytes);return bytes;
+  stack.delete(value);jsonSizes.set(value,bytes);if(objectCounts.has(value))jsonMembers.set(value,count);return bytes;
 }
 export const same = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
 const key = (...parts) => JSON.stringify(parts);
@@ -302,6 +317,7 @@ export function assertDocumentChanges(before,doc){
   const limits=documentLimits(doc);
   if(!doc||!Array.isArray(doc.pages)||!doc.pages.length||doc.pages.length>limits.pages||!doc.pagesById)throw Error('Invalid document: pages are required');
   const previouslyActive=new Set(before.pages);
+  const dictionaryChanges=new Map();
   let count=0;
   for(const pid of doc.pages){
     if(typeof pid!=='string'||blocked.has(pid))throw Error('Invalid page ID');
@@ -311,17 +327,26 @@ export function assertDocumentChanges(before,doc){
     const page=doc.pagesById[pid],old=previouslyActive.has(pid)?before.pagesById[pid]:undefined;
     if(!page?.objects?.[ROOT]||page.objects[ROOT].type!=='frame')throw Error('Invalid document root');
     if(page.objects===old?.objects&&objectCounts.has(page.objects)){count+=objectCounts.get(page.objects);continue;}
-    let objects=0;
+    let objects=0,added=0;const changed=[],previous=old?.objects,oldCount=previous&&objectCounts.get(previous);
     for(const [id,s] of Object.entries(page.objects)){
       objects++;
-      if(s===old?.objects[id])continue;
+      const existed=previous&&Object.prototype.propertyIsEnumerable.call(previous,id);
+      if(existed&&s===previous[id])continue;
+      changed.push(id);if(!existed)added++;
       if(blocked.has(id)||!s||s.id!==id||!['frame','group','boolean','rect','ellipse','path','text','image','svg'].includes(s.type))throw Error('Invalid or oversized shape graph');
       for(const n of ['x','y','width','height'])if(s[n]!==undefined&&(!Number.isFinite(s[n])||Math.abs(s[n])>1e8))throw Error('Invalid geometry');
+    }
+    if(previous&&oldCount!==undefined&&!Array.isArray(previous)&&[Object.prototype,null].includes(Object.getPrototypeOf(previous))){
+      // With no removals, the entry count and independently observed additions
+      // prove that every old key remains. Mixed insert/delete edits enumerate
+      // the prior keys once to include each missing serialized member.
+      if(objects<oldCount+added)for(const id of Object.keys(previous))if(!Object.prototype.propertyIsEnumerable.call(page.objects,id))changed.push(id);
+      dictionaryChanges.set(page.objects,{before:previous,keys:changed});
     }
     objectCounts.set(page.objects,objects);count+=objects;
   }
   if(count>limits.objects)throw Error('Invalid or oversized shape graph');
-  if(jsonBytes(doc,true)>limits.documentBytes)throw Error(`Document exceeds ${limits.documentBytes/1024/1024} MiB; use referenced image assets`);
+  if(jsonBytes(doc,true,'',new Set(),dictionaryChanges)>limits.documentBytes)throw Error(`Document exceeds ${limits.documentBytes/1024/1024} MiB; use referenced image assets`);
   validatedDocuments.add(doc);return doc;
 }
 export const assertDocumentIncremental=(doc,before)=>assertDocumentChanges(before,doc);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { Editor, createDocument, createShape, insertShape } from "../document";
+import { Editor, createDocument, createPage, createShape, insertShape } from "../document";
 import { createCanvasInteraction } from "../interaction/canvas";
 import { createInspector } from "../ui/inspector";
 import { createRenderer } from "../render";
@@ -59,6 +59,38 @@ function inspectorFixture() {
     const field = (label: string) => root.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
     return { editor, root, inspector, field };
 }
+
+it("updates the page inspector on a page-and-viewport event without carrying the old page's focused draft", () => {
+    const t = inspectorFixture(), originalPage = t.editor.pageId;
+    t.editor.transact("Add page", doc => {
+        const page = createPage("Examples", "examples");
+        doc.pages.push(page.id); doc.pagesById[page.id] = page;
+        doc.pagesById[originalPage].name = "Cover";
+    });
+    t.editor.setSelection([]);
+    const oldName = t.field("Name");
+    oldName.focus(); oldName.value = "Uncommitted Cover draft";
+    t.editor.setPage("examples");
+    expect(t.field("Name").value).toBe("Examples");
+    expect(t.field("Name")).not.toBe(oldName);
+    const rebuilds = t.inspector.diagnostics.rebuilds;
+    t.editor.setViewport({ ...t.editor.viewport, vbox: { ...t.editor.viewport.vbox, x: 100 } });
+    expect(t.inspector.diagnostics.rebuilds).toBe(rebuilds);
+    t.field("Name").value = "Edited Examples";
+    t.field("Name").dispatchEvent(new Event("change", { bubbles: true }));
+    expect(t.editor.page.name).toBe("Edited Examples");
+    expect(t.editor.doc.pagesById[originalPage].name).toBe("Cover");
+    t.editor.setPage(originalPage);
+    expect(t.field("Name").value).toBe("Cover");
+});
+
+it("does not transfer a focused inspector draft to a different selected layer", () => {
+    const t = inspectorFixture(), oldName = t.field("Name");
+    oldName.focus(); oldName.value = "Uncommitted selected-layer draft";
+    t.editor.setSelection(["other"]);
+    expect(t.field("Name").value).toBe(t.editor.page.objects.other.name);
+    expect(t.field("Name")).not.toBe(oldName);
+});
 
 it("builds one overlay for a committed scene change and none for duplicate frame notifications", () => {
     const t = canvasFixture(), initial = t.canvas.diagnostics.overlayBuilds;

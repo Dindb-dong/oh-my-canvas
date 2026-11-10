@@ -15,7 +15,12 @@ export function jsonStringBytes(value){
   if(cached!==undefined)return cached;
   const bytes=utf8Bytes(JSON.stringify(value));
   if(strings.size===MAX_STRINGS)strings.delete(strings.keys().next().value);
-  strings.set(value,bytes);
+  // A short slice can retain an arbitrarily large parent string in V8. Build
+  // an independent UTF-16 key before caching; UTF-8 round trips would replace
+  // lone surrogates and could alias strings with different JSON byte lengths.
+  const units=new Array(value.length);
+  for(let index=0;index<value.length;index++)units[index]=value.charCodeAt(index);
+  strings.set(String.fromCharCode(...units),bytes);
   return bytes;
 }
 

@@ -18,8 +18,20 @@ export function hasBackdropDependency(shape: Shape): boolean {
     });
 }
 
+function hasFilterDependency(shape: Shape): boolean {
+    return !!(shape.effects?.some((effect: Data) => !effect.hidden && effect.visible !== false) ||
+        shape.shadows?.some((shadow: Data) => !shadow.hidden) ||
+        !shape.blurHidden && shape.blur || !shape.backgroundBlurHidden && shape.backgroundBlur);
+}
+
+/** Removing a child can change a sibling's mask or an ancestor's filtered output.
+ * Those subtrees remain complete even when their individual children are offscreen. */
+function keepChildrenTogether(shape: Shape): boolean {
+    return shape.type === 'boolean' || shape.type === 'svg' || hasFilterDependency(shape) ||
+        shape.isMaskGroup !== false && !!(shape.isMaskGroup || shape.maskType || shape.maskMode || shape.mask?.mode);
+}
+
 /** A conservative screen-only bound. Unknown ink is retained, never silently clipped.
- * Whole root subtrees stay together: masks, clipping and sibling compositing remain intact.
  * Clipped frames bound their descendants, including unknown text/SVG ink. */
 export function subtreeScreenBounds(objects: Record<string, Shape>, id: string, memo = new Map<string, Rect | null>(), visiting = new Set<string>(), geometryCache?: WeakMap<Shape, Rect | null>): Rect | null {
     if (memo.has(id)) return memo.get(id)!;
@@ -28,17 +40,16 @@ export function subtreeScreenBounds(objects: Record<string, Shape>, id: string, 
     visiting.add(id);
     const finish = (value: Rect | null) => { visiting.delete(id); memo.set(id, value); return value; };
     if (shape.hidden || shape.visible === false) return finish({ x: shape.x, y: shape.y, width: 0, height: 0 });
-    // These may produce ink beyond their declared geometry. Keeping the entire root is
-    // intentional until a measured/compositing-aware bound is available.
-    if (shape.type === 'text' || shape.type === 'svg' || shape.effects?.some((e: any) => !e.hidden && e.visible !== false) ||
-        shape.shadows?.some((e: any) => !e.hidden) || !shape.blurHidden && shape.blur || !shape.backgroundBlurHidden && shape.backgroundBlur)
+    // These may produce ink beyond their declared geometry. Keep their output until
+    // a measured/compositing-aware bound is available.
+    if (shape.type === 'text' || shape.type === 'svg' || hasFilterDependency(shape))
         return finish(null);
     const geometry = geometryCache?.has(shape) ? geometryCache.get(shape)! : hitBounds(shape);
     geometryCache?.set(shape, geometry);
     if (!geometry) return finish(null);
     let bounds: Rect = geometry;
     // Miter joins and arbitrary path markers can extend beyond a path's geometry.
-    // Frame/primitive strokes also conservatively retain the root for now.
+    // Frame/primitive strokes also conservatively retain their own ink for now.
     if (shape.strokes?.some((stroke: any) => !stroke.hidden && stroke.visible !== false && (stroke.width ?? 1) > 0)) return finish(null);
     if (!shape.clipContent || shape.clip) {
         for (const child of shape.childIds ?? []) {
@@ -51,7 +62,8 @@ export function subtreeScreenBounds(objects: Record<string, Shape>, id: string, 
     return finish(bounds);
 }
 
-/** Retain an overscanned root set while the viewport stays inside its prepared area. */
+/** Retain an overscanned scene while the viewport stays inside its prepared area.
+ * An unbounded ancestor does not force independently bounded children to be mounted. */
 export class ViewportPreparation {
     private source?: Record<string, Shape>;
     private area?: Rect;
@@ -79,33 +91,38 @@ export class ViewportPreparation {
             this.bounds = new Map();
             if (this.enabled && !this.backdrop) for (const id of this.allRoots) subtreeScreenBounds(source, id, this.bounds, new Set(), this.geometry);
         }
-        const selectedRoots = new Set<string>();
-        for (let id of selected) {
+        const selectedNodes = new Set(selected.filter(id => !!source[id])), selectedAncestors = new Set<string>();
+        for (let id of selectedNodes) {
             const seen = new Set<string>();
-            while (source[id] && source[id].parentId !== 'root' && !seen.has(id)) { seen.add(id); id = source[id].parentId; }
-            if (source[id]) selectedRoots.add(id);
+            while (source[id] && !seen.has(id)) { seen.add(id); selectedAncestors.add(id); id = source[id].parentId; }
         }
-        const selectedKey = [...selectedRoots].sort().join('\0');
+        const selectedKey = [...selectedNodes].sort().join('\0');
         if (!sourceChanged && selectedKey === this.selectedKey && this.area && contains(this.area, viewport)) return false;
         this.selectedKey = selectedKey;
         this.area = { x: viewport.x - viewport.width / 2, y: viewport.y - viewport.height / 2, width: viewport.width * 2, height: viewport.height * 2 };
-        const next = !this.enabled || this.backdrop ? this.allRoots : this.allRoots.filter(id => selectedRoots.has(id) || !this.bounds.get(id) || intersects(this.bounds.get(id)!, this.area!));
-        const changed = sourceChanged || next.length !== this.roots.length || next.some((id, index) => id !== this.roots[index]);
-        if (!changed) return false;
-        this.roots = [...next];
-        if (!this.enabled || this.backdrop) this.objects = source;
-        else {
-            const objects: Record<string, Shape> = {};
-            const visit = (id: string) => {
+        let objects: Record<string, Shape> = source, next = this.allRoots;
+        if (this.enabled && !this.backdrop) {
+            objects = {};
+            const visit = (id: string, wholeSubtree = false) => {
                 const shape = source[id];
                 if (!shape || objects[id]) return;
+                const bounds = wholeSubtree ? null : subtreeScreenBounds(source, id, this.bounds, new Set(), this.geometry);
+                if (!wholeSubtree && !selectedAncestors.has(id) && bounds && !intersects(bounds, this.area!)) return;
                 objects[id] = shape;
-                for (const child of shape.childIds ?? []) visit(child);
+                const keepChildren = wholeSubtree || selectedNodes.has(id) || keepChildrenTogether(shape);
+                for (const child of shape.childIds ?? []) visit(child, keepChildren);
             };
             if (source.root) objects.root = source.root;
-            for (const id of next) visit(id);
-            this.objects = objects;
+            for (const id of this.allRoots) visit(id);
+            next = this.allRoots.filter(id => !!objects[id]);
         }
+        // Descendant membership can change while every root remains mounted. A new
+        // subset invalidates retained ancestor serialization through sceneChanges().
+        const changed = sourceChanged || next.length !== this.roots.length || next.some((id, index) => id !== this.roots[index]) ||
+            Object.keys(objects).length !== Object.keys(this.objects).length || Object.keys(objects).some(id => !this.objects[id]);
+        if (!changed) return false;
+        this.roots = [...next];
+        this.objects = objects;
         return true;
     }
     clear() { this.source = undefined; this.area = undefined; this.objects = {}; this.roots = []; this.bounds.clear(); this.geometry = new WeakMap(); }

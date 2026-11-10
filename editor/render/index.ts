@@ -7,7 +7,7 @@ export type { TextFragment } from './scene';
 import { combinePaths } from './vector';
 import { measureTextScene } from './text';
 import { textMetricRevision } from './metric-cache';
-import { SceneNodeCache, sceneChanges, parseScene, reconcileScene, type SceneNodeRecord } from './retained';
+import { SceneNodeCache, sceneChanges, parseScene, reconcileScene, resourceScope } from './retained';
 import { hasBackdropDependency, ViewportPreparation } from './viewport';
 export { measureTextScene } from './text';
 export { combinePaths } from './vector';
@@ -280,15 +280,11 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         // scene-wide until dependency-aware compositing has its own parity coverage.
         const backdrop = Object.values(objects).some(hasBackdropDependency);
         const reset = key !== renderedKey || renderedPage !== editor.pageId || backdrop;
-        const changes = sceneChanges(renderedObjects, objects), prior = new Map<string, SceneNodeRecord>();
+        const changes = sceneChanges(renderedObjects, objects);
         if (!reset && !changes.changed.size && scene.firstElementChild) {
             lastRender = { mode: 'unchanged', generatedNodes: 0, cachedNodes: 0, changedNodes: 0 };
             updateViewport();
             return;
-        }
-        if (!reset) for (const id of changes.changed) {
-            const entry = nodeCache.get(id + '\0shape');
-            if (entry) prior.set(id, entry);
         }
         if (reset) nodeCache.clear(); else nodeCache.invalidate(changes.affected);
         const writer = new SceneWriter(objects, { assets: editor.doc.assets, imageSource: displaySource, textFragments: fragments, typography: options, resolveImageSource, outlines: renderedOutlines, outlineWidth: 1 / vp.zoom, idPrefix: scenePrefix, stableIds: true, ...(!backdrop ? { nodeCache } : {}) });
@@ -308,13 +304,19 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         // Structural edits and compositing dependencies take the retained full path.
         const leafEdit = !reset && !!svg && changes.changed.size > 0 && [...changes.changed].every(id => {
             const old = renderedObjects?.[id], next = objects[id];
-            return old && next && prior.has(id) && old.parentId === next.parentId && !old.childIds?.length && !next.childIds?.length && !old.hidden && old.visible !== false && !next.hidden && next.visible !== false && !maskAncestor(id) && !!layerElement(id);
+            return old && next && old.parentId === next.parentId && !old.childIds?.length && !next.childIds?.length && !old.hidden && old.visible !== false && !next.hidden && next.visible !== false && !maskAncestor(id) && !!layerElement(id);
         });
         let bytes = 0, attachMs = 0;
         if (leafEdit) {
             const definitions = svg!.querySelector('defs')!;
             const resources = new Map(Array.from(definitions.children).map(node => [node.id, node]));
             for (const id of changes.changed) {
+                // The bounded serialization cache can evict a leaf in a large scene.
+                // Stable resource scopes let the live DOM remain the authority for
+                // its old definitions, so eviction never turns a leaf edit into a
+                // full-scene parse or requires retaining another source snapshot.
+                const prefix = scenePrefix + '-' + resourceScope(id) + '-';
+                const previousIds = [...resources.keys()].filter(resource => resource.startsWith(prefix));
                 const source = writer.node(objects[id]), record = nodeCache.get(id + '\0shape');
                 // Oversized entries may be intentionally absent from the bounded cache.
                 const defs = record?.defs ?? writer.defs;
@@ -325,8 +327,8 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 if (!current) throw new Error('Retained scene lost an edited layer');
                 reconcileScene(current, next);
                 const nextDefinitions = Array.from(patch.firstElementChild!.children), nextIds = new Set(nextDefinitions.map(node => node.id));
-                for (const match of prior.get(id)!.defs.join('').matchAll(/\bid="([^"]+)"/g)) {
-                    if (!nextIds.has(match[1])) { resources.get(match[1])?.remove(); resources.delete(match[1]); }
+                for (const resource of previousIds) {
+                    if (!nextIds.has(resource)) { resources.get(resource)?.remove(); resources.delete(resource); }
                 }
                 for (const node of nextDefinitions) {
                     const previous = resources.get(node.id);

@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
 import {jsonPrimitiveBytes,jsonStringBytes} from '../core/json-bytes.mjs';
 import {assertDocument,MAX_DOCUMENT_BYTES} from '../core/document.mjs';
 import {documentFixture} from './helpers.mjs';
@@ -34,6 +35,34 @@ test('repeated short strings and numeric primitives do not allocate a UTF-8 buff
   assert.equal(jsonPrimitiveBytes(i),String(i).length);jsonPrimitiveBytes(null);jsonPrimitiveBytes(true);jsonPrimitiveBytes(false);
  }
  assert.equal(allocations,afterFirst);
+});
+
+test('short cache keys detach large string parents without replacing UTF-16 surrogates',()=>{
+ const moduleURL=new URL('../core/json-bytes.mjs',import.meta.url).href;
+ const child=spawnSync(process.execPath,['--expose-gc','--input-type=module','-e',`
+  import assert from 'node:assert/strict';
+  import {jsonStringBytes} from ${JSON.stringify(moduleURL)};
+  const native=value=>new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  const heap=()=>{global.gc();return process.memoryUsage().heapUsed;};
+  const before=heap();
+  const admit=index=>{
+   const parent=('slice-'+index+'\\ud800\\udfff\\ud800\\udfff\\ud800').padEnd(64,'p')+'x'.repeat(2*1024*1024);
+   const key=parent.slice(0,64);
+   assert.equal(jsonStringBytes(key),native(key));
+  };
+  for(let index=0;index<8;index++)admit(index);
+  const retainedBytes=heap()-before;
+  const lone='cache-key-\\ud800',replacement='cache-key-\\ufffd';
+  assert.equal(jsonStringBytes(lone),native(lone));
+  assert.equal(jsonStringBytes(replacement),native(replacement));
+  assert.equal(jsonStringBytes(lone),native(lone));
+  console.log(JSON.stringify({retainedBytes}));
+ `],{encoding:'utf8',timeout:15000});
+ assert.equal(child.status,0,child.stderr||String(child.error??''));
+ const {retainedBytes}=JSON.parse(child.stdout);
+ // An isolated, explicit-GC child avoids shared test heap noise. Retaining all
+ // eight two-byte parents costs about 32 MiB; allow 4 MiB of runtime variation.
+ assert.ok(retainedBytes<4*1024*1024,`Short cache entries retained ${retainedBytes} bytes of parent strings`);
 });
 
 test('full document validation still enforces the exact byte boundary after mutable and custom-serializer edits',()=>{

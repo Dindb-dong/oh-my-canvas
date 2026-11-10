@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Editor, createDocument, createShape, insertShape } from '../document';
 import { createRenderer } from '../render';
 import { ViewportPreparation } from '../render/viewport';
+import * as text from '../render/text';
 import type { Shape } from '../contracts';
 
 const cleanups: (() => void)[] = [];
@@ -12,10 +13,10 @@ beforeEach(() => {
     Object.defineProperty(document, 'fonts', { configurable: true, value: Object.assign(new EventTarget(), { ready: Promise.resolve() }) });
 });
 afterEach(() => { cleanups.splice(0).reverse().forEach(fn => fn()); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-function fixture(extra: Shape[] = [], options = {}) {
+function fixture(extra: Shape[] = [], options = {}, paddingParent = 'root') {
     const doc = createDocument(), page = doc.pagesById[doc.pages[0]];
-    for (let i = 0; i < 600; i++) insertShape(page, createShape('rect', { id: `r${i}`, x: i * 1000, width: 80, height: 80, fills: [{ color: '#abcdef' }] }));
     for (const shape of extra) insertShape(page, shape);
+    for (let i = 0; i < 600; i++) insertShape(page, createShape('rect', { id: `r${i}`, parentId: paddingParent, x: i * 1000, width: 80, height: 80, fills: [{ color: '#abcdef' }] }));
     const editor = new Editor(doc), stage = document.createElement('div');
     editor.setViewport({ zoom: 1, vport: { width: 800, height: 600 }, vbox: { x: 0, y: 0, width: 800, height: 600 } });
     document.body.append(stage);
@@ -55,7 +56,7 @@ it('retains overflowing children and unknown effects, keeps complete mask siblin
     expect(t.view.element('r599')).not.toBeNull();
     expect(t.view.renderDiagnostics().preparedObjects).toBe(Object.keys(t.editor.page.objects).length);
 });
-it('defers image preparation outside clipped offscreen frames, resolves immutable sources, and pins selected roots', async () => {
+it('defers image preparation outside clipped offscreen frames, resolves immutable sources, and pins selected ancestry', async () => {
     const decoded: string[] = [];
     vi.stubGlobal('Image', class { complete = true; naturalWidth = 1; set src(value: string) { decoded.push(value); } });
     const ref = 'omc-asset:sha256:' + 'a'.repeat(64), url = 'omc://canvas/assets/' + 'a'.repeat(64);
@@ -95,4 +96,66 @@ it.each(['background-blur', 'BACKDROP_BLUR'])('retains backdrop source roots for
     t.editor.transact('Remove backdrop effect', doc => { doc.pagesById[t.editor.pageId].objects.glass.effects = []; });
     expect(t.view.element('r599')).toBeNull();
     expect(t.view.element('glass')).not.toBeNull();
+});
+it('prunes bounded child subtrees under a stroked ancestor and refreshes them without changing the root set', () => {
+    vi.spyOn(text, 'measureTextScene').mockReturnValue({ fragments: new Map(), textSizes: new Map() });
+    const t = fixture([
+        createShape('group', { id: 'board', width: 12000, height: 1000, strokes: [{ color: '#a855f7', width: 1 }] }),
+        createShape('frame', { id: 'near-frame', parentId: 'board', width: 200, height: 200, clipContent: true }),
+        createShape('text', { id: 'near-text', parentId: 'near-frame' }),
+        createShape('frame', { id: 'far-frame', parentId: 'board', x: 10000, width: 200, height: 200, clipContent: true }),
+        createShape('text', { id: 'far-text', parentId: 'far-frame', x: 10000 }),
+        // Loose text may overflow its box; it has no safe screen bound yet.
+        createShape('text', { id: 'unknown-text', parentId: 'board', x: 20000 })
+    ], {}, 'board');
+    const board = t.view.element('board');
+    expect(t.view.renderDiagnostics()).toMatchObject({ preparedRoots: 1, preparedObjects: 7 });
+    expect(t.view.element('near-text')).not.toBeNull(); expect(t.view.element('far-frame')).toBeNull();
+    expect(t.view.element('unknown-text')).not.toBeNull();
+    expect(t.view.sceneSvg()).toContain('data-shape-id="far-text"');
+    t.editor.setViewport({ ...t.editor.viewport, vbox: { x: 10000, y: 0, width: 800, height: 600 } });
+    expect(t.view.element('board')).toBe(board); expect(t.view.element('near-frame')).toBeNull();
+    expect(t.view.element('far-text')).not.toBeNull(); expect(t.view.element('r10')).not.toBeNull();
+    expect(t.view.element('r0')).toBeNull(); expect(t.view.renderDiagnostics().preparedRoots).toBe(1);
+    t.editor.transact('Edit culled nested child', doc => { doc.pagesById[t.editor.pageId].objects.r0.fills = [{ color: '#123456' }]; });
+    t.editor.setViewport({ ...t.editor.viewport, vbox: { x: 0, y: 0, width: 800, height: 600 } });
+    expect(t.view.element('r0')!.querySelector('path')!.getAttribute('fill')).toBe('#123456');
+    expect(t.view.element('far-frame')).toBeNull(); expect(t.view.element('near-text')).not.toBeNull();
+});
+it('pins a selected child and its ancestry without mounting unrelated offscreen siblings', () => {
+    const t = fixture([
+        createShape('group', { id: 'board', width: 30000, height: 1000, strokes: [{ color: '#a855f7', width: 1 }] }),
+        createShape('frame', { id: 'first', parentId: 'board', x: 10000, width: 200, height: 200, clipContent: true }),
+        createShape('rect', { id: 'first-child', parentId: 'first', x: 10000 }),
+        createShape('frame', { id: 'second', parentId: 'board', x: 20000, width: 200, height: 200, clipContent: true }),
+        createShape('rect', { id: 'second-child', parentId: 'second', x: 20000 })
+    ], {}, 'board');
+    t.editor.setSelection(['first-child']);
+    expect(t.view.element('first')).not.toBeNull(); expect(t.view.element('first-child')).not.toBeNull();
+    expect(t.view.element('second')).toBeNull(); expect(t.view.element('r100')).toBeNull();
+    t.editor.setSelection(['second-child']);
+    expect(t.view.element('first')).toBeNull(); expect(t.view.element('second-child')).not.toBeNull();
+    t.editor.setSelection(['board']);
+    expect(t.view.element('first-child')).not.toBeNull(); expect(t.view.element('r599')).not.toBeNull();
+    t.editor.setSelection([]);
+    expect(t.view.element('first')).toBeNull(); expect(t.view.element('second')).toBeNull();
+});
+it.each([
+    { effects: [{ type: 'dropShadow', offset: { x: -10000, y: 0 } }] },
+    { shadows: [{ offsetX: -10000, blur: 10 }] },
+    { blur: 10000 },
+    { isMaskGroup: true, maskType: 'alpha' },
+    { type: 'boolean', booleanOperation: 'subtract' }
+])('keeps sibling/filter dependencies together below an unbounded ancestor (%j)', dependency => {
+    const doc = createDocument(), objects = doc.pagesById[doc.pages[0]].objects;
+    for (let i = 0; i < 520; i++) objects[`r${i}`] = createShape('rect', { id: `r${i}`, x: 10000 });
+    objects.root.childIds = ['board'];
+    objects.board = createShape('group', { id: 'board', width: 12000, strokes: [{ width: 1 }], childIds: ['dependency'] });
+    objects.dependency = createShape('group', { id: 'dependency', parentId: 'board', childIds: ['first', 'far'], ...dependency });
+    objects.first = createShape('rect', { id: 'first', parentId: 'dependency', width: 100, height: 100 });
+    objects.far = createShape('rect', { id: 'far', parentId: 'dependency', x: 10000, width: 100, height: 100 });
+    const preparation = new ViewportPreparation();
+    preparation.update(objects, { x: 0, y: 0, width: 800, height: 600 });
+    expect(preparation.objects.first).toBe(objects.first);
+    expect(preparation.objects.far).toBe(objects.far);
 });
