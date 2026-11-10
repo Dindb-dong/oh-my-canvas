@@ -33,7 +33,7 @@ Do not disable TLS verification or publish an invitation for someone to test. As
 
 A malformed or oversized file is rejected before import. New files use `.omc` v2; v1 remains readable. Opening an older portable copy merges with newer local history rather than erasing it.
 
-A document or CRDT state is limited to 16 MiB; the file/wire envelope is limited to 24 MiB. Reduce embedded assets or duplicate a readable current document to start fresh history. A duplicate has a new document ID and is separate from the existing collaboration room.
+Ordinary documents/CRDT states are limited to 16 MiB; imported design libraries use a 256 MiB budget. File/wire envelopes are limited to 384 MiB. Large v3 portable files require the current app. Reduce embedded assets or duplicate a readable current document to start fresh history. A duplicate has a new document ID and is separate from the existing collaboration room.
 
 For recovery, keep the original file and its `.bak` before attempting manual changes. The store tries a valid backup and marks recovery. Export a separate portable copy after recovery. An unreadable file appears as a damaged document rather than breaking the whole library. Do not use Delete as a repair operation: it removes this device's primary and backup.
 

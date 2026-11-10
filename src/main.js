@@ -42,7 +42,7 @@ $('#document-tabs').onkeydown=event=>{
   const id=tabs[next].dataset.tab;void run(async()=>{await selectTab(id);document.querySelector(`[data-tab="${id}"]`)?.focus();})();
 };
 async function newCanvas(sample=false){await api.invoke('create',{title:sample?'Studio 01':'Untitled canvas',document:importCanvasJson(sample?sampleCanvas():blankCanvas()),focus:true});}
-async function importFile(){const file=await api.invoke('import');if(!file||file.opened)return;if(file.json)await api.invoke('create',{title:file.title,document:file.json.pagesById?file.json:importCanvasJson(file.json),focus:true});if(file.warnings?.length)toast('Imported with limitations: '+file.warnings.join(' '));}
+async function importFile(){const file=await api.invoke('import');if(!file)return;if(file.warnings?.length)toast('Imported with limitations: '+file.warnings.join(' '));if(file.opened)return;if(file.json)await api.invoke('create',{title:file.title,document:file.json.pagesById?file.json:importCanvasJson(file.json),focus:true});}
 function renderLibrary(){
   const query=$('#search').value.trim().toLocaleLowerCase();
   const docs=documents.filter(doc=>(section!=='starred'||(prefs.starred??[]).includes(doc.id))&&doc.title.toLocaleLowerCase().includes(query)).sort((a,b)=>$('#sort').value==='title'?a.title.localeCompare(b.title):(b.updatedAt??'').localeCompare(a.updatedAt??''));

@@ -1,3 +1,4 @@
+import {DESIGN_FILE_LIMIT} from '../core/capacity.mjs';
 import path from 'node:path';
 import {decodeFile,encodeFile} from '../core/storage.mjs';
 import {assertDocument,MAX_ENVELOPE_BYTES,MAX_DOCUMENT_BYTES} from '../core/document.mjs';
@@ -59,8 +60,8 @@ export function createWorkspaceTools({readDesignFile,manager,store,profile,sourc
       if((args.payload===undefined)===(args.filePath===undefined))throw error('bad_args','Supply exactly one of payload or filePath');
       const design=['fig','sketch'].includes(args.format);
       if(design&&!args.filePath)throw error('bad_args','Design imports require an explicit filePath');
-      const bytes=args.filePath?await readExplicitFile(args.filePath,{limit:design?32*1024*1024:MAX_ENVELOPE_BYTES,protectedDirectory:profile,signal}):Buffer.from(args.payload,'utf8');
-      if(bytes.length>(design?32*1024*1024:MAX_ENVELOPE_BYTES))throw error('bad_args','Document file exceeds 24 MiB');
+      const bytes=args.filePath?await readExplicitFile(args.filePath,{limit:design?DESIGN_FILE_LIMIT:MAX_ENVELOPE_BYTES,protectedDirectory:profile,signal}):Buffer.from(args.payload,'utf8');
+      if(bytes.length>(design?DESIGN_FILE_LIMIT:MAX_ENVELOPE_BYTES))throw error('bad_args',`Document file exceeds ${(design?DESIGN_FILE_LIMIT:MAX_ENVELOPE_BYTES)/1024/1024} MiB`);
       const raw=design?'':bytes.toString('utf8'),options={agent,focus:args.focus??false,signal};let entry,warnings=[];
       if(design){
         const result=await readDesignFile(bytes,args.format);warnings=result.warnings;validateImportedDocument(result.document);

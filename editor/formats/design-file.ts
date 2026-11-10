@@ -1,4 +1,5 @@
 /** Local design-file conversion. Run in the desktop import worker, never in the renderer. */
+import {createHash} from 'node:crypto';
 import {inflateRawSync,zstdDecompressSync} from 'node:zlib';
 import { unzipSync } from 'fflate';
 import { parseFigBinary, nodeId, resolveVectorNodePaths, type FigNode } from 'openfig-core';
@@ -9,8 +10,9 @@ import { parseSvgPath } from './svg';
 import {validateImportedDocument} from '../mcp/import-document';
 import { multiply, identity } from '../geometry';
 
-export const DESIGN_FILE_LIMIT = 32 * 1024 * 1024;
-const EXPANDED_LIMIT = 128 * 1024 * 1024;
+import {DESIGN_FILE_LIMIT,documentLimits} from '../../core/capacity.mjs';
+export {DESIGN_FILE_LIMIT} from '../../core/capacity.mjs';
+const EXPANDED_LIMIT = 512 * 1024 * 1024;
 const positionOrder = (a: FigNode, b: FigNode) => {const x=a.parentIndex?.position??'',y=b.parentIndex?.position??'';return x<y?-1:x>y?1:0;};
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 const finite = (value: any, fallback = 0): number => {
@@ -21,7 +23,7 @@ const finite = (value: any, fallback = 0): number => {
 function archive(bytes: Uint8Array) {
     let total = 0, count = 0;
     const files = unzipSync(bytes, { filter: entry => {
-        if (++count > 20000 || entry.originalSize > DESIGN_FILE_LIMIT || (total += entry.originalSize) > EXPANDED_LIMIT)
+        if (++count > 100000 || entry.originalSize > DESIGN_FILE_LIMIT || (total += entry.originalSize) > EXPANDED_LIMIT)
             throw Error('Design archive exceeds the expanded size or entry limit');
         if (entry.name.split('/').some(part => part === '..') || entry.name.startsWith('/') || entry.name.includes('\\'))
             throw Error('Invalid design archive path');
@@ -42,10 +44,21 @@ function imageSource(bytes: Uint8Array) {
 const rgba = (c: Data = {}) => `rgba(${Math.round(finite(c.r ?? c.red) * 255)},${Math.round(finite(c.g ?? c.green) * 255)},${Math.round(finite(c.b ?? c.blue) * 255)},${finite(c.a ?? c.alpha, 1)})`;
 
 export function importDesignFile(bytes: Uint8Array, format: string): { document: CanvasDocument; warnings: string[] } {
-    if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > DESIGN_FILE_LIMIT) throw Error('Design file exceeds 32 MiB or is empty');
+    if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > DESIGN_FILE_LIMIT) throw Error('Design file exceeds 256 MiB or is empty');
     if (!['fig', 'sketch'].includes(format)) throw Error('Unsupported design file format');
     const warnings = new Set<string>(), document = createDocument();
+    document.capacity='large';
     document.pages = []; document.pagesById = {};
+    const embedded = new Map<Uint8Array, string>();
+    const imageRef = (bytes: Uint8Array) => {
+        let id = embedded.get(bytes);
+        if (!id) {
+            id = 'design-' + createHash('sha256').update(bytes).digest('hex');
+            (document.assets ??= {})[id] = {id, name: id, kind: 'image', src: imageSource(bytes)};
+            embedded.set(bytes, id);
+        }
+        return {assetId: id};
+    };
     let count = 0;
     const warn = (message: string) => { if (warnings.size < 40) warnings.add(message); };
     const page = (name: string) => {
@@ -53,7 +66,7 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
         const p = createPage(name); document.pages.push(p.id); document.pagesById[p.id] = p; return p;
     };
     const add = (p: Page, parent: string, type: string, values: Data, matrix: Matrix) => {
-        if (++count > 20000) throw Error('Design file exceeds 20000 layers');
+        if (++count > 100000) throw Error('Design file exceeds 100000 layers');
         if (values.width < 0 || values.height < 0) throw Error('Invalid design-file dimensions');
         // Convert local transforms to world coordinates; the editor rotates around the shape center.
         const width = values.width, height = values.height;
@@ -84,14 +97,14 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
             expanded += (zstd ? zstdDecompressSync : inflateRawSync)(chunk, {maxOutputLength: EXPANDED_LIMIT - expanded}).length;
         }
         const fig = parseFigBinary(binary);
-        if (!Array.isArray(fig.nodes) || fig.nodes.length > 20000) throw Error('Figma file exceeds 20000 nodes');
+        if (!Array.isArray(fig.nodes) || fig.nodes.length > 100000) throw Error('Figma file exceeds 100000 nodes');
         const images = new Map(Object.entries(files ?? {}).filter(([name]) => name.startsWith('images/')).map(([name, data]) => [name.slice(7), data]));
         const paints = (list: Data[] = []): Data[] => list.filter(p => p.visible !== false).flatMap<Data>(p => {
             if (p.type === 'SOLID') return [{ color: rgba(p.color), opacity: finite(p.opacity, 1) }];
             if (p.type === 'IMAGE') {
                 const hash = p.image?.hash, key = typeof hash === 'string' ? hash : hash ? Array.from(hash as Uint8Array).map(b => b.toString(16).padStart(2, '0')).join('') : '';
                 const data = images.get(key);
-                if (data) return [{ image: { src: imageSource(data) }, opacity: finite(p.opacity, 1) }];
+                if (data) return [{ image: imageRef(data), opacity: finite(p.opacity, 1) }];
                 warn('An embedded Figma image is missing.'); return [];
             }
             warn(`Unsupported Figma paint: ${p.type}`); return [];
@@ -148,12 +161,12 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
             if (!files[key]) throw Error(`Missing Sketch page: ${key}`);
             const p = JSON.parse(text(files[key]));
             const stack = [p]; let scanned = 0;
-            while (stack.length) { const n = stack.pop()!; if (++scanned > 20000) throw Error('Sketch page exceeds 20000 layers'); if (n._class === 'symbolMaster') symbols.set(n.symbolID, n); stack.push(...n.layers ?? []); }
+            while (stack.length) { const n = stack.pop()!; if (++scanned > 100000) throw Error('Sketch page exceeds 100000 layers'); if (n._class === 'symbolMaster') symbols.set(n.symbolID, n); stack.push(...n.layers ?? []); }
             return p;
         });
         const paints = (list: Data[] = []): Data[] => list.filter(p => p.isEnabled !== false).flatMap<Data>(p => {
             if ((p.fillType ?? 0) === 0) return [{ color: rgba(p.color), opacity: finite(p.contextSettings?.opacity, 1) }];
-            if (p.fillType === 4 && p.image?._ref && files[p.image._ref]) return [{ image: { src: imageSource(files[p.image._ref]) } }];
+            if (p.fillType === 4 && p.image?._ref && files[p.image._ref]) return [{ image: imageRef(files[p.image._ref]) }];
             warn(`Unsupported Sketch paint: ${p.fillType}`); return [];
         });
         const point = (value: string, width: number, height: number) => {
@@ -179,7 +192,7 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
             }
             if (type === 'image') {
                 const data = files[n.image?._ref];
-                if (data) values.image = { src: imageSource(data), width, height };
+                if (data) values.image = { ...imageRef(data), width, height };
                 else throw Error('Missing embedded Sketch bitmap');
                 values.fills = [];
             }
@@ -212,6 +225,6 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
     assertFiniteDocument(document);
     document.extra = { ...document.extra, importWarnings: [...warnings], importedFrom: format };
     validateImportedDocument(document);
-    if (Buffer.byteLength(JSON.stringify(document)) > 16 * 1024 * 1024) throw Error('Converted design exceeds the 16 MiB canvas limit');
+    if (Buffer.byteLength(JSON.stringify(document)) > documentLimits(document).bytes) throw Error('Converted design exceeds the 256 MiB canvas limit');
     return { document, warnings: [...warnings] };
 }

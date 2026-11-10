@@ -1,3 +1,4 @@
+import {imageSource} from './assets';
 import type { Data, EditorStore, Operation } from '../contracts';
 import { clone, isEditable } from '../document';
 
@@ -7,7 +8,7 @@ export function createImageService(editor:EditorStore, options:{removeBackground
     const lifetime=new AbortController();
     const imageShape=(id:string)=>{
         const shape=editor.page.objects[id];
-        if(!shape||shape.type!=='image'||typeof shape.image?.src!=='string')throw Error('Select a raster image');
+        if(!shape||shape.type!=='image'||!imageSource(shape.image,editor.doc.assets))throw Error('Select a raster image');
         if(!isEditable(editor.page,id))throw Error('The image or its parent is locked');
         return shape;
     };
@@ -23,7 +24,7 @@ export function createImageService(editor:EditorStore, options:{removeBackground
             if(editor.activeSession||editor.inTransaction)throw Error('Finish the current edit first');
             busy=true;
             try {
-                const result=await options.removeBackground(original.src,activeSignal);
+                const result=await options.removeBackground(imageSource(original,editor.doc.assets),activeSignal);
                 activeSignal.throwIfAborted();
                 if(editor.doc!==snapshot||editor.pageId!==pageId||editor.activeSession||editor.inTransaction)throw Error('The document changed during background removal. Please retry.');
                 imageShape(id);

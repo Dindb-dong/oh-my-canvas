@@ -1,3 +1,4 @@
+import {DESIGN_FILE_LIMIT} from '../core/capacity.mjs';
 import {readDesignFile} from './design-import.mjs';
 import {readExplicitFile} from './file-transfer.mjs';
 import {createFileDialogs} from './file-dialogs.mjs';
@@ -172,7 +173,7 @@ app.whenReady().then(async()=>{
   async function importFile(){
     const result=await fileDialogs.open({title:'Open canvas',filters:[{name:'Canvas documents',extensions:['omc','json','fig','sketch']}],properties:['openFile']});if(result.canceled)return null;
     const extension=path.extname(result.filePaths[0]).slice(1).toLowerCase();
-    if(['fig','sketch'].includes(extension)){const resultData=await readDesignFile(await readExplicitFile(result.filePaths[0],{limit:32*1024*1024}),extension);return {json:resultData.document,warnings:resultData.warnings,title:path.basename(result.filePaths[0],path.extname(result.filePaths[0]))};}
+    if(['fig','sketch'].includes(extension)){const resultData=await readDesignFile(await readExplicitFile(result.filePaths[0],{limit:DESIGN_FILE_LIMIT}),extension);await manager.create(path.basename(result.filePaths[0],path.extname(result.filePaths[0])),resultData.document,{focus:true});return {opened:true,warnings:resultData.warnings};}
     const stat=await fs.stat(result.filePaths[0]);if(stat.size>MAX_ENVELOPE_BYTES)throw Error('Document file exceeds 24 MiB');
     const raw=await fs.readFile(result.filePaths[0],'utf8');
     if(!result.filePaths[0].endsWith('.omc'))return {json:JSON.parse(raw),title:path.basename(result.filePaths[0],'.json')};

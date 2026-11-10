@@ -1,3 +1,5 @@
+import {referencedAssets} from '../images/assets';
+import {DESIGN_FILE_LIMIT} from '../../core/capacity.mjs';
 import type { Data, EditorServices, Point, Shape } from "../contracts";
 import { createShape, topLevelIds, descendants } from "../document";
 import { moveShape, shapeBounds, unionBounds } from "../geometry";
@@ -22,6 +24,8 @@ export function createClipboard(stage: HTMLElement, services: EditorServices, op
         return {
             kind: "oh-my-canvas/shapes",
             version: 1,
+            assets: referencedAssets(roots.flatMap(id=>descendants(editor.page,id,true)),editor.doc.assets),
+            capacity:editor.doc.capacity,
             roots,
             shapes: roots.flatMap(id => descendants(editor.page, id, true)).map(clone)
         };
@@ -64,11 +68,11 @@ export function createClipboard(stage: HTMLElement, services: EditorServices, op
     }
     async function importFiles(files: File[], point: Point) {
         const pageId = editor.pageId, shapes: Shape[] = [], roots: string[] = [], assets: Data[] = [], fontFaces: Data[] = [];
-        let offset = 0;
+        let offset = 0,large=false;
         const warnings: string[] = [];
         for (const file of files) {
             const designFormat = /\.(fig|sketch)$/i.exec(file.name)?.[1].toLowerCase();
-            if (designFormat && file.size > 32 * 1024 * 1024) throw Error('Design file exceeds 32 MiB');
+            if (designFormat && file.size > DESIGN_FILE_LIMIT) throw Error('Design file exceeds 256 MiB');
             const src = designFormat ? '' : await dataUrl(file);
             if (file.type.includes("font") || /\.(woff2?|ttf|otf)$/i.test(file.name)) {
                 const family = file.name.replace(/\.[^.]+$/, "");
@@ -92,7 +96,8 @@ export function createClipboard(stage: HTMLElement, services: EditorServices, op
             if (designFormat) {
                 if (!services.formats?.importDesignFile) throw Error('Design file import requires the desktop app');
                 const result = await services.formats.importDesignFile(new Uint8Array(await file.arrayBuffer()), designFormat);
-                const document = result.document;
+                const document = result.document;large ||= document.capacity==='large';
+                assets.push(...Object.values(document.assets??{}) as Data[]);
                 group = {shapes: [], roots: []};
                 for (const pageId of document.pages) {
                     const page = document.pagesById[pageId];
@@ -185,7 +190,8 @@ export function createClipboard(stage: HTMLElement, services: EditorServices, op
                 throw Error("The page changed while fonts were loading. Place the files again.");
             if (shapes.length && typeof services.commands.pastePrepared !== "function")
                 throw Error("Prepared file insertion is unavailable");
-            editor.transact("Place files", () => {
+            editor.transact("Place files", doc => {
+                if(large)doc.capacity="large";
                 for (const asset of assets)
                     services.assets?.addFile?.(asset);
                 if (shapes.length)

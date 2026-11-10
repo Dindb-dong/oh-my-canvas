@@ -3,6 +3,8 @@ import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { Replica } from './replica.mjs';
 import {MAX_ENVELOPE_BYTES} from './document.mjs';
+import {MAX_STATE_BYTES,MAX_LARGE_BYTES} from './capacity.mjs';
+import {gzipSync,gunzipSync} from 'node:zlib';
 export const validId = id => typeof id === 'string' && /^[a-f0-9-]{36}$/.test(id);
 function assertMetadata(record) {
   if (!record || !validId(record.id) || typeof record.title !== 'string' || !record.title.trim() || record.title.length > 1024) throw Error('Invalid canvas metadata: title or ID');
@@ -23,21 +25,28 @@ export async function atomicWrite(file, data, {backup=true}={}) {
 }
 export function encodeFile({ id, title, replica, createdAt, thumbnail }) {
   assertMetadata({id,title,createdAt,thumbnail});
-  const state = Buffer.from(replica.state).toString('base64');
-  const data=JSON.stringify({ format: 'oh-my-canvas', version: 2, id, title, createdAt, updatedAt: new Date().toISOString(), thumbnail, sha256: createHash('sha256').update(state).digest('hex'), state });
-  if(Buffer.byteLength(data)>MAX_ENVELOPE_BYTES)throw Error('Portable file exceeds 24 MiB');return data;
+  const bytes=replica.state,version=bytes.byteLength>MAX_STATE_BYTES?3:2;
+  const state = Buffer.from(version===3?gzipSync(bytes):bytes).toString('base64');
+  const data=JSON.stringify({ format: 'oh-my-canvas', version, id, title, createdAt, updatedAt: new Date().toISOString(), thumbnail, sha256: createHash('sha256').update(state).digest('hex'), state });
+  if(Buffer.byteLength(data)>MAX_ENVELOPE_BYTES)throw Error('Portable file exceeds 384 MiB');return data;
+}
+function envelope(data) {
+  if (Buffer.byteLength(data) > MAX_ENVELOPE_BYTES) throw Error('File exceeds 384 MiB');
+  const f = JSON.parse(data);
+  if (!f || f.format !== 'oh-my-canvas' || ![1,2,3].includes(f.version) || !validId(f.id) || typeof f.state !== 'string' || createHash('sha256').update(f.state).digest('hex') !== f.sha256) throw Error('Invalid or damaged Oh My Canvas file');
+  assertMetadata(f);return f;
 }
 export function decodeFile(data) {
-  if (Buffer.byteLength(data) > MAX_ENVELOPE_BYTES) throw Error('File exceeds 24 MiB');
-  const f = JSON.parse(data);
-  if (!f || f.format !== 'oh-my-canvas' || ![1,2].includes(f.version) || !validId(f.id) || typeof f.state !== 'string' || createHash('sha256').update(f.state).digest('hex') !== f.sha256) throw Error('Invalid or damaged Oh My Canvas file');
-  assertMetadata(f);
-  const replica = new Replica({ state: Buffer.from(f.state, 'base64') });
+  const f=envelope(data),encoded=Buffer.from(f.state,'base64');
+  const state=f.version===3?gunzipSync(encoded,{maxOutputLength:MAX_LARGE_BYTES}):encoded;
+  // Encoded state is transport data; retaining its string duplicates hundreds of MiB for large libraries.
+  delete f.state;data='';
+  const replica = new Replica({ state });
   replica.document;
   return { ...f, replica };
 }
 export class Store {
-  constructor(dir) { this.dir = dir; this.pending = new Map(); this.saved = new Map(); }
+  constructor(dir) { this.dir = dir; this.pending = new Map(); this.saved = new Map(); this.listed = new Map(); this.listing = null; }
   file(id) { if (!validId(id)) throw Error('Invalid document ID'); return path.join(this.dir, `${id}.omc`); }
   async load(id) {
     const file = this.file(id);
@@ -62,16 +71,30 @@ export class Store {
     try { await writing;record.recovered=false; } finally { if (this.pending.get(id) === writing) this.pending.delete(id); }
   }
   async list() {
+    if(this.listing)return this.listing;
+    this.listing=this.readList();
+    try{return await this.listing;}finally{this.listing=null;}
+  }
+  async readList() {
     await fs.mkdir(this.dir, { recursive: true });
     const items = [];
     for (const name of await fs.readdir(this.dir)) {
       if (!name.endsWith('.omc') || !validId(name.slice(0,-4))) continue;
       try {
-        const f = await this.load(name.slice(0,-4));
-        items.push({ id: f.id, title: f.title, updatedAt: f.updatedAt, createdAt: f.createdAt, thumbnail: f.thumbnail, recovered: !!f.recovered }); f.replica.destroy();
+        const id=name.slice(0,-4),file=this.file(id),stat=await fs.stat(file),signature=stat.mtimeMs+':'+stat.size,large=stat.size>24*1024*1024;
+        const cached=this.listed.get(id);if(cached?.signature===signature){items.push(cached.metadata);continue;}
+        let f;
+        if(large){
+          // A library listing verifies its envelope without instantiating another full CRDT replica.
+          try{f=envelope(await fs.readFile(file,'utf8'));}
+          catch(original){try{f=envelope(await fs.readFile(file+'.bak','utf8'));f.recovered=true;}catch{throw original;}}
+        }else f=await this.load(id);
+        const metadata={ id: f.id, title: f.title, updatedAt: f.updatedAt, createdAt: f.createdAt, thumbnail: f.thumbnail, recovered: !!f.recovered };
+        items.push(metadata);f.replica?.destroy();delete f.state;
+        if(!f.recovered)this.listed.set(id,{signature,metadata});
       } catch { items.push({ id: name.slice(0,-4), title: 'Damaged document', damaged: true }); }
     }
     return items.sort((a,b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
   }
-  async remove(id) { await this.pending.get(id); this.saved.delete(id); await fs.rm(this.file(id), {force:true}); await fs.rm(`${this.file(id)}.bak`, {force:true}); }
+  async remove(id) { await this.pending.get(id); this.listed.delete(id); this.saved.delete(id); await fs.rm(this.file(id), {force:true}); await fs.rm(`${this.file(id)}.bak`, {force:true}); }
 }

@@ -89,6 +89,9 @@ export function importCanvasJson(input: any, options: Data = {}): CanvasDocument
     for (const key of ['pages', 'editorPages', 'editorComponents', 'editorStyles', 'editorLibraries', 'editorRootLayers'])
         delete doc.legacy[key];
     doc.extra = copy(raw.extra ?? {});
+    doc.assets = copy(raw.assets ?? {});
+    doc.capacity = raw.capacity;
+    delete doc.legacy.assets;delete doc.legacy.capacity;
     doc.components = copy(raw.editorComponents ?? {});
     doc.styles = copy(raw.editorStyles ?? {});
     doc.libraries = copy(raw.editorLibraries ?? {});
@@ -306,5 +309,5 @@ export function exportCanvasJson(doc: CanvasDocument, options: Data = {}): Data 
     const components = copy(doc.components ?? {});
     for (const component of Object.values(components))
         delete component.mainPageId;
-    return { ...copy(doc.legacy ?? {}), width: boards[0]?.width ?? 1000, height: boards[0]?.height ?? 1000, pages: boards, editorPages: doc.pages.map(id => { const { objects, ...metadata } = doc.pagesById[id]; return copy(metadata); }), editorComponents: components, editorStyles: copy(doc.styles ?? {}), editorLibraries: copy(doc.libraries ?? {}), editorRootLayers: rootLayers, extra: copy(doc.extra ?? {}) };
+    return { ...copy(doc.legacy ?? {}), ...(doc.assets?{assets:copy(doc.assets)}:{}), ...(doc.capacity?{capacity:doc.capacity}:{}), width: boards[0]?.width ?? 1000, height: boards[0]?.height ?? 1000, pages: boards, editorPages: doc.pages.map(id => { const { objects, ...metadata } = doc.pagesById[id]; return copy(metadata); }), editorComponents: components, editorStyles: copy(doc.styles ?? {}), editorLibraries: copy(doc.libraries ?? {}), editorRootLayers: rootLayers, extra: copy(doc.extra ?? {}) };
 }

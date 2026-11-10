@@ -1,3 +1,4 @@
+import {imageSource as assetSource} from '../images/assets';
 import type { Data, EditorStore, Measured, Rect, RenderView, Shape } from '../contracts';
 import { SceneWriter, boundsOf, textHTML, num, shapePath, type TextFragment } from './scene';
 export { shapePath, boundsOf, textHTML, SceneWriter } from './scene';
@@ -119,14 +120,43 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         const root = editor.page.objects.root;
         return root?.childIds ?? Object.values(editor.page.objects).filter(s => s.parentId === 'root' && s.id !== 'root').map(s => s.id);
     }
+    let visibleSource: Record<string, Shape> | undefined, visible: Shape[] = [];
+    function visibleShapes() {
+        const objects = editor.page.objects;
+        if (visibleSource === objects) return visible;
+        visibleSource = objects; visible = [];
+        const seen = new Set<string>(), stack = [...roots()].reverse();
+        while (stack.length) {
+            const id = stack.pop()!, shape = objects[id];
+            if (!shape || seen.has(id)) continue;
+            seen.add(id);
+            if (shape.hidden || shape.visible === false) continue;
+            visible.push(shape); stack.push(...[...shape.childIds ?? []].reverse());
+        }
+        return visible;
+    }
+    let previousAssets=editor.doc.assets,assetRevision=0;
+    const assetUrls=new Map<string,{src:string;url:string}>();
+    function displaySource(image: Data) {
+        const src=assetSource(image,editor.doc.assets);
+        if (!image.assetId || !src.startsWith('data:')) return src;
+        const old=assetUrls.get(image.assetId);
+        if(old?.src===src)return old.url;
+        if(old)URL.revokeObjectURL(old.url);
+        const comma=src.indexOf(','),decoded=atob(src.slice(comma+1)),bytes=new Uint8Array(decoded.length);
+        for(let i=0;i<decoded.length;i++)bytes[i]=decoded.charCodeAt(i);
+        const url=URL.createObjectURL(new Blob([bytes],{type:src.slice(5,src.indexOf(';'))}));
+        assetUrls.set(image.assetId,{src,url});return url;
+    }
     function imageSource(s: Shape) {
-        return [s.image?.src, ...(s.fills ?? []).filter((p: Data) => p.type === 'image' || p.image).map((p: Data) => p.image?.src ?? p.image?.id ?? p.src)].filter(Boolean) as string[];
+        return [s.image ? displaySource(s.image) : '', ...(s.fills ?? []).filter((p: Data) => p.type === 'image' || p.image).map((p: Data) => displaySource(p.image ?? p))].filter(Boolean);
     }
     function discoverImages() {
+        if(previousAssets!==editor.doc.assets){previousAssets=editor.doc.assets;assetRevision++;previousImages=undefined;images.clear();}
         if (previousImages === editor.page.objects) return;
         previousImages = editor.page.objects;
         const active = new Set<string>();
-        for (const s of Object.values(editor.page.objects))
+        for (const s of visibleShapes())
             for (const src of imageSource(s)) {
                 active.add(src);
                 if (images.has(src))
@@ -155,13 +185,14 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 images.set(src, record);
             }
         for (const src of images.keys()) if (!active.has(src)) images.delete(src);
+        for(const [id,entry] of assetUrls)if(!active.has(entry.url)){URL.revokeObjectURL(entry.url);assetUrls.delete(id);}
     }
     let fontRevision = 0, measuredMetricRevision = -1, measuredFontRevision = -1;
     const measuredText = new Map<string, Shape>();
     function measureText() {
         const all = measuredMetricRevision !== textMetricRevision() || measuredFontRevision !== fontRevision;
         const changed: Record<string, Shape> = {}, live = new Set<string>();
-        for (const shape of Object.values(editor.page.objects)) {
+        for (const shape of visibleShapes()) {
             if (shape.type !== 'text') continue;
             live.add(shape.id);
             if (all || measuredText.get(shape.id) !== shape) changed[shape.id] = shape;
@@ -219,7 +250,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         renderedOutlines = !!editor.showOutlines;
         const vp = editor.viewport, bounds = { x: vp.vbox.x, y: vp.vbox.y, width: vp.vport.width / vp.zoom, height: vp.vport.height / vp.zoom };
         const svgStart = performance.now();
-        const objects = resolvedObjects(), key = `${editor.pageId}:${fontRevision}:${measuredMetricRevision}:${renderedOutlines}:${renderedOutlines ? 1 / vp.zoom : ''}`;
+        const objects = resolvedObjects(), key = `${editor.pageId}:${assetRevision}:${fontRevision}:${measuredMetricRevision}:${renderedOutlines}:${renderedOutlines ? 1 / vp.zoom : ''}`;
         // Backdrop blur reads earlier siblings, so its invalidation is deliberately
         // scene-wide until dependency-aware compositing has its own parity coverage.
         const backdrop = Object.values(objects).some(shape => !shape.backgroundBlurHidden && num(shape.backgroundBlur) !== 0);
@@ -235,7 +266,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             if (entry) prior.set(id, entry);
         }
         if (reset) nodeCache.clear(); else nodeCache.invalidate(changes.affected);
-        const writer = new SceneWriter(objects, { textFragments: fragments, typography: options, outlines: renderedOutlines, outlineWidth: 1 / vp.zoom, idPrefix: scenePrefix, stableIds: true, ...(!backdrop ? { nodeCache } : {}) });
+        const writer = new SceneWriter(objects, { assets:editor.doc.assets,imageSource:displaySource,textFragments: fragments, typography: options, outlines: renderedOutlines, outlineWidth: 1 / vp.zoom, idPrefix: scenePrefix, stableIds: true, ...(!backdrop ? { nodeCache } : {}) });
         const svg = scene.firstElementChild as SVGSVGElement | null;
         const maskAncestor = (id: string) => {
             const seen = new Set<string>();
@@ -431,7 +462,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             document.body.append(holder);
             try {
                 const measured = measureTextScene(objects, holder, options), bounds = boundsOf([objects[id]]);
-                return new SceneWriter(objects, { textFragments: measured.fragments, typography: options, idPrefix: 'omc-thumb-' + (++thumbnailNamespace) }).svg([id], bounds);
+                return new SceneWriter(objects, { assets:editor.doc.assets,textFragments: measured.fragments, typography: options, idPrefix: 'omc-thumb-' + (++thumbnailNamespace) }).svg([id], bounds);
             }
             finally {
                 holder.remove();
@@ -483,7 +514,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             flushPending();
             const chosen = ids?.length ? ids : roots();
             const bounds = opts.bounds ?? boundsOf(chosen.map(id => resolvedObjects()[id]).filter(Boolean));
-            return new SceneWriter(resolvedObjects(), { ...opts, exporting: true, textFragments: fragments }).svg(chosen, bounds);
+            return new SceneWriter(resolvedObjects(), { assets:editor.doc.assets,...opts, exporting: true, textFragments: fragments }).svg(chosen, bounds);
         }, bounds(ids: string[]) {
             return boundsOf(ids.map(id => resolvedObjects()[id]).filter(Boolean));
         }, projectedShape(id: string) {
@@ -522,7 +553,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             const blob = await rasterizeSVG(source, b, scale, 'image/png');
             const data = await blobBase64(blob);
             return { data, mimeType: 'image/png', slices };
-        }, destroy() {
+        }, imageCacheDiagnostics(){return {loadedImages:images.size,assetURLs:assetUrls.size};}, destroy() {
             destroyed = true;
             cancelScheduled?.(); cancelScheduled = undefined; pendingRender = false;
             off();
@@ -531,6 +562,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             renderListeners.clear();
             thumbnailCache.clear();
             images.clear();
+            for(const {url} of assetUrls.values())URL.revokeObjectURL(url);assetUrls.clear();
             booleans.clear();
             booleanProjections.clear();
             fragments.clear();

@@ -1,3 +1,4 @@
+import {DESIGN_FILE_LIMIT} from '../core/capacity.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -26,7 +27,8 @@ export function createFileDialogs(dialog) {
         if (!formats[kind].includes(path.extname(file).slice(1).toLowerCase())) throw Error('Unsupported asset format');
         const stat = await fs.stat(file);
         total += stat.size;
-        if (!stat.isFile() || stat.size > 32 * 1024 * 1024 || total > 128 * 1024 * 1024) throw Error('Assets exceed the size limit (32 MiB per file, 128 MiB total)');
+        const limit=/\.(fig|sketch)$/i.test(file)?DESIGN_FILE_LIMIT:32*1024*1024;
+        if (!stat.isFile() || stat.size > limit || total > DESIGN_FILE_LIMIT) throw Error('Assets exceed the size limit (256 MiB per design file, 32 MiB per other file, 256 MiB total)');
         const bytes = await fs.readFile(file);
         if (bytes.length !== stat.size) throw Error('Asset changed while reading. Please select it again.');
         files.push({name:path.basename(file), bytes});
