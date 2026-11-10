@@ -53,6 +53,14 @@ Undo/Redo stacks are session-local and are not restored when a document is reope
 
 Do not use another participant's local replica as your only backup. Deleting a document removes this computer's primary and backup after confirmation; other participants' replicas remain.
 
+## Import design files
+
+Open `.fig` (Figma Design) or `.sketch` (Sketch 43+) using **Import**, or place them through the editor's asset picker or drag and drop. Document import retains all pages; placement inserts the layers of every page into the current page. MCP `import_document` accepts `format:"fig"` or `format:"sketch"` with an explicit absolute `filePath`.
+
+Conversion runs locally in a bounded desktop worker. Frames/groups, basic shapes, vector paths, text and embedded PNG/JPEG/GIF/WebP images remain editable. File input is limited to 32 MiB, expanded archives to 128 MiB, and converted canvases to the existing document limits below. Files exceeding these limits are rejected without modifying the current canvas.
+
+Compatibility is partial: component/symbol links and overrides, variables, mixed text formatting, effects, unsupported paints, masks and complex transforms may differ. Import warnings are shown and saved in document metadata. Auto layout uses saved positions. Install the original fonts for matching typography. Pixel-perfect parity with a particular source file requires testing that actual file; general format support does not establish it.
+
 ## Export formats
 
 | Route | Output |

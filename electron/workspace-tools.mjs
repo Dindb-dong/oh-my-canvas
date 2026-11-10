@@ -7,7 +7,7 @@ import {readExplicitFile,writeExplicitFile,MAX_INLINE_BYTES,MAX_EXPORT_BYTES} fr
 
 export const DESKTOP_TOOL_NAMES=new Set(['workspace','preferences','save_document','delete_document','import_document','export_document','import_resource','collaboration']);
 const error=(code,message)=>Object.assign(Error(message),{code});
-export function createWorkspaceTools({manager,store,profile,sourceRoot,importCanvasJson,exportCanvasJson,validateImportedDocument,runtimeRequest,preferences,notifyPreferences,connection,about,windowState,capabilities,sampleColor,requestQuit,editorTool,join,host,stopSession,checkBusy,context}){
+export function createWorkspaceTools({readDesignFile,manager,store,profile,sourceRoot,importCanvasJson,exportCanvasJson,validateImportedDocument,runtimeRequest,preferences,notifyPreferences,connection,about,windowState,capabilities,sampleColor,requestQuit,editorTool,join,host,stopSession,checkBusy,context}){
   async function targeted(id,signal){
     if(!id)throw error('document_required','An explicit documentId is required');
     const entry=await manager.load(id);signal?.throwIfAborted();return entry;
@@ -57,10 +57,15 @@ export function createWorkspaceTools({manager,store,profile,sourceRoot,importCan
     }
     if(call.name==='import_document'){
       if((args.payload===undefined)===(args.filePath===undefined))throw error('bad_args','Supply exactly one of payload or filePath');
-      const bytes=args.filePath?await readExplicitFile(args.filePath,{limit:MAX_ENVELOPE_BYTES,protectedDirectory:profile,signal}):Buffer.from(args.payload,'utf8');
-      if(bytes.length>MAX_ENVELOPE_BYTES)throw error('bad_args','Document file exceeds 24 MiB');
-      const raw=bytes.toString('utf8'),options={agent,focus:args.focus??false,signal};let entry;
-      if(args.format==='json'){
+      const design=['fig','sketch'].includes(args.format);
+      if(design&&!args.filePath)throw error('bad_args','Design imports require an explicit filePath');
+      const bytes=args.filePath?await readExplicitFile(args.filePath,{limit:design?32*1024*1024:MAX_ENVELOPE_BYTES,protectedDirectory:profile,signal}):Buffer.from(args.payload,'utf8');
+      if(bytes.length>(design?32*1024*1024:MAX_ENVELOPE_BYTES))throw error('bad_args','Document file exceeds 24 MiB');
+      const raw=design?'':bytes.toString('utf8'),options={agent,focus:args.focus??false,signal};let entry,warnings=[];
+      if(design){
+        const result=await readDesignFile(bytes,args.format);warnings=result.warnings;validateImportedDocument(result.document);
+        entry=await manager.create(args.title??path.basename(args.filePath,path.extname(args.filePath)),assertDocument(result.document),options);
+      }else if(args.format==='json'){
         const input=JSON.parse(raw);validateImportedDocument(input);const document=assertDocument(importCanvasJson(input));validateImportedDocument(document);
         entry=await manager.create(args.title??(args.filePath?path.basename(args.filePath,path.extname(args.filePath)):'Imported canvas'),document,options);
       }else{
@@ -81,7 +86,7 @@ export function createWorkspaceTools({manager,store,profile,sourceRoot,importCan
           try{await manager.save(entry);await manager.open(entry.record.id,options);}finally{entry.holds--;}
         }catch(e){if(!entry)record.replica.destroy();else if(!entry.runtime&&!entry.tabOpen&&!entry.agents.size&&!entry.collab)manager.discard(entry);throw e;}
       }
-      return {ok:true,documentId:entry.record.id,document:{id:entry.record.id,title:entry.record.title},context:await context(entry,agent,signal)};
+      return {ok:true,documentId:entry.record.id,document:{id:entry.record.id,title:entry.record.title},...(warnings.length?{warnings}:{}),context:await context(entry,agent,signal)};
     }
     if(call.name==='export_document')return withEntry(args.id,signal,async entry=>{
       await checkBusy(entry,agent,signal);if(entry.runtime)await request(entry,'flush',{guardBusy:true});signal?.throwIfAborted();await manager.save(entry);

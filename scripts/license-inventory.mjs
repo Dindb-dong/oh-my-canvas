@@ -10,6 +10,8 @@ const exists = async file => !!await stat(file).catch(()=>null);
 const noticeName = name => /^(licen[sc]e|copying|notice)([.-]|$)/i.test(name);
 // Retain upstream notices omitted by npm packages and their embedded decoders.
 const supplementalNotices = new Map([
+  ['node_modules/openfig-core',{version:'0.4.1',files:['docs/licensing/openfig-core-NOTICE.txt']}],
+  ['node_modules/kiwi-schema',{version:'0.5.0',files:['docs/licensing/kiwi-schema-NOTICE.txt']}],
   ['node_modules/brotli',{version:'1.3.3',files:['docs/licensing/brotli-NOTICE.txt']}],
   ['node_modules/fontkit',{version:'2.0.4',files:['docs/licensing/fontkit-NOTICE.txt']}],
   ['node_modules/dfa',{version:'1.2.0',files:['docs/licensing/dfa-NOTICE.txt']}],

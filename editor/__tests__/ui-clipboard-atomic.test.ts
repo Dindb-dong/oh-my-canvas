@@ -105,3 +105,24 @@ describe("prepared native file placement atomicity", () => {
         expect(commits).toBe(0);
     });
 });
+
+
+describe("design file placement", () => {
+    it("places every imported page in one undoable edit", async () => {
+        const t = setup(), before = structuredClone(t.editor.doc);
+        const one = createShape("rect", {id:"design-one", name:"First page", parentId:"root", width:20, height:10});
+        const two = createShape("rect", {id:"design-two", name:"Second page", parentId:"root", x:50, width:20, height:10});
+        t.services.formats.importDesignFile = async () => ({document:{pages:["one","two"],pagesById:{one:{objects:{root:{id:"root",childIds:[one.id]},[one.id]:one}},two:{objects:{root:{id:"root",childIds:[two.id]},[two.id]:two}}}},warnings:[]});
+        const file = new File(["binary"], "pages.FIG");Object.defineProperty(file,"arrayBuffer",{value:async()=>new Uint8Array([1,2,3]).buffer});
+        await t.clipboard.importFiles([file],{x:100,y:200});
+        expect(Object.values(t.editor.page.objects).filter(s=>s.id!=="root").map(s=>s.name)).toEqual(["First page","Second page"]);
+        expect(t.editor.undoStep()).toBe(true);expect(t.editor.doc).toEqual(before);
+    });
+    it("leaves the document unchanged when decoding fails", async () => {
+        const t = setup(), before = structuredClone(t.editor.doc);
+        t.services.formats.importDesignFile = async () => {throw Error("Invalid design archive");};
+        const file = new File(["binary"], "invalid.sketch");Object.defineProperty(file,"arrayBuffer",{value:async()=>new Uint8Array([1]).buffer});
+        await expect(t.clipboard.importFiles([file],{x:0,y:0})).rejects.toThrow("Invalid design archive");
+        expect(t.editor.doc).toEqual(before);
+    });
+});

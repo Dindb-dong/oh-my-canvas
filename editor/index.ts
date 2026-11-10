@@ -77,7 +77,7 @@ export async function mountEditor(root:HTMLElement,options:MountOptions) {
       await view.settled();
       return outlineText(shape,view.textFragments(shape.id),fonts.sources(),operation);
     },
-    formats:{importCanvasJson,exportCanvasJson,importSvg,importHtml,exportHtml},
+    formats:{importDesignFile:options.importDesignFile,importCanvasJson,exportCanvasJson,importSvg,importHtml,exportHtml},
     boolean:(operation:string,shapes:any[])=>combinePaths(shapes,operation as any,{wasmUrl:options.wasmUrl,objects:editor.page.objects}),
     combinePaths:(shapes:any[],operation:string)=>combinePaths(shapes,operation as any,{wasmUrl:options.wasmUrl,objects:editor.page.objects}),
   };

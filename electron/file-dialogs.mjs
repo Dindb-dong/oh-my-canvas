@@ -15,7 +15,7 @@ export function createFileDialogs(dialog) {
     open: options => choose('showOpenDialog', options),
     save: options => choose('showSaveDialog', options),
     async pick({kind, multiple = false} = {}) {
-      const formats = {image:['png','jpg','jpeg','gif','webp','avif','bmp','svg','ico'], library:['json'], assets:['png','jpg','jpeg','gif','webp','avif','bmp','svg','ico','woff','woff2','ttf','otf','json']};
+      const formats = {image:['png','jpg','jpeg','gif','webp','avif','bmp','svg','ico'], library:['json'], assets:['png','jpg','jpeg','gif','webp','avif','bmp','svg','ico','woff','woff2','ttf','otf','json','fig','sketch']};
       if (!Object.hasOwn(formats, kind) || typeof multiple !== 'boolean') throw Error('Unsupported file picker');
       const result = await choose('showOpenDialog', {title:kind === 'library' ? 'Import library' : 'Choose assets', filters:[{name:kind === 'library' ? 'Component library' : 'Design assets', extensions:formats[kind]}], properties:multiple ? ['openFile','multiSelections'] : ['openFile']});
       if (result.canceled) return [];

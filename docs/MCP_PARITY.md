@@ -52,7 +52,7 @@ Closing with `workspace({action:"close",documentId})` saves and releases this ca
 
 ## Files and repeatable output
 
-`import_document` accepts exactly one inline payload or explicit absolute local `filePath`. JSON creates an independent canvas. OMC defaults to identity-preserving merge, refusing an in-use target; `mode:"copy"` creates an independent canvas. `focus` defaults to false. `import_resource` ingests a local image/SVG/font/library; place the returned asset separately.
+`import_document` accepts exactly one inline payload or explicit absolute local `filePath`. JSON, Figma `.fig`, and Sketch `.sketch` imports create independent canvases. The binary design formats require `filePath`; conversion warnings are returned. OMC defaults to identity-preserving merge, refusing an in-use target; `mode:"copy"` creates an independent canvas. `focus` defaults to false. `import_resource` ingests a local image/SVG/font/library; place the returned asset separately.
 
 `export_selection` returns typed UTF-8 or base64 content. `export_document` returns base64 or writes an explicit path. Layer export IDs are explicit, or omitted desktop export scope is the entire active page; human selection never chooses the output. Raster/PDF export requires one explicit layer when a page contains multiple roots. Full OMC preserves the editable document, embedded assets and merge history.
 

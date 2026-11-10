@@ -1,3 +1,5 @@
+import {readDesignFile} from './design-import.mjs';
+import {readExplicitFile} from './file-transfer.mjs';
 import {createFileDialogs} from './file-dialogs.mjs';
 import {app,BrowserWindow,WebContentsView,ipcMain,dialog,protocol,Menu,clipboard,screen,desktopCapturer,systemPreferences} from 'electron';
 import {promises as fs} from 'node:fs';
@@ -124,7 +126,7 @@ app.whenReady().then(async()=>{
   async function checkBusy(entry,agent,signal){
     signal?.throwIfAborted();if(entry.runtime){const inspection=await runtimeRequest(entry,'inspect',{}, {signal,agent});if(inspection.busy)throw Object.assign(Error('A user edit is in progress in this canvas'),{code:'busy'});}
   }
-  const desktopTools=createWorkspaceTools({sampleColor:createScreenSampler({screen,desktopCapturer,systemPreferences}),manager,store,profile:dir,sourceRoot:root,importCanvasJson,exportCanvasJson,validateImportedDocument,runtimeRequest,preferences,checkBusy,
+  const desktopTools=createWorkspaceTools({readDesignFile,sampleColor:createScreenSampler({screen,desktopCapturer,systemPreferences}),manager,store,profile:dir,sourceRoot:root,importCanvasJson,exportCanvasJson,validateImportedDocument,runtimeRequest,preferences,checkBusy,
     notifyPreferences:value=>{sendShell({type:'preferences',preferences:value});for(const entry of manager.entries.values())sendRuntime(entry,{type:'preferences',preferences:value});},
     editorTool:(entry,call,signal)=>mcpDispatch({...call,args:{...call.args,documentId:entry.record.id}},{signal}),capabilities:()=>({tools:TOOLS,explicitDocumentMutations:DOCUMENT_MUTATIONS,protocol:{explicitTargets:true,implicitVisibleTabTarget:false,idempotency:'session-scoped',clipboard:'private-agent'},platform:{os:process.platform,windowControls:true,devTools:process.argv.includes('--debug-ui'),screenSampling:process.platform!=='darwin'||systemPreferences.getMediaAccessStatus('screen')==='granted'}}),requestQuit:()=>{setTimeout(()=>void closeApplication(),250).unref();},
     connection:mcpInfo,about:()=>({name:app.getName(),version:app.getVersion(),platform:process.platform,license:'MIT',notices:'omc://canvas/licenses/index.html',debugUi:process.argv.includes('--debug-ui')}),
@@ -168,7 +170,9 @@ app.whenReady().then(async()=>{
     return {port:collab.port,addresses:Object.values(os.networkInterfaces()).flat().filter(address=>address?.family==='IPv4'&&!address.internal).map(address=>address.address)};
   }
   async function importFile(){
-    const result=await fileDialogs.open({title:'Open canvas',filters:[{name:'Canvas documents',extensions:['omc','json']}],properties:['openFile']});if(result.canceled)return null;
+    const result=await fileDialogs.open({title:'Open canvas',filters:[{name:'Canvas documents',extensions:['omc','json','fig','sketch']}],properties:['openFile']});if(result.canceled)return null;
+    const extension=path.extname(result.filePaths[0]).slice(1).toLowerCase();
+    if(['fig','sketch'].includes(extension)){const resultData=await readDesignFile(await readExplicitFile(result.filePaths[0],{limit:32*1024*1024}),extension);return {json:resultData.document,warnings:resultData.warnings,title:path.basename(result.filePaths[0],path.extname(result.filePaths[0]))};}
     const stat=await fs.stat(result.filePaths[0]);if(stat.size>MAX_ENVELOPE_BYTES)throw Error('Document file exceeds 24 MiB');
     const raw=await fs.readFile(result.filePaths[0],'utf8');
     if(!result.filePaths[0].endsWith('.omc'))return {json:JSON.parse(raw),title:path.basename(result.filePaths[0],'.json')};
@@ -225,6 +229,7 @@ app.whenReady().then(async()=>{
     if(action==='preferences')return preferences(data);
     if(action==='mcp-info')return mcpInfo(data);
     if(action==='pick-files')return fileDialogs.pick(data);
+    if(action==='import-design')return readDesignFile(data?.bytes,data?.format);
     if(action==='join')return join(data);
     if(action==='show-library')return manager.showLibrary();
     if(sender.role==='document'){
