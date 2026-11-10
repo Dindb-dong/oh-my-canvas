@@ -88,8 +88,14 @@ it("all four UI picker routes use the host and retain image paint, image metadat
     await vi.waitFor(() => expect(t.editor.page.objects.rect.fills[0].image?.width).toBe(80));
     expect(await t.handle.placeImage()).toMatchObject({ width: 80, height: 40, mimeType: "image/png" });
     t.handle.assets.open();
+    const beforeFont = structuredClone(t.editor.doc);
     click(t.root, "Place image / font");
-    await vi.waitFor(() => expect(t.addAsset).toHaveBeenCalledWith(expect.objectContaining({ kind: "font", family: "Picker" })));
+    await vi.waitFor(() => expect(Object.values(t.editor.doc.assets ?? {})).toEqual([
+        expect.objectContaining({ kind: "font", family: "Picker", name: "Picker.woff2", src: expect.stringMatching(/^data:font\/woff2;base64,/) })
+    ]));
+    const fontAssets = structuredClone(t.editor.doc.assets);
+    expect(t.editor.undoStep()).toBe(true); expect(t.editor.doc).toEqual(beforeFont);
+    expect(t.editor.redoStep()).toBe(true); expect(t.editor.doc.assets).toEqual(fontAssets);
     click(t.root, "Import library");
     await vi.waitFor(() => expect(t.addLibrary).toHaveBeenCalledWith({ name: "Native library" }));
     expect(host.mock.calls.map(call => call[0])).toEqual([{ kind: "image" }, { kind: "image" }, { kind: "assets", multiple: true }, { kind: "library" }]);
@@ -109,6 +115,7 @@ it("UI picker cancellation is a no-op and host errors reach the accessible error
 it("destroyed workspace and changed page ignore pending host results", async () => {
     let resolve!: (files: File[]) => void;
     const t = workspace(() => new Promise(done => resolve = done));
+    const before = structuredClone(t.editor.doc);
     const pending = t.handle.placeImage();
     await Promise.resolve();
     t.editor.setPage(t.secondPageId);
@@ -122,6 +129,7 @@ it("destroyed workspace and changed page ignore pending host results", async () 
     await Promise.resolve();
     expect(t.addAsset).not.toHaveBeenCalled();
     expect(t.addLibrary).not.toHaveBeenCalled();
+    expect(t.editor.doc).toEqual(before);
 });
 
 it("an already aborted picker never opens a host dialog in the queued microtask", async () => {
@@ -139,6 +147,7 @@ it("library and asset routes ignore files returned for a page that is no longer 
         let resolve!: (files: File[]) => void;
         const host = vi.fn(() => new Promise<File[]>(done => resolve = done));
         const t = workspace(host);
+        const before = structuredClone(t.editor.doc);
         t.handle.assets.open();
         click(t.root, kind === "library" ? "Import library" : "Place image / font");
         await vi.waitFor(() => expect(host).toHaveBeenCalledOnce());
@@ -149,6 +158,7 @@ it("library and asset routes ignore files returned for a page that is no longer 
         await Promise.resolve();
         expect(t.addLibrary).not.toHaveBeenCalled();
         expect(t.addAsset).not.toHaveBeenCalled();
+        expect(t.editor.doc).toEqual(before);
     }
     expect(read).not.toHaveBeenCalled();
 });

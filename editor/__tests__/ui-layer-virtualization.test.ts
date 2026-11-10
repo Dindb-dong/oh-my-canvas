@@ -1,0 +1,81 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { Editor, createDocument, createShape, insertShape } from '../document';
+import { createCommands } from '../commands';
+import { mountWorkspace } from '../ui';
+import type { EditorServices } from '../contracts';
+const cleanups: (() => void)[] = [];
+beforeEach(() => { vi.stubGlobal('CSS', { escape: (s: string) => s }); vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
+afterEach(() => { cleanups.splice(0).reverse().forEach(fn => fn()); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+function fixture() {
+    const doc = createDocument(), page = doc.pagesById[doc.pages[0]];
+    for (let i = 0; i < 1000; i++) insertShape(page, createShape('rect', { id: `r${i}`, name: `Rectangle ${i}`, x: i * 30, width: 20, height: 20 }));
+    const editor = new Editor(doc), root = document.createElement('div'); document.body.append(root);
+    const services = { editor, view: { element: () => null, settled: async () => {} }, fonts: { ensure: async () => {}, catalog: () => [], add() {} }, components: { list: () => ({ components: [] }) }, styles: { list: () => [] }, libraries: { list: () => [] } } as unknown as EditorServices;
+    services.commands = createCommands(editor, services);
+    const workspace = mountWorkspace(root, services, { document: doc });
+    cleanups.push(() => { workspace.destroy(); services.commands.destroy?.(); editor.destroy(); });
+    const tree = () => root.querySelector<HTMLElement>('.layers')!;
+    const row = (id: string) => root.querySelector<HTMLElement>(`.layers .row[data-id="${id}"]`);
+    const scroll = (index: number) => { tree().scrollTop = 30 + index * 31; tree().dispatchEvent(new Event('scroll')); };
+    const click = async (id: string, shiftKey = false) => { row(id)!.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey })); await Promise.resolve(); };
+    return { editor, root, tree, row, scroll, click };
+}
+it('bounds mounted rows and selects logical Shift ranges across unmounted rows', async () => {
+    const t = fixture();
+    expect(t.root.querySelectorAll('.layers .row').length).toBeLessThan(60);
+    expect(t.tree().dataset.totalRows).toBe('1000');
+    await t.click('r999'); t.scroll(499);
+    expect(t.row('r999')).toBeNull(); expect(t.row('r500')).not.toBeNull();
+    await t.click('r500', true);
+    expect(t.editor.selection).toHaveLength(500);
+    expect(t.editor.selection[0]).toBe('r999'); expect(t.editor.selection.at(-1)).toBe('r500');
+    expect(t.row('r500')!.getAttribute('aria-selected')).toBe('true');
+    expect(t.root.querySelectorAll('.layers .row').length).toBeLessThan(60);
+});
+it('reveals offscreen selections, supports keyboard End/Home and clears filters that hide a selection', () => {
+    const t = fixture();
+    t.editor.setSelection(['r0']); expect(t.row('r0')).not.toBeNull(); expect(t.tree().scrollTop).toBeGreaterThan(30000);
+    t.tree().dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(t.editor.selection).toEqual(['r999']); expect(t.row('r999')).not.toBeNull();
+    t.tree().dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(t.editor.selection).toEqual(['r0']); expect(t.row('r0')).not.toBeNull();
+    const input = t.root.querySelector<HTMLInputElement>('[aria-label="Filter layers"]')!;
+    input.value = 'Rectangle 999'; input.dispatchEvent(new Event('input')); (document.activeElement as HTMLElement)?.blur();
+    t.editor.setSelection(['r500']);
+    expect(t.root.querySelector<HTMLInputElement>('[aria-label="Filter layers"]')!.value).toBe('');
+    expect(t.row('r500')).not.toBeNull();
+});
+it('keeps the native drag source attached while scrolling and releases the pinned row on dragend', () => {
+    const t = fixture(), source = t.row('r999')!;
+    const event = new MouseEvent('dragstart', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: { setData() {}, effectAllowed: '' } });
+    source.dispatchEvent(event); t.scroll(800);
+    expect(source.isConnected).toBe(true); expect(t.row('r999')).toBe(source);
+    expect(t.row('r199')).not.toBeNull();
+    window.dispatchEvent(new Event('dragend'));
+    expect(source.isConnected).toBe(false);
+});
+it('extends and shrinks keyboard ranges from the focused row and exposes one active descendant', async () => {
+    const t = fixture();
+    await t.click('r990');
+    const key = (key: string, shiftKey = false) => t.tree().dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey, bubbles: true }));
+    const active = () => t.root.querySelectorAll<HTMLElement>('[id="omc-active-layer"]');
+    key('ArrowUp', true);
+    expect(t.editor.selection).toEqual(['r991', 'r990']);
+    key('ArrowUp', true);
+    expect(t.editor.selection).toEqual(['r992', 'r991', 'r990']);
+    expect(active()).toHaveLength(1);
+    expect(active()[0].dataset.id).toBe('r992');
+    key('ArrowDown', true);
+    expect(t.editor.selection).toEqual(['r991', 'r990']);
+    expect(active()).toHaveLength(1);
+    expect(active()[0].dataset.id).toBe('r991');
+    t.editor.setSelection(['r500']);
+    expect(active()).toHaveLength(1);
+    expect(active()[0].dataset.id).toBe('r500');
+    key('ArrowDown');
+    expect(t.editor.selection).toEqual(['r499']);
+    expect(active()).toHaveLength(1);
+    expect(active()[0].dataset.id).toBe('r499');
+});

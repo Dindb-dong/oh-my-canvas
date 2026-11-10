@@ -1,12 +1,14 @@
 /** Original isolated transaction and gesture-session editor. */
-import type { CanvasDocument, Page, EditorStore, EditorOptions, EditorEvent, Operation, Mutator, Viewport, Tool } from '../contracts';
+import type { CanvasDocument, Page, Shape, EditorStore, EditorOptions, EditorEvent, EditorChangeScope, Operation, Mutator, Viewport, Tool } from '../contracts';
 import { reconcileShapeGeometry } from '../geometry';
 import { clone, newId, ROOT_ID } from './factory';
 import { refreshFrames } from './tree';
-import { validateDocument } from './validation';
-import { share, patches, applyPatches, inversePatches, type Patch } from './journal';
+import { validateDocument, validateDocumentChanges, validateDocumentSize } from './validation';
+import { share, patches, patchesAtPaths, applyPatches, inversePatches, type Patch } from './journal';
 import { normalizePathContent } from '../geometry/svg-path';
 import { geometryUnchanged } from './geometry-state';
+import { documentDraft } from './draft';
+import { changeScope, changedPaths } from './changes';
 export * from './factory';
 export * from './tree';
 export * from './validation';
@@ -15,6 +17,7 @@ interface Session {
     operation: Operation;
     history: CanvasDocument[];
     future: CanvasDocument[];
+    paths: Map<string, string[]>;
 }
 export class Editor implements EditorStore {
     [key: string]: any;
@@ -44,6 +47,7 @@ export class Editor implements EditorStore {
     private nestedFailure: unknown = null;
     lastOperation: Operation | undefined;
     private pageViews = new Map<string, Viewport>();
+    private preparedPaths: string[][] = [];
     constructor(input: CanvasDocument | {
         doc: CanvasDocument;
         [key: string]: any;
@@ -59,6 +63,7 @@ export class Editor implements EditorStore {
                 this.viewport = clone(input.viewport);
         }
         this.normalize(this.doc);
+        validateDocumentSize(this.doc);
     }
     get doc(): CanvasDocument {
         return this.candidate ?? this.committed;
@@ -105,14 +110,65 @@ export class Editor implements EditorStore {
             refreshFrames(page);
         }
     }
-    private prepare(before: CanvasDocument, draft: CanvasDocument): CanvasDocument {
-        this.normalize(draft, before);
-        const intermediate = clone(draft);
-        this.options.reconcile?.(before, draft);
-        this.normalize(draft, intermediate);
-        validateDocument(draft);
-        this.options.validate?.(draft);
-        return share(before, draft);
+    private timed<T>(phase: string, run: () => T): T {
+        const start = performance.now();
+        try { return run(); }
+        finally { try { this.options.onTiming?.(phase, performance.now() - start); } catch { /* Metrics must not change commit semantics. */ } }
+    }
+    private changedShapeIds(before: CanvasDocument, after: CanvasDocument, paths?: string[][]): Record<string, string[]> {
+        return Object.fromEntries([...changeScope(before, after, paths).shapes].map(([id, shapes]) => [id, [...shapes]]));
+    }
+    private normalizeChanges(doc: CanvasDocument, before: CanvasDocument, scope: EditorChangeScope, geometryBaseline?: (pageId: string, shapeId: string) => Shape | undefined): void {
+        for (const [pageId, ids] of scope.shapes) {
+            const page = doc.pagesById[pageId];
+            if (!page) continue;
+            for (const id of ids) {
+                const shape = page.objects[id];
+                if (!shape) continue;
+                normalizePathContent(shape, true);
+                const previous = geometryBaseline ? geometryBaseline(pageId, id) : before.pages.includes(pageId) ? before.pagesById[pageId]?.objects[id] : undefined;
+                if (!geometryUnchanged(previous, shape)) reconcileShapeGeometry(previous, shape);
+            }
+        }
+        for (const id of scope.topologyPages) if (doc.pagesById[id]) refreshFrames(doc.pagesById[id]);
+    }
+    private prepare(before: CanvasDocument, draft: CanvasDocument, paths = changedPaths(before, draft), isolation = documentDraft(draft)): CanvasDocument {
+        const prior = this.candidate;
+        try {
+            // Keep one mutable entity draft through all phases. The checkpoint
+            // detaches touched entities for pre-hook geometry without allocating
+            // an intermediate immutable copy of a large page object index.
+            this.candidate = isolation.draft;
+            this.timed('normalize', () => this.normalizeChanges(isolation.draft, before, changeScope(before, draft, paths)));
+            const normalized = this.timed('snapshot', () => isolation.checkpoint());
+            const normalizedPages: string[] = normalized.get(['pages']);
+            const directPaths = isolation.base === before ? normalized.paths : [...paths, ...normalized.paths];
+            const directScope = changeScope(before, isolation.draft, directPaths);
+            this.timed('reconcile', () => {
+                if (this.options.reconcileChanges) this.options.reconcileChanges(before, isolation.draft, directScope);
+                else this.options.reconcile?.(before, isolation.draft);
+            });
+            // The isolated pre-hook snapshot supplies geometry inputs. Only
+            // entities opened by the hook can have changed, so a second full
+            // object-index snapshot is unnecessary before reconciliation.
+            const derivedPaths = isolation.possiblePaths();
+            const derivedScope = changeScope(isolation.base, isolation.draft, derivedPaths);
+            // A hook can restore the original topology after the first pass
+            // updated derived frame IDs. Such pages still need the second pass.
+            const finalScope = { ...derivedScope, topologyPages: new Set([...directScope.topologyPages, ...derivedScope.topologyPages]) };
+            this.timed('normalize-derived', () => this.normalizeChanges(isolation.draft, isolation.base, finalScope, (pageId, id) => normalizedPages?.includes(pageId) ? normalized.get(['pagesById', pageId, 'objects', id]) : undefined));
+            const prepared = this.timed('snapshot', () => isolation.finish());
+            const touched = isolation.base === before ? prepared.paths : [...paths, ...prepared.paths];
+            const scope = changeScope(before, prepared.document, touched);
+            this.timed('validate', () => {
+                validateDocumentChanges(before, prepared.document, scope);
+                if (this.options.validateChanges) this.options.validateChanges(before, prepared.document, scope);
+                else this.options.validate?.(prepared.document);
+            });
+            this.preparedPaths = touched;
+            return isolation.base === before ? prepared.document : share(before, prepared.document);
+        }
+        finally { this.candidate = prior; }
     }
     private prune(): void {
         if (!this.doc.pagesById[this.pageId])
@@ -138,7 +194,7 @@ export class Editor implements EditorStore {
         }
         if (this.session)
             throw new Error('Editor busy with an active user session');
-        const before = this.doc, draft = clone(before), op = typeof operation === 'string' ? { id: newId('op'), label: operation } : { ...operation, id: operation.id || newId('op') }, ui = { selection: [...this.selection], pageId: this.pageId, hover: this.hover, tool: this.tool, viewport: this.viewport };
+        const before = this.doc, isolation = documentDraft(before), draft = isolation.draft, op = typeof operation === 'string' ? { id: newId('op'), label: operation } : { ...operation, id: operation.id || newId('op') }, ui = { selection: [...this.selection], pageId: this.pageId, hover: this.hover, tool: this.tool, viewport: this.viewport };
         this.candidate = draft;
         this.pending = [];
         this.nestedFailure = null;
@@ -149,7 +205,8 @@ export class Editor implements EditorStore {
                 throw this.nestedFailure;
             if (result && typeof (result as any).then === 'function')
                 throw new Error('Transactions must be synchronous');
-            this.committed = this.prepare(before, draft);
+            const paths = this.timed('draft', () => isolation.possiblePaths());
+            this.committed = this.prepare(before, draft, paths, isolation);
         }
         catch (error) {
             Object.assign(this, ui);
@@ -161,12 +218,12 @@ export class Editor implements EditorStore {
             this.nestedFailure = null;
         }
         if (this.doc !== before) {
-            const changes = patches(before, this.doc);
+            const changes = this.timed('patches', () => patchesAtPaths(before, this.doc, this.preparedPaths));
             this.recordHistory(before, changes, op);
             this.future = [];
             this.prune();
             this.lastOperation = op;
-            const event: EditorEvent = { changes, operation: op };
+            const event: EditorEvent = { changes, changedShapeIds: this.changedShapeIds(before, this.doc, this.preparedPaths), operation: op };
             for (const queued of this.pending)
                 Object.assign(event, queued);
             this.pending = [];
@@ -197,14 +254,14 @@ export class Editor implements EditorStore {
     begin(label: string): boolean {
         if (this.session || this.candidate || this.dead)
             return false;
-        this.session = { base: this.doc, operation: { id: newId('op'), label }, history: [this.doc], future: [] };
+        this.session = { base: this.doc, operation: { id: newId('op'), label }, history: [this.doc], future: [], paths: new Map() };
         this.undo.blocked = true;
         return true;
     }
     preview(mutate: Mutator): void {
         if (!this.session)
             throw new Error('No active session');
-        const before = this.doc, draft = clone(before), ui = { selection: [...this.selection], pageId: this.pageId, hover: this.hover, tool: this.tool, viewport: this.viewport };
+        const before = this.doc, isolation = documentDraft(before), draft = isolation.draft, ui = { selection: [...this.selection], pageId: this.pageId, hover: this.hover, tool: this.tool, viewport: this.viewport };
         this.candidate = draft;
         this.pending = [];
         this.nestedFailure = null;
@@ -214,7 +271,8 @@ export class Editor implements EditorStore {
                 throw new Error('Previews must be synchronous');
             if (this.nestedFailure)
                 throw this.nestedFailure;
-            this.committed = this.prepare(before, draft);
+            const paths = this.timed('draft', () => isolation.possiblePaths());
+            this.committed = this.prepare(before, draft, paths, isolation);
         }
         catch (error) {
             Object.assign(this, ui);
@@ -226,12 +284,13 @@ export class Editor implements EditorStore {
             this.nestedFailure = null;
         }
         if (this.doc !== before) {
+            for (const path of this.preparedPaths) this.session.paths.set(JSON.stringify(path), path);
             this.session.history.push(this.doc);
             if (this.session.history.length > 100)
                 this.session.history.shift();
             this.session.future = [];
             this.prune();
-            const event: EditorEvent = { deltas: true };
+            const event: EditorEvent = { deltas: true, changedShapeIds: this.changedShapeIds(before, this.doc, this.preparedPaths) };
             for (const queued of this.pending)
                 Object.assign(event, queued);
             this.pending = [];
@@ -244,23 +303,24 @@ export class Editor implements EditorStore {
         const session = this.session;
         this.session = null;
         this.undo.blocked = false;
-        const changes = patches(session.base, this.doc);
+        const changes = patchesAtPaths(session.base, this.doc, [...session.paths.values()]);
         if (!changes.length)
             return false;
         this.recordHistory(session.base, changes, session.operation);
         this.future = [];
         this.lastOperation = session.operation;
-        this.emit({ changes, operation: session.operation });
+        this.emit({ changes, changedShapeIds: this.changedShapeIds(session.base, this.doc, [...session.paths.values()]), operation: session.operation });
         return true;
     }
     cancelSession(): void {
         if (!this.session)
             return;
+        const before = this.doc;
         this.doc = this.session.base;
         this.session = null;
         this.undo.blocked = false;
         this.prune();
-        this.emit({ deltas: true });
+        this.emit({ deltas: true, changedShapeIds: this.changedShapeIds(before, this.doc) });
     }
     setSelection(ids: string[]): void {
         const next = [...new Set(ids)].filter(id => id !== ROOT_ID && this.page.objects[id]);
@@ -307,6 +367,7 @@ export class Editor implements EditorStore {
         const next = clone(doc);
         validateDocument(next);
         this.normalize(next);
+        validateDocumentSize(next);
         this.session = null;
         this.undo.blocked = false;
         this.doc = share(this.doc, next);
@@ -316,10 +377,25 @@ export class Editor implements EditorStore {
         this.prune();
         this.emit({ projection: true, page: true, selection: true });
     }
-    receiveDocument(doc: CanvasDocument): void {
-        const remote = clone(doc);
-        validateDocument(remote);
-        this.normalize(remote);
+    receiveDocument(doc: CanvasDocument, options: { incremental?: boolean } = {}): void {
+        const previous = this.doc, baseline = this.session?.base ?? previous;
+        let remote: CanvasDocument;
+        if (options.incremental) {
+            // Internal host projections preserve immutable branches. This is still
+            // validated; arbitrary snapshots must use the default full path.
+            const scope = changeScope(baseline, doc);
+            validateDocumentChanges(baseline, doc, scope);
+            const projection = documentDraft(doc);
+            this.normalizeChanges(projection.draft, baseline, scope);
+            remote = projection.finish().document;
+            validateDocumentChanges(baseline, remote, changeScope(baseline, remote));
+        }
+        else {
+            remote = clone(doc);
+            validateDocument(remote);
+            this.normalize(remote);
+            validateDocumentSize(remote);
+        }
         if (this.session) {
             const previousBase = this.session.base;
             const rebased = new Map<CanvasDocument, CanvasDocument>();
@@ -356,21 +432,23 @@ export class Editor implements EditorStore {
             this.session.history = history;
             this.session.future = future;
             this.doc = current;
+            this.session.paths = new Map([...history, ...future, current].flatMap(snapshot => changedPaths(remote, snapshot)).map(path => [JSON.stringify(path), path]));
         }
         else
             this.doc = share(this.doc, remote);
         this.prune();
-        this.emit({ projection: true, deltas: true });
+        this.emit({ projection: true, deltas: true, changedShapeIds: this.changedShapeIds(previous, this.doc) });
     }
     undoStep(): boolean {
         if (this.session) {
             const { history, future } = this.session;
             if (history.length < 2)
                 return false;
+            const before = this.doc;
             future.push(history.pop()!);
             this.doc = history.at(-1)!;
             this.prune();
-            this.emit({ deltas: true });
+            this.emit({ deltas: true, changedShapeIds: this.changedShapeIds(before, this.doc) });
             return true;
         }
         if (this.undo.blocked)
@@ -384,7 +462,7 @@ export class Editor implements EditorStore {
         this.future.push(entry);
         this.prune();
         this.lastOperation = { id: newId('op'), label: 'Undo', author: entry.operation.author };
-        this.emit({ changes: patches(before, next), operation: this.lastOperation });
+        this.emit({ changes: patchesAtPaths(before, next, this.preparedPaths), changedShapeIds: this.changedShapeIds(before, next, this.preparedPaths), operation: this.lastOperation });
         return true;
     }
     redoStep(): boolean {
@@ -392,10 +470,11 @@ export class Editor implements EditorStore {
             const next = this.session.future.pop();
             if (!next)
                 return false;
+            const before = this.doc;
             this.doc = next;
             this.session.history.push(next);
             this.prune();
-            this.emit({ deltas: true });
+            this.emit({ deltas: true, changedShapeIds: this.changedShapeIds(before, this.doc) });
             return true;
         }
         if (this.undo.blocked)
@@ -409,7 +488,7 @@ export class Editor implements EditorStore {
         this.past.push(entry);
         this.prune();
         this.lastOperation = { id: newId('op'), label: 'Redo', author: entry.operation.author };
-        this.emit({ changes: patches(before, next), operation: this.lastOperation });
+        this.emit({ changes: patchesAtPaths(before, next, this.preparedPaths), changedShapeIds: this.changedShapeIds(before, next, this.preparedPaths), operation: this.lastOperation });
         return true;
     }
     destroy(): void {

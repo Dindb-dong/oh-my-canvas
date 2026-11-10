@@ -1,8 +1,42 @@
-# Design-file import: prototype status and architecture proposal
+# Design-file import and large-document boundaries
 
-Status: **prototype checkpoint published for integration; architecture improvements paused**. Updated 2026-11-10.
+Status: **incremental architecture implemented; performance and source fidelity remain separately qualified**. Updated 2026-11-11.
 
-This document records the `.fig` / `.sketch` prototype, measured limits of a real large library, and recommendations from a read-only GPT-6 Astra review at high reasoning effort. PR #10 initially published documentation only. The subsequent implementation checkpoint includes the paused code and [full source fixture in Git LFS](../fixtures/design-files/README.md) for integration by the ongoing architecture work. The proposed redesign below is not implemented.
+PR #12 continues the import work with a different storage, editing and rendering boundary. PR #11 is a reference checkpoint; its successful structure import is not proof of acceptable performance or source fidelity. The [full original fixture](../fixtures/design-files/README.md) is available through Git LFS and its byte count and SHA-256 were verified during this work.
+
+## Implemented boundaries
+
+- Desktop decoding transfers original raster buffers out of the worker. A durable SHA-256 blob store receives them before the editable document exposes references. The current document and Yjs fields do not carry those original bitmap bytes.
+- Local drafts, normalization, layout, validation and patch conversion follow changed paths. Imports and untrusted replacements retain full validation. Structural/dependency edits conservatively process their affected graph.
+- Renderer IPC uses revisioned deltas and separate accepted/durable sequence counters. Undo resurrection, missing revisions, rejected edits and persistence retries have explicit handling.
+- Working storage uses a small manifest, immutable checkpoints and a checksummed append journal. Save acknowledgment follows fsync. Explicit portable export assembles v4 image packages; v1/v2 and PR #11's compressed v3 remain readable.
+- Image copy/paste and property copy share `assetDefinitions`; collisions remap IDs atomically. Referenced catalog assets remain retained instead of being expanded into every shape. JSON/HTML/SVG exports hydrate their dependencies.
+- Large pages use conservative viewport preparation, virtual layer rows, coalesced viewport input and spatial hit/snap candidates. Effects, masks, overflow, uncertain bounds and complete export retain conservative behavior.
+- Collaboration v3 transfers state and missing blobs in bounded chunks. A 1 MiB frame budget is independent of the 384 MiB portable-file budget. Assets are digest-checked and persisted before remote publication; the document save precedes transfer ACK.
+
+These are implemented contracts, not a claim that all acceptance targets below have been met. The immutable plain-object shape index still imposes some work proportional to the edited page size. Full initial validation/materialization, text layout, large root subtrees and export can remain expensive. No decoded-pixel memory ceiling, packaged cross-platform qualification, or perfect source reproduction is claimed.
+
+## Current core measurements
+
+The verified 160,627,671-byte source produced 46 pages, 39,363 objects and 160 external bitmap blobs containing 90,234,314 original bytes. The editable JSON is 41,452,401 bytes and its initial Yjs state is 107,305,531 bytes. Separating the images does not eliminate the remaining geometry, text or CRDT representation costs.
+
+One core-process journey on Linux x64, Node 24.22.1, Intel Xeon Platinum 8573C measured the following phases with `scripts/benchmark-document-core.mjs`. The source replica was closed before the single reopen observation. Explicit garbage collection was enabled. These measurements exclude Electron IPC, editor initialization/reconciliation, native rendering, image decoding for display, portable export and visual fidelity.
+
+| Core phase | Observed time | Scope |
+| --- | --- | --- |
+| Worker import | 18.83 s | Includes 8.62 s of full worker validation |
+| Persist original bitmap blobs | 2.32 s | Verified durable blob writes |
+| Initial replica | 30.40 s | Includes 11.71 s of projection/validation and 2.34 s of state encoding |
+| Initial checkpoint | 2.03 s | Initial working-storage checkpoint |
+| Reopen | 22.86 s | One observation after closing the source replica; process launch excluded |
+| First page rename | 18.60 ms | Patch translation, replica acceptance and fsynced journal |
+| Five subsequent page renames | 2.89 ms median; 6.79 ms maximum | Same core path, after the first edit; nearest-rank p95 equals the maximum for five samples |
+
+The warm rename samples were 3.45, 6.79, 2.86, 2.12 and 2.89 ms. Each produced a 49-byte Yjs update and a 319-byte journal record, with no full-state encoding during validation. The edited page contained 18,380 objects. This establishes bounded small-edit work in that core path, not a desktop input-latency or frame-rate result. Initial import and reopen remain expensive and do not meet a responsiveness claim.
+
+The [testing guide](TESTING.md#large-design-file-journey) describes the separate native journey, including UI paint versus durable acknowledgment, pan/hover/drag, portable exports and fresh-profile reopen. The native runner records its actual GPU environment and failures; a timeout is a failed acceptance. The historical macOS timings below must not be treated as a same-host comparison with these Linux core observations.
+
+The sections below preserve **historical PR #11 measurements and review findings**. They describe the prototype that motivated this work.
 
 ## Outcome and target
 
@@ -12,7 +46,7 @@ The prototype imported all **46 user pages**, selected every page, accepted a pa
 
 Raising capacity was necessary, but page separation alone did not remove lag. Rendering uses the active page while editing, validation, CRDT projection, IPC, and persistence still process substantial parts of the complete document.
 
-## Implemented prototype
+## Historical prototype implementation
 
 | Area | Work completed | Remaining limitation |
 | --- | --- | --- |
@@ -35,9 +69,9 @@ The prototype capacity profile is:
 | Design-file input / expanded archive | Not applicable | 256 MiB / 512 MiB |
 | File envelope | Prototype globally raises the envelope ceiling to 384 MiB | Same ceiling; the unintended coupling to network limits must be resolved |
 
-These are prototype validation limits, not the current default-branch product contract.
+These are historical prototype limits. The current implementation keeps document/input budgets but separates portable files from 1 MiB collaboration frames; see [Architecture](ARCHITECTURE.md).
 
-## Measured evaluation
+## Historical prototype evaluation
 
 The full local source was 160,627,671 bytes, with 424 ZIP entries and 37,743 decoded source nodes. Of 47 CANVAS records, one was internal and 46 were user pages. Instance expansion produced 39,363 output objects, including page roots. Shared-asset converted JSON was 158,849,316 bytes. Output object counts do not imply semantic equivalence with the source.
 
@@ -80,7 +114,7 @@ The prototype runners were `node scripts/design-import-e2e.mjs` and `node script
 
 ## Astra review: findings and confidence
 
-The review inspected the prototype code and existing measurements without modifying files, running new benchmarks, or visually comparing the source. The paths below identify implementation areas; proposed changes are not implemented behavior.
+The review inspected the prototype code and existing measurements without modifying files, running new benchmarks, or visually comparing the source. The paths below identify the implementation areas reviewed at that time; the implemented boundaries above supersede these original findings.
 
 | Finding | Evidence in the prototype | Assessment |
 | --- | --- | --- |
@@ -92,7 +126,7 @@ The review inspected the prototype code and existing measurements without modify
 | Current visibility filtering skips hidden subtrees rather than offscreen content | `editor/render/index.ts`, `editor/render/scene.ts`; layer rows in `editor/ui/index.ts` | Code-confirmed; viewport preparation and panel virtualization remain separate work |
 | Fidelity losses are converter decisions as well as engine limitations | `editor/formats/design-file.ts`, existing geometry/effect/component implementations | Reuse existing engine capabilities before considering a renderer rewrite; current components still expand instance subtrees |
 
-### Correctness gaps to close first
+### Historical correctness gaps addressed by this work
 
 1. MCP copy exports bitmap dependencies through `assetDefinitions`, resource preparation handles fonts, and command paste merges `payload.assets`. The contracts do not currently align for shared bitmaps across documents.
 2. UI property copy can transfer an image-fill reference without its asset definition.
@@ -100,12 +134,12 @@ The review inspected the prototype code and existing measurements without modify
 4. The enlarged `MAX_ENVELOPE_BYTES` also controls collaboration payload/backpressure. Local compressed reopen does not qualify full-state base64 network messages. Storage and wire budgets need separate contracts.
 5. Large-library listing uses compressed on-disk file size to choose whether to instantiate a replica. A highly compressible large state can still enter the expensive path. Listing should eventually read independent metadata.
 
-## Recommended architecture
+## Architecture direction adopted
 
 Preserve the import worker, content hashes, all-page traversal, existing validation guarantees, retained renderer, and reopen regression. Avoid a complete rewrite before measuring individual phases.
 
 ```mermaid
-flowchart LR
+flowchart TB
   Import[Local import worker] --> Manifest[Editable pages, shapes and asset manifest]
   Import --> Blobs[Immutable bitmap bytes by hash]
   Manifest --> Edit[Changed entities and validated deltas]
@@ -117,7 +151,7 @@ flowchart LR
   Blobs --> Portable
 ```
 
-This is a proposed boundary diagram, not the current architecture.
+This boundary is implemented. Its performance and compatibility acceptance criteria still need to be assessed independently.
 
 | Stage | Change | Required proof before proceeding |
 | --- | --- | --- |
@@ -129,7 +163,7 @@ This is a proposed boundary diagram, not the current architecture.
 
 ### Constraints and tradeoffs
 
-- **Working storage and portable export should differ.** Editing should not rebuild a complete portable package for every change. Exact storage/container/version choices remain undecided.
+- **Working storage and portable export should differ.** Editing should not rebuild a complete portable package for every change. The selected contract is a local manifest/journal/checkpoint plus an explicit v4 portable image package.
 - Blob garbage collection must account for Undo, every page, components, pending writes, and checkpoint references. Current visible shapes alone are insufficient to determine safe deletion.
 - Keep complete validation at imports, remote inputs, and checkpoints. Incremental local validation must include dependencies; do not remove validation or replace Yjs history size with a naive string-size sum.
 - Dropping assets from snapshots through an implicit cache is insufficient. Delta sequencing, durable ACKs, runtime generation, missing-revision recovery, and full resynchronization need explicit contracts.
@@ -153,6 +187,6 @@ These are targets for future work, **not measured achievements**. Use the same m
 
 ## Outstanding decisions and publication boundaries
 
-Implementation remains paused pending a chosen architecture and staged verification. Exact blob storage, journal/checkpoint format, migration strategy, wire protocol, cache budgets, and fidelity thresholds have not been selected. The existing prototype is a useful checkpoint, not a merge-ready large-library editor.
+The selected storage, journal, blob, IPC and wire contracts are implemented. Remaining work includes meeting the measured drag/page-entry targets, bounding decoded-image memory, and comparing representative original frames with matching fonts and dimensions. No Rust engine, per-page Y.Doc partition, renderer replacement or Tauri migration is included.
 
-The full third-party `.fig` is now available through the linked Git LFS fixture at the user’s explicit request. A [native runtime screenshot](qa/design-file-import-examples.png) records the Examples page. Generated documents and detailed internal logs remain unpublished. The code checkpoint retains the documented correctness and latency gaps; no architecture redesign, packaged release, or deployment is implied.
+The full third-party `.fig` is available through the Git LFS fixture at the user’s explicit request. The [earlier native screenshot](qa/design-file-import-examples.png) records the prototype Examples page and is not visual evidence for this implementation. Generated documents and detailed internal logs remain unpublished. A packaged release or deployment is not implied.

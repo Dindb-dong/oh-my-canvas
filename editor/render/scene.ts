@@ -97,6 +97,8 @@ export interface SceneOptions {
     /** Screen-only retained serialization; omitted by every export path. */
     nodeCache?: SceneNodeCache;
     stableIds?: boolean;
+    /** Resolve immutable bitmap references without putting original bytes in the scene model. */
+    resolveImageSource?: (source: string) => string;
 }
 const blends = new Set(['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity']);
 const blend = (v: any) => {
@@ -148,7 +150,8 @@ export class SceneWriter {
             const image = p.image ?? p;
             const adjust = p.adjust ?? image.adjust;
             const adjustment = this.imageAdjustment(adjust);
-            const href = (this.options.imageSource?.(image) ?? imageSource(image,this.options.assets)) || p.src || '';
+            const source = (this.options.imageSource?.(image) ?? imageSource(image, this.options.assets)) || p.src || '';
+            const href = this.options.resolveImageSource?.(source) ?? source;
             const id = this.id('image');
             const mode = p.objectFit ?? p.scaleMode ?? image.scaleMode ?? p.mode ?? 'fill';
             const tile = mode === 'tile';

@@ -3,6 +3,7 @@ import { createAssetService, createLibraryService } from '../assets';
 import { createStyleService } from '../styles';
 import { isEditable, newId, validateDocument } from '../document';
 import { validateVisualProperties } from './properties';
+import { clipboardAssetDefinitions, prepareAssetTransfer, isExternalImageSource } from '../images/assets';
 
 const copy = <T>(value: T): T => structuredClone(value);
 const resourceNames = new Set(['styles', 'libraries', 'document_assets']);
@@ -21,7 +22,7 @@ function json(value: unknown, depth = 0, budget = { nodes: 0 }): void {
     for (const [key, child] of Object.entries(value)) {
         if (['__proto__', 'prototype', 'constructor'].includes(key))
             throw Error('Unsafe resource key');
-        if (['src', 'url'].includes(key) && typeof child === 'string' && !child.startsWith('data:'))
+        if (['src', 'url'].includes(key) && typeof child === 'string' && !child.startsWith('data:') && !isExternalImageSource(child))
             throw Error('Resource sources must be embedded data URLs');
         json(child, depth + 1, budget);
     }
@@ -150,7 +151,7 @@ export function readResourceOperation(name: string, args: Data, doc: CanvasDocum
             return { library: copy(library), ...args.action === 'export' ? { snapshot: copy(library) } : {} };
     }
     if (name === 'document_assets' && args.action === 'list')
-        return { assets: Object.values<Data>(doc.assets ?? {}).filter(asset => (!args.kind || asset.kind === args.kind) && `${asset.name ?? ''} ${asset.family ?? ''}`.toLowerCase().includes((args.query ?? '').toLowerCase())).map(metadata) };
+        return { assets: Object.values<Data>(doc.assets ?? {}).filter(asset => !asset.deleted && (!args.kind || asset.kind === args.kind) && `${asset.name ?? ''} ${asset.family ?? ''}`.toLowerCase().includes((args.query ?? '').toLowerCase())).map(metadata) };
     throw Error(`Unknown resource read: ${name}/${args.action}`);
 }
 
@@ -237,7 +238,7 @@ export function applyResourceOperation(name: string, args: Data, doc: CanvasDocu
             const asset = own(doc.assets, args.id);
             if (!asset)
                 throw Error('Unknown asset');
-            if (!asset.src?.startsWith('data:'))
+            if (!asset.src?.startsWith('data:') && !isExternalImageSource(asset.src))
                 throw Error('Only embedded assets can be placed through MCP');
             return service.place(args.id, { pageId, parentId: args.parentId ?? 'root', x: args.x ?? 0, y: args.y ?? 0, width: args.width, height: args.height });
         }
@@ -246,25 +247,24 @@ export function applyResourceOperation(name: string, args: Data, doc: CanvasDocu
 }
 
 export async function prepareResourceOperation(name: string, args: Data, doc: CanvasDocument, pageId: string, services: Data, signal?: AbortSignal): Promise<{ args: Data; release?: () => void }> {
-    if (name === 'clipboard' && ['paste', 'paste_properties'].includes(args.action) && args.payload?.assetDefinitions) {
-        const definitions = args.payload.assetDefinitions;
-        if (!definitions || typeof definitions !== 'object' || Array.isArray(definitions) || Object.keys(definitions).length > 100)
-            throw Error('Clipboard font definitions must contain at most 100 records');
-        const preparedAssets: Data = {};
-        for (const source of Object.values<Data>(definitions)) {
-            if (source?.kind !== 'font') continue;
+    if (name === 'clipboard' && ['paste', 'paste_properties'].includes(args.action) && args.payload) {
+        const preparedPayload = prepareAssetTransfer(args.payload, doc.assets);
+        const preparedAssets = clipboardAssetDefinitions(preparedPayload);
+        const fonts = Object.values<Data>(preparedAssets).filter(asset => asset.kind === 'font');
+        if (fonts.length > 100) throw Error('Clipboard font definitions must contain at most 100 records');
+        for (const source of fonts) {
             const [asset] = assetInputs({ kind: 'font', id: source.id, name: source.name, family: source.family, dataUrl: source.src, weight: source.weight, fontStyle: source.style, unicodeRange: source.unicodeRange });
             payload(asset);
-            const existing = Object.values<Data>({ ...doc.assets, ...preparedAssets }).find(candidate => candidate.kind === 'font' && candidate.src === asset.src && candidate.family === asset.family && candidate.weight === asset.weight && candidate.style === asset.style && candidate.unicodeRange === asset.unicodeRange);
-            if (existing) continue;
-            if (own(doc.assets, asset.id) || own(preparedAssets, asset.id)) asset.id = newId('asset');
             preparedAssets[asset.id] = asset;
         }
-        if (!Object.keys(preparedAssets).length) return { args };
+        payload(preparedAssets);
+        if (!Object.keys(preparedAssets).length) return { args: { ...args, payload: preparedPayload } };
+        args = { ...args, payload: preparedPayload, preparedAssets };
+        if (!fonts.length) return { args };
         if (!services.fonts?.prepareAssets) throw Error('Font preparation service is unavailable');
         const release = await services.fonts.prepareAssets({ ...doc.assets, ...preparedAssets });
         if (signal?.aborted) { release?.(); signal.throwIfAborted(); }
-        return { args: { ...args, preparedAssets }, release };
+        return { args, release };
     }
     if (name !== 'document_assets' || args.action !== 'add')
         return { args };

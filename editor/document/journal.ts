@@ -115,6 +115,23 @@ export function patches(before: any, after: any, path: string[] = []): Patch[] {
     visit(before, after, path);
     return result;
 }
+/** Draft tracking avoids rediscovering edits by walking every object index. */
+export function patchesAtPaths(before: any, after: any, paths: readonly string[][]): Patch[] {
+    const unique = new Map(paths.map(path => [JSON.stringify(path), path]));
+    const roots = [...unique.values()].filter(path => !path.some((_key, i) => unique.has(JSON.stringify(path.slice(0, i)))));
+    const result: Patch[] = [];
+    for (const path of roots) {
+        let old = before, next = after;
+        for (const key of path.slice(0, -1)) { old = old?.[key]; next = next?.[key]; }
+        const key = path.at(-1);
+        if (key === undefined) { result.push(...patches(before, after)); continue; }
+        const had = old != null && Object.hasOwn(old, key), has = next != null && Object.hasOwn(next, key);
+        if (had && !has) result.push({ path: [...path], remove: true });
+        else if (!had && has) result.push({ path: [...path], value: clone(next[key]) });
+        else if (had && has) result.push(...patches(old[key], next[key], path));
+    }
+    return result;
+}
 /** Invert detached, immutable patches. Changed values can be shared by the two
  * directions because applyPatches always clones values before applying them.
  */
@@ -132,16 +149,23 @@ export function inversePatches(before: any, changes: Patch[]): Patch[] {
     });
 }
 export function applyPatches(doc: CanvasDocument, changes: Patch[]): CanvasDocument {
-    let next: any = clone(doc);
+    if (!changes.length) return doc;
+    let next: any = { ...doc };
+    const owned = new WeakSet<object>([next]);
     for (const change of changes) {
         if (!change.path.length) {
             next = clone(change.value);
+            if (next && typeof next === 'object') owned.add(next);
             continue;
         }
         let obj = next;
         for (const key of change.path.slice(0, -1)) {
-            if (!obj[key] || typeof obj[key] !== 'object')
-                obj[key] = {};
+            const current = Object.hasOwn(obj, key) ? obj[key] : undefined;
+            if (!current || typeof current !== 'object' || !owned.has(current)) {
+                const value = !current || typeof current !== 'object' ? {} : Array.isArray(current) ? [...current] : { ...current };
+                Object.defineProperty(obj, key, { value, enumerable: true, configurable: true, writable: true });
+                owned.add(value);
+            }
             obj = obj[key];
         }
         const key = change.path.at(-1)!;
@@ -164,10 +188,10 @@ export function applyPatches(doc: CanvasDocument, changes: Patch[]): CanvasDocum
                 }
                 merged.splice(insertion, 0, id);
             }
-            obj[key] = merged;
+            Object.defineProperty(obj, key, { value: merged, enumerable: true, configurable: true, writable: true });
         }
         else
-            obj[key] = clone(change.value);
+            Object.defineProperty(obj, key, { value: clone(change.value), enumerable: true, configurable: true, writable: true });
     }
     return next;
 }

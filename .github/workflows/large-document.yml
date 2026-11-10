@@ -1,0 +1,97 @@
+name: Large document validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [perf/large-document-core]
+    paths:
+      - core/**
+      - editor/**
+      - electron/**
+      - src/**
+      - scripts/**
+      - tests/**
+      - package*.json
+      - .github/workflows/large-document.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: large-document-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-comparison:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out candidate and verified LFS source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: candidate
+          lfs: true
+          persist-credentials: false
+      - name: Check out historical reference
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 3c94d043fa97711d98f014a196977cc3d003ad28
+          path: baseline
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Prepare evidence and verify source
+        run: |
+          mkdir -p evidence/baseline evidence/current
+          python3 - <<'PY'
+          import hashlib, pathlib
+          source = pathlib.Path('candidate/fixtures/design-files/iOS-and-iPadOS-27.fig')
+          content = source.read_bytes()
+          assert len(content) == 160627671
+          assert hashlib.sha256(content).hexdigest() == 'c7c4fdbe469ae451c9a3d3d384a2102fa08dfaa220a1277e2df17fc2146c5ee7'
+          PY
+      - name: Install candidate dependencies
+        working-directory: candidate
+        run: npm ci
+      - name: Install native display dependencies
+        working-directory: candidate
+        run: npx playwright install-deps chromium
+      - name: Verify candidate
+        working-directory: candidate
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee ../evidence/check.log
+          node scripts/check-docs.mjs 2>&1 | tee ../evidence/docs-check.log
+          npm test 2>&1 | tee ../evidence/node-tests.log
+          npm run test:editor -- --maxWorkers=2 2>&1 | tee ../evidence/editor-tests.log
+          npm run build 2>&1 | tee ../evidence/current-build.log
+      - name: Build historical reference
+        id: reference-build
+        continue-on-error: true
+        working-directory: baseline
+        run: |
+          set -o pipefail
+          npm ci
+          npm run build 2>&1 | tee ../evidence/baseline-build.log
+      - name: Measure historical reference
+        if: steps.reference-build.outcome == 'success'
+        continue-on-error: true
+        working-directory: baseline
+        run: |
+          xvfb-run --auto-servernum node ../candidate/scripts/large-document-e2e.mjs --source "$GITHUB_WORKSPACE/candidate/fixtures/design-files/iOS-and-iPadOS-27.fig" --output "$GITHUB_WORKSPACE/evidence/baseline" --label pr11
+      - name: Measure candidate
+        working-directory: candidate
+        run: |
+          xvfb-run --auto-servernum node scripts/large-document-e2e.mjs --source "$GITHUB_WORKSPACE/candidate/fixtures/design-files/iOS-and-iPadOS-27.fig" --output "$GITHUB_WORKSPACE/evidence/current" --label candidate
+      - name: Retain validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: large-document-${{ github.run_id }}
+          path: |
+            evidence/**/result.json
+            evidence/**/*.png
+            evidence/*.log
+          retention-days: 7
+          if-no-files-found: error

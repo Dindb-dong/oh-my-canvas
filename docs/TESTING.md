@@ -82,6 +82,23 @@ This reproducible Node/jsdom benchmark measures a committed single-layer move an
 
 The fixture contains rectangles only. Results do not measure native browser layout/paint, FPS, physical input timing, text shaping, image decoding, Electron IPC or durable saving. The eight-preview workload measures event coalescing within one JavaScript turn; it is not an eight-frame drag. Run the native render, UI and library journeys above before accepting visual or desktop performance claims. Use `--output=/path/to/report.json` to retain a report; the benchmark does not write generated files by default.
 
+### Large design-file journey
+
+Retrieve the real source with Git LFS and build the candidate before the native journey:
+
+```sh
+git lfs pull --include=fixtures/design-files/iOS-and-iPadOS-27.fig
+npm run build
+node scripts/large-document-e2e.mjs --source /absolute/path/to/iOS-and-iPadOS-27.fig --output /absolute/path/to/evidence --label candidate
+node --expose-gc scripts/benchmark-document-core.mjs --file=/absolute/path/to/iOS-and-iPadOS-27.fig --output=/absolute/path/to/core-result.json
+```
+
+On Linux with no desktop display, prefix the native command with `xvfb-run --auto-servernum`. The core benchmark needs no display. It imports once, records a first rename and five subsequent renames, closes the source replica, and reopens once; it does not measure native rendering or IPC. The documented fixture hash and size are in [Design-file import](DESIGN_FILE_IMPORT.md).
+
+For a native comparison, run the same `large-document-e2e.mjs` script from each checkout's working directory after building it. The runner resolves that checkout's Electron executable and uses fresh temporary profiles. It checks the complete 46-page source, image-hash closure and missing-image response, UI rename paint and durable acknowledgment, complete MCP rename, Examples page entry, pan/hover without document writes, a single-leaf drag, JSON/SVG/OMC export and fresh-process/fresh-profile round trips. Automated input frame intervals include Playwright scheduling; they are not GPU-only frame times. A screenshot alone does not establish fidelity to the original Figma frames.
+
+The `Large document validation` workflow runs the candidate checks and this native journey on a fresh Ubuntu runner, then retains JSON results, screenshots and logs as private workflow artifacts. The historical reference and candidate share one runner and harness, with results kept separate. Historical-reference failures remain recorded even when the candidate proceeds. Neither harness waiting nor CI changes the application's worker or renderer initialization deadlines. The runner makes only its isolated test window visible to the virtual display so Chromium can paint; normal background acceptance scripts remain hidden.
+
 ## Current evidence and limits
 
 The final current-source run passed 340 editor tests across 12 files and 38 host tests. Actual native UI acceptance passed 37/37 cases with zero renderer errors. Rendering coverage includes 32 scenarios and 830 assertions, plus eight large-fixture/cache assertions. The real library, four-client Electron/TLS plus official SDK/offline/export journey, packaged-app smoke and package-provenance checks passed; the current provenance report has no mismatches.

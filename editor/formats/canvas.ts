@@ -1,5 +1,6 @@
 /** Canvas interchange, implemented from independently recorded serialization contracts. */
 import type { CanvasDocument, Data, Page, Shape, ShapeType } from '../contracts';
+import { assertPortableImages } from '../images/assets';
 import { boxGeometry } from '../geometry';
 import { createPage, insertShape, refreshFrames } from '../document';
 import { assertFiniteDocument, copy, documentModel, richText, shape, textValue, uid } from './model';
@@ -221,6 +222,7 @@ export function importCanvasJson(input: any, options: Data = {}): CanvasDocument
     return doc;
 }
 export function exportCanvasJson(doc: CanvasDocument, options: Data = {}): Data {
+    assertPortableImages(doc);
     assertFiniteDocument(copy(doc));
     const rootLayers: Record<string, Data[]> = {};
     const convert = (s: Shape, page: Page, ox: number, oy: number): Data => {

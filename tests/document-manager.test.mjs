@@ -7,6 +7,7 @@ import {Store} from '../core/storage.mjs';
 import {Replica} from '../core/replica.mjs';
 import {randomUUID} from 'node:crypto';
 import {changesBetween} from '../core/document.mjs';
+import {DocumentProjection} from '../core/projection.mjs';
 import {createDocumentManager} from '../electron/document-manager.mjs';
 import {documentFixture} from './helpers.mjs';
 
@@ -135,4 +136,40 @@ test('failed uninitialized join candidates can be discarded without saving a dam
   const {manager,store}=await fixture(t),id=randomUUID();
   const entry=await manager.load(id,{id,title:'Uninitialized join',replica:new Replica()});
   assert.equal(manager.discard(entry),true);assert.equal(manager.entries.size,0);assert.deepEqual(await store.list(),[]);
+});
+
+test('renderer deltas restore deleted shape declarations and containment through undo and redo',async t=>{
+  let projection;
+  const deltas=[];
+  const {manager}=await fixture(t,{onEvent(entry,event){if(event.type==='document-delta'){deltas.push(event);projection?.accept(event);}}});
+  const entry=await manager.create('History',documentFixture());projection=new DocumentProjection(manager.snapshot(entry));
+  const before=entry.record.replica.document,after=structuredClone(before);
+  delete after.pagesById.page.objects.board;after.pagesById.page.objects.root.childIds=['label'];
+  entry.record.replica.patch(changesBetween(before,after),'Delete board');
+  assert.deepEqual(projection.document,entry.record.replica.document);assert.equal(projection.document.pagesById.page.objects.label.parentId,'root');
+  entry.record.replica.history('undo');
+  assert.deepEqual(projection.document,entry.record.replica.document);assert.equal(projection.document.pagesById.page.objects.board.type,'frame');assert.equal(projection.document.pagesById.page.objects.label.parentId,'board');
+  assert.ok(deltas.at(-1).changes.some(([key])=>key===JSON.stringify(['shape','page','board','type'])));
+  entry.record.replica.history('redo');assert.deepEqual(projection.document,entry.record.replica.document);
+});
+
+test('renderer deltas restore every declaration when a historical page becomes visible again',async t=>{
+  let projection;
+  const {manager}=await fixture(t,{onEvent(entry,event){if(event.type==='document-delta')projection?.accept(event);}});
+  const document=documentFixture();document.pages.push('other');document.pagesById.other={...structuredClone(document.pagesById.page),id:'other',name:'Other page'};
+  const entry=await manager.create('Pages',document);projection=new DocumentProjection(manager.snapshot(entry));
+  const before=entry.record.replica.document,after=structuredClone(before);after.pages=['other'];delete after.pagesById.page;
+  entry.record.replica.patch(changesBetween(before,after),'Delete page');assert.deepEqual(projection.document,entry.record.replica.document);
+  entry.record.replica.history('undo');assert.deepEqual(projection.document,entry.record.replica.document);assert.equal(projection.document.pagesById.page.objects.label.text,'Hello');
+});
+
+test('a legacy aggregate asset update cannot erase independent per-ID renderer declarations',async t=>{
+  let projection;
+  const {manager}=await fixture(t,{onEvent(entry,event){if(event.type==='document-delta')projection?.accept(event);}});
+  const document=documentFixture();document.assets={owned:{src:'https://example.test/owned.png'}};
+  const entry=await manager.create('Assets',document);projection=new DocumentProjection(manager.snapshot(entry));
+  const remote=new Replica({state:entry.record.replica.state});t.after(()=>remote.destroy());
+  remote.ydoc.transact(()=>remote.fields.set(JSON.stringify(['meta','assets']),{owned:{src:'https://example.test/stale.png'},legacy:{src:'https://example.test/legacy.png'}}));
+  entry.record.replica.receive(remote.state);
+  assert.deepEqual(projection.document,entry.record.replica.document);assert.equal(projection.document.assets.owned.src,'https://example.test/owned.png');assert.ok(projection.document.assets.legacy);
 });

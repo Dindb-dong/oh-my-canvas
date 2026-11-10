@@ -157,7 +157,7 @@ describe('geometry preparation and preview reuse', () => {
         e.destroy();
     });
 
-    it('preserves full candidate and intermediate isolation around reconciliation', () => {
+    it('preserves candidate and intermediate isolation without copying the complete document', () => {
         const e = fixture({ reconcile(_before, draft) { draft.pagesById[e.pageId].objects.b.name = 'Derived'; } }, { assets: { data: 'x'.repeat(128 * 1024) } });
         const original = e.doc;
         e.begin('Drag');
@@ -168,12 +168,11 @@ describe('geometry preparation and preview reuse', () => {
             documents = copy.mock.calls.map(([value]) => value).filter((value: any) => value?.pages && value?.pagesById);
         }
         finally { copy.mockRestore(); }
-        expect(documents!).toHaveLength(2);
-        expect(documents![0]).toBe(original);
-        expect(documents![1]).not.toBe(original);
+        expect(documents!).toHaveLength(0);
         expect(original.pagesById[e.pageId].objects.a.x).toBe(10);
         expect(e.page.objects.a.x).toBe(40);
         expect(e.page.objects.b.name).toBe('Derived');
+        expect(e.doc.assets).toBe(original.assets);
         e.cancelSession();
         expect(e.doc).toBe(original);
         e.destroy();

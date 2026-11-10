@@ -1,14 +1,15 @@
-import {DESIGN_FILE_LIMIT} from '../core/capacity.mjs';
+import {DESIGN_FILE_LIMIT,MAX_PORTABLE_BYTES} from '../core/capacity.mjs';
+import {portableAssetDocument} from './document-assets.mjs';
 import path from 'node:path';
-import {decodeFile,encodeFile} from '../core/storage.mjs';
-import {assertDocument,MAX_ENVELOPE_BYTES,MAX_DOCUMENT_BYTES} from '../core/document.mjs';
+import {decodeFile} from '../core/storage.mjs';
+import {assertDocument,MAX_DOCUMENT_BYTES} from '../core/document.mjs';
 import {parseInvite} from '../core/collaboration.mjs';
 import {canvasTitle} from './document-actions.mjs';
 import {readExplicitFile,writeExplicitFile,MAX_INLINE_BYTES,MAX_EXPORT_BYTES} from './file-transfer.mjs';
 
 export const DESKTOP_TOOL_NAMES=new Set(['workspace','preferences','save_document','delete_document','import_document','export_document','import_resource','collaboration']);
 const error=(code,message)=>Object.assign(Error(message),{code});
-export function createWorkspaceTools({readDesignFile,manager,store,profile,sourceRoot,importCanvasJson,exportCanvasJson,validateImportedDocument,runtimeRequest,preferences,notifyPreferences,connection,about,windowState,capabilities,sampleColor,requestQuit,editorTool,join,host,stopSession,checkBusy,context}){
+export function createWorkspaceTools({readDesignFile,manager,store,profile,sourceRoot,importCanvasJson,exportCanvasJson,portableDocument,validateImportedDocument,runtimeRequest,preferences,notifyPreferences,connection,about,windowState,capabilities,sampleColor,requestQuit,editorTool,join,host,stopSession,checkBusy,context}){
   async function targeted(id,signal){
     if(!id)throw error('document_required','An explicit documentId is required');
     const entry=await manager.load(id);signal?.throwIfAborted();return entry;
@@ -24,7 +25,7 @@ export function createWorkspaceTools({readDesignFile,manager,store,profile,sourc
       if(args.action==='show_library')return {ok:true,...manager.showLibrary()};
       if(args.action==='connection')return {ok:true,...connection(args)};
       if(args.action==='sample_color')return {ok:true,...await sampleColor(args)};
-      if(args.action==='capabilities')return {ok:true,...capabilities(),limits:{inlineBytes:MAX_INLINE_BYTES,importBytes:MAX_ENVELOPE_BYTES,exportBytes:MAX_EXPORT_BYTES,resourceBytes:MAX_DOCUMENT_BYTES}};
+      if(args.action==='capabilities')return {ok:true,...capabilities(),limits:{inlineBytes:MAX_INLINE_BYTES,importBytes:MAX_PORTABLE_BYTES,exportBytes:MAX_EXPORT_BYTES,portableExportBytes:MAX_PORTABLE_BYTES,resourceBytes:MAX_DOCUMENT_BYTES}};
       if(args.action==='quit'){requestQuit();return {ok:true,quitting:true};}
       if(args.action==='about')return {ok:true,...about()};
       if(args.action==='window')return {ok:true,...windowState(args)};
@@ -60,8 +61,8 @@ export function createWorkspaceTools({readDesignFile,manager,store,profile,sourc
       if((args.payload===undefined)===(args.filePath===undefined))throw error('bad_args','Supply exactly one of payload or filePath');
       const design=['fig','sketch'].includes(args.format);
       if(design&&!args.filePath)throw error('bad_args','Design imports require an explicit filePath');
-      const bytes=args.filePath?await readExplicitFile(args.filePath,{limit:design?DESIGN_FILE_LIMIT:MAX_ENVELOPE_BYTES,protectedDirectory:profile,signal}):Buffer.from(args.payload,'utf8');
-      if(bytes.length>(design?DESIGN_FILE_LIMIT:MAX_ENVELOPE_BYTES))throw error('bad_args',`Document file exceeds ${(design?DESIGN_FILE_LIMIT:MAX_ENVELOPE_BYTES)/1024/1024} MiB`);
+      const bytes=args.filePath?await readExplicitFile(args.filePath,{limit:design?DESIGN_FILE_LIMIT:MAX_PORTABLE_BYTES,protectedDirectory:profile,signal}):Buffer.from(args.payload,'utf8');
+      if(bytes.length>(design?DESIGN_FILE_LIMIT:MAX_PORTABLE_BYTES))throw error('bad_args',`Document file exceeds ${(design?DESIGN_FILE_LIMIT:MAX_PORTABLE_BYTES)/1024/1024} MiB`);
       const raw=design?'':bytes.toString('utf8'),options={agent,focus:args.focus??false,signal};let entry,warnings=[];
       if(design){
         const result=await readDesignFile(bytes,args.format);warnings=result.warnings;validateImportedDocument(result.document);
@@ -72,6 +73,7 @@ export function createWorkspaceTools({readDesignFile,manager,store,profile,sourc
       }else{
         const record=decodeFile(raw);
         try{validateImportedDocument(record.replica.document);}catch(error){record.replica.destroy();throw error;}
+        try{await store.prepareRecord?.(record);if(!store.prepareRecord)await store.importAssets?.(record);}catch(error){record.replica.destroy();throw error;}
         if(args.mode==='copy'){try{entry=await manager.create(args.title??record.title,record.replica.document,options);}finally{record.replica.destroy();}}
         else try{
           if(args.title!==undefined)record.title=canvasTitle(args.title);
@@ -92,16 +94,16 @@ export function createWorkspaceTools({readDesignFile,manager,store,profile,sourc
     if(call.name==='export_document')return withEntry(args.id,signal,async entry=>{
       await checkBusy(entry,agent,signal);if(entry.runtime)await request(entry,'flush',{guardBusy:true});signal?.throwIfAborted();await manager.save(entry);
       let bytes,mimeType;
-      if(args.format==='omc'){bytes=Buffer.from(encodeFile(entry.record));mimeType='application/vnd.ohmycanvas+json';}
-      else if(args.format==='json'){bytes=Buffer.from(JSON.stringify(exportCanvasJson(entry.record.replica.document)));mimeType='application/json';}
+      if(args.format==='omc'){bytes=Buffer.from(await store.export(entry.record));mimeType='application/vnd.ohmycanvas+json';}
+      else if(args.format==='json'){bytes=Buffer.from(JSON.stringify(exportCanvasJson(await portableAssetDocument(entry.record.replica.document,store.assets,portableDocument,{signal}))));mimeType='application/json';}
       else{
         await manager.ensureRuntime(entry);
         const exported=await request(entry,'export-data',{format:args.format,ids:args.ids,scale:args.scale,quality:args.quality,bounds:args.bounds,background:args.background,omitFill:args.omitFill,constraint:args.constraint,agent});
         if(typeof exported.data!=='string'||exported.data.length>Math.ceil(MAX_EXPORT_BYTES*4/3)+4)throw error('invalid','Invalid or oversized renderer export');
         bytes=Buffer.from(exported.data,'base64');mimeType=exported.mimeType;
       }
-      signal?.throwIfAborted();if(bytes.length>MAX_EXPORT_BYTES)throw error('invalid','Export exceeds 100 MiB');
-      if(args.filePath)return {ok:true,documentId:entry.record.id,format:args.format,mimeType,...await writeExplicitFile(args.filePath,bytes,{overwrite:args.overwrite??false,protectedDirectory:profile,protectedDirectories:sourceRoot?[sourceRoot]:[],signal})};
+      signal?.throwIfAborted();const limit=['omc','json'].includes(args.format)?MAX_PORTABLE_BYTES:MAX_EXPORT_BYTES;if(bytes.length>limit)throw error('invalid',`Export exceeds ${limit/1024/1024} MiB`);
+      if(args.filePath)return {ok:true,documentId:entry.record.id,format:args.format,mimeType,...await writeExplicitFile(args.filePath,bytes,{overwrite:args.overwrite??false,protectedDirectory:profile,protectedDirectories:sourceRoot?[sourceRoot]:[],signal,limit})};
       if(bytes.length>MAX_INLINE_BYTES)throw error('response_limit','Export is too large for an inline response; supply filePath');
       return {ok:true,documentId:entry.record.id,format:args.format,mimeType,encoding:'base64',data:bytes.toString('base64'),bytes:bytes.length};
     });

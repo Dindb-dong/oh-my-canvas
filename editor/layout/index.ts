@@ -1,4 +1,4 @@
-import type { CanvasDocument, Data, Rect, Shape } from '../contracts';
+import type { CanvasDocument, Data, EditorChangeScope, Rect, Shape } from '../contracts';
 import { cachedTextMetric, retainTextMetric, textMetricKey } from '../render/metric-cache';
 import { textHTML } from '../render/scene';
 import { applyConstraints, moveShape, resizeShape } from '../geometry';
@@ -42,16 +42,20 @@ function constrained(shape: Shape, axis: 'width' | 'height', value: number) {
     return limit(value, shape[axis === 'width' ? 'minWidth' : 'minHeight'], shape[axis === 'width' ? 'maxWidth' : 'maxHeight']);
 }
 /** Keep imported CSS anchors in sync with explicit edits, in the parent's local content space. */
-function reconcileInlineGeometry(objects: Record<string, Shape>, previous: Record<string, Shape>): void {
+function reconcileInlineGeometry(objects: Record<string, Shape>, previous: Record<string, Shape>, ids = Object.keys(objects)): void {
     const local = (shape: Shape, parent: Shape) => {
         const [top, right, bottom, left] = padding(parent.layout ?? {}), matrix = parent.inverseTransform ?? { a: 1, b: 0, c: 0, d: 1 }, cx = parent.x + parent.width / 2, cy = parent.y + parent.height / 2, dx = shape.x + shape.width / 2 - cx, dy = shape.y + shape.height / 2 - cy;
         return {
             x: cx + matrix.a * dx + matrix.c * dy - shape.width / 2 - parent.x - left, y: cy + matrix.b * dx + matrix.d * dy - shape.height / 2 - parent.y - top, width: shape.width, height: shape.height, contentWidth: Math.max(0, parent.width - left - right), contentHeight: Math.max(0, parent.height - top - bottom)
         };
     };
-    for (const shape of Object.values(objects)) {
-        const old = previous[shape.id], parent = objects[shape.parentId], oldParent = old && previous[old.parentId], css = shape.inlineStyles;
-        if (!old || !parent || !oldParent || !css || shape.id === shape.parentId)
+    for (const id of ids) {
+        const shape = objects[id];
+        const old = previous[shape.id], css = shape.inlineStyles;
+        if (!old || !css || shape.id === shape.parentId)
+            continue;
+        const parent = objects[shape.parentId], oldParent = previous[old.parentId];
+        if (!parent || !oldParent)
             continue;
         const reparented = shape.parentId !== old.parentId, geometryChanged = shape.x !== old.x || shape.y !== old.y || shape.width !== old.width || shape.height !== old.height;
         const current = local(geometryChanged || reparented ? shape : old, geometryChanged || reparented ? parent : oldParent);
@@ -86,10 +90,62 @@ function reconcileInlineGeometry(objects: Record<string, Shape>, previous: Recor
             shape.inlineStyles = next;
     }
 }
+const appearanceFields = new Set(['name', 'fills', 'strokes', 'opacity', 'shadows', 'blur', 'blurHidden', 'backgroundBlur', 'backgroundBlurHidden', 'locked', 'fillStyleId', 'strokeStyleId', 'effectStyleId', 'box', 'corners', 'inverseTransform', 'enclosingFrameId', 'pathContentVersion']);
+/** Fixed, non-layout containers isolate sibling subtrees. Layout ancestors
+ * remain a unit because intrinsic sizing and distribution can affect siblings.
+ * Structural edits conservatively retain the complete affected-page pass.
+ */
+function affectedRoots(objects: Record<string, Shape>, previous: Record<string, Shape>, scope: EditorChangeScope, pageId: string): string[] {
+    if (scope.topologyPages.has(pageId)) return ['root'];
+    const roots = new Set<string>();
+    const changed = scope.shapes.get(pageId);
+    // Ancestors outside this complete change scope are immutable. Inspect them
+    // without opening a mutable draft of their potentially large child list.
+    const inspect = (id: string) => changed?.has(id) ? objects[id] : previous[id];
+    for (const id of scope.shapes.get(pageId) ?? []) {
+        let shape = objects[id];
+        const old = previous[id];
+        if (!shape) continue;
+        if (old && Object.keys({ ...old, ...shape }).every(key => appearanceFields.has(key) || old[key] === shape[key])) continue;
+        const seen = new Set<string>();
+        while (shape.parentId !== shape.id) {
+            if (seen.has(shape.id)) throw new Error('Cyclic layout parent chain');
+            seen.add(shape.id);
+            const parent = inspect(shape.parentId);
+            if (!parent?.layout || parent.layout.type === 'none') break;
+            shape = parent;
+        }
+        roots.add(shape.id);
+    }
+    return [...roots].filter(id => {
+        const seen = new Set<string>(); let shape = objects[id];
+        while (shape && shape.parentId !== shape.id) {
+            if (seen.has(shape.id)) throw new Error('Cyclic layout parent chain');
+            seen.add(shape.id);
+            if (roots.has(shape.parentId)) return false;
+            shape = inspect(shape.parentId);
+        }
+        return true;
+    });
+}
 /** Measure intrinsic containers bottom-up, then assign available space top-down. */
-export function applyLayout(doc: CanvasDocument, before?: CanvasDocument, options: Data = {}): void {
-    for (const page of Object.values(doc.pagesById)) {
+export function applyLayout(doc: CanvasDocument, before?: CanvasDocument, options: Data = {}, scope?: EditorChangeScope): void {
+    const pageIds = scope ? [...new Set([...scope.shapes.keys(), ...scope.topologyPages])] : Object.keys(doc.pagesById);
+    for (const pageId of pageIds) {
+        const page = doc.pagesById[pageId];
+        if (!page) continue;
         const objects = page.objects;
+        const roots = scope && before ? affectedRoots(objects, before.pagesById[pageId]?.objects ?? {}, scope, pageId) : ['root'];
+        if (!roots.length) continue;
+        const selected = new Set<string>(), stack = [...roots];
+        while (stack.length) {
+            const id = stack.pop()!;
+            if (selected.has(id)) throw new Error('Cyclic or shared layout child');
+            selected.add(id);
+            const shape = objects[id];
+            if (shape) stack.push(...shape.childIds ?? []);
+        }
+        const selectedIds = [...selected].filter(id => !!objects[id]);
         const place = (shape: Shape, rect: Rect) => {
             const dx = rect.x - shape.x, dy = rect.y - shape.y;
             resizeShape(shape, { ...rect, width: constrained(shape, 'width', rect.width), height: constrained(shape, 'height', rect.height) });
@@ -106,10 +162,14 @@ export function applyLayout(doc: CanvasDocument, before?: CanvasDocument, option
                     shift(id);
         };
         if (before)
-            reconcileInlineGeometry(objects, before.pagesById[page.id]?.objects ?? {});
+            reconcileInlineGeometry(objects, before.pagesById[page.id]?.objects ?? {}, selectedIds);
         if (before) {
             const previous = before.pagesById[page.id]?.objects ?? {};
-            for (const shape of Object.values(objects)) {
+            for (const id of selectedIds) {
+                const shape = objects[id];
+                // A fixed ancestor outside the selected dependency subtree has
+                // unchanged dimensions, so it cannot trigger constraints.
+                if (scope && !selected.has(shape.parentId) && !scope.shapes.get(pageId)?.has(shape.parentId) && !scope.topologyPages.has(pageId)) continue;
                 const oldParent = previous[shape.parentId], parent = objects[shape.parentId], old = previous[shape.id];
                 if (!old || !parent || !oldParent || shape.parentId === shape.id)
                     continue;
@@ -362,10 +422,9 @@ export function applyLayout(doc: CanvasDocument, before?: CanvasDocument, option
                 if (objects[id])
                     arrange(objects[id]);
         };
-        const root = objects.root;
-        if (root) {
-            measure(root);
-            arrange(root);
+        for (const id of roots) {
+            const root = objects[id];
+            if (root) { measure(root); arrange(root); }
         }
     }
 }

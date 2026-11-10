@@ -1,5 +1,7 @@
 import {describe,it,expect} from 'vitest';
-import {zipSync,strToU8} from 'fflate';
+import {zipSync,strToU8,deflateSync} from 'fflate';
+import {parseFigBinary,encodeFigParts,assembleCanvasFig} from 'openfig-core';
+import {createHash} from 'node:crypto';
 import {figFixture,sketchFixture} from './fixtures/design-files';
 import {importDesignFile,DESIGN_FILE_LIMIT} from '../formats/design-file';
 import {validateImportedDocument} from '../mcp/import-document';
@@ -30,6 +32,32 @@ describe('native design files',()=>{
         const png=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64'));
         const bytes=zipSync({'document.json':strToU8('{"pages":[{"_ref":"pages/one"}]}'),'pages/one.json':strToU8(JSON.stringify({layers:Array.from({length:3},()=>({_class:'bitmap',frame:{width:10,height:10},image:{_ref:'images/a.png'}}))})),'images/a.png':png});
         const {document}=importDesignFile(bytes,'sketch');validateImportedDocument(document);const image=layers(document).find(s=>s.type==='image').image;expect(document.assets[image.assetId].src).toMatch(/^data:image\/png;base64,/);expect(Object.keys(document.assets)).toHaveLength(1);expect(layers(document).filter(s=>s.type==='image').every(s=>s.image.assetId===image.assetId)).toBe(true);expect(imageSource(image,document.assets)).toBe(document.assets[image.assetId].src);expect(referencedAssets(layers(document),document.assets)).toEqual(document.assets);const again=importCanvasJson(exportCanvasJson(document));expect(again.assets[image.assetId]).toEqual(document.assets[image.assetId]);
+    });
+    it('returns transferable binary assets with no base64 in the editable document',()=>{
+        const png=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64'));
+        const bytes=zipSync({'document.json':strToU8('{"pages":[{"_ref":"pages/one"}]}'),'pages/one.json':strToU8(JSON.stringify({layers:['a','b'].map(key=>({_class:'bitmap',frame:{width:10,height:10},image:{_ref:`images/${key}.png`}}))})),'images/a.png':png,'images/b.png':png});
+        const result=importDesignFile(bytes,'sketch',{binaryAssets:true}),hash=createHash('sha256').update(png).digest('hex');
+        expect(result.blobs).toHaveLength(1);expect(result.blobs![0]).toMatchObject({hash,mimeType:'image/png'});
+        expect(result.blobs![0].bytes).toEqual(png);
+        expect(Object.values<any>(result.document.assets)).toHaveLength(1);
+        expect(Object.values<any>(result.document.assets)[0].src).toBe(`omc-asset:sha256:${hash}`);
+        expect(JSON.stringify(result.document)).not.toContain('base64');
+        expect(bytes.byteLength).toBeGreaterThan(0);
+        expect(result.timings.total).toBeGreaterThan(0);
+        validateImportedDocument(result.document);
+    });
+    it('preserves full affine orientation and world-space vector points with source IDs',()=>{
+        const fig=parseFigBinary(figFixture().binary),board=fig.nodes.find(node=>node.name==='Board')!,vector=fig.nodes.find(node=>node.name==='Vector')!;
+        board.transform={m00:0,m01:-1,m02:100,m10:1,m11:0,m12:200};
+        vector.transform={m00:2,m01:.5,m02:10,m10:0,m11:1.5,m12:20};
+        const parts=encodeFigParts(fig),binary=assembleCanvasFig({...parts,messageCompressed:deflateSync(parts.messageRaw)});
+        const {document}=importDesignFile(binary,'fig'),shape=layers(document).find(s=>s.name==='Vector');
+        expect(shape.transform).toMatchObject({a:0,b:2,c:-1.5,d:.5});
+        expect(shape.content[0]).toMatchObject({command:'move',x:80,y:210});
+        expect(shape.content[1]).toMatchObject({command:'line',x:80,y:410});
+        expect(shape.content[2]).toMatchObject({command:'line',x:-10,y:240});
+        expect(shape.importSource).toEqual({format:'fig',nodeId:'0:6',nodeType:'VECTOR'});
+        expect(document.extra.importFidelity).toBe('unverified');
     });
     it('rejects malformed, missing, oversized and traversal archives before importing',()=>{
         expect(()=>importDesignFile(new Uint8Array(DESIGN_FILE_LIMIT+1),'fig')).toThrow(/256 MiB/);

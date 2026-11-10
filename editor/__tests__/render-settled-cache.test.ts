@@ -87,21 +87,25 @@ it('still waits for newly discovered image decoding without replacing unchanged 
     expect(view.measure(['image']).get('image')!.imageFailed).toBeUndefined();
 });
 
-it('loads shared image assets once per active page and releases them on departure', async () => {
-    const create = vi.fn(() => 'blob:shared'), revoke = vi.fn();
+it.each([
+    ['base64 raster', 'data:image/png;base64,AA==', 'image/png'],
+    ['URI-encoded SVG', 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text>이미지</text></svg>'), 'image/svg+xml']
+])('loads shared %s assets once per active page and releases them on departure', async (_name, src, mime) => {
+    const create = vi.fn((_blob: Blob) => 'blob:shared'), revoke = vi.fn();
     vi.stubGlobal('URL', { createObjectURL: create, revokeObjectURL: revoke });
     vi.stubGlobal('Image', class { complete = true; naturalWidth = 1; set src(_value: string) {} });
     const { editor, view } = setup();
     let second = '';
     editor.transact('Shared images', doc => {
-        doc.assets = { bitmap: { src: 'data:image/png;base64,AA==' } };
+        doc.assets = { bitmap: { src } };
         const page = doc.pagesById[editor.pageId];
         for (const id of ['image-a', 'image-b']) insertShape(page, createShape('image', { id, width: 10, height: 10, image: { assetId: 'bitmap' } }));
         const next = createPage('Empty'); second = next.id; doc.pages.push(next.id); doc.pagesById[next.id] = next;
     });
     await view.settled();
     expect(create).toHaveBeenCalledTimes(1);
-    expect(view.sceneSvg(['image-a'])).toContain('data:image/png;base64,AA==');
+    expect(create.mock.calls[0][0].type).toBe(mime);
+    expect(view.sceneSvg(['image-a'])).toContain(src);
     expect(view.sceneSvg(['image-a'])).not.toContain('blob:');
     editor.setPage(second); await view.settled();
     expect(revoke).toHaveBeenCalledWith('blob:shared');

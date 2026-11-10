@@ -22,7 +22,7 @@ test('wrong secret and browser Origin are refused before websocket upgrade',asyn
 });
 test('old collaboration schemas are refused before document exchange',async t=>{
  const replica=new Replica({document:documentFixture()}),host=new Collaboration({replica,id:randomUUID(),title:'Schema'});t.after(async()=>{await host.close();replica.destroy();});await host.host({bind:'127.0.0.1'});const d=parseInvite(host.invite('127.0.0.1'));
- assert.equal(d.v,2);assert.throws(()=>parseInvite('omc://join/'+Buffer.from(JSON.stringify({...d,v:1})).toString('base64url')),/Update Oh My Canvas/);
+ assert.equal(d.v,3);for(const v of [1,2])assert.throws(()=>parseInvite('omc://join/'+Buffer.from(JSON.stringify({...d,v})).toString('base64url')),/Update Oh My Canvas/);
  const state=Buffer.from(replica.state);let welcomed=false;
  await new Promise((resolve,reject)=>{const w=new WebSocket(d.url,{ca:d.cert,rejectUnauthorized:true,checkServerIdentity:()=>undefined,headers:{Authorization:`Bearer ${d.token}`}});w.on('open',()=>w.send(JSON.stringify({type:'hello',room:d.room,id:randomUUID(),name:'Old client'})));w.on('message',raw=>{if(JSON.parse(raw).type==='welcome')welcomed=true;});w.on('close',resolve);w.on('error',reject);});assert.equal(welcomed,false);assert.deepEqual(Buffer.from(replica.state),state);
 });

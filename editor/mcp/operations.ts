@@ -4,6 +4,7 @@ import { groupShapes, ungroupShapes, alignShapes, distributeShapes, orderShapes,
 import { unionBounds, shapeBounds, fitViewport } from '../geometry';
 import { richText, textValue, uid } from '../formats/model';
 import { SHAPE_PROPERTIES, TEXT_STYLE_PROPERTIES, validateShapeProperties, validateTextStyleProperties, validateJson } from './properties';
+import { referencedAssets, prepareAssetTransfer, mergeTransferredAssets } from '../images/assets';
 
 export function requireEditable(editor: EditorStore, ids: string[], ownFlags?: Data): void {
     if (!ids.length || new Set(ids).size !== ids.length) throw Error('Choose distinct layers');
@@ -193,13 +194,15 @@ export function clipboardPayload(args: Data, editor: EditorStore): Data {
         const shape = editor.page.objects[ids[0]];
         const properties = Object.fromEntries(PROPERTY_KEYS.filter(key => key in shape).map(key => [key, clone(shape[key])]));
         if (shape.type === 'text') properties.textFormatting = clone(shape.content.children).map((paragraph: Data) => ({ ...Object.fromEntries(Object.entries(paragraph).filter(([key]) => Object.hasOwn(TEXT_STYLE_PROPERTIES.properties, key))), children: paragraph.children.map((run: Data) => Object.fromEntries(Object.entries(run).filter(([key]) => Object.hasOwn(TEXT_STYLE_PROPERTIES.properties, key)))) }));
-        return { kind: 'oh-my-canvas/properties', version: 1, properties, ...dependencies(editor.doc, [shape]) };
+        return { kind: 'oh-my-canvas/properties', version: 1, properties, ...dependencies(editor.doc, [properties as Shape]) };
     }
     return { kind: 'oh-my-canvas/shapes', version: 1, ...dependencies(editor.doc, ids.flatMap(id => descendants(editor.page, id, true))), roots: ids, shapes: ids.flatMap(id => descendants(editor.page, id, true)).map(clone), pageId: editor.pageId, origin: unionBounds(ids.map(id => shapeBounds(editor.page.objects[id]))) };
 }
 export function pasteProperties(payload: Data, ids: string[], editor: EditorStore): Data {
     if (payload?.kind !== 'oh-my-canvas/properties' || !payload.properties || typeof payload.properties !== 'object') throw Error('A copied properties payload is required');
     validateJson(payload);
+    payload = prepareAssetTransfer(payload, editor.doc.assets);
+    mergeTransferredAssets(editor.doc, payload);
     const value = clone(payload.properties);
     for (const key of Object.keys(value)) if (![...PROPERTY_KEYS, 'textFormatting'].includes(key)) throw Error(`Unsupported clipboard property: ${key}`);
     validateShapeProperties(Object.fromEntries(Object.entries(value).filter(([key]) => Object.hasOwn((SHAPE_PROPERTIES as Data).properties, key))));
@@ -239,7 +242,7 @@ export function validateClipboardPayload(payload: Data): void {
 
 const COMPONENT_FIELDS = ['componentId', 'sourceId', 'isMain', 'isInstanceRoot', 'isVariantSet', 'variantSetId', 'variantProperties', 'overrides', 'componentPropertyRefs', 'componentProperties', 'componentSourceIds', 'componentOuterSourceId', 'componentRootId', 'componentRoot', 'sourceMap', 'instanceMap', 'propertyValues'];
 export function prepareClipboardPayload(payload: Data, doc: CanvasDocument): Data {
-    const prepared = clone(payload);
+    const prepared = prepareAssetTransfer(payload, doc.assets);
     if (prepared.kind !== 'oh-my-canvas/shapes') return prepared;
     const detached = prepared.shapes.some((shape: Shape) => shape.componentId && (!doc.components?.[shape.componentId] || JSON.stringify(doc.components[shape.componentId]) !== JSON.stringify(prepared.componentDefinitions?.[shape.componentId])));
     for (const shape of prepared.shapes) {
@@ -283,6 +286,6 @@ function dependencies(doc: CanvasDocument, shapes: Shape[]): Data {
     shapes.forEach(shape => visit(shape));
     const styles = Object.fromEntries([...styleIds].filter(id => doc.styles?.[id]).map(id => [id, clone(doc.styles![id])]));
     Object.values(styles).forEach(style => visit(style));
-    const assets = Object.fromEntries(Object.entries<Data>(doc.assets ?? {}).filter(([id, asset]) => assetIds.has(id) || asset.kind === 'font' && families.has(asset.family)).map(([id, asset]) => [id, clone(asset)]));
+    const assets = { ...referencedAssets(shapes, doc.assets), ...Object.fromEntries(Object.entries<Data>(doc.assets ?? {}).filter(([id, asset]) => assetIds.has(id) || asset.kind === 'font' && families.has(asset.family)).map(([id, asset]) => [id, clone(asset)])) };
     return { componentDefinitions: Object.fromEntries([...componentIds].filter(id => doc.components?.[id]).map(id => [id, clone(doc.components![id])])), styleDefinitions: styles, assetDefinitions: assets };
 }

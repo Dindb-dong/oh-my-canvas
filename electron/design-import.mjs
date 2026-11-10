@@ -7,10 +7,19 @@ export async function readDesignFile(bytes,format){
   if(pending>=1)throw Error('Finish the current design import first');
   pending++;
   try{return await new Promise((resolve,reject)=>{
-    const worker=new Worker(new URL('./design-import-worker.mjs',import.meta.url),{workerData:{bytes,format},execArgv:[],resourceLimits:{maxOldGenerationSizeMb:1536,maxYoungGenerationSizeMb:32}});
-    const timer=setTimeout(()=>{void worker.terminate();reject(Error('Design import timed out after 30 seconds'));},30000);
-    worker.once('message',result=>{clearTimeout(timer);void worker.terminate();if(result.error)reject(Error(result.error));else resolve(result);});
-    worker.once('error',error=>{clearTimeout(timer);reject(error);});
-    worker.once('exit',code=>{clearTimeout(timer);reject(Error(`Design import worker stopped (${code})`));});
+    // Transfer a dedicated copy; detaching an IPC/caller-owned view would be a
+    // surprising mutation, and Buffer.slice() may share its backing allocation.
+    const input=Uint8Array.from(bytes);
+    const worker=new Worker(new URL('./design-import-worker.mjs',import.meta.url),{workerData:{bytes:input,format},transferList:[input.buffer],execArgv:[],resourceLimits:{maxOldGenerationSizeMb:1536,maxYoungGenerationSizeMb:32}});
+    let finished=false;
+    const finish=async(error,result)=>{
+      if(finished)return;finished=true;clearTimeout(timer);
+      try{await worker.terminate();}catch{}
+      if(error)reject(error);else resolve(result);
+    };
+    const timer=setTimeout(()=>{void finish(Error('Design import timed out after 30 seconds'));},30000);
+    worker.once('message',result=>{void finish(result?.error?Error(result.error):null,result);});
+    worker.once('error',error=>{void finish(error);});
+    worker.once('exit',code=>{void finish(Error(`Design import worker stopped (${code})`));});
   });}finally{pending--;}
 }

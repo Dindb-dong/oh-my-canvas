@@ -13,9 +13,10 @@ export interface CanvasDocument extends Data {pages:string[];pagesById:Record<st
 export interface Viewport {vport:{width:number;height:number};vbox:Rect;zoom:number;}
 export type Tool = 'move'|'frame'|'rect'|'ellipse'|'polygon'|'star'|'line'|'arrow'|'pencil'|'pen'|'text';
 export interface Operation {id:string;label?:string;author?:string;group?:string;}
-export interface EditorEvent {changes?:unknown[];operation?:Operation;selection?:boolean;hover?:boolean;deltas?:boolean;viewport?:boolean;tool?:boolean;page?:boolean;projection?:boolean;}
+export interface EditorEvent {changes?:unknown[];changedShapeIds?:Record<string,string[]>;operation?:Operation;selection?:boolean;hover?:boolean;deltas?:boolean;viewport?:boolean;tool?:boolean;page?:boolean;projection?:boolean;}
 export type Mutator<T=any> = (draft:CanvasDocument)=>T;
-export interface EditorOptions {reconcile?:(before:CanvasDocument,draft:CanvasDocument)=>void;validate?:(draft:CanvasDocument)=>void;}
+export interface EditorChangeScope {paths:readonly string[][];pages:readonly string[];shapes:ReadonlyMap<string,ReadonlySet<string>>;topologyPages:ReadonlySet<string>;documentFields:ReadonlySet<string>;}
+export interface EditorOptions {reconcile?:(before:CanvasDocument,draft:CanvasDocument)=>void;reconcileChanges?:(before:CanvasDocument,draft:CanvasDocument,scope:EditorChangeScope)=>void;validate?:(draft:CanvasDocument)=>void;validateChanges?:(before:CanvasDocument,draft:CanvasDocument,scope:EditorChangeScope)=>void;onTiming?:(phase:string,milliseconds:number)=>void;}
 export interface EditorStore {
  doc:CanvasDocument;readonly page:Page;pageId:string;selection:string[];viewport:Viewport;tool:Tool;hover:string|null;
  undo:{blocked:boolean;[key:string]:any};[key:string]:any;
@@ -23,7 +24,7 @@ export interface EditorStore {
  transact<T>(operation:Operation|string,mutate:Mutator<T>):T;
  begin(label:string):boolean;preview(mutate:Mutator):void;commitSession():boolean;cancelSession():void;
  setSelection(ids:string[]):void;setHover(id:string|null):void;setPage(id:string):void;setTool(tool:Tool):void;setViewport(viewport:Viewport):void;
- replaceDocument(doc:CanvasDocument):void;receiveDocument(doc:CanvasDocument):void;
+ replaceDocument(doc:CanvasDocument):void;receiveDocument(doc:CanvasDocument,options?:{incremental?:boolean}):void;
  undoStep():boolean;redoStep():boolean;destroy():void;
 }
 export interface Measured {x:number;y:number;w:number;h:number;scrollW:number;scrollH:number;clippedText:boolean;overflowParent:boolean;fontFallback?:string;imageFailed?:boolean;}
@@ -34,6 +35,7 @@ export interface RenderView {
  readonly renderRevision?:number;flush?():void;
  settled():Promise<void>;measure(ids:string[]):Map<string,Measured>;computedStyle(id:string,keys?:string[]):Record<string,string>;
  screenshot(id?:string,options?:{mode?:'slice'|'overview';slice?:number;scope?:'page'}):Promise<Shot>;
+ thumbnailSnapshot?(options?:{signal?:AbortSignal}):Promise<Shot|null>;
  thumbnailSvg?(pageId:string,id:string):Promise<string>;
  element(id:string):HTMLElement|null;render():void;destroy():void;[key:string]:any;
 }
