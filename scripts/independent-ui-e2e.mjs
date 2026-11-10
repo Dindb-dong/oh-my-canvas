@@ -856,6 +856,34 @@ try {
             path: path.join(qa, "desktop-pages.png")
         });
     });
+    await test("UI-inspector-help", "inspector identifies axes and explains controls on hover and keyboard focus", async () => {
+        await fresh([shape("rect", "rect", 100, 100, 100, 80)]);
+        await selected("rect");
+        const inspector = page.locator('#right');
+        await inspector.getByText('Horizontal (X)', {exact: true}).waitFor();
+        await inspector.getByText('Vertical (Y)', {exact: true}).waitFor();
+        assert.equal(await inspector.locator('.inspector-actions').count(), 2);
+        assert.equal(await inspector.locator('.inspector-actions').first().getByRole('button').count(), 3);
+        await inspector.getByRole('button', {name: 'Distribute horizontally', exact: true}).hover();
+        await page.getByRole('tooltip').filter({hasText: 'horizontal gaps'}).waitFor();
+        await page.screenshot({path: path.join(qa, 'desktop-inspector-help.png')});
+        await page.keyboard.press('Escape');
+        assert.equal(await page.getByRole('tooltip').count(), 0);
+        await inspector.locator('input[aria-label="W"]').focus();
+        await page.getByRole('tooltip').filter({hasText: 'Layer width'}).waitFor();
+        await page.keyboard.press('Escape');
+        assert.equal(await page.getByRole('tooltip').count(), 0);
+        assert.equal((await objects()).rect.width, 100);
+        const viewport = await page.evaluate(() => ({width: innerWidth, height: innerHeight}));
+        await page.setViewportSize({width: 960, height: 640});
+        await inspector.getByRole('button', {name: 'Flip vertically', exact: true}).hover();
+        await page.getByRole('tooltip').filter({hasText: 'top to bottom'}).waitFor();
+        const box = await page.getByRole('tooltip').boundingBox();
+        assert.ok(box && box.x >= 0 && box.y >= 0 && box.x + box.width <= 960 && box.y + box.height <= 640);
+        await page.screenshot({path: path.join(qa, 'minimum-inspector-help.png')});
+        await page.keyboard.press('Escape');
+        await page.setViewportSize(viewport);
+    });
     await test("UI-inspector-paint", "gradient stop limits, stroke details and effects update canonical paint and SVG", async () => {
         await fresh([shape("rect", "rect", 100, 100, 100, 80)]);
         await selected("rect");

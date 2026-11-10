@@ -24,7 +24,7 @@ const length = (v: string | undefined, base: number, f = 0) => v?.endsWith('%') 
 const textTags = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'label', 'strong', 'b', 'em', 'i', 'u', 's', 'small', 'code', 'pre', 'li', 'blockquote']);
 const inlineTags = new Set(['span', 'a', 'label', 'strong', 'b', 'em', 'i', 'u', 's', 'small', 'code', 'br']);
 const inherited = ['color', 'font-family', 'font-size', 'font-weight', 'font-style', 'text-align', 'line-height', 'letter-spacing', 'text-decoration', 'text-transform', 'white-space'];
-const supported = new Set(['display', 'position', 'left', 'top', 'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height', 'box-sizing', 'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'gap', 'row-gap', 'column-gap', 'flex-direction', 'flex-wrap', 'justify-content', 'align-items', 'align-self', 'align-content', 'flex', 'flex-grow', 'flex-shrink', 'flex-basis', 'grid-template-columns', 'grid-template-rows', 'grid-column', 'grid-row', 'grid-column-start', 'grid-row-start', 'grid-column-end', 'grid-row-end', 'overflow', 'overflow-x', 'overflow-y', 'background', 'background-color', 'background-image', 'border', 'border-width', 'border-style', 'border-color', 'outline', 'outline-width', 'outline-style', 'outline-color', 'border-radius', 'border-top', 'border-right', 'border-bottom', 'border-left', 'opacity', 'box-shadow', 'filter', 'backdrop-filter', 'mix-blend-mode', 'transform', 'transform-origin', 'object-fit', 'object-position', 'visibility', 'vertical-align', 'text-overflow', '-webkit-line-clamp', ...inherited]);
+const supported = new Set(['display', 'position', 'left', 'top', 'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height', 'box-sizing', 'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'gap', 'row-gap', 'column-gap', 'flex-direction', 'flex-wrap', 'justify-content', 'align-items', 'justify-items', 'place-items', 'align-self', 'align-content', 'flex', 'flex-grow', 'flex-shrink', 'flex-basis', 'grid-template-columns', 'grid-template-rows', 'grid-column', 'grid-row', 'grid-column-start', 'grid-row-start', 'grid-column-end', 'grid-row-end', 'overflow', 'overflow-x', 'overflow-y', 'background', 'background-color', 'background-image', 'border', 'border-width', 'border-style', 'border-color', 'outline', 'outline-width', 'outline-style', 'outline-color', 'border-radius', 'border-top', 'border-right', 'border-bottom', 'border-left', 'opacity', 'box-shadow', 'filter', 'backdrop-filter', 'mix-blend-mode', 'transform', 'transform-origin', 'object-fit', 'object-position', 'visibility', 'vertical-align', 'text-overflow', '-webkit-line-clamp', ...inherited]);
 function runStyle(css: Data, tag: string): Data { return { fontFamily: css['font-family']?.replace(/^['"]|['"]$/g, ''), fontSize: number(css['font-size'], 16), fontWeight: css['font-weight'] ?? (['b', 'strong'].includes(tag) ? 700 : 400), fontStyle: css['font-style'] ?? (['em', 'i'].includes(tag) ? 'italic' : 'normal'), textDecoration: css['text-decoration'] ?? (tag === 'u' ? 'underline' : tag === 's' ? 'line-through' : 'none'), textTransform: css['text-transform'], letterSpacing: number(css['letter-spacing']), fills: [{ color: css.color ?? '#000000' }] }; }
 function splitSpace(value: string) { return value.trim().split(/\s+(?![^()]*\))/); }
 export function gridTracks(value: string): Data[] {
@@ -97,6 +97,11 @@ export function importHtml(html: string, options: ImportOptions = {}): Imported 
         if (['s', 'del'].includes(node.tag))
             tagStyle['text-decoration'] = 'line-through';
         const css = { ...Object.fromEntries(inherited.filter(k => parent[k] !== undefined).map(k => [k, parent[k]])), ...tagStyle, ...cssDeclarations(node.attrs.style ?? '') };
+        if (css['place-items']) {
+            const [align, justify = align] = splitSpace(css['place-items']);
+            css['align-items'] ??= align;
+            css['justify-items'] ??= justify;
+        }
         if (css.display === 'inline-block')
             warnings.push('Unsupported CSS display: inline-block');
         for (const k of Object.keys(css))
@@ -174,7 +179,7 @@ export function importHtml(html: string, options: ImportOptions = {}): Imported 
         }
         else {
             const p = padding(css, w), display = css.display ?? 'block', isGrid = display === 'grid' || display === 'inline-grid', direction = css['flex-direction'] ?? (display === 'flex' || display === 'inline-flex' ? 'row' : 'column');
-            s = shape(radius === '50%' ? 'ellipse' : 'frame', { ...common, height: h, childIds: [], layout: { type: isGrid ? 'grid' : 'flex', direction, wrap: css['flex-wrap'] ?? 'nowrap', padding: p, gap: { row: number(css['row-gap'], number(splitSpace(css.gap ?? '0')[0])), column: number(css['column-gap'], number(splitSpace(css.gap ?? '0')[1] ?? splitSpace(css.gap ?? '0')[0])) }, justifyContent: css['justify-content'] ?? 'start', alignItems: css['align-items'] ?? 'start', alignContent: css['align-content'], columns: css['grid-template-columns'] ? gridTracks(css['grid-template-columns']) : undefined, rows: css['grid-template-rows'] ? gridTracks(css['grid-template-rows']) : undefined }, clipContent: ['hidden', 'clip'].includes(css.overflow), heightSizing: css.height ? 'fixed' : 'hug', widthSizing: css.width === 'auto' ? 'hug' : 'fixed' });
+            s = shape(radius === '50%' ? 'ellipse' : 'frame', { ...common, height: h, childIds: [], layout: { type: isGrid ? 'grid' : 'flex', direction, wrap: css['flex-wrap'] === 'wrap' || css['flex-wrap'] === 'wrap-reverse', padding: p, gap: { row: number(css['row-gap'], number(splitSpace(css.gap ?? '0')[0])), column: number(css['column-gap'], number(splitSpace(css.gap ?? '0')[1] ?? splitSpace(css.gap ?? '0')[0])) }, justifyContent: css['justify-content'] ?? 'start', alignItems: css['align-items'] ?? 'start', justifyItems: css['justify-items'], alignContent: css['align-content'], columns: css['grid-template-columns'] ? gridTracks(css['grid-template-columns']) : undefined, rows: css['grid-template-rows'] ? gridTracks(css['grid-template-rows']) : undefined }, clipContent: ['hidden', 'clip'].includes(css.overflow), heightSizing: css.height ? 'fixed' : 'hug', widthSizing: css.width === 'auto' ? 'hug' : 'fixed' });
             if (s.type === 'ellipse' && node.children.some(n => n.tag !== '#text' || n.text?.trim())) {
                 s.type = 'frame';
                 warnings.push('Percentage-radius container retained as an editable rounded frame');
@@ -182,7 +187,8 @@ export function importHtml(html: string, options: ImportOptions = {}): Imported 
             objects[s.id] = s;
             const inlineOnly = node.children.length > 0 && node.children.every(n => n.tag === '#text' || inlineTags.has(n.tag));
             if (inlineOnly) {
-                const content = rich(node, css), fontSize = number(css['font-size'], 16), t = shape('text', { id: makeId(), parentId: s.id, enclosingFrameId: s.id, x: x + p[3], y: y + p[0], width: Math.max(0, w - p[1] - p[3]), height: content.children.length * fontSize * 1.2, content, autoResize: 'height', widthSizing: 'fill' });
+                const intrinsic = ['flex', 'inline-flex', 'grid', 'inline-grid'].includes(display);
+                const content = rich(node, css), fontSize = number(css['font-size'], 16), t = shape('text', { id: makeId(), parentId: s.id, enclosingFrameId: s.id, x: x + p[3], y: y + p[0], width: Math.max(0, w - p[1] - p[3]), height: content.children.length * fontSize * 1.2, content, inlineStyles: intrinsic ? { 'max-width': '100%' } : undefined, maxWidth: intrinsic ? Math.max(0, w - p[1] - p[3]) : undefined, autoResize: intrinsic ? 'widthAndHeight' : 'height', widthSizing: intrinsic ? 'hug' : 'fill' });
                 objects[t.id] = t;
                 s.childIds = [t.id];
             }

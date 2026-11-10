@@ -342,6 +342,13 @@ export const workspaceStyle = `
   flex-wrap:wrap;
   gap:4px;
 }
+.inspector-axis-label { color:var(--muted); font-size:11px; margin:10px 0 5px; }
+.omc-inspector-tooltip {
+  position:fixed; z-index:10000; width:280px; max-width:calc(100vw - 16px);
+  box-sizing:border-box; padding:8px 10px; border-radius:6px;
+  background:#252b37; color:#fff; font:12px/1.45 'IBM Plex Sans',sans-serif;
+  box-shadow:0 2px 8px #0002; pointer-events:none;
+}
 .paint-row,.effect-row,.export-row {
   border:1px solid var(--line);
   border-radius:5px;

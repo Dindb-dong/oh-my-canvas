@@ -3,6 +3,7 @@ import { moveTree, resizeTree, topLevelIds, isEditable, ancestors } from "../doc
 import { rotateShapes, setPathHandle, movePathNodes, convertPathNode } from "../commands";
 import { el, button, iconButton, labeledIconButton, input, syncInputValue, select, check, section, row, clone, jsonEditor, askName, modal, toast, download } from "./dom";
 import { chooseFiles, readImageFile } from "./picker";
+import { createInspectorHelp } from "./inspector-help";
 import type { createTextSession } from "../interaction/text";
 import type { createCanvasInteraction } from "../interaction/canvas";
 const blends = [
@@ -25,6 +26,7 @@ const blends = [
 ];
 export function createInspector(root: HTMLElement, services: EditorServices, text: ReturnType<typeof createTextSession>, canvas: ReturnType<typeof createCanvasInteraction>, options: Data & Pick<MountOptions, "pickFiles">) {
     const editor = services.editor;
+    const help = createInspectorHelp(root);
     const pickerAbort = new AbortController();
     let destroyed = false, rendering = false, numericSession = false;
     const geometryKeys = new Set(["x", "y", "width", "height", "rotation", "box", "corners", "transform", "inverseTransform"]);
@@ -161,7 +163,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
     };
     const choice = (label: string, key: string, values: string[], fallback = "") => select(label, value(key, fallback), values, v => patch(key, v));
     const toggle = (label: string, key: string) => check(label, value(key), v => patch(key, v));
-    const action = (id: string, label: string) => {
+    const action = (id: string, label: string, caption?: string) => {
         const icons: Record<string, string> = {
             "align.left": "align-box-left-middle",
             "align.h-center": "align-box-center-middle",
@@ -174,7 +176,9 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             "transform.flip-h": "flip-horizontal",
             "transform.flip-v": "flip-vertical"
         };
-        return icons[id] ? iconButton(icons[id], () => services.commands.run(id), "", label) : button(label, () => services.commands.run(id), undefined, label);
+        const run = () => services.commands.run(id);
+        if (!icons[id]) return button(label, run);
+        return caption ? labeledIconButton(icons[id], caption, run, "", label) : iconButton(icons[id], run, "", label);
     };
     async function textStyle(patch: Data) {
         const ids = [...editor.selection];
@@ -720,7 +724,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             if (layout.type === "flex")
                 s.append(row(select("Direction", layout.direction, ["row", "row-reverse", "column", "column-reverse"], v => set({
                     direction: v
-                })), check("Wrap", layout.wrap, v => set({
+                })), check("Wrap", layout.wrap === true || layout.wrap === "wrap" || layout.wrap === "wrap-reverse", v => set({
                     wrap: v
                 }))), row(select("Distribute", layout.justifyContent, [
                     "start",
@@ -1217,6 +1221,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
         rebuilds++;
         geometryInputs.clear();
         renderedState = inspectorState();
+        help.hide();
         root.replaceChildren();
         const design = el("div", "design");
         root.append(design);
@@ -1244,7 +1249,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
         const shape = shapes[0];
         const top = section(shapes.length === 1 ? shape.type[0].toUpperCase() + shape.type.slice(1) : `${shapes.length} layers`);
         top.append(input("Name", value("name"), v => patch("name", v)), row(num("X", "x"), num("Y", "y")), row(num("W", "width"), num("H", "height")), row(num("Rotate", "rotation"), toggle("Proportions", "constrainProportions")), row(toggle("Hidden", "hidden"), toggle("Locked", "locked")));
-        const align = el("div", "inspector-actions");
+        const horizontal = el("div", "inspector-actions"), vertical = el("div", "inspector-actions");
         for (const [id, label] of [
             ["left", "Align left"],
             ["h-center", "Align horizontal center"],
@@ -1253,8 +1258,13 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             ["v-center", "Align vertical center"],
             ["bottom", "Align bottom"]
         ])
-            align.append(action("align." + id, label));
-        top.append(align, row(action("distribute.h", "Distribute horizontally"), action("distribute.v", "Distribute vertically")), row(action("transform.flip-h", "Flip horizontally"), action("transform.flip-v", "Flip vertically")));
+            (['left', 'h-center', 'right'].includes(id) ? horizontal : vertical).append(action("align." + id, label));
+        top.append(el('div', 'inspector-axis-label', 'Horizontal (X)'), horizontal,
+            el('div', 'inspector-axis-label', 'Vertical (Y)'), vertical,
+            el('div', 'inspector-axis-label', 'Distribute spacing'),
+            row(action("distribute.h", "Distribute horizontally", "Horizontal"), action("distribute.v", "Distribute vertically", "Vertical")),
+            el('div', 'inspector-axis-label', 'Flip'),
+            row(action("transform.flip-h", "Flip horizontally", "Horizontal"), action("transform.flip-v", "Flip vertically", "Vertical")));
         design.append(top);
         const appearance = section("Appearance");
         appearance.append(row(num("Opacity", "opacity", 1), choice("Blend", "blendMode", blends, "normal")));
@@ -1484,6 +1494,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
         fontPicker,
         exportLayer,
         destroy() {
+            help.destroy();
             destroyed = true;
             pickerAbort.abort();
             root.dispatchEvent(new Event("numeric-dispose"));
