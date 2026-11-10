@@ -23,14 +23,14 @@ function setup(options = {}) {
     cleanup.push(() => editor.destroy(), () => view.destroy());
     return { editor, view, attach, fonts };
 }
-it('retains the rendered DOM for unchanged settling and performs one replacement per edit', async () => {
+it('retains the rendered DOM for unchanged settling and updates an edited element in place', async () => {
     const { editor, view, attach } = setup();
     const initial = view.element('r0'); attach.mockClear();
     await view.settled(); await view.settled();
     expect(attach).not.toHaveBeenCalled(); expect(view.element('r0')).toBe(initial);
     editor.transact('Move', doc => { doc.pagesById[editor.pageId].objects.r0.x = 32; });
     await view.settled();
-    expect(attach).toHaveBeenCalledTimes(1); expect(view.element('r0')).not.toBe(initial);
+    expect(attach).toHaveBeenCalledTimes(1); expect(view.element('r0')).toBe(initial);
     expect(view.measure(['r0']).get('r0')!.x).toBe(32);
 });
 it('still renders font completion and font metrics invalidated by ensure', async () => {

@@ -167,6 +167,26 @@ it("reveals external selections within the layer scroller without jumping for ro
     t.editor.setSelection([]);
     expect(t.root.querySelectorAll('.layers [aria-selected="true"]')).toHaveLength(0);
 });
+it("retains layer rows across geometry and paint edits while refreshing names, structure and selection", () => {
+    const t = setup(), row = t.row("r1"), tree = t.root.querySelector(".layers");
+    const replace = vi.spyOn(t.root.querySelector<HTMLElement>("#left")!, "replaceChildren");
+    for (let x = 31; x <= 50; x++)
+        t.editor.transact("Move", doc => { doc.pagesById[t.editor.pageId].objects.r1.x = x; });
+    t.editor.transact("Paint", doc => { doc.pagesById[t.editor.pageId].objects.r1.fills = [{ color: "#123456" }]; });
+    expect(t.row("r1")).toBe(row);
+    expect(t.root.querySelector(".layers")).toBe(tree);
+    expect(replace).not.toHaveBeenCalled();
+    t.editor.setSelection(["r1"]);
+    expect(t.row("r1").getAttribute("aria-selected")).toBe("true");
+    t.editor.transact("Rename", doc => { doc.pagesById[t.editor.pageId].objects.r1.name = "Renamed"; });
+    expect(t.row("r1").querySelector(".name")!.textContent).toBe("Renamed");
+    expect(replace).toHaveBeenCalledTimes(1);
+    t.editor.transact("Reorder", doc => { doc.pagesById[t.editor.pageId].objects.root.childIds!.reverse(); });
+    expect(t.visible()[0]).toBe("r1");
+    expect(replace).toHaveBeenCalledTimes(2);
+    expect(t.editor.undoStep()).toBe(true);
+    expect(t.visible()[0]).toBe("frame");
+});
 it("reveals the nearest enclosing frame, opens its ancestors and keeps the frame collapsed", () => {
     const t = setup();
     t.editor.transact("Nest frame", doc => {

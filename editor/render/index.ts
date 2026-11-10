@@ -6,9 +6,11 @@ export type { TextFragment } from './scene';
 import { combinePaths } from './vector';
 import { measureTextScene } from './text';
 import { textMetricRevision } from './metric-cache';
+import { SceneNodeCache, sceneChanges, parseScene, reconcileScene, type SceneNodeRecord } from './retained';
 export { measureTextScene } from './text';
 export { combinePaths } from './vector';
 let thumbnailNamespace = 0;
+let sceneNamespace = 0;
 export function createRenderer(editor: EditorStore, stage: HTMLElement, options: Data = {}): RenderView {
     const scene = document.createElement('div');
     scene.className = 'canvas-scene';
@@ -32,6 +34,13 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
     }>();
     const renderListeners = new Set<() => void>();
     let destroyed = false, revision = 0, settling: Promise<void> | undefined;
+    let visualRevision = 0, booleanRevision = 0, pendingRender = false, cancelScheduled: (() => void) | undefined;
+    const nodeCache = new SceneNodeCache(), scenePrefix = 'omc-view-' + (++sceneNamespace);
+    let renderedObjects: Record<string, Shape> | undefined, renderedPage = '', renderedKey = '';
+    let previousImages: Record<string, Shape> | undefined, previousBooleans: Record<string, Shape> | undefined;
+    let resolvedSource: Record<string, Shape> | undefined, resolvedRevision = -1, resolved: Record<string, Shape>;
+    const booleanProjections = new Map<string, { source: Shape; content: Data[]; shape: Shape }>();
+    let lastRender = { mode: 'full', generatedNodes: 0, cachedNodes: 0, changedNodes: 0 };
     const booleans = new Map<string, {
         signature: string;
         promise: Promise<void>;
@@ -41,9 +50,12 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         error?: unknown;
     }>();
     function resolvedObjects() {
+        if (resolvedSource === editor.page.objects && resolvedRevision === booleanRevision) return resolved;
         const result = { ...editor.page.objects };
         for (const [id, entry] of booleans)
-            if (result[id] && entry.content)
+            if (result[id] && entry.content) {
+                const source = result[id], previous = booleanProjections.get(id);
+                if (previous?.source === source && previous.content === entry.content) { result[id] = previous.shape; continue; }
                 result[id] = {
                     ...result[id], ...(entry.bounds ? { ...entry.bounds, box: { ...entry.bounds }, corners: [{ x: entry.bounds.x, y: entry.bounds.y }, { x: entry.bounds.x + entry.bounds.width, y: entry.bounds.y }, { x: entry.bounds.x + entry.bounds.width, y: entry.bounds.y + entry.bounds.height }, { x: entry.bounds.x, y: entry.bounds.y + entry.bounds.height }] } : {}), content: entry.content, fillRule: entry.fillRule, transform: {
                         a: 1, b: 0, c: 0, d: 1, e: 0, f: 0
@@ -51,10 +63,16 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                         a: 1, b: 0, c: 0, d: 1, e: 0, f: 0
                     }, rotation: 0
                 };
+                booleanProjections.set(id, { source, content: entry.content, shape: result[id] });
+            }
+        for (const id of booleanProjections.keys()) if (!booleans.get(id)?.content || !result[id]) booleanProjections.delete(id);
+        resolvedSource = editor.page.objects; resolvedRevision = booleanRevision; resolved = result;
         return result;
     }
     function discoverBooleans() {
         const objects = editor.page.objects;
+        if (previousBooleans === objects) return;
+        previousBooleans = objects;
         const signature = (shape: Shape): any[] => [shape.booleanOperation ?? shape.operation, shapePath(shape), shape.transform, shape.fillRule, shape.hidden, (shape.childIds ?? []).map(id => objects[id] ? signature(objects[id]) : null)];
         for (const shape of Object.values(objects)) {
             if (shape.type !== 'boolean' || !shape.childIds?.length)
@@ -76,24 +94,26 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 if (!operands.length) {
                     entry.content = [];
                     entry.fillRule = 'nonzero';
-                    if (!destroyed)
-                        render();
+                    booleanRevision++;
                     return;
                 }
                 const operation = shape.booleanOperation ?? shape.operation ?? 'union';
                 const result = await combinePaths(operands, operation, { wasmUrl: options.wasmUrl, objects });
+                if (destroyed || booleans.get(shape.id) !== entry) return;
                 entry.content = result.segments;
                 entry.bounds = result.bounds;
                 entry.fillRule = result.fillRule;
-                if (!destroyed)
-                    render();
+                booleanRevision++;
+                requestRender();
             })().catch(error => {
                 entry.error = error;
             });
         }
         for (const id of booleans.keys())
-            if (!objects[id])
+            if (!objects[id] || objects[id].type !== 'boolean' || !objects[id].childIds?.length) {
                 booleans.delete(id);
+                booleanRevision++;
+            }
     }
     function roots() {
         const root = editor.page.objects.root;
@@ -103,8 +123,12 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         return [s.image?.src, ...(s.fills ?? []).filter((p: Data) => p.type === 'image' || p.image).map((p: Data) => p.image?.src ?? p.image?.id ?? p.src)].filter(Boolean) as string[];
     }
     function discoverImages() {
+        if (previousImages === editor.page.objects) return;
+        previousImages = editor.page.objects;
+        const active = new Set<string>();
         for (const s of Object.values(editor.page.objects))
             for (const src of imageSource(s)) {
+                active.add(src);
                 if (images.has(src))
                     continue;
                 const record = { promise: Promise.resolve(), failed: false };
@@ -130,23 +154,40 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 });
                 images.set(src, record);
             }
+        for (const src of images.keys()) if (!active.has(src)) images.delete(src);
     }
-    let previousTextKey = '', fontRevision = 0, measuredMetricRevision = -1;
+    let fontRevision = 0, measuredMetricRevision = -1, measuredFontRevision = -1;
+    const measuredText = new Map<string, Shape>();
     function measureText() {
-        const key = fontRevision + ":" + textMetricRevision() + JSON.stringify(Object.values(editor.page.objects).filter(shape => shape.type === 'text'));
-        if (key === previousTextKey)
-            return;
-        previousTextKey = key;
-        measuredMetricRevision = textMetricRevision();
-        const measured = measureTextScene(editor.page.objects, measurements, options);
-        fragments.clear();
+        const all = measuredMetricRevision !== textMetricRevision() || measuredFontRevision !== fontRevision;
+        const changed: Record<string, Shape> = {}, live = new Set<string>();
+        for (const shape of Object.values(editor.page.objects)) {
+            if (shape.type !== 'text') continue;
+            live.add(shape.id);
+            if (all || measuredText.get(shape.id) !== shape) changed[shape.id] = shape;
+        }
+        for (const id of measuredText.keys()) if (!live.has(id)) {
+            measuredText.delete(id); fragments.delete(id); textSizes.delete(id);
+        }
+        if (!Object.keys(changed).length) { measuredMetricRevision = textMetricRevision(); measuredFontRevision = fontRevision; return; }
+        const measured = measureTextScene(changed, measurements, options);
+        for (const shape of Object.values(changed)) measuredText.set(shape.id, shape);
+        measuredMetricRevision = textMetricRevision(); measuredFontRevision = fontRevision;
         for (const [id, list] of measured.fragments)
             fragments.set(id, list);
-        textSizes.clear();
         for (const [id, size] of measured.textSizes)
             textSizes.set(id, size);
     }
     let renderedOutlines = !!editor.showOutlines, lastZoom = editor.viewport.zoom;
+    function layerElement(id: string): Element | null {
+        const svg = scene.firstElementChild;
+        if (!svg) return null;
+        // Imported pictures own nested SVG trees and may repeat document IDs in
+        // their attributes. Only the outer scene contains generated layer groups.
+        for (const element of svg.querySelectorAll(`[data-shape-id="${CSS.escape(id)}"]`))
+            if (element.closest('svg') === svg) return element;
+        return null;
+    }
     function updateViewport() {
         const svg = scene.firstElementChild as SVGSVGElement | null;
         if (!svg)
@@ -161,6 +202,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             for (const path of svg.querySelectorAll('[stroke="#6366f1"]'))
                 path.setAttribute('stroke-width', String(1 / vp.zoom));
         lastZoom = vp.zoom;
+        visualRevision++;
         for (const listener of renderListeners)
             listener();
     }
@@ -168,6 +210,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         const phaseStart = performance.now();
         if (destroyed)
             return;
+        cancelScheduled?.(); cancelScheduled = undefined; pendingRender = false;
         revision++;
         discoverImages();
         discoverBooleans();
@@ -176,19 +219,100 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         renderedOutlines = !!editor.showOutlines;
         const vp = editor.viewport, bounds = { x: vp.vbox.x, y: vp.vbox.y, width: vp.vport.width / vp.zoom, height: vp.vport.height / vp.zoom };
         const svgStart = performance.now();
-        const source = new SceneWriter(resolvedObjects(), { textFragments: fragments, typography: options, outlines: renderedOutlines, outlineWidth: 1 / vp.zoom }).svg(roots(), bounds);
-        options.onTiming?.({ phase: 'render.serializeSvg', ms: performance.now() - svgStart, bytes: source.length });
-        const domStart = performance.now();
-        scene.innerHTML = source;
-        options.onTiming?.({ phase: 'render.attachSvg', ms: performance.now() - domStart });
+        const objects = resolvedObjects(), key = `${editor.pageId}:${fontRevision}:${measuredMetricRevision}:${renderedOutlines}:${renderedOutlines ? 1 / vp.zoom : ''}`;
+        // Backdrop blur reads earlier siblings, so its invalidation is deliberately
+        // scene-wide until dependency-aware compositing has its own parity coverage.
+        const backdrop = Object.values(objects).some(shape => !shape.backgroundBlurHidden && num(shape.backgroundBlur) !== 0);
+        const reset = key !== renderedKey || renderedPage !== editor.pageId || backdrop;
+        const changes = sceneChanges(renderedObjects, objects), prior = new Map<string, SceneNodeRecord>();
+        if (!reset && !changes.changed.size && scene.firstElementChild) {
+            lastRender = { mode: 'unchanged', generatedNodes: 0, cachedNodes: 0, changedNodes: 0 };
+            updateViewport();
+            return;
+        }
+        if (!reset) for (const id of changes.changed) {
+            const entry = nodeCache.get(id + '\0shape');
+            if (entry) prior.set(id, entry);
+        }
+        if (reset) nodeCache.clear(); else nodeCache.invalidate(changes.affected);
+        const writer = new SceneWriter(objects, { textFragments: fragments, typography: options, outlines: renderedOutlines, outlineWidth: 1 / vp.zoom, idPrefix: scenePrefix, stableIds: true, ...(!backdrop ? { nodeCache } : {}) });
+        const svg = scene.firstElementChild as SVGSVGElement | null;
+        const maskAncestor = (id: string) => {
+            const seen = new Set<string>();
+            let shape = objects[id];
+            while (shape && !seen.has(shape.id)) {
+                seen.add(shape.id);
+                if (shape.isMaskGroup || shape.maskType || shape.maskMode || shape.mask?.mode) return true;
+                if (shape.parentId === shape.id) break;
+                shape = objects[shape.parentId];
+            }
+            return false;
+        };
+        // A leaf edit does not require parsing its unchanged siblings or parent.
+        // Structural edits and compositing dependencies take the retained full path.
+        const leafEdit = !reset && !!svg && changes.changed.size > 0 && [...changes.changed].every(id => {
+            const old = renderedObjects?.[id], next = objects[id];
+            return old && next && prior.has(id) && old.parentId === next.parentId && !old.childIds?.length && !next.childIds?.length && !old.hidden && old.visible !== false && !next.hidden && next.visible !== false && !maskAncestor(id) && !!layerElement(id);
+        });
+        let bytes = 0, attachMs = 0;
+        if (leafEdit) {
+            const definitions = svg!.querySelector('defs')!;
+            const resources = new Map(Array.from(definitions.children).map(node => [node.id, node]));
+            for (const id of changes.changed) {
+                const source = writer.node(objects[id]), record = nodeCache.get(id + '\0shape');
+                // Oversized entries may be intentionally absent from the bounded cache.
+                const defs = record?.defs ?? writer.defs;
+                bytes += source.length + defs.reduce((sum, value) => sum + value.length, 0);
+                const domStart = performance.now();
+                const patch = parseScene(`<svg xmlns="http://www.w3.org/2000/svg"><defs>${defs.join('')}</defs>${source}</svg>`);
+                const next = patch.lastElementChild!, current = layerElement(id);
+                if (!current) throw new Error('Retained scene lost an edited layer');
+                reconcileScene(current, next);
+                const nextDefinitions = Array.from(patch.firstElementChild!.children), nextIds = new Set(nextDefinitions.map(node => node.id));
+                for (const match of prior.get(id)!.defs.join('').matchAll(/\bid="([^"]+)"/g)) {
+                    if (!nextIds.has(match[1])) { resources.get(match[1])?.remove(); resources.delete(match[1]); }
+                }
+                for (const node of nextDefinitions) {
+                    const previous = resources.get(node.id);
+                    if (previous) reconcileScene(previous, node);
+                    else { definitions.append(node); resources.set(node.id, node); }
+                }
+                attachMs += performance.now() - domStart;
+                writer.defs.length = 0;
+            }
+        } else {
+            const source = writer.svg(roots(), bounds); bytes = source.length;
+            const domStart = performance.now(), next = parseScene(source);
+            if (svg && renderedPage === editor.pageId) reconcileScene(svg, next, reset ? undefined : changes.affected);
+            else scene.replaceChildren(next);
+            attachMs = performance.now() - domStart;
+        }
+        lastRender = { mode: leafEdit ? 'leaf' : 'full', generatedNodes: writer.generatedNodes, cachedNodes: writer.cachedNodes, changedNodes: changes.changed.size };
+        options.onTiming?.({ phase: 'render.serializeSvg', ms: performance.now() - svgStart - attachMs, bytes, ...lastRender });
+        options.onTiming?.({ phase: 'render.attachSvg', ms: attachMs, ...lastRender });
+        renderedObjects = objects; renderedKey = key; renderedPage = editor.pageId;
         updateViewport();
     }
+    function requestRender() {
+        if (destroyed) return;
+        pendingRender = true; revision++;
+        if (cancelScheduled) return;
+        if (typeof requestAnimationFrame === 'function') {
+            const frame = requestAnimationFrame(() => { cancelScheduled = undefined; flushPending(); });
+            cancelScheduled = () => cancelAnimationFrame(frame);
+        } else {
+            const timer = setTimeout(() => { cancelScheduled = undefined; flushPending(); }, 0);
+            cancelScheduled = () => clearTimeout(timer);
+        }
+    }
+    function flushPending() { if (pendingRender) render(); }
     async function settled() {
         if (settling)
             return settling;
         settling = (async () => {
             let stable = false;
             for (let attempt = 0; attempt < 4; attempt++) {
+                flushPending();
                 const start = revision;
                 discoverImages();
                 discoverBooleans();
@@ -199,12 +323,10 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 for (const entry of booleans.values())
                     if (entry.error)
                         throw new Error('Boolean geometry could not be computed', { cause: entry.error });
-                const resourcesRevision = revision;
-                if (measuredMetricRevision !== textMetricRevision() || renderedOutlines !== !!editor.showOutlines)
+                if (pendingRender || measuredMetricRevision !== textMetricRevision() || renderedOutlines !== !!editor.showOutlines)
                     render();
-                const completedRevision = revision;
                 await new Promise<void>(resolve => setTimeout(resolve, 0));
-                if (start === resourcesRevision && completedRevision === revision) {
+                if (start === revision && !pendingRender) {
                     stable = true;
                     break;
                 }
@@ -217,6 +339,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         return settling;
     }
     function measure(ids: string[]) {
+        flushPending();
         const result = new Map<string, Measured>();
         if (!ids.length) return result;
         const objects = resolvedObjects();
@@ -225,7 +348,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             if (!s)
                 continue;
             let b = boundsOf([s]);
-            const element = scene.querySelector(`[data-shape-id="${CSS.escape(id)}"]`);
+            const element = layerElement(id);
             if (!element)
                 continue;
             if (element) {
@@ -325,18 +448,23 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
     }
     const view: RenderView = {
         thumbnailSvg,
+        get renderRevision() { return visualRevision; },
+        renderDiagnostics() { return { ...lastRender, ...nodeCache.diagnostics(), pending: pendingRender }; },
+        flush: flushPending,
         onRender(listener: () => void) {
             renderListeners.add(listener);
             return () => renderListeners.delete(listener);
         },
         textFragments(id: string) {
+            flushPending();
             return (fragments.get(id) ?? []).map(fragment => ({ ...fragment, style: { ...fragment.style } }));
         },
         render, settled, measure, computedStyle(id, keys) {
+            flushPending();
             const s = resolvedObjects()[id];
             if (!s)
                 return {};
-            const group = scene.querySelector(`[data-shape-id="${CSS.escape(id)}"]`);
+            const group = layerElement(id);
             const el = group?.querySelector('[data-run]') ?? group?.querySelector('path:not([data-geometry]),image,svg') ?? group;
             if (!el)
                 return {};
@@ -349,8 +477,10 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             const selected = keys ?? ['fill', 'stroke', 'opacity', 'font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'color', 'mix-blend-mode'];
             return Object.fromEntries(selected.map(k => [k, derived[k] ?? style.getPropertyValue(k)]));
         }, element(id) {
-            return scene.querySelector<HTMLElement>(`[data-shape-id="${CSS.escape(id)}"]`);
+            flushPending();
+            return layerElement(id) as HTMLElement | null;
         }, sceneSvg(ids?: string[], opts: Data = {}) {
+            flushPending();
             const chosen = ids?.length ? ids : roots();
             const bounds = opts.bounds ?? boundsOf(chosen.map(id => resolvedObjects()[id]).filter(Boolean));
             return new SceneWriter(resolvedObjects(), { ...opts, exporting: true, textFragments: fragments }).svg(chosen, bounds);
@@ -359,8 +489,10 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         }, projectedShape(id: string) {
             return resolvedObjects()[id];
         }, textLines(id: string) {
+            flushPending();
             return (fragments.get(id)??[]).map(fragment=>({...fragment,style:{...fragment.style}}));
         }, textSize(id: string) {
+            flushPending();
             const size=textSizes.get(id);return size?{...size}:undefined;
         }, async screenshot(id, opts = {}) {
             await settled();
@@ -392,6 +524,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             return { data, mimeType: 'image/png', slices };
         }, destroy() {
             destroyed = true;
+            cancelScheduled?.(); cancelScheduled = undefined; pendingRender = false;
             off();
             scene.remove();
             measurements.remove();
@@ -399,15 +532,21 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             thumbnailCache.clear();
             images.clear();
             booleans.clear();
+            booleanProjections.clear();
             fragments.clear();
             textSizes.clear();
+            measuredText.clear(); nodeCache.clear(); renderedObjects = undefined; resolvedSource = undefined;
         }
     };
     const off = editor.on(event => {
-        if (event.changes || event.deltas || event.projection || event.page || renderedOutlines !== !!editor.showOutlines)
+        if (event.changes || event.projection || event.page || renderedOutlines !== !!editor.showOutlines)
             render();
-        else if (event.viewport)
-            updateViewport();
+        else if (event.deltas) {
+            if (editor.undo.blocked) requestRender(); else render();
+        }
+        else if (event.viewport) {
+            if (pendingRender) render(); else updateViewport();
+        }
     });
     const loaded = () => {
         fontRevision++;

@@ -184,6 +184,30 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
     let destroyed = false, leftTab = "layers", assetQuery = "", layerQuery = "", collapsedNodes = new Set<string>(), menu: HTMLElement | null = null, findBar: HTMLElement | null = null, findIndex = 0, findMatches: string[] = [], inspector: ReturnType<typeof createInspector> | null = null;
     let dragged: Data | null = null;
     let layerAnchor: string | null = null, layerRangeBase: string[] = [];
+    let layerPresentation: {pageId: string; pages: string[]; names: unknown[]; objects: Data} | null = null;
+    const layerKeys = ["name", "type", "hidden", "locked", "parentId", "isMain", "isInstanceRoot"];
+    function sameLayerPresentation() {
+        if (leftTab !== "layers" || !layerPresentation || layerPresentation.pageId !== editor.pageId)
+            return false;
+        const previous = layerPresentation, pages = editor.doc.pages, objects = editor.page.objects;
+        if (pages.length !== previous.pages.length || pages.some((id, index) => id !== previous.pages[index] || editor.doc.pagesById[id].name !== previous.names[index]))
+            return false;
+        if (Object.keys(objects).length !== Object.keys(previous.objects).length)
+            return false;
+        for (const [id, shape] of Object.entries(objects)) {
+            const old = previous.objects[id];
+            if (old === shape)
+                continue;
+            if (!old || layerKeys.some(key => !Object.is(old[key], shape[key])))
+                return false;
+            const oldChildren = old.childIds, children = shape.childIds;
+            if (oldChildren !== children && (!oldChildren || !children || oldChildren.length !== children.length || children.some((child: string, index: number) => child !== oldChildren[index])))
+                return false;
+        }
+        // Release the older geometry snapshot even when its presentation did not change.
+        previous.objects = objects;
+        return true;
+    }
     function clearLayerDrop() {
         left.querySelectorAll("[data-drop]").forEach(node => node.removeAttribute("data-drop"));
     }
@@ -598,15 +622,31 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
         try { editor.setSelection(ids); }
         finally { selectingLayerRows = false; }
     }
+    function updateLayerSelection() {
+        const selected = new Set(editor.selection);
+        for (const row of left.querySelectorAll<HTMLElement>(".layers .row[data-id]")) {
+            const active = selected.has(row.dataset.id!);
+            row.classList.toggle("selected", active);
+            row.setAttribute("aria-selected", String(active));
+        }
+    }
     function revealLayerSelection() {
         const id = editor.selection.at(-1), shape = id && editor.page.objects[id];
-        if (leftTab !== "layers" || !shape) {
+        if (leftTab !== "layers") {
             renderLeft();
             return;
         }
+        if (!shape) {
+            if (!sameLayerPresentation()) renderLeft();
+            else updateLayerSelection();
+            return;
+        }
         const target = shape.type === "frame" ? shape : ancestors(editor.page, shape.id).find(parent => parent.id !== "root" && parent.type === "frame") ?? shape;
-        for (const parent of ancestors(editor.page, target.id)) collapsedNodes.delete(parent.id);
-        renderLeft(true);
+        let expanded = false;
+        for (const parent of ancestors(editor.page, target.id))
+            expanded = collapsedNodes.delete(parent.id) || expanded;
+        if (expanded || !sameLayerPresentation()) renderLeft(true);
+        else updateLayerSelection();
         let row = left.querySelector<HTMLElement>(`.layers .row[data-id="${CSS.escape(target.id)}"]`);
         if (row?.hidden) {
             layerQuery = "";
@@ -641,6 +681,7 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
         }
         left.append(tabs);
         if (leftTab === "assets") {
+            layerPresentation = null;
             renderAssets();
             return;
         }
@@ -889,6 +930,8 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
             tree.append(el("div", "empty-state", "Draw a shape or place an image to begin."));
         left.append(tree);
         tree.scrollTop = scrollTop;
+        layerPresentation = {pageId: editor.pageId, pages: [...editor.doc.pages],
+            names: editor.doc.pages.map(id => editor.doc.pagesById[id].name), objects: editor.page.objects};
         filter.oninput = () => {
             layerQuery = filter.value;
             const cursor = filter.selectionStart;
@@ -1520,10 +1563,15 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
             findBar = null;
             collapsedNodes.clear();
         }
-        if (event.selection && !event.page && !selectingLayerRows)
-            revealLayerSelection();
-        else if (event.page || !event.viewport && !event.hover && (!event.deltas || event.projection))
-            renderLeft();
+        if (event.selection && !event.page) {
+            if (!selectingLayerRows) revealLayerSelection();
+            else if (!sameLayerPresentation()) renderLeft();
+            else updateLayerSelection();
+        }
+        else if (event.page || !event.viewport && !event.hover && (!event.deltas || event.projection)) {
+            if (event.page || !sameLayerPresentation())
+                renderLeft();
+        }
         refreshToolbar();
     });
     function measure() {
@@ -1593,6 +1641,7 @@ export function mountWorkspace(root: HTMLElement, services: EditorServices, opti
                 canvas.finishPen();
             inspector?.finishScrub();
             await services.view.settled();
+            canvas.flush();
         },
         editingText: () => text.id,
         highlightAgent: canvas.highlightAgent,

@@ -1,5 +1,16 @@
 import type { Data } from "../contracts";
 import { createIcon } from "./icons";
+const inputSynchronizers = new WeakMap<HTMLInputElement, {sync: (value: unknown) => void; dirty: () => boolean}>();
+/** Update a retained control without treating the new displayed value as user input. */
+export function syncInputValue(control: HTMLInputElement, value: unknown, preserveDraft = false): void {
+    const state = inputSynchronizers.get(control);
+    if (preserveDraft && state?.dirty())
+        return;
+    if (state)
+        state.sync(value);
+    else
+        control.value = value == null ? "" : String(value);
+}
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text?: string): HTMLElementTagNameMap[K] {
     const n = document.createElement(tag);
     n.className = cls;
@@ -51,6 +62,13 @@ export function input(label: string, value: any, change: (value: any) => any, ty
     if (type === "number")
         n.step = "any";
     let committedValue = n.value;
+    inputSynchronizers.set(n, {
+        sync: value => {
+            n.value = value == null ? "" : String(value);
+            committedValue = n.value;
+        },
+        dirty: () => n.value !== committedValue
+    });
     n.onchange = () => {
         committedValue = n.value;
         const v = type === "number" ? Number(n.value) : n.value;
