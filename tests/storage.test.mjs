@@ -46,3 +46,38 @@ test('large retained history is refused before mutation and every accepted file 
     }
   }finally{replica.destroy();}
 });
+
+test('clean and queued duplicate saves write once, while metadata and document revisions persist',async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-clean-save-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const store=new Store(dir),record={id:randomUUID(),title:'Clean',replica:new Replica({document:documentFixture()})};t.after(()=>record.replica.destroy());
+  const rename=fs.rename;let writes=0;t.mock.method(fs,'rename',async(...args)=>{writes++;return rename(...args);});
+  await Promise.all(Array.from({length:8},()=>store.save(record)));assert.equal(writes,1);
+  const original=await fs.readFile(store.file(record.id),'utf8');await store.save(record);assert.equal(writes,1);assert.equal(await fs.readFile(store.file(record.id),'utf8'),original);
+  for(const fields of [{title:'Renamed'},{thumbnail:'data:image/png;base64,AA=='},{createdAt:'2026-01-01T00:00:00.000Z'}]){Object.assign(record,fields);await store.save(record);}
+  assert.equal(writes,4);
+  const before=record.replica.document,after=structuredClone(before);after.pagesById.page.objects.label.name='New state';record.replica.patch(changesBetween(before,after));await store.save(record);assert.equal(writes,5);
+  const read=await store.load(record.id);t.after(()=>read.replica.destroy());assert.equal(read.title,'Renamed');assert.equal(read.thumbnail,record.thumbnail);assert.equal(read.createdAt,record.createdAt);assert.equal(read.replica.document.pagesById.page.objects.label.name,'New state');
+  const other=new Replica({document:documentFixture()});t.after(()=>other.destroy());await store.save({...record,replica:other});assert.equal(writes,6);await store.save(record);assert.equal(writes,7);
+});
+
+test('failed save retries and recovered or removed documents never reuse a clean fingerprint',async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-retry-save-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const store=new Store(dir),record={id:randomUUID(),title:'Original',replica:new Replica({document:documentFixture()})};t.after(()=>record.replica.destroy());
+  const rename=fs.rename;let writes=0,fail=true;t.mock.method(fs,'rename',async(...args)=>{if(fail){fail=false;throw Error('Injected rename failure');}writes++;return rename(...args);});
+  await assert.rejects(store.save(record),/Injected rename failure/);await store.save(record);assert.equal(writes,1);
+  record.title='Latest';await store.save(record);assert.equal(writes,2);
+  await fs.writeFile(store.file(record.id),'broken');const recovered=await store.load(record.id);t.after(()=>recovered.replica.destroy());assert.equal(recovered.recovered,true);
+  const backup=await fs.readFile(store.file(record.id)+'.bak','utf8');await store.save(recovered);assert.equal(writes,3);assert.equal(await fs.readFile(store.file(record.id)+'.bak','utf8'),backup);
+  await store.remove(record.id);await store.save(recovered);assert.equal(writes,4);const recreated=await store.load(record.id);t.after(()=>recreated.replica.destroy());assert.equal(recreated.title,'Original');
+});
+
+test('revision changes during an in-flight save retain ordering and duplicate callers await durability',async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-inflight-save-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const store=new Store(dir),record={id:randomUUID(),title:'First',replica:new Replica({document:documentFixture()})};t.after(()=>record.replica.destroy());
+  const rename=fs.rename;let writes=0,release,started;const gate=new Promise(resolve=>{release=resolve;}),ready=new Promise(resolve=>{started=resolve;});
+  t.mock.method(fs,'rename',async(...args)=>{writes++;if(writes===1){started();await gate;}return rename(...args);});
+  const first=store.save(record);await ready;
+  let duplicateFinished=false;const duplicate=store.save(record).then(()=>{duplicateFinished=true;});
+  record.title='Second';const second=store.save(record);await Promise.resolve();assert.equal(duplicateFinished,false);release();await Promise.all([first,duplicate,second]);assert.equal(writes,2);
+  const read=await store.load(record.id);t.after(()=>read.replica.destroy());assert.equal(read.title,'Second');
+});

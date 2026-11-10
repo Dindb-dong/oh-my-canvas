@@ -131,12 +131,13 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 images.set(src, record);
             }
     }
-    let previousTextKey = '', fontRevision = 0;
+    let previousTextKey = '', fontRevision = 0, measuredMetricRevision = -1;
     function measureText() {
         const key = fontRevision + ":" + textMetricRevision() + JSON.stringify(Object.values(editor.page.objects).filter(shape => shape.type === 'text'));
         if (key === previousTextKey)
             return;
         previousTextKey = key;
+        measuredMetricRevision = textMetricRevision();
         const measured = measureTextScene(editor.page.objects, measurements, options);
         fragments.clear();
         for (const [id, list] of measured.fragments)
@@ -198,9 +199,12 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 for (const entry of booleans.values())
                     if (entry.error)
                         throw new Error('Boolean geometry could not be computed', { cause: entry.error });
-                render();
+                const resourcesRevision = revision;
+                if (measuredMetricRevision !== textMetricRevision() || renderedOutlines !== !!editor.showOutlines)
+                    render();
+                const completedRevision = revision;
                 await new Promise<void>(resolve => setTimeout(resolve, 0));
-                if (start + 1 === revision) {
+                if (start === resourcesRevision && completedRevision === revision) {
                     stable = true;
                     break;
                 }
@@ -214,8 +218,10 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
     }
     function measure(ids: string[]) {
         const result = new Map<string, Measured>();
+        if (!ids.length) return result;
+        const objects = resolvedObjects();
         for (const id of ids) {
-            const s = resolvedObjects()[id];
+            const s = objects[id];
             if (!s)
                 continue;
             let b = boundsOf([s]);

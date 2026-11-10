@@ -37,20 +37,27 @@ export function decodeFile(data) {
   return { ...f, replica };
 }
 export class Store {
-  constructor(dir) { this.dir = dir; this.pending = new Map(); }
+  constructor(dir) { this.dir = dir; this.pending = new Map(); this.saved = new Map(); }
   file(id) { if (!validId(id)) throw Error('Invalid document ID'); return path.join(this.dir, `${id}.omc`); }
   async load(id) {
     const file = this.file(id);
     try { return decodeFile(await fs.readFile(file, 'utf8')); }
     catch (original) {
-      try { const recovered = decodeFile(await fs.readFile(`${file}.bak`, 'utf8')); recovered.recovered = true; return recovered; }
+      try { const recovered = decodeFile(await fs.readFile(`${file}.bak`, 'utf8')); recovered.recovered = true; this.saved.delete(id); return recovered; }
       catch { throw original; }
     }
   }
   async save(record) {
-    // Serialize writes for each document; a slow earlier fsync must not overwrite a newer state.
-    const data = encodeFile(record), id = record.id;
-    const writing = (this.pending.get(id) ?? Promise.resolve()).catch(() => {}).then(() => atomicWrite(this.file(id), data,{backup:!record.recovered}));
+    assertMetadata(record);
+    // Capture the requested revision before waiting for an earlier fsync.
+    const {id,title,createdAt,thumbnail}=record, state=record.replica.state, recovered=!!record.recovered;
+    const fingerprint=createHash('sha256').update(JSON.stringify([title,createdAt,thumbnail])).update(state).digest('hex');
+    const writing = (this.pending.get(id) ?? Promise.resolve()).catch(() => {}).then(async () => {
+      if(!recovered && this.saved.get(id)===fingerprint)return;
+      const data=encodeFile({id,title,createdAt,thumbnail,replica:{state}});
+      await atomicWrite(this.file(id),data,{backup:!recovered});
+      this.saved.set(id,fingerprint);
+    });
     this.pending.set(id, writing);
     try { await writing;record.recovered=false; } finally { if (this.pending.get(id) === writing) this.pending.delete(id); }
   }
@@ -66,5 +73,5 @@ export class Store {
     }
     return items.sort((a,b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
   }
-  async remove(id) { await this.pending.get(id); await fs.rm(this.file(id), {force:true}); await fs.rm(`${this.file(id)}.bak`, {force:true}); }
+  async remove(id) { await this.pending.get(id); this.saved.delete(id); await fs.rm(this.file(id), {force:true}); await fs.rm(`${this.file(id)}.bak`, {force:true}); }
 }
