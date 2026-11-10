@@ -1,6 +1,6 @@
 # Design-file import and large-document boundaries
 
-Status: **incremental architecture implemented; performance and source fidelity remain separately qualified**. Updated 2026-11-11.
+Status: **incremental architecture implemented; performance and source fidelity remain separately qualified**. Updated 2026-11-10 UTC.
 
 PR #12 continues the import work with a different storage, editing and rendering boundary. PR #11 is a reference checkpoint; its successful structure import is not proof of acceptable performance or source fidelity. The [full original fixture](../fixtures/design-files/README.md) is available through Git LFS and its byte count and SHA-256 were verified during this work.
 
@@ -16,7 +16,48 @@ PR #12 continues the import work with a different storage, editing and rendering
 
 These are implemented contracts, not a claim that all acceptance targets below have been met. The immutable plain-object shape index still imposes some work proportional to the edited page size. Full initial validation/materialization, text layout, large root subtrees and export can remain expensive. No decoded-pixel memory ceiling, packaged cross-platform qualification, or perfect source reproduction is claimed.
 
-## Current core measurements
+## Current conversion limits
+
+The current converter still has known losses, beyond the need for visual comparison:
+
+- Figma effects and variable bindings are omitted. Unsupported paints are omitted with warnings.
+- Components and instances become ordinary editable layers; instance overrides can differ. Boolean operations become editable groups, and auto layout retains saved positions.
+- Masks are incomplete, mixed text styles can be simplified, and nonstandard blend modes can differ. The recorded Linux viewport also shows fallback fonts, missing glyphs and overlapping labels.
+
+The document retains `importFidelity: 'unverified'` and conversion warnings. The native round trips check page IDs and order, per-page object counts, page names, original bitmap hash sets, and the dragged shape's coordinates. These checks do not establish complete field-by-field or visual fidelity to the source. Representative original Figma frames with matching fonts are still required to assess source reproduction. Existing editor component and effect features do not establish their mapping from imported design files.
+
+## Native validation: `cfa052c8`
+
+The [2026-11-10 native run](https://github.com/Dindb-dong/oh-my-canvas/actions/runs/42869423111) tested runtime commit `cfa052c8d08aa368017314f3ba08f50a36fd2e47`. Syntax/type checks, documentation checks, 189 Node tests, 823 editor tests and the production build passed. All 17 native checks passed with zero renderer exceptions. The [sanitized evaluation record](qa/pr12-large-document-evaluation.json) retains the measured values and their scope after the workflow artifacts expire.
+
+The full original source was 160,627,671 bytes with SHA-256 `c7c4fdbe469ae451c9a3d3d384a2102fa08dfaa220a1277e2df17fc2146c5ee7`. Import, working-storage reopen, portable OMC import and portable JSON import retained 46 pages, 39,363 objects and the same 160 original bitmap hashes. Round trips also retained page IDs/order/names and the dragged shape's coordinates. JSON and SVG exports contained embedded image data without local or remote image references. The valid-asset route returned 200 and the deliberately missing hash returned 404; three cancelled image fetches on page departure were recorded separately from renderer exceptions.
+
+This was one journey on Linux x64/Xvfb, AMD EPYC 9V74, two logical CPUs and 7.75 GiB RAM, using Electron 45.2.1 with software rendering. The harness used Node 22.23.4; Electron used Node 24.22.1. These are individual observations, except for the explicitly sampled gesture distributions. They are not directly comparable to the earlier macOS prototype or the Linux reference run on an EPYC 7763.
+
+| Operation | Final observation | Measurement scope |
+| --- | --- | --- |
+| Import complete source | 38.89 s | Native import invocation through editor readiness; full check including metadata/memory assertions took 41.26 s |
+| Page rename | 102.1 ms screen paint; 24.0 ms acceptance; 379.3 ms durable save | One UI edit; paint uses two animation frames and save follows fsync |
+| Complete MCP page rename | 21.08 ms | Separate native MCP operation |
+| Enter Examples | 610.8 ms screen paint; 557.0 ms additional settling | First measured entry into the 18,380-object page |
+| Pan, 90 wheel events | 50.0 ms frame-interval p95; 83.4 ms maximum | Input-handler p95 0.1 ms; no document writes |
+| Hover, 90 pointer events | 16.8 ms frame-interval p95; no long tasks | Input-handler p95 0.4 ms; no document writes |
+| Leaf drag, 24 movement steps | 133.4 ms frame-interval p95; 1,400 ms maximum | Input-handler p95 59.8 ms, maximum 1,284.9 ms; release-to-durable save 307.7 ms |
+| Reopen working document | 21.44 s | Fresh process after app launch; excludes launch and is not a cold-disk measurement |
+| Fresh-profile portable OMC import | 28.92 s | Complete image package and retained edits |
+| Fresh-profile portable JSON import | 34.47 s | Embedded images re-enter the external blob store |
+
+Explicit exports took 10.92 s for JSON (246,625,867 bytes), 0.61 s for SVG (13,984,120 bytes) and 6.46 s for portable OMC (129,899,344 bytes). Export remains whole-content work; these costs are separate from normal edit persistence.
+
+At the fixed Examples viewport, 6,245 shape elements and 25,351 total scene nodes were mounted, with 40 layer rows. This is still substantial DOM work. Aggregate process working-set snapshots were 2,204.6 MiB after import and 3,567.7 MiB after the gestures; these are snapshots, not a combined peak, and do not establish bounded decoded-image memory. The frame intervals include Playwright scheduling and software rendering, so their reciprocals are not a hardware FPS benchmark.
+
+The final Examples screenshot is byte-identical to the preceding `75c9dcb2` run: 0 of 1,369,500 full-image pixels differ, including all 745,780 canvas pixels. Both use the same source, viewport and DOM counts. This verifies that the final gesture-origin and bounds-invalidation changes preserved this imported viewport; it is not a comparison with the original Figma rendering.
+
+A separate six-wheel diagnostic trace completed without reported data loss. In its 651.034 ms marked window, exclusive main-thread attribution recorded 229.881 ms in style/layout/hit-testing, 157.161 ms in paint/compositing, 8.204 ms in script/callbacks, 11.159 ms in other observed work and 244.629 ms idle or unobserved. Six main-thread tasks exceeded 50 ms. Four unpaired synchronous begin events were excluded from attribution. This points to retained SVG layout and paint as the remaining pan bottleneck in this environment; it does not attribute GPU-process work, generalize to hardware rendering, or diagnose the separate drag spike. The original 90-event pan sample excludes tracing overhead.
+
+These results close the observed persistence/export correctness failures and demonstrate the new boundaries on the real fixture. They do **not** meet all responsiveness, memory, collaboration or fidelity targets below: drag still has a 1.4-second frame, import/reopen remain long, and the full fixture has not been qualified across four native collaboration peers or current packaged macOS/Windows builds.
+
+## Intermediate core checkpoint: `37fec915`
 
 The verified 160,627,671-byte source produced 46 pages, 39,363 objects and 160 external bitmap blobs containing 90,234,314 original bytes. The editable JSON is 41,452,401 bytes and its initial Yjs state is 107,305,531 bytes. Separating the images does not eliminate the remaining geometry, text or CRDT representation costs.
 
@@ -128,11 +169,11 @@ The review inspected the prototype code and existing measurements without modify
 
 ### Historical correctness gaps addressed by this work
 
-1. MCP copy exports bitmap dependencies through `assetDefinitions`, resource preparation handles fonts, and command paste merges `payload.assets`. The contracts do not currently align for shared bitmaps across documents.
-2. UI property copy can transfer an image-fill reference without its asset definition.
-3. Removing a shared image asset currently detaches references into inline sources. A heavily reused image can become duplicated enough to exceed capacity; deletion needs a durable reference/retention policy.
-4. The enlarged `MAX_ENVELOPE_BYTES` also controls collaboration payload/backpressure. Local compressed reopen does not qualify full-state base64 network messages. Storage and wire budgets need separate contracts.
-5. Large-library listing uses compressed on-disk file size to choose whether to instantiate a replica. A highly compressible large state can still enter the expensive path. Listing should eventually read independent metadata.
+1. MCP copy exported bitmap dependencies through `assetDefinitions`, while command paste merged `payload.assets`. The contracts did not align for shared bitmaps across documents.
+2. UI property copy could transfer an image-fill reference without its asset definition.
+3. Removing a shared image asset detached references into inline sources. A heavily reused image could become duplicated enough to exceed capacity.
+4. The enlarged `MAX_ENVELOPE_BYTES` also controlled collaboration payload/backpressure. Local compressed reopen did not qualify full-state base64 network messages.
+5. Large-library listing used compressed on-disk file size to choose whether to instantiate a replica. A highly compressible large state could still enter the expensive path.
 
 ## Architecture direction adopted
 

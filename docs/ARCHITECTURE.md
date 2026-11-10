@@ -31,7 +31,7 @@ flowchart TB
 | `core/collaboration.mjs`, `core/collaboration-transfer.mjs` | Pinned TLS, protocol v3, bounded state/blob transfers, presence and reconnect |
 | `electron/` | Trusted main-process dispatch, preload allowlist, file dialogs, custom asset protocol and MCP bridge |
 | `cli/mcp.mjs` | Official SDK stdio server and a unique author identity per process |
-| `docs/independent/VERIFICATION.md` | Current verification scope, results, open work and evidence limits |
+| `docs/independent/VERIFICATION.md` | Historical independent-engine verification from 2026-11-03 |
 | `docs/qa/` | Explicitly reviewed fresh screenshots and runtime evidence |
 
 ## An edit, end to end
@@ -61,7 +61,7 @@ Each HTTP session keeps its own aliases, Undo ownership, and bounded in-memory i
 
 ## Working storage and portable files
 
-The local `<id>.omc` file is a small manifest. Its immutable checkpoint and append journal live under `.omc-data/<id>/`; shared bitmap bytes live under `assets/<hash-prefix>/<hash>`. Copying only that local manifest is not a portable backup. Use **Export canvas → Oh My Canvas** or MCP `export_document` to assemble a complete portable file.
+Under the profile's `documents/` directory, the local `<id>.omc` is a small `oh-my-canvas-local` manifest. Its immutable checkpoint and append journal live under `.omc-data/<id>/`; shared bitmap bytes live under `assets/<hash-prefix>/<hash>`. Older apps cannot read this new working manifest. Copying only the manifest is not a portable backup. Keep the directory and its dependencies together, or use **Export canvas → Oh My Canvas** or MCP `export_document` to assemble a complete portable file. Legacy portable v1/v2/v3 files remain readable; portable v4 image packages require the updated app. Collaboration independently requires protocol v3 on every peer and a new invitation.
 
 Incomplete final journal writes recover to the last complete record. Complete checksum/sequence/Yjs corruption fails explicitly rather than silently omitting acknowledged edits. Current and backup checkpoint generations are retained, including active readers. Asset collection is deliberately deferred: hidden pages, Undo and other documents may still need a blob.
 
@@ -69,17 +69,17 @@ Opening legacy embedded images externalizes the current raster manifest without 
 
 ## Rendering and export paths
 
-Large pages prepare an overscanned set of visible root subtrees. Masks, overflow and uncertain effect/text bounds remain conservative; backdrop dependencies can disable culling. Layer rows are virtualized, pointer viewport updates coalesce by frame, and hit/snap lookups use spatial candidates. These changes do not establish a fixed frame rate for every document.
+Large pages prepare overscanned nested subtrees. An ancestor with uncertain ink bounds stays mounted while independently bounded offscreen descendants can be excluded. Selected nodes and ancestry are retained; masks, effects, overflow and backdrop dependencies keep conservative fallbacks. Complete immutable change spans invalidate affected bounds, while missing spans, page changes and topology changes rebuild preparation. Layer rows are virtualized, pointer viewport updates coalesce by frame, and hit/snap lookups use spatial candidates. Gestures retain immutable origins, and leaf DOM updates remain incremental after serialization-cache eviction. These changes do not establish a fixed frame rate for every document.
 
 
 The top SVG export and layer SVG exports reuse the renderer's measured text layout and image-ready export host. The layer panel passes file bytes to the scoped native-save IPC, which validates MIME/extension/size and uses the existing atomic writer. Browser downloads remain denied in the Electron shell. Standalone editor mounts without this host callback keep their browser export behavior. JSON/HTML hydrate each required image from verified bytes before serialization; SVG inlining deduplicates sources and bounds concurrent fetches. Export prepares the full requested content independently of screen culling. Clipboard shapes and properties share one `assetDefinitions` contract, including collision remapping and Undo.
 
-## Current acceptance evidence
+## Historical independent-engine acceptance, 2026-11-03
 
-The actual four-process Electron/TLS journey passed, including official SDK stdio, offline rejoin, local exports and durable reopen. The full 1,065-object component library passed its 170-variant/254-binding workflows and all 16 rendered Assets previews on initial open and reopen. Current packaged-app smoke and exact-byte package provenance checks passed. These are scoped local results; final independent review and a clean publication snapshot remain pending. See [VERIFICATION.md](independent/VERIFICATION.md) for detailed evidence and limits.
+That earlier source passed a four-process Electron/TLS journey, including official SDK stdio, offline rejoin, local exports and durable reopen. Its 1,065-object component library passed the 170-variant/254-binding workflows and all 16 rendered Assets previews on initial open and reopen. Packaged-app smoke, package provenance and the independent review were recorded for that historical source. They do not qualify the new working-storage format, collaboration protocol or current package. See the [historical verification record](independent/VERIFICATION.md) for its exact scope and limits.
 
 For the large-library implementation boundaries, original prototype measurements, source fixture and remaining performance/fidelity criteria, see [Design-file import](DESIGN_FILE_IMPORT.md). Historical measurements must not be presented as results of the new paths.
 
 ## Review before changing
 
-A storage, protocol, geometry, or Undo change can affect offline replicas and old files. Add a regression at the actual boundary; comparing two final JSON trees alone does not prove the rendered geometry or native save action works. See the [test matrix](TESTING.md) and the [current verification record](independent/VERIFICATION.md).
+A storage, protocol, geometry, or Undo change can affect offline replicas and old files. Add a regression at the actual boundary; comparing two final JSON trees alone does not prove the rendered geometry or native save action works. See the [test matrix](TESTING.md) and the [historical independent-engine verification record](independent/VERIFICATION.md).
