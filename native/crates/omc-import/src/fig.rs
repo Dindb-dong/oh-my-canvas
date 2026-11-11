@@ -1,5 +1,6 @@
 use super::*;
 use omc_model::{Node, NodeKind, Page};
+use omc_scene::Affine;
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, io::Read};
 
@@ -304,8 +305,23 @@ fn visit(
             json!(source.get("frameMaskDisabled") != Some(&Value::Bool(true))),
         );
     }
-    let fills = paints(source.get("fillPaints"), decoded, files, result, &node.id)?;
-    let mut strokes = paints(source.get("strokePaints"), decoded, files, result, &node.id)?;
+    let gradient_size = (kind != NodeKind::Text).then_some((width, height));
+    let fills = paints(
+        source.get("fillPaints"),
+        decoded,
+        files,
+        result,
+        &node.id,
+        gradient_size,
+    )?;
+    let mut strokes = paints(
+        source.get("strokePaints"),
+        decoded,
+        files,
+        result,
+        &node.id,
+        gradient_size,
+    )?;
     for stroke in &mut strokes {
         stroke["width"] = json!(number(source, "strokeWeight", 1.)?);
         stroke["alignment"] = json!(
@@ -551,20 +567,206 @@ fn paints(
     files: &BTreeMap<String, Vec<u8>>,
     result: &mut ImportResult,
     id: &str,
+    gradient_size: Option<(f64, f64)>,
 ) -> Result<Vec<Value>, ImportError> {
     let mut output = Vec::new();
-    for paint in values
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|v| v.get("visible") != Some(&Value::Bool(false)))
-    {
-        let opacity = number(paint, "opacity", 1.)?;
+    for paint in values.and_then(Value::as_array).into_iter().flatten() {
         let kind = paint.get("type").and_then(Value::as_str).unwrap_or("SOLID");
-        match kind{"SOLID"=>output.push(json!({"color":rgba(paint.get("color").unwrap_or(&Value::Null))?,"opacity":opacity})),"IMAGE"=>{let source=paint.get("image").and_then(|i|i.get("hash")).ok_or_else(||invalid("FIG image hash missing"))?;let key=source.as_str().map(str::to_owned).or_else(||decoded.bytes(source).map(|bytes|bytes.iter().map(|b|format!("{b:02x}")).collect::<String>())).ok_or_else(||invalid("FIG image hash encoding"))?;if let Some(bytes)=files.get(&format!("images/{key}")){let media=if bytes.starts_with(b"\x89PNG\r\n\x1a\n"){"image/png"}else if bytes.starts_with(b"\xff\xd8\xff"){"image/jpeg"}else if bytes.starts_with(b"GIF"){"image/gif"}else if bytes.starts_with(b"RIFF"){"image/webp"}else{return Err(ImportError::Unsupported("FIG image encoding".into()));};let resource=resource(&format!("data:{media};base64,{}",base64::engine::general_purpose::STANDARD.encode(bytes)))?;let hash=resource.hash.clone();if !result.resources.iter().any(|v|v.hash==hash){result.resources.push(resource);}output.push(json!({"type":"image","image":{"hash":hash},"opacity":opacity}));}else{result.diagnostics.push(Diagnostic::unsupported(Some(id),Some("fig-image"),&key));}},other=>{output.push(json!({"type":"unsupported","sourceType":other}));result.diagnostics.push(Diagnostic::unsupported(Some(id),Some("fig-paint"),other));}}
+        let visible = paint.get("visible").and_then(Value::as_bool);
+        let hidden = visible == Some(false);
+        if hidden && !matches!(kind, "GRADIENT_LINEAR" | "GRADIENT_RADIAL") {
+            continue;
+        }
+        let opacity = match number(paint, "opacity", 1.) {
+            Err(_) if hidden => continue,
+            result => result?,
+        };
+        match kind {
+            "SOLID" => output.push(json!({"color":rgba(paint.get("color").unwrap_or(&Value::Null))?,"opacity":opacity})),
+            "IMAGE" => {
+                let source = paint.get("image").and_then(|image| image.get("hash"))
+                    .ok_or_else(|| invalid("FIG image hash missing"))?;
+                let key = source.as_str().map(str::to_owned)
+                    .or_else(|| decoded.bytes(source).map(|bytes| bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>()))
+                    .ok_or_else(|| invalid("FIG image hash encoding"))?;
+                if let Some(bytes) = files.get(&format!("images/{key}")) {
+                    let media = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+                        "image/png"
+                    } else if bytes.starts_with(b"\xff\xd8\xff") {
+                        "image/jpeg"
+                    } else if bytes.starts_with(b"GIF") {
+                        "image/gif"
+                    } else if bytes.starts_with(b"RIFF") {
+                        "image/webp"
+                    } else {
+                        return Err(ImportError::Unsupported("FIG image encoding".into()));
+                    };
+                    let resource = resource(&format!(
+                        "data:{media};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)
+                    ))?;
+                    let hash = resource.hash.clone();
+                    if !result.resources.iter().any(|asset| asset.hash == hash) {
+                        result.resources.push(resource);
+                    }
+                    output.push(json!({"type":"image","image":{"hash":hash},"opacity":opacity}));
+                } else {
+                    result.diagnostics.push(Diagnostic::unsupported(Some(id), Some("fig-image"), &key));
+                }
+            }
+            "GRADIENT_LINEAR" | "GRADIENT_RADIAL" => {
+                match gradient(paint, kind, opacity, gradient_size) {
+                    Ok(mut converted) => {
+                        if let Some(visible) = visible {
+                            converted["visible"] = json!(visible);
+                        }
+                        output.push(converted);
+                    }
+                    Err(_) if hidden => continue,
+                    Err(ImportError::Unsupported(reason)) => {
+                        output.push(json!({"type":"unsupported","sourceType":kind}));
+                        result.diagnostics.push(Diagnostic::unsupported(Some(id), Some("fig-paint"), &format!("{kind}: {reason}")));
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            other => {
+                output.push(json!({"type":"unsupported","sourceType":other}));
+                result.diagnostics.push(Diagnostic::unsupported(Some(id), Some("fig-paint"), other));
+            }
+        }
     }
     Ok(output)
 }
+
+fn gradient(
+    paint: &Value,
+    kind: &str,
+    opacity: f64,
+    size: Option<(f64, f64)>,
+) -> Result<Value, ImportError> {
+    let unsupported = |reason: &str| ImportError::Unsupported(reason.into());
+    let (width, height) = size.ok_or_else(|| unsupported("text gradient paint"))?;
+    if width <= 0. || height <= 0. {
+        return Err(unsupported("gradient on an empty layer"));
+    }
+    if [
+        "opacityVar",
+        "colorVar",
+        "gradientVar",
+        "paintVar",
+        "stopsVar",
+        "authoredStops",
+    ]
+    .into_iter()
+    .any(|key| {
+        paint
+            .get(key)
+            .is_some_and(|value| !value.as_array().is_some_and(Vec::is_empty))
+    }) || paint
+        .get("interpolationColorSpace")
+        .is_some_and(|value| value != "DEFAULT")
+        || paint
+            .get("blendMode")
+            .is_some_and(|value| value != "NORMAL")
+    {
+        return Err(unsupported(
+            "gradient bindings, authored colors, interpolation or blend mode",
+        ));
+    }
+    if !(0. ..=1.).contains(&opacity) {
+        return Err(invalid("FIG gradient opacity must be 0..1"));
+    }
+    let stops = paint
+        .get("stops")
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid("FIG gradient stops missing"))?;
+    if stops.len() < 2 {
+        return Err(invalid("FIG gradient requires at least two stops"));
+    }
+    if stops.len() > 128 {
+        return Err(unsupported("more than 128 gradient stops"));
+    }
+    let mut converted = Vec::with_capacity(stops.len());
+    let mut previous = 0.;
+    for stop in stops {
+        let offset = number(stop, "position", f64::NAN)?;
+        if !(previous..=1.).contains(&offset) {
+            return Err(invalid("FIG gradient stops must be ordered within 0..1"));
+        }
+        let color = stop
+            .get("color")
+            .ok_or_else(|| invalid("FIG gradient color missing"))?;
+        for key in ["r", "g", "b", "a"] {
+            if !(0. ..=1.).contains(&number(color, key, f64::NAN)?) {
+                return Err(invalid("FIG gradient color channels must be 0..1"));
+            }
+        }
+        converted.push(json!({"offset":offset,"color":rgba(color)?}));
+        previous = offset;
+    }
+
+    let transform = match paint.get("transform") {
+        Some(transform) => Affine([
+            number(transform, "m00", f64::NAN)?,
+            number(transform, "m10", f64::NAN)?,
+            number(transform, "m01", f64::NAN)?,
+            number(transform, "m11", f64::NAN)?,
+            number(transform, "m02", f64::NAN)?,
+            number(transform, "m12", f64::NAN)?,
+        ]),
+        None => Affine::IDENTITY,
+    };
+    if transform.0.iter().any(|value| !value.is_finite()) {
+        return Err(invalid("incomplete FIG gradient transform"));
+    }
+    let inverse = transform
+        .inverse()
+        .ok_or_else(|| unsupported("singular gradient transform"))?;
+    let shape_space = Affine([width, 0., 0., height, 0., 0.]).multiply(inverse);
+    let (kind, start, end, aspect) = if kind == "GRADIENT_LINEAR" {
+        // A color stop is a line of constant gradient x, so use its perpendicular in pixels.
+        let dx = transform.0[0] / width;
+        let dy = transform.0[2] / height;
+        let length_squared = dx * dx + dy * dy;
+        let start = shape_space.point(0., 0.5);
+        let end = (start.0 + dx / length_squared, start.1 + dy / length_squared);
+        ("linear", start, end, 1.)
+    } else {
+        // The transformed circle's ellipse comes from the principal axes of A·Aᵀ.
+        let [a, b, c, d, _, _] = shape_space.0;
+        let xx = a * a + c * c;
+        let xy = a * b + c * d;
+        let yy = b * b + d * d;
+        let major_squared = (xx + yy + (xx - yy).hypot(2. * xy)) / 2.;
+        let radius = major_squared.sqrt() / 2.;
+        let aspect = (a * d - b * c).abs() / major_squared;
+        let (sin, cos) = (0.5 * (2. * xy).atan2(xx - yy)).sin_cos();
+        let start = shape_space.point(0.5, 0.5);
+        let end = (start.0 + cos * radius, start.1 + sin * radius);
+        ("radial", start, end, aspect)
+    };
+    let coordinates = [start.0, start.1, end.0, end.1].map(|v| v as f32);
+    if coordinates.iter().any(|v| !v.is_finite())
+        || coordinates[..2] == coordinates[2..]
+        || !(aspect as f32).is_finite()
+        || aspect as f32 <= 0.
+    {
+        return Err(unsupported(
+            "gradient geometry is outside native renderer range",
+        ));
+    }
+    Ok(json!({
+        "type":kind,
+        "opacity":opacity,
+        "gradient":{
+            "start":{"x":start.0/width,"y":start.1/height},
+            "end":{"x":end.0/width,"y":end.1/height},
+            "aspect":aspect,
+            "stops":converted
+        }
+    }))
+}
+
 fn guid(value: &Value) -> Option<String> {
     Some(format!(
         "{}:{}",
