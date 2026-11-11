@@ -1,0 +1,12 @@
+[package]
+name = "omc-style"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+omc-model = { path = "../omc-model" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
