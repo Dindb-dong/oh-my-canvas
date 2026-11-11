@@ -708,6 +708,19 @@ impl DocumentEngine {
                     },
                 )?;
             }
+            Command::NodeUnset {
+                node_id,
+                properties,
+            } => {
+                self.live_node(candidate, node_id)?;
+                self.append(
+                    candidate,
+                    Action::UnsetNode {
+                        node_id: node_id.clone(),
+                        properties: properties.clone(),
+                    },
+                )?;
+            }
             Command::NodeMove {
                 node_id,
                 parent_id,

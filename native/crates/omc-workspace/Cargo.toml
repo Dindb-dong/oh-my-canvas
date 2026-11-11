@@ -1,0 +1,24 @@
+[package]
+name = "omc-workspace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+omc-model = { path = "../omc-model" }
+omc-protocol = { path = "../omc-protocol" }
+omc-engine = { path = "../omc-engine" }
+omc-sync = { path = "../omc-sync" }
+omc-storage = { path = "../omc-storage" }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+hex.workspace = true
+rusqlite.workspace = true
+fs2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+

@@ -41,6 +41,10 @@ pub enum Action {
         node_id: String,
         properties: Properties,
     },
+    UnsetNode {
+        node_id: String,
+        properties: Vec<String>,
+    },
     MoveNode {
         node_id: String,
         parent_id: Option<String>,
@@ -97,6 +101,7 @@ impl Action {
         match self {
             Self::CreateNode { node } => &node.id,
             Self::SetNode { node_id, .. }
+            | Self::UnsetNode { node_id, .. }
             | Self::MoveNode { node_id, .. }
             | Self::AdjustRank { node_id, .. }
             | Self::DeleteNode { node_id }
@@ -361,6 +366,20 @@ impl NodeState {
                     ));
                 }
             }
+            Action::UnsetNode { properties, .. } => {
+                if properties.is_empty()
+                    || properties.len() > 1024
+                    || properties.iter().any(|key| {
+                        key.is_empty()
+                            || key.len() > 256
+                            || matches!(key.as_str(), "text" | "textRuns")
+                    })
+                {
+                    return Err(EngineError::invalid(
+                        "invalid unset properties; text requires character commands",
+                    ));
+                }
+            }
             Action::MoveNode {
                 rank, parent_id, ..
             } => {
@@ -419,6 +438,11 @@ impl NodeState {
         for event in &events {
             match &event.action {
                 Action::SetNode { properties, .. } => node.properties.extend(properties.clone()),
+                Action::UnsetNode { properties, .. } => {
+                    for key in properties {
+                        node.properties.remove(key);
+                    }
+                }
                 Action::MoveNode {
                     parent_id, rank, ..
                 } => {
@@ -482,6 +506,7 @@ impl NodeState {
                         || node.properties.contains_key(field)
                 }
                 Action::SetNode { properties, .. } => properties.contains_key(field),
+                Action::UnsetNode { properties, .. } => properties.iter().any(|key| key == field),
                 Action::MoveNode { .. } => field == "placement",
                 Action::DeleteNode { .. } => field == "existence",
                 Action::TextInsert { .. } | Action::TextDelete { .. } | Action::TextMark { .. } => {
@@ -538,7 +563,36 @@ impl NodeState {
         let retracted = retractions(&self.events);
         let mut atoms: BTreeMap<String, Atom> = BTreeMap::new();
         let mut after = None;
+        original.validate().map_err(EngineError::invalid)?;
+        let mut initial_offset = 0;
+        let initial_attributes: Vec<(usize, Properties)> = original
+            .properties
+            .get("textRuns")
+            .and_then(Value::as_array)
+            .map(|runs| {
+                runs.iter()
+                    .map(|run| {
+                        let attributes: Properties = run["attributes"]
+                            .as_object()
+                            .unwrap()
+                            .iter()
+                            .filter(|(_, value)| !value.is_null())
+                            .map(|(key, value)| (key.clone(), value.clone()))
+                            .collect();
+                        initial_offset += run["text"].as_str().unwrap().chars().count();
+                        (initial_offset, attributes)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut run_index = 0;
         for (index, character) in original.string("text").unwrap_or("").chars().enumerate() {
+            while initial_attributes
+                .get(run_index)
+                .is_some_and(|(end, _)| index >= *end)
+            {
+                run_index += 1;
+            }
             let id = format!("g:{}:{index}", original.id);
             atoms.insert(
                 id.clone(),
@@ -547,7 +601,10 @@ impl NodeState {
                     after,
                     character,
                     stamp: Stamp::genesis(),
-                    attributes: Properties::new(),
+                    attributes: initial_attributes
+                        .get(run_index)
+                        .map(|(_, attributes)| attributes.clone())
+                        .unwrap_or_default(),
                     visible: true,
                 },
             );

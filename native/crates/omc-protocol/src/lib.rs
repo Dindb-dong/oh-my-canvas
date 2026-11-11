@@ -110,6 +110,12 @@ pub enum Command {
         node_id: String,
         properties: Properties,
     },
+    #[serde(rename = "node.unset")]
+    NodeUnset {
+        #[serde(rename = "nodeId")]
+        node_id: String,
+        properties: Vec<String>,
+    },
     #[serde(rename = "node.move")]
     NodeMove {
         #[serde(rename = "nodeId")]
@@ -332,8 +338,16 @@ pub fn decode_command(bytes: &[u8]) -> Result<CommandEnvelope> {
 }
 
 pub fn decode_json(bytes: &[u8]) -> Result<Value> {
-    if bytes.len() > MAX_REQUEST_BYTES {
-        return Err(EngineError::new("resource_limit", "request exceeds 1 MiB"));
+    decode_json_with_limit(bytes, MAX_REQUEST_BYTES)
+}
+
+/// Opt-in for explicit native file operations; ordinary MCP remains limited to 1 MiB.
+pub fn decode_json_with_limit(bytes: &[u8], maximum: usize) -> Result<Value> {
+    if bytes.len() > maximum.min(64 * 1024 * 1024) {
+        return Err(EngineError::new(
+            "resource_limit",
+            "request exceeds its declared body limit",
+        ));
     }
     let mut de = serde_json::Deserializer::from_slice(bytes);
     let value = UniqueValue::deserialize(&mut de)
