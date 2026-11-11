@@ -1,0 +1,12 @@
+[package]
+name = "omc-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+reqwest.workspace = true
+clap.workspace = true
+

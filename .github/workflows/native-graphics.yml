@@ -24,3 +24,14 @@ jobs:
         with:
           workspaces: native
       - run: cargo test --manifest-path native/Cargo.toml --locked -p omc-text -p omc-layout -p omc-scene -p omc-render -p omc-import -p omc-export -p omc-mcp
+      - name: Native service and stdio bridge
+        run: cargo build --manifest-path native/Cargo.toml --locked -p omc-service -p omc-cli
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Official MCP SDK test dependency
+        run: npm install --prefix "${{ runner.temp }}/omc-mcp-sdk" --ignore-scripts --no-audit --no-fund "@modelcontextprotocol/sdk@1.32.2"
+      - name: Official MCP client contracts
+        env:
+          OMC_TEST_SDK_ROOT: ${{ runner.temp }}/omc-mcp-sdk/node_modules/@modelcontextprotocol/sdk
+        run: node native/tests/mcp.e2e.mjs

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/omc-assets", "crates/omc-engine", "crates/omc-export", "crates/omc-import", "crates/omc-layout", "crates/omc-mcp", "crates/omc-model", "crates/omc-protocol", "crates/omc-render", "crates/omc-scene", "crates/omc-storage", "crates/omc-style", "crates/omc-sync", "crates/omc-text", "crates/omc-workspace"]
+members = ["apps/omc-cli", "apps/omc-service", "crates/omc-assets", "crates/omc-engine", "crates/omc-export", "crates/omc-import", "crates/omc-layout", "crates/omc-mcp", "crates/omc-model", "crates/omc-protocol", "crates/omc-render", "crates/omc-scene", "crates/omc-storage", "crates/omc-style", "crates/omc-sync", "crates/omc-text", "crates/omc-workspace"]
 
 [workspace.package]
 version = "0.1.0"
@@ -25,8 +25,12 @@ html5ever = "=0.35.0"
 markup5ever_rcdom = "=0.35.0+unofficial"
 roxmltree = "=0.21.2"
 svgtypes = "=0.16.2"
+reqwest = { version = "=0.13.5", default-features = false, features = ["json", "rustls", "blocking"] }
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+axum = "=0.8.9"
 fs2 = "=0.4.3"
 base64 = "=0.23.1"
+clap = { version = "=4.6.7", features = ["derive"] }
 unicode-segmentation = "1.12"
 zip = { version = "=2.4.2", default-features = false, features = ["deflate"] }
 flate2 = "=1.1.9"
