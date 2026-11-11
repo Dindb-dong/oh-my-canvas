@@ -1,0 +1,16 @@
+[package]
+name = "omc-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+omc-style = { path = "../omc-style" }
+skia-safe.workspace = true
+unicode-segmentation.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+skia-safe = { workspace = true, features = ["vulkan"] }

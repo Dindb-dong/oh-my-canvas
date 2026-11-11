@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/omc-assets", "crates/omc-engine", "crates/omc-model", "crates/omc-protocol", "crates/omc-storage", "crates/omc-style", "crates/omc-sync"]
+members = ["crates/omc-assets", "crates/omc-engine", "crates/omc-model", "crates/omc-protocol", "crates/omc-storage", "crates/omc-style", "crates/omc-sync", "crates/omc-text"]
 
 [workspace.package]
 version = "0.1.0"
@@ -19,6 +19,8 @@ thiserror = "=2.0.21"
 rusqlite = { version = "=0.42.0", features = ["bundled", "backup"] }
 hex = "=0.4.3"
 tempfile = "=3.27.0"
+skia-safe = { version = "=0.90.0", features = ["textlayout", "svg", "webp"] }
+unicode-segmentation = "1.12"
 
 [profile.dev]
 debug = 0
