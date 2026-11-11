@@ -1,5 +1,7 @@
 # Implementation contract
 
+This is the historical contract for the initial Electron implementation and local-only development phase. See [current architecture](docs/ARCHITECTURE.md) for implemented behavior and the [native engine rewrite plan](docs/NATIVE_ENGINE_PLAN.md) for the accepted replacement architecture and qualification gates. The original publication, renderer, MCP-transport and size-limit choices below are historical; recovery, validation, ownership and provenance requirements remain relevant.
+
 Local repository only. No git remote, telemetry, paid API, authentication service, cloud database or auto-publishing.
 
 1. Use the independently authored editor/ document, geometry, components, renderer, interaction, formats and MCP services in a sandboxed Electron renderer. Retired company code and copied tests are excluded from the publication source.

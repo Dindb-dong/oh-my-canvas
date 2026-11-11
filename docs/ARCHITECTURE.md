@@ -2,6 +2,8 @@
 
 [README](../README.md) · [Implementation contract](../IMPLEMENTATION.md) · [Design direction](../DESIGN.md)
 
+This document describes the current Electron runtime. The [native engine rewrite plan](NATIVE_ENGINE_PLAN.md) defines the accepted replacement architecture, migration milestones and release gates; native implementation and qualification are pending.
+
 Oh My Canvas uses an independently authored DOM/SVG editor inside an Electron application. The application has no runtime dependency on the original repository, Leviosa login/credits, Paper's service, a cloud database, or a telemetry endpoint.
 
 ```mermaid
