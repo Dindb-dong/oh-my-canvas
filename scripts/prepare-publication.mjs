@@ -148,7 +148,7 @@ function reseedOMC(file, source) {
         const document = structuredClone(old.replica.document), documentHash = sha(stable(document));
         inspectText(file, JSON.stringify({ document, id: old.id, title: old.title, createdAt: old.createdAt, updatedAt: old.updatedAt }));
         fresh = newReplica(document, `${old.id}\n${documentHash}`);
-        const envelope = JSON.parse(encodeFile({ id: old.id, title: old.title, replica: fresh, createdAt: old.createdAt }));
+        const envelope = JSON.parse(encodeFile({ id: old.id, title: old.title, replica: fresh, createdAt: old.createdAt, assets: old.assets }));
         envelope.updatedAt = old.updatedAt ?? old.createdAt ?? '1970-01-01T00:00:00.000Z';
         const output = Buffer.from(stable(envelope));
         verified = decodeFile(output.toString('utf8'));

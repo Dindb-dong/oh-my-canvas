@@ -1,5 +1,6 @@
 /** Canvas interchange, implemented from independently recorded serialization contracts. */
 import type { CanvasDocument, Data, Page, Shape, ShapeType } from '../contracts';
+import { assertPortableImages } from '../images/assets';
 import { boxGeometry } from '../geometry';
 import { createPage, insertShape, refreshFrames } from '../document';
 import { assertFiniteDocument, copy, documentModel, richText, shape, textValue, uid } from './model';
@@ -17,6 +18,31 @@ const extensionFields: Record<string, string[]> = {
     editorVector: ['strokeSides', 'radii', 'cornerSmoothing', 'strokeCap', 'strokeJoin', 'strokeDashes', 'fillRule', 'primitive', 'transform', 'flipX', 'flipY'],
     editorStyle: ['fills', 'strokes', 'effects', 'shadows', 'opacity', 'blendMode', 'blur', 'blurHidden', 'backgroundBlur', 'backgroundBlurHidden', 'radiusTopLeft', 'radiusTopRight', 'radiusBottomRight', 'radiusBottomLeft'],
 };
+const interchangeExtensions = new Set([...Object.keys(extensionFields), 'editorPath']);
+const derivedFields = new Set(['box', 'corners', 'transform', 'inverseTransform', 'parentId', 'enclosingFrameId', 'childIds', 'legacy', 'content']);
+const documentCollections = new Set(['pages', 'editorPages', 'editorComponents', 'editorStyles', 'editorLibraries', 'editorRootLayers', 'assets', 'capacity', 'extra']);
+const shapeCollections = new Set(['children', 'legacy', ...interchangeExtensions]);
+const recognizedExtensions = new Map([...interchangeExtensions].map(extension => [extension, new Set(extension === 'editorPath' ? ['content', 'segments'] : [...extensionFields[extension], ...extension === 'editorFrame' ? ['x', 'y', 'width', 'height'] : []])]));
+function copyExcept(input: Data, excluded: Set<string>): Data {
+    // Exclude descendants before cloning: copying a whole board subtree for
+    // every ancestor and then deleting `children` multiplies import memory.
+    return copy(Object.fromEntries(Object.entries(input).filter(([key]) => !excluded.has(key))));
+}
+function legacyExtras(input: Data): Data {
+    // Ordinary properties already live on the canonical shape and export from
+    // there. Retain only original fields whose derived counterparts are omitted
+    // by the exporter, unknown extension members, and explicit null markers.
+    const result = Object.fromEntries(Object.entries(input).filter(([key]) => derivedFields.has(key)).map(([key, value]) => [key, copy(value)]));
+    for (const extension of interchangeExtensions) {
+        const value = input[extension];
+        if (value === undefined) continue;
+        if (!value || typeof value !== 'object' || Array.isArray(value)) { result[extension] = copy(value); continue; }
+        const recognized = recognizedExtensions.get(extension)!;
+        const extra = Object.fromEntries(Object.entries(value).filter(([key, value]) => !recognized.has(key) || value === null));
+        if (Object.keys(extra).length) result[extension] = copy(extra);
+    }
+    return result;
+}
 function extensions(raw: Data): Data {
     const result: Data = {};
     for (const [extension, keys] of Object.entries(extensionFields)) {
@@ -85,13 +111,10 @@ export function importCanvasJson(input: any, options: Data = {}): CanvasDocument
         return raw;
     }
     const doc = documentModel();
-    doc.legacy = copy(raw);
-    for (const key of ['pages', 'editorPages', 'editorComponents', 'editorStyles', 'editorLibraries', 'editorRootLayers'])
-        delete doc.legacy[key];
+    doc.legacy = copyExcept(raw, documentCollections);
     doc.extra = copy(raw.extra ?? {});
     doc.assets = copy(raw.assets ?? {});
     doc.capacity = raw.capacity;
-    delete doc.legacy.assets;delete doc.legacy.capacity;
     doc.components = copy(raw.editorComponents ?? {});
     doc.styles = copy(raw.editorStyles ?? {});
     doc.libraries = copy(raw.editorLibraries ?? {});
@@ -129,9 +152,9 @@ export function importCanvasJson(input: any, options: Data = {}): CanvasDocument
         if (rawLayer.editorFrame && !board && !rawLayer.editorPath && !rawLayer.editorBool && !['path', 'boolean', 'text', 'image', 'svg'].includes(rawLayer.type))
             type = 'frame';
         const id = idFor(rawLayer.id), x = placement?.x ?? Number(frame.x ?? rawLayer.x ?? 0) + ox, y = placement?.y ?? Number(frame.y ?? rawLayer.y ?? 0) + oy, width = Number(frame.width ?? rawLayer.width ?? (board ? raw.width ?? 1000 : 100)), height = Number(frame.height ?? rawLayer.height ?? (board ? raw.height ?? 1000 : 100));
-        const values: Data = { ...copy(rawLayer), ...ext, type, id, x, y, width, height, parentId, enclosingFrameId: parentId, legacy: copy(rawLayer) };
-        delete values.children;
-        delete values.legacy.children;
+        const legacy = legacyExtras(rawLayer);
+        const values: Data = { ...copyExcept(rawLayer, shapeCollections), ...ext, type, id, x, y, width, height, parentId, enclosingFrameId: parentId };
+        if (Object.keys(legacy).length) values.legacy = legacy;
         delete values.childIds;
         if (rawLayer.fill !== undefined && !('fills' in ext))
             values.fills = rawLayer.fill === null ? [] : [{ color: rawLayer.fill, opacity: 1 }];
@@ -221,6 +244,7 @@ export function importCanvasJson(input: any, options: Data = {}): CanvasDocument
     return doc;
 }
 export function exportCanvasJson(doc: CanvasDocument, options: Data = {}): Data {
+    assertPortableImages(doc);
     assertFiniteDocument(copy(doc));
     const rootLayers: Record<string, Data[]> = {};
     const convert = (s: Shape, page: Page, ox: number, oy: number): Data => {

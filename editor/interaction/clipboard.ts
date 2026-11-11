@@ -1,7 +1,7 @@
-import {referencedAssets} from '../images/assets';
+import {referencedAssets, portableClipboard, prepareAssetTransfer, mergeTransferredAssets} from '../images/assets';
 import {DESIGN_FILE_LIMIT} from '../../core/capacity.mjs';
 import type { Data, EditorServices, Point, Shape } from "../contracts";
-import { createShape, topLevelIds, descendants } from "../document";
+import { createShape, topLevelIds, descendants, remapReferences } from "../document";
 import { moveShape, shapeBounds, unionBounds } from "../geometry";
 import { clone, textValue, toast } from "../ui/dom";
 const MIME = "application/x-oh-my-canvas-shapes";
@@ -24,7 +24,7 @@ export function createClipboard(stage: HTMLElement, services: EditorServices, op
         return {
             kind: "oh-my-canvas/shapes",
             version: 1,
-            assets: referencedAssets(roots.flatMap(id=>descendants(editor.page,id,true)),editor.doc.assets),
+            assetDefinitions: referencedAssets(roots.flatMap(id=>descendants(editor.page,id,true)),editor.doc.assets),
             capacity:editor.doc.capacity,
             roots,
             shapes: roots.flatMap(id => descendants(editor.page, id, true)).map(clone)
@@ -66,8 +66,19 @@ export function createClipboard(stage: HTMLElement, services: EditorServices, op
             roots: result.rootIds ?? shapes.filter(shape => !ids.has(shape.parentId)).map(shape => shape.id)
         };
     }
+    // File/page IDs are local namespaces. Flattening multiple imported pages must
+    // preserve each page's tree even when they use the same raw layer IDs.
+    function isolated(group: { shapes: Shape[]; roots: string[] }) {
+        const mapping = new Map(group.shapes.map(shape => [shape.id, crypto.randomUUID()]));
+        if (mapping.size !== group.shapes.length) throw Error('Imported page contains duplicate layer IDs');
+        return {
+            roots: group.roots.map(id => mapping.get(id) ?? id),
+            shapes: group.shapes.map(shape => ({ ...remapReferences(shape, mapping), id: mapping.get(shape.id)! } as Shape))
+        };
+    }
     async function importFiles(files: File[], point: Point) {
         const pageId = editor.pageId, shapes: Shape[] = [], roots: string[] = [], assets: Data[] = [], fontFaces: Data[] = [];
+        const stagedAssets: Data = {};
         let offset = 0,large=false;
         const warnings: string[] = [];
         for (const file of files) {
@@ -97,13 +108,15 @@ export function createClipboard(stage: HTMLElement, services: EditorServices, op
                 if (!services.formats?.importDesignFile) throw Error('Design file import requires the desktop app');
                 const result = await services.formats.importDesignFile(new Uint8Array(await file.arrayBuffer()), designFormat);
                 const document = result.document;large ||= document.capacity==='large';
-                assets.push(...Object.values(document.assets??{}) as Data[]);
                 group = {shapes: [], roots: []};
                 for (const pageId of document.pages) {
                     const page = document.pagesById[pageId];
-                    group.shapes.push(...Object.values(page.objects).filter((shape: any) => shape.id !== 'root') as Shape[]);
-                    group.roots.push(...page.objects.root.childIds);
+                    const isolatedPage = isolated({ shapes: Object.values(page.objects).filter((shape: any) => shape.id !== 'root') as Shape[], roots: page.objects.root.childIds });
+                    group.shapes.push(...isolatedPage.shapes);
+                    group.roots.push(...isolatedPage.roots);
                 }
+                const prepared = prepareAssetTransfer({ ...group, assetDefinitions: document.assets }, stagedAssets);
+                Object.assign(stagedAssets, prepared.assetDefinitions); group = prepared as typeof group;
                 warnings.push(...result.warnings);
             }
             else if (file.type === "image/svg+xml" || /\.svg$/i.test(file.name)) {
@@ -166,15 +179,18 @@ export function createClipboard(stage: HTMLElement, services: EditorServices, op
                     throw Error("Canvas JSON import is unavailable");
                 const document = services.formats.importCanvasJson(JSON.parse(await file.text()));
                 const page = document.pagesById[document.pages[0]];
-                group = {
+                const prepared = prepareAssetTransfer({
                     shapes: Object.values(page.objects).filter((shape: any) => shape.id !== "root") as Shape[],
-                    roots: page.objects.root.childIds
-                };
+                    roots: page.objects.root.childIds,
+                    assetDefinitions: document.assets
+                }, stagedAssets);
+                Object.assign(stagedAssets, prepared.assetDefinitions); group = prepared as typeof group;
             }
             else
                 throw Error("Unsupported file: " + file.name);
             if (!group.shapes.length)
                 throw Error("The imported file has no layers");
+            if (!designFormat) group = isolated(group);
             const box = unionBounds(group.shapes.filter(shape => group.roots.includes(shape.id)).map(shapeBounds));
             for (const shape of group.shapes)
                 moveShape(shape, offset - box.x, -box.y);
@@ -184,22 +200,21 @@ export function createClipboard(stage: HTMLElement, services: EditorServices, op
         }
         if (pageId !== editor.pageId)
             throw Error("The page changed while files were loading. Place the files again.");
-        const releaseFonts = fontFaces.length ? await services.fonts.prepareAssets?.(assets) : undefined;
+        for (const asset of assets) { asset.id ??= crypto.randomUUID(); stagedAssets[asset.id] = asset; }
+        const sourceDocument = editor.doc;
+        const payload = prepareAssetTransfer({ kind: 'oh-my-canvas/shapes', roots, shapes, assetDefinitions: stagedAssets }, sourceDocument.assets);
+        const releaseFonts = fontFaces.length ? await services.fonts.prepareAssets?.({ ...sourceDocument.assets, ...payload.assetDefinitions }) : undefined;
         try {
             if (pageId !== editor.pageId)
                 throw Error("The page changed while fonts were loading. Place the files again.");
+            if (sourceDocument !== editor.doc) throw Error('The document changed while files were loading. Place the files again.');
             if (shapes.length && typeof services.commands.pastePrepared !== "function")
                 throw Error("Prepared file insertion is unavailable");
             editor.transact("Place files", doc => {
                 if(large)doc.capacity="large";
-                for (const asset of assets)
-                    services.assets?.addFile?.(asset);
+                mergeTransferredAssets(doc, payload);
                 if (shapes.length)
-                    services.commands.pastePrepared({
-                        kind: "oh-my-canvas/shapes",
-                        roots,
-                        shapes
-                    }, {
+                    services.commands.pastePrepared(payload, {
                         parentId: "root",
                         x: point.x,
                         y: point.y
@@ -214,27 +229,33 @@ export function createClipboard(stage: HTMLElement, services: EditorServices, op
         }
     }
     async function copy(cut = false, event?: ClipboardEvent) {
+        const sourceDocument = editor.doc;
         const data = serialize();
         if (!data.roots.length)
             return false;
         memory = data;
+        const raw = JSON.stringify(data), needsHydration = raw.includes('omc-asset:sha256:');
         const plain = data.roots.map(id => {
             const shape = data.shapes.find(shape => shape.id === id)!;
             return shape.type === "text" ? textValue(shape.content) : shape.name ?? shape.type;
         }).join("\n");
         if (event?.clipboardData) {
             event.preventDefault();
-            event.clipboardData.setData(MIME, JSON.stringify(data));
-            event.clipboardData.setData("text/plain", JSON.stringify(data));
+            event.clipboardData.setData(MIME, raw);
+            event.clipboardData.setData("text/plain", raw);
         }
-        else {
+        const portable = await portableClipboard(data, services.resolveImageSource);
+        memory = portable;
+        if (!event?.clipboardData || needsHydration) {
             try {
-                await navigator.clipboard.writeText(JSON.stringify(data));
+                await navigator.clipboard.writeText(JSON.stringify(portable));
             }
             catch {
                 toast("Clipboard access was denied; copied layers remain available in this editor.");
+                if (cut && needsHydration) return false;
             }
         }
+        if (cut && editor.doc !== sourceDocument) throw Error('Canvas changed while copying; no layers were cut');
         if (cut)
             await services.commands.run("edit.delete", {
                 ids: data.roots

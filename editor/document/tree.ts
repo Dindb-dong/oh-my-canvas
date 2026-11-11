@@ -107,6 +107,8 @@ export function reparentShapes(page: Page, ids: string[], parentId: string, inde
     }
 }
 export function remapReferences(value: any, mapping: Map<string, string>, key = ''): any {
+    // Asset IDs occupy their own namespace, even when equal to a layer ID.
+    if (key === 'assetId') return value;
     if (typeof value === 'string')
         return /(?:Id|Ids|source|target)$/.test(key) ? mapping.get(value) ?? value : value;
     if (Array.isArray(value))

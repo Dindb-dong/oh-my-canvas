@@ -1,25 +1,33 @@
 import type { Rect } from '../contracts';
-export async function inlineSVGImages(svg: string): Promise<string> {
+import { embedImageSource } from '../images/assets';
+export async function inlineSVGImages(svg: string, options: { signal?: AbortSignal; maxBytes?: number } = {}): Promise<string> {
+    options.signal?.throwIfAborted();
     const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
     if (doc.querySelector('parsererror'))
         throw new Error('Invalid generated SVG');
-    await Promise.all([...doc.querySelectorAll('image')].map(async (image) => {
+    const sources = new Map<string, Element[]>();
+    for (const image of doc.querySelectorAll('image')) {
         const src = image.getAttribute('href') ?? image.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
         if (!src || src.startsWith('data:'))
-            return;
-        const response = await fetch(src);
-        if (!response.ok)
-            throw new Error(`Image export failed: ${response.status}`);
-        const blob = await response.blob();
-        const data = await new Promise<string>((resolve, reject) => {
-            const r = new FileReader();
-            r.onerror = () => reject(r.error);
-            r.onload = () => resolve(String(r.result));
-            r.readAsDataURL(blob);
-        });
-        image.setAttribute('href', data);
-        image.removeAttributeNS('http://www.w3.org/1999/xlink', 'href');
-    }));
+            continue;
+        const images = sources.get(src) ?? []; images.push(image); sources.set(src, images);
+    }
+    const pending = [...sources], budget = { left: options.maxBytes ?? 256 * 1024 * 1024 }, abort = new AbortController();
+    const signal = options.signal ? AbortSignal.any([options.signal, abort.signal]) : abort.signal;
+    let cursor = 0;
+    try {
+        await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {
+            while (cursor < pending.length) {
+                signal.throwIfAborted();
+                const [src, images] = pending[cursor++];
+                const data = await embedImageSource(src, value => value, budget, signal);
+                for (const image of images) {
+                    image.setAttribute('href', data);
+                    image.removeAttributeNS('http://www.w3.org/1999/xlink', 'href');
+                }
+            }
+        }));
+    } catch (error) { abort.abort(error); throw error; }
     return new XMLSerializer().serializeToString(doc.documentElement);
 }
 export async function rasterizeSVG(svg: string, bounds: Rect, scale = 1, type = 'image/png', quality = .92, background?: string): Promise<Blob> {

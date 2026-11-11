@@ -7,7 +7,8 @@ export type { TextFragment } from './scene';
 import { combinePaths } from './vector';
 import { measureTextScene } from './text';
 import { textMetricRevision } from './metric-cache';
-import { SceneNodeCache, sceneChanges, parseScene, reconcileScene, type SceneNodeRecord } from './retained';
+import { SceneNodeCache, sceneChanges, parseScene, reconcileScene, resourceScope } from './retained';
+import { hasBackdropDependency, ViewportPreparation, type ViewportChanges } from './viewport';
 export { measureTextScene } from './text';
 export { combinePaths } from './vector';
 let thumbnailNamespace = 0;
@@ -37,6 +38,31 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
     let destroyed = false, revision = 0, settling: Promise<void> | undefined;
     let visualRevision = 0, booleanRevision = 0, pendingRender = false, cancelScheduled: (() => void) | undefined;
     const nodeCache = new SceneNodeCache(), scenePrefix = 'omc-view-' + (++sceneNamespace);
+    const preparation = new ViewportPreparation();
+    let preparedPage = '', preparedSource: Record<string, Shape> | undefined;
+    let observedPage = editor.pageId, observedSource = editor.page.objects;
+    let pendingShapeIds: Set<string> | undefined = new Set();
+    const viewportBounds = () => ({ x: editor.viewport.vbox.x, y: editor.viewport.vbox.y, width: editor.viewport.vport.width / editor.viewport.zoom, height: editor.viewport.vport.height / editor.viewport.zoom });
+    function prepareScreen() {
+        const source = editor.page.objects, pageId = editor.pageId;
+        const changes: ViewportChanges | undefined = pendingShapeIds && preparedSource && preparedPage === pageId && observedPage === pageId && observedSource === source ?
+            { before: preparedSource, after: source, ids: pendingShapeIds } : undefined;
+        const changed = preparation.update(source, viewportBounds(), editor.selection, changes);
+        preparedPage = observedPage = pageId; preparedSource = observedSource = source;
+        pendingShapeIds = new Set();
+        return changed;
+    }
+    const screenObjects = () => preparation.objects;
+    const resolveImageSource = (source: string): string => options.resolveImageSource?.(source) ?? source;
+    function resourceVisible(shape: Shape, objects: Record<string, Shape>, cache: Map<string, boolean>, seen = new Set<string>()): boolean {
+        if (cache.has(shape.id)) return cache.get(shape.id)!;
+        if (seen.has(shape.id)) return false;
+        seen.add(shape.id);
+        const parent = objects[shape.parentId];
+        const visible = !shape.hidden && shape.visible !== false && (!parent || parent.id === shape.id || resourceVisible(parent, objects, cache, seen));
+        cache.set(shape.id, visible);
+        return visible;
+    }
     let renderedObjects: Record<string, Shape> | undefined, renderedPage = '', renderedKey = '';
     let previousImages: Record<string, Shape> | undefined, previousBooleans: Record<string, Shape> | undefined;
     let resolvedSource: Record<string, Shape> | undefined, resolvedRevision = -1, resolved: Record<string, Shape>;
@@ -70,13 +96,13 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         resolvedSource = editor.page.objects; resolvedRevision = booleanRevision; resolved = result;
         return result;
     }
-    function discoverBooleans() {
-        const objects = editor.page.objects;
+    function discoverBooleans(objects = screenObjects()) {
         if (previousBooleans === objects) return;
         previousBooleans = objects;
+        const visibility = new Map<string, boolean>();
         const signature = (shape: Shape): any[] => [shape.booleanOperation ?? shape.operation, shapePath(shape), shape.transform, shape.fillRule, shape.hidden, (shape.childIds ?? []).map(id => objects[id] ? signature(objects[id]) : null)];
         for (const shape of Object.values(objects)) {
-            if (shape.type !== 'boolean' || !shape.childIds?.length)
+            if (shape.type !== 'boolean' || !shape.childIds?.length || !resourceVisible(shape, objects, visibility))
                 continue;
             const key = JSON.stringify(signature(shape));
             if (booleans.get(shape.id)?.signature === key)
@@ -111,7 +137,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             });
         }
         for (const id of booleans.keys())
-            if (!objects[id] || objects[id].type !== 'boolean' || !objects[id].childIds?.length) {
+            if (!editor.page.objects[id] || editor.page.objects[id].type !== 'boolean' || !editor.page.objects[id].childIds?.length) {
                 booleans.delete(id);
                 booleanRevision++;
             }
@@ -143,20 +169,27 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         const old=assetUrls.get(image.assetId);
         if(old?.src===src)return old.url;
         if(old)URL.revokeObjectURL(old.url);
-        const comma=src.indexOf(','),decoded=atob(src.slice(comma+1)),bytes=new Uint8Array(decoded.length);
-        for(let i=0;i<decoded.length;i++)bytes[i]=decoded.charCodeAt(i);
-        const url=URL.createObjectURL(new Blob([bytes],{type:src.slice(5,src.indexOf(';'))}));
+        const comma = src.indexOf(','), header = src.slice(5, comma);
+        let bytes: Uint8Array;
+        try {
+            if (header.endsWith(';base64')) {
+                const decoded = atob(src.slice(comma + 1)); bytes = Uint8Array.from(decoded, character => character.charCodeAt(0));
+            } else bytes = new TextEncoder().encode(decodeURIComponent(src.slice(comma + 1)));
+        } catch { return src; }
+        const url=URL.createObjectURL(new Blob([bytes as BlobPart],{type:header.split(';')[0]}));
         assetUrls.set(image.assetId,{src,url});return url;
     }
     function imageSource(s: Shape) {
         return [s.image ? displaySource(s.image) : '', ...(s.fills ?? []).filter((p: Data) => p.type === 'image' || p.image).map((p: Data) => displaySource(p.image ?? p))].filter(Boolean);
     }
-    function discoverImages() {
+    function discoverImages(objects = screenObjects()) {
         if(previousAssets!==editor.doc.assets){previousAssets=editor.doc.assets;assetRevision++;previousImages=undefined;images.clear();}
-        if (previousImages === editor.page.objects) return;
-        previousImages = editor.page.objects;
+        if (previousImages === objects) return;
+        previousImages = objects;
         const active = new Set<string>();
-        for (const s of visibleShapes())
+        const visibility = new Map<string, boolean>();
+        for (const s of Object.values(objects)) {
+            if (!resourceVisible(s, objects, visibility)) continue;
             for (const src of imageSource(s)) {
                 active.add(src);
                 if (images.has(src))
@@ -178,30 +211,33 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                         image.decode().then(() => finish(false), () => finish(true));
                     };
                     image.onerror = () => finish(true);
-                    image.src = src;
+                    image.src = resolveImageSource(src);
                     if (image.complete)
                         finish(!image.naturalWidth);
                 });
                 images.set(src, record);
             }
+        }
         for (const src of images.keys()) if (!active.has(src)) images.delete(src);
         for(const [id,entry] of assetUrls)if(!active.has(entry.url)){URL.revokeObjectURL(entry.url);assetUrls.delete(id);}
     }
     let fontRevision = 0, measuredMetricRevision = -1, measuredFontRevision = -1;
     const measuredText = new Map<string, Shape>();
-    function measureText() {
+    function measureText(objects = screenObjects()) {
         const all = measuredMetricRevision !== textMetricRevision() || measuredFontRevision !== fontRevision;
+        if (all) measuredText.clear();
         const changed: Record<string, Shape> = {}, live = new Set<string>();
-        for (const shape of visibleShapes()) {
-            if (shape.type !== 'text') continue;
+        const visibility = new Map<string, boolean>();
+        for (const shape of Object.values(objects)) {
+            if (shape.type !== 'text' || !resourceVisible(shape, editor.page.objects, visibility)) continue;
             live.add(shape.id);
             if (all || measuredText.get(shape.id) !== shape) changed[shape.id] = shape;
         }
-        for (const id of measuredText.keys()) if (!live.has(id)) {
+        for (const id of measuredText.keys()) if (!editor.page.objects[id]) {
             measuredText.delete(id); fragments.delete(id); textSizes.delete(id);
         }
         if (!Object.keys(changed).length) { measuredMetricRevision = textMetricRevision(); measuredFontRevision = fontRevision; return; }
-        const measured = measureTextScene(changed, measurements, options);
+        const measured = measureTextScene(changed, measurements, { ...options, assets: editor.doc.assets, resolveImageSource });
         for (const shape of Object.values(changed)) measuredText.set(shape.id, shape);
         measuredMetricRevision = textMetricRevision(); measuredFontRevision = fontRevision;
         for (const [id, list] of measured.fragments)
@@ -243,6 +279,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             return;
         cancelScheduled?.(); cancelScheduled = undefined; pendingRender = false;
         revision++;
+        prepareScreen();
         discoverImages();
         discoverBooleans();
         measureText();
@@ -250,23 +287,19 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         renderedOutlines = !!editor.showOutlines;
         const vp = editor.viewport, bounds = { x: vp.vbox.x, y: vp.vbox.y, width: vp.vport.width / vp.zoom, height: vp.vport.height / vp.zoom };
         const svgStart = performance.now();
-        const objects = resolvedObjects(), key = `${editor.pageId}:${assetRevision}:${fontRevision}:${measuredMetricRevision}:${renderedOutlines}:${renderedOutlines ? 1 / vp.zoom : ''}`;
+        const projected = resolvedObjects(), objects = preparation.objects === editor.page.objects ? projected : Object.fromEntries(Object.keys(preparation.objects).map(id => [id, projected[id]])), key = `${editor.pageId}:${assetRevision}:${fontRevision}:${measuredMetricRevision}:${renderedOutlines}:${renderedOutlines ? 1 / vp.zoom : ''}`;
         // Backdrop blur reads earlier siblings, so its invalidation is deliberately
         // scene-wide until dependency-aware compositing has its own parity coverage.
-        const backdrop = Object.values(objects).some(shape => !shape.backgroundBlurHidden && num(shape.backgroundBlur) !== 0);
+        const backdrop = Object.values(objects).some(hasBackdropDependency);
         const reset = key !== renderedKey || renderedPage !== editor.pageId || backdrop;
-        const changes = sceneChanges(renderedObjects, objects), prior = new Map<string, SceneNodeRecord>();
+        const changes = sceneChanges(renderedObjects, objects);
         if (!reset && !changes.changed.size && scene.firstElementChild) {
             lastRender = { mode: 'unchanged', generatedNodes: 0, cachedNodes: 0, changedNodes: 0 };
             updateViewport();
             return;
         }
-        if (!reset) for (const id of changes.changed) {
-            const entry = nodeCache.get(id + '\0shape');
-            if (entry) prior.set(id, entry);
-        }
         if (reset) nodeCache.clear(); else nodeCache.invalidate(changes.affected);
-        const writer = new SceneWriter(objects, { assets:editor.doc.assets,imageSource:displaySource,textFragments: fragments, typography: options, outlines: renderedOutlines, outlineWidth: 1 / vp.zoom, idPrefix: scenePrefix, stableIds: true, ...(!backdrop ? { nodeCache } : {}) });
+        const writer = new SceneWriter(objects, { assets: editor.doc.assets, imageSource: displaySource, textFragments: fragments, typography: options, resolveImageSource, outlines: renderedOutlines, outlineWidth: 1 / vp.zoom, idPrefix: scenePrefix, stableIds: true, ...(!backdrop ? { nodeCache } : {}) });
         const svg = scene.firstElementChild as SVGSVGElement | null;
         const maskAncestor = (id: string) => {
             const seen = new Set<string>();
@@ -283,13 +316,19 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         // Structural edits and compositing dependencies take the retained full path.
         const leafEdit = !reset && !!svg && changes.changed.size > 0 && [...changes.changed].every(id => {
             const old = renderedObjects?.[id], next = objects[id];
-            return old && next && prior.has(id) && old.parentId === next.parentId && !old.childIds?.length && !next.childIds?.length && !old.hidden && old.visible !== false && !next.hidden && next.visible !== false && !maskAncestor(id) && !!layerElement(id);
+            return old && next && old.parentId === next.parentId && !old.childIds?.length && !next.childIds?.length && !old.hidden && old.visible !== false && !next.hidden && next.visible !== false && !maskAncestor(id) && !!layerElement(id);
         });
         let bytes = 0, attachMs = 0;
         if (leafEdit) {
             const definitions = svg!.querySelector('defs')!;
             const resources = new Map(Array.from(definitions.children).map(node => [node.id, node]));
             for (const id of changes.changed) {
+                // The bounded serialization cache can evict a leaf in a large scene.
+                // Stable resource scopes let the live DOM remain the authority for
+                // its old definitions, so eviction never turns a leaf edit into a
+                // full-scene parse or requires retaining another source snapshot.
+                const prefix = scenePrefix + '-' + resourceScope(id) + '-';
+                const previousIds = [...resources.keys()].filter(resource => resource.startsWith(prefix));
                 const source = writer.node(objects[id]), record = nodeCache.get(id + '\0shape');
                 // Oversized entries may be intentionally absent from the bounded cache.
                 const defs = record?.defs ?? writer.defs;
@@ -300,8 +339,8 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 if (!current) throw new Error('Retained scene lost an edited layer');
                 reconcileScene(current, next);
                 const nextDefinitions = Array.from(patch.firstElementChild!.children), nextIds = new Set(nextDefinitions.map(node => node.id));
-                for (const match of prior.get(id)!.defs.join('').matchAll(/\bid="([^"]+)"/g)) {
-                    if (!nextIds.has(match[1])) { resources.get(match[1])?.remove(); resources.delete(match[1]); }
+                for (const resource of previousIds) {
+                    if (!nextIds.has(resource)) { resources.get(resource)?.remove(); resources.delete(resource); }
                 }
                 for (const node of nextDefinitions) {
                     const previous = resources.get(node.id);
@@ -312,7 +351,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 writer.defs.length = 0;
             }
         } else {
-            const source = writer.svg(roots(), bounds); bytes = source.length;
+            const source = writer.svg(preparation.roots, bounds); bytes = source.length;
             const domStart = performance.now(), next = parseScene(source);
             if (svg && renderedPage === editor.pageId) reconcileScene(svg, next, reset ? undefined : changes.affected);
             else scene.replaceChildren(next);
@@ -345,16 +384,20 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             for (let attempt = 0; attempt < 4; attempt++) {
                 flushPending();
                 const start = revision;
-                discoverImages();
-                discoverBooleans();
+                // Full settling is an explicit measurement/export contract; interactive
+                // render preparation remains scoped to the screen and its overscan.
+                discoverImages(editor.page.objects);
+                discoverBooleans(editor.page.objects);
                 const text = Object.values(editor.page.objects).filter(s => s.type === 'text').map(s => typeof s.content === 'string' ? s.content : JSON.stringify(s.content ?? s.text ?? '')).join('');
                 await bounded(options.fonts?.ensure ? options.fonts.ensure(text) : document.fonts.ready, 15000);
+                const metricsChanged = measuredMetricRevision !== textMetricRevision() || measuredFontRevision !== fontRevision;
+                measureText(editor.page.objects);
                 await Promise.all([...images.values()].map(i => i.promise));
                 await bounded(Promise.all([...booleans.values()].map(entry => entry.promise)), 20000);
                 for (const entry of booleans.values())
                     if (entry.error)
                         throw new Error('Boolean geometry could not be computed', { cause: entry.error });
-                if (pendingRender || measuredMetricRevision !== textMetricRevision() || renderedOutlines !== !!editor.showOutlines)
+                if (pendingRender || metricsChanged || measuredMetricRevision !== textMetricRevision() || renderedOutlines !== !!editor.showOutlines)
                     render();
                 await new Promise<void>(resolve => setTimeout(resolve, 0));
                 if (start === revision && !pendingRender) {
@@ -371,6 +414,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
     }
     function measure(ids: string[]) {
         flushPending();
+        measureText(Object.fromEntries(ids.filter(id => editor.page.objects[id]).map(id => [id, editor.page.objects[id]])));
         const result = new Map<string, Measured>();
         if (!ids.length) return result;
         const objects = resolvedObjects();
@@ -380,8 +424,17 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 continue;
             let b = boundsOf([s]);
             const element = layerElement(id);
-            if (!element)
-                continue;
+            if (!element) {
+                if (!preparation.enabled) continue;
+                let ancestor: Shape | undefined = s, hidden = false;
+                const seen = new Set<string>();
+                while (ancestor && !seen.has(ancestor.id)) {
+                    seen.add(ancestor.id);
+                    if (ancestor.hidden || ancestor.visible === false) { hidden = true; break; }
+                    ancestor = editor.page.objects[ancestor.parentId];
+                }
+                if (hidden) continue;
+            }
             if (element) {
                 const r = (element.querySelector('[data-geometry]') ?? element).getBoundingClientRect(), origin = stage.getBoundingClientRect(), zoom = editor.viewport.zoom;
                 if (r.width || r.height) {
@@ -406,6 +459,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
     }
     const thumbnailCache = new Map<string, {
         signature: string;
+        assets: Data | undefined;
         promise: Promise<string>;
     }>();
     async function thumbnailSvg(pageId: string, id: string): Promise<string> {
@@ -426,8 +480,9 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 collect(child);
         };
         collect(id);
+        const assets = editor.doc.assets;
         const key = pageId + '\0' + id, signature = fontRevision + ":" + textMetricRevision() + JSON.stringify(objects), cached = thumbnailCache.get(key);
-        if (cached?.signature === signature)
+        if (cached?.signature === signature && cached.assets === assets)
             return cached.promise;
         const promise = (async () => {
             const text = Object.values(objects).filter(shape => shape.type === 'text').flatMap(shape => (shape.content?.children ?? []).flatMap((paragraph: Data) => (paragraph.children ?? []).map((run: Data) => run.text ?? ''))).join('');
@@ -461,14 +516,16 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             });
             document.body.append(holder);
             try {
-                const measured = measureTextScene(objects, holder, options), bounds = boundsOf([objects[id]]);
-                return new SceneWriter(objects, { assets:editor.doc.assets,textFragments: measured.fragments, typography: options, idPrefix: 'omc-thumb-' + (++thumbnailNamespace) }).svg([id], bounds);
+                const measured = measureTextScene(objects, holder, { ...options, assets, resolveImageSource }), bounds = boundsOf([objects[id]]);
+                const svg = new SceneWriter(objects, { assets, textFragments: measured.fragments, typography: options, resolveImageSource, idPrefix: 'omc-thumb-' + (++thumbnailNamespace) }).svg([id], bounds);
+                const { inlineSVGImages } = await import('../export/raster');
+                return inlineSVGImages(svg);
             }
             finally {
                 holder.remove();
             }
         })();
-        thumbnailCache.set(key, { signature, promise });
+        thumbnailCache.set(key, { signature, assets, promise });
         if (thumbnailCache.size > 200)
             thumbnailCache.delete(thumbnailCache.keys().next().value!);
         promise.catch(() => {
@@ -479,8 +536,46 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
     }
     const view: RenderView = {
         thumbnailSvg,
+        async thumbnailSnapshot({ signal } = {}) {
+            signal?.throwIfAborted();
+            const svg = scene.firstElementChild as SVGSVGElement | null;
+            if (destroyed || pendingRender || !svg) return null;
+            // Automatic library previews must never invoke full-page settling.
+            // Snapshot only the already prepared viewport, with a bounded walk
+            // before serialization (an individual inline image can also be huge).
+            const walk = document.createTreeWalker(svg, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+            let node: Node | null = svg, nodes = 0, characters = 0;
+            while (node) {
+                if (++nodes > 2000) return null;
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    const element = node as Element;
+                    characters += element.tagName.length * 2 + 5;
+                    for (const attribute of element.attributes) characters += attribute.name.length + attribute.value.length + 4;
+                } else characters += node.nodeValue?.length ?? 0;
+                if (characters > 2 * 1024 * 1024) return null;
+                node = walk.nextNode();
+            }
+            const b = viewportBounds();
+            if (![b.x, b.y, b.width, b.height].every(Number.isFinite) || b.width <= 0 || b.height <= 0) return null;
+            const version = visualRevision, snapshot = svg.cloneNode(true) as SVGSVGElement;
+            snapshot.style.removeProperty('width'); snapshot.style.removeProperty('height'); snapshot.style.overflow = 'hidden';
+            snapshot.setAttribute('width', String(b.width)); snapshot.setAttribute('height', String(b.height));
+            const source = new XMLSerializer().serializeToString(snapshot);
+            const { inlineSVGImages, rasterizeSVG } = await import('../export/raster');
+            const embedded = await inlineSVGImages(source, { signal, maxBytes: 8 * 1024 * 1024 });
+            signal?.throwIfAborted();
+            if (destroyed || visualRevision !== version) return null;
+            // Library previews are best effort and use available system fonts;
+            // explicit screenshots still settle and embed the export font set.
+            const scale = Math.min(1, Math.sqrt(80000 / (b.width * b.height)));
+            const blob = await rasterizeSVG(embedded, b, scale, 'image/png');
+            signal?.throwIfAborted();
+            if (destroyed || visualRevision !== version) return null;
+            return { data: await blobBase64(blob), mimeType: 'image/png' };
+        },
         get renderRevision() { return visualRevision; },
-        renderDiagnostics() { return { ...lastRender, ...nodeCache.diagnostics(), pending: pendingRender }; },
+        get geometryRevision() { return booleanRevision; },
+        renderDiagnostics() { return { ...lastRender, ...nodeCache.diagnostics(), pending: pendingRender, viewportCulling: preparation.enabled, preparedObjects: Object.keys(preparation.objects).length, preparedRoots: preparation.roots.length }; },
         flush: flushPending,
         onRender(listener: () => void) {
             renderListeners.add(listener);
@@ -488,6 +583,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         },
         textFragments(id: string) {
             flushPending();
+            if (editor.page.objects[id]) measureText({ [id]: editor.page.objects[id] });
             return (fragments.get(id) ?? []).map(fragment => ({ ...fragment, style: { ...fragment.style } }));
         },
         render, settled, measure, computedStyle(id, keys) {
@@ -495,10 +591,19 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             const s = resolvedObjects()[id];
             if (!s)
                 return {};
-            const group = layerElement(id);
+            let group = layerElement(id), probe: HTMLElement | undefined;
+            if (!group && preparation.enabled) {
+                measureText({ [id]: editor.page.objects[id] });
+                probe = document.createElement('div');
+                probe.innerHTML = new SceneWriter(resolvedObjects(), { assets: editor.doc.assets, textFragments: fragments, typography: options, resolveImageSource }).svg([id], boundsOf([s]));
+                measurements.append(probe);
+                group = probe.querySelector(`[data-shape-id="${CSS.escape(id)}"]`);
+            }
             const el = group?.querySelector('[data-run]') ?? group?.querySelector('path:not([data-geometry]),image,svg') ?? group;
-            if (!el)
+            if (!el) {
+                probe?.remove();
                 return {};
+            }
             const style = getComputedStyle(el);
             const derived: Record<string, string> = {
                 width: s.width + 'px', height: s.height + 'px', left: s.x + 'px', top: s.y + 'px', opacity: String(s.opacity ?? 1), display: s.layout?.type === 'flex' ? 'flex' : s.layout?.type === 'grid' ? 'grid' : 'block', ...(s.layout?.direction ? { 'flex-direction': s.layout.direction } : {})
@@ -506,24 +611,29 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             if (s.fills?.[0]?.color)
                 derived['background-color'] = s.fills[0].color;
             const selected = keys ?? ['fill', 'stroke', 'opacity', 'font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'color', 'mix-blend-mode'];
-            return Object.fromEntries(selected.map(k => [k, derived[k] ?? style.getPropertyValue(k)]));
+            const result = Object.fromEntries(selected.map(k => [k, derived[k] ?? style.getPropertyValue(k)]));
+            probe?.remove();
+            return result;
         }, element(id) {
             flushPending();
             return layerElement(id) as HTMLElement | null;
         }, sceneSvg(ids?: string[], opts: Data = {}) {
             flushPending();
+            measureText(editor.page.objects);
             const chosen = ids?.length ? ids : roots();
             const bounds = opts.bounds ?? boundsOf(chosen.map(id => resolvedObjects()[id]).filter(Boolean));
-            return new SceneWriter(resolvedObjects(), { assets:editor.doc.assets,...opts, exporting: true, textFragments: fragments }).svg(chosen, bounds);
+            return new SceneWriter(resolvedObjects(), { assets: editor.doc.assets, ...opts, exporting: true, textFragments: fragments, resolveImageSource }).svg(chosen, bounds);
         }, bounds(ids: string[]) {
             return boundsOf(ids.map(id => resolvedObjects()[id]).filter(Boolean));
         }, projectedShape(id: string) {
             return resolvedObjects()[id];
         }, textLines(id: string) {
             flushPending();
+            if (editor.page.objects[id]) measureText({ [id]: editor.page.objects[id] });
             return (fragments.get(id)??[]).map(fragment=>({...fragment,style:{...fragment.style}}));
         }, textSize(id: string) {
             flushPending();
+            if (editor.page.objects[id]) measureText({ [id]: editor.page.objects[id] });
             const size=textSizes.get(id);return size?{...size}:undefined;
         }, async screenshot(id, opts = {}) {
             await settled();
@@ -545,12 +655,12 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
                 b.y += slice * step;
                 b.height = Math.min(height, b.height - slice * step);
             }
-            const { rasterizeSVG } = await import('../export/raster');
+            const { rasterizeSVG, inlineSVGImages } = await import('../export/raster');
             let source = view.sceneSvg(chosenIds, { bounds: b });
             const css = await options.fonts?.embeddedCss?.();
             if (css)
                 source = source.replace('<defs>', '<defs><style>' + css.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</style>');
-            const blob = await rasterizeSVG(source, b, scale, 'image/png');
+            const blob = await rasterizeSVG(await inlineSVGImages(source), b, scale, 'image/png');
             const data = await blobBase64(blob);
             return { data, mimeType: 'image/png', slices };
         }, imageCacheDiagnostics(){return {loadedImages:images.size,assetURLs:assetUrls.size};}, destroy() {
@@ -568,16 +678,30 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             fragments.clear();
             textSizes.clear();
             measuredText.clear(); nodeCache.clear(); renderedObjects = undefined; resolvedSource = undefined;
+            preparation.clear();
         }
     };
     const off = editor.on(event => {
+        const source = editor.page.objects;
+        if (event.page || observedPage !== editor.pageId) {
+            preparation.clear(); pendingShapeIds = undefined;
+        } else if (source !== observedSource) {
+            // Absence means unknown, whereas an explicit empty scope means no
+            // shape changed. Union every skipped preview up to the next render.
+            if (!event.changedShapeIds) pendingShapeIds = undefined;
+            else if (pendingShapeIds) for (const id of event.changedShapeIds[editor.pageId] ?? []) pendingShapeIds.add(id);
+        }
+        observedPage = editor.pageId; observedSource = source;
         if (event.changes || event.projection || event.page || renderedOutlines !== !!editor.showOutlines)
             render();
         else if (event.deltas) {
             if (editor.undo.blocked) requestRender(); else render();
         }
         else if (event.viewport) {
-            if (pendingRender) render(); else updateViewport();
+            if (pendingRender || prepareScreen()) render(); else updateViewport();
+        }
+        else if (event.selection && preparation.enabled && prepareScreen()) {
+            render();
         }
     });
     const loaded = () => {

@@ -166,6 +166,52 @@ describe('FMT-02 / DOC-02 Canvas interchange', () => {
         expect(t.fills).toEqual([]);
         expect(exportCanvasJson(doc).pages[0].children[0].editorStyle.fills).toBeNull();
     });
+    it('keeps one canonical payload through repeated JSON round trips without dropping unknown extensions or source IDs', () => {
+        const segments = [{ command: 'move', x: 0, y: 0 }, ...Array.from({ length: 256 }, (_, i) => ({ command: 'line', x: i + 1, y: i % 30 }))];
+        const content = { type: 'richText', children: [{ children: [{ text: 'Portable text', fontWeight: 700 }] }] };
+        const unknown = { nested: ['future', { enabled: true }] };
+        const input = {
+            opaque: unknown, extra: { origin: 'synthetic' },
+            assets: { image: { id: 'image', kind: 'image', src: 'data:image/png;base64,aW1hZ2U=' } },
+            editorPages: [{ id: 'page-one', name: 'Page', guides: [{ axis: 'x', position: 10 }] }],
+            editorStyles: { style: { id: 'style', name: 'Style', opaque: unknown } },
+            pages: [{ id: 'board', editorPage: 'page-one', width: 500, height: 400, children: [
+                { id: 'vector', type: 'path', width: 256, height: 30, customBlob: unknown,
+                    editorPath: { segments, futurePath: unknown },
+                    editorComponent: { sourceId: 'source-vector', componentId: 'component', isInstanceRoot: true, futureComponent: unknown },
+                    editorStyle: { fills: [{ color: '#123456' }], futureStyle: unknown } },
+                { id: 'text', type: 'text', x: 0, y: 50, width: 100, height: 20,
+                    editorText: { content, autoResize: 'none', futureText: unknown },
+                    editorStyle: { fills: null } },
+            ] }],
+        };
+        const original = structuredClone(input);
+        let doc = importCanvasJson(input), stableBytes: number | undefined;
+        for (let round = 0; round < 4; round++) {
+            const encoded = exportCanvasJson(doc);
+            expect(encoded.pagesById).toBeUndefined(); // Keep the existing interchange format.
+            expect(encoded.opaque).toEqual(unknown);
+            expect(encoded.assets).toEqual(input.assets);
+            expect(encoded.editorStyles).toEqual(input.editorStyles);
+            expect(encoded.pages[0].children[1].editorStyle.fills).toBeNull();
+            doc = importCanvasJson(encoded);
+            const objects = doc.pagesById['page-one'].objects;
+            expect(Object.keys(objects).sort()).toEqual(['board', 'root', 'text', 'vector']);
+            expect(objects.vector.sourceId).toBe('source-vector');
+            expect(objects.vector.componentId).toBe('component');
+            expect(objects.vector.content).toEqual(segments);
+            expect(objects.vector.customBlob).toEqual(unknown);
+            expect(objects.vector.legacy.editorPath).toEqual({ futurePath: unknown });
+            expect(objects.vector.legacy.editorComponent).toEqual({ futureComponent: unknown });
+            expect(objects.vector.editorPath).toBeUndefined();
+            expect(objects.text.content).toEqual(content);
+            expect(objects.text.legacy.editorText).toEqual({ futureText: unknown });
+            const bytes = JSON.stringify(doc).length;
+            if (stableBytes !== undefined) expect(bytes).toBe(stableBytes);
+            stableBytes = bytes;
+        }
+        expect(input).toEqual(original);
+    });
     it('does not mutate caller models and preserves arbitrary current-model fields', () => {
         const doc = createDocument(), page = doc.pagesById[doc.pages[0]], s = createShape('rect', { id: 'opaque', extra: { nested: [1, 2] } });
         insertShape(page, s);

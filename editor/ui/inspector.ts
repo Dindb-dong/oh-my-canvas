@@ -31,7 +31,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
     let destroyed = false, rendering = false, numericSession = false;
     const geometryKeys = new Set(["x", "y", "width", "height", "rotation", "box", "corners", "transform", "inverseTransform"]);
     const geometryInputs = new Map<string, HTMLInputElement>();
-    let renderedState: {shapes: Shape[]; dependencies: unknown[]} | null = null;
+    let renderedState: {pageId: string; shapes: Shape[]; dependencies: unknown[]} | null = null;
     let rebuilds = 0, geometryUpdates = 0, skippedRefreshes = 0;
     const processing = new Set<string>();
     const processingErrors = new Map<string, string>();
@@ -1155,7 +1155,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             dependencies.push(editor.page.name);
         for (const shape of shapes)
             dependencies.push(...ancestors(editor.page, shape.id));
-        return {shapes, dependencies};
+        return {pageId: editor.pageId, shapes, dependencies};
     }
     function refreshFromDocument() {
         if (destroyed)
@@ -1192,8 +1192,12 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
     function refresh() {
         if (destroyed || rendering)
             return;
+        const next = inspectorState();
+        const sameTarget = renderedState?.pageId === next.pageId &&
+            renderedState.shapes.length === next.shapes.length &&
+            renderedState.shapes.every((shape, index) => shape.id === next.shapes[index].id);
         const active = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLSelectElement || document.activeElement instanceof HTMLTextAreaElement ? document.activeElement : null;
-        const restoreFocus = active && root.contains(active) ? {
+        const restoreFocus = sameTarget && active && root.contains(active) ? {
             label: active.getAttribute("aria-label"),
             value: active.value,
             start: active instanceof HTMLInputElement ? active.selectionStart : null,
@@ -1220,7 +1224,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
         rendering = true;
         rebuilds++;
         geometryInputs.clear();
-        renderedState = inspectorState();
+        renderedState = next;
         help.hide();
         root.replaceChildren();
         const design = el("div", "design");
@@ -1466,7 +1470,7 @@ export function createInspector(root: HTMLElement, services: EditorServices, tex
             editor.commitSession();
     });
     const unsubscribe = editor.on(event => {
-        if (event.viewport || event.hover)
+        if (!event.page && !event.selection && !event.projection && !event.changes && !event.deltas && (event.viewport || event.hover))
             return;
         if (text.active && !event.selection && !event.projection)
             return;

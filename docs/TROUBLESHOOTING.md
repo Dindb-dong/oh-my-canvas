@@ -23,19 +23,19 @@ Use a copy of your document while investigating. Include the app version/source 
 
 ## A teammate cannot join
 
-All participants need the current protocol v2. Old invitations are rejected; create a new invitation from the updated host. The host must remain running and reachable. Ending hosting invalidates the invitation. There are four total slots, including the host; a fifth connection is refused.
+All participants need the current collaboration protocol v3. Old invitations are rejected; create a new invitation from the updated host. The host must remain running and reachable. Ending hosting invalidates the invitation. There are four total slots, including the host; a fifth connection is refused.
 
-The same-machine four-client flow is tested. External internet/NAT has not been tested here. On another machine, verify the collaboration address is reachable from that machine. An automatically displayed local address may belong to the wrong interface or VPN. Public internet, double NAT, CGNAT, firewalls, and router rules may block access. A port-forward rule, where appropriate, must target the collaboration port—not MCP. The app does not create those rules, supply a relay, or guarantee a network route.
+Current protocol tests cover bounded state/blob transfers and multiple peers. The earlier same-machine four-Electron-client acceptance predates protocol v3; it does not establish full 153-MiB-source collaboration or external internet/NAT behavior. On another machine, verify the collaboration address is reachable from that machine. An automatically displayed local address may belong to the wrong interface or VPN. Public internet, double NAT, CGNAT, firewalls, and router rules may block access. A port-forward rule, where appropriate, must target the collaboration port—not MCP. The app does not create those rules, supply a relay, or guarantee a network route.
 
 Do not disable TLS verification or publish an invitation for someone to test. Ask a trusted participant to join privately. If the host is gone, a participant can rehost their saved replica with a new invitation.
 
 ## A save or import fails
 
-A malformed or oversized file is rejected before import. New files use `.omc` v2; v1 remains readable. Opening an older portable copy merges with newer local history rather than erasing it.
+A malformed or oversized file is rejected before import. Portable image packages use `.omc` v4; v1/v2 raw-state files and v3 gzip files remain readable. Opening an older portable copy merges with newer local history rather than erasing it.
 
-Ordinary documents/CRDT states are limited to 16 MiB; imported design libraries use a 256 MiB budget. File/wire envelopes are limited to 384 MiB. Large v3 portable files require the current app. Reduce embedded assets or duplicate a readable current document to start fresh history. A duplicate has a new document ID and is separate from the existing collaboration room.
+Ordinary documents/CRDT states are limited to 16 MiB; imported design libraries use a 256 MiB budget. Portable files have a 384 MiB limit. The collaboration frame limit is independently 1 MiB; larger states and missing bitmaps use bounded, verified chunks. Individual external bitmaps are limited to 64 MiB. Portable v4 files and collaboration v3 require the current app. Reduce large assets or duplicate a readable current document to start fresh history. A duplicate has a new document ID and is separate from the existing collaboration room.
 
-For recovery, keep the original file and its `.bak` before attempting manual changes. The store tries a valid backup and marks recovery. Export a separate portable copy after recovery. An unreadable file appears as a damaged document rather than breaking the whole library. Do not use Delete as a repair operation: it removes this device's primary and backup.
+For recovery, keep the profile's complete `documents/` directory, including `.omc-data/<id>/`, shared `assets/`, each manifest and its `.bak`, before attempting manual changes. The new local `<id>.omc` has the `oh-my-canvas-local` format, which older apps cannot read; the manifest alone is not a portable file. Use Export to create a complete portable copy. An incomplete last journal append is discarded; corruption in a complete journal record reports an error. Manifest/checkpoint recovery can use a valid backup and marks recovery. Export a separate portable copy after recovery. An unreadable file appears as a damaged document rather than breaking the whole library. Do not use Delete as a repair operation: it removes this device's manifest, backup and that document's checkpoint/journal directory. Shared bitmap assets remain retained because other documents or history may need them.
 
 ## An export is cancelled or fails
 
@@ -45,7 +45,7 @@ Check the native save dialog. Cancel intentionally produces no file. Choose a wr
 
 Use the lockfile with `npm ci`, Node 22.12+, and `npm run build`. A network connection is needed to install dependencies/Electron initially. Build before running E2E or source MCP. Packaging from a `node_modules` symlink can omit indirect dependencies; use the checkout's real installed directory.
 
-macOS arm64 is the verified target. A configured Windows/Linux target is not evidence that it has been tested. This personal macOS build is unsigned/unnotarized; the repository has no published installer or automatic updater. Do not bypass operating-system security prompts as a generic troubleshooting step.
+The current large-document source app is exercised on Linux x64 with Electron and Xvfb/software rendering. Earlier macOS arm64 package verification belongs to its recorded source; the latest candidate's packaged macOS/Linux/Windows builds are not qualified by that result or by configured build targets. The personal macOS build is unsigned/unnotarized; the repository has no published installer or automatic updater. Do not bypass operating-system security prompts as a generic troubleshooting step.
 
 ## Report it
 

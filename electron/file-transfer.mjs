@@ -21,8 +21,8 @@ export async function readExplicitFile(filePath,{limit,protectedDirectory,signal
     return Buffer.concat(chunks,length);
   }finally{await handle.close();}
 }
-export async function writeExplicitFile(filePath,bytes,{overwrite=false,protectedDirectory,protectedDirectories,signal}={}){
-  if(!(bytes instanceof Uint8Array)||!bytes.byteLength||bytes.byteLength>MAX_EXPORT_BYTES)throw invalid('Invalid or oversized export');
+export async function writeExplicitFile(filePath,bytes,{overwrite=false,protectedDirectory,protectedDirectories,signal,limit=MAX_EXPORT_BYTES}={}){
+  if(!(bytes instanceof Uint8Array)||!bytes.byteLength||bytes.byteLength>limit)throw invalid('Invalid or oversized export');
   const file=await destination(filePath,protectedDirectory,protectedDirectories);signal?.throwIfAborted();
   let existing;try{existing=await fs.lstat(file);}catch(error){if(error.code!=='ENOENT')throw error;}
   if(existing&&(!existing.isFile()||existing.isSymbolicLink()))throw invalid('Export destination must be a regular file');

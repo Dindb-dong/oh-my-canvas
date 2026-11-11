@@ -1,10 +1,17 @@
 import {randomUUID} from 'node:crypto';
 import {Replica} from '../core/replica.mjs';
+import {changesBetween} from '../core/document.mjs';
 import {validId} from '../core/storage.mjs';
 import {canvasTitle,createDocumentWriter} from './document-actions.mjs';
 
 export const MAX_DOCUMENT_RUNTIMES=8;
 const failure=(code,message)=>Object.assign(Error(message),{code});
+const canonicalDeltaRequired=key=>{
+  const p=JSON.parse(key);
+  return p[0]==='page'&&['alive','order','id','objects'].includes(p[2])||
+    p[0]==='shape'&&['alive','order','parentId','type','id','childIds','enclosingFrameId'].includes(p[3])||
+    p[0]==='meta'&&['pages','pagesById','assets','components','styles','libraries'].includes(p[1]);
+};
 
 export function createDocumentManager({store,createRuntime,disposeRuntime,flushRuntime,onChange=()=>{},onEvent=()=>{},canDispose=()=>true,maxResidents=MAX_DOCUMENT_RUNTIMES}) {
   const entries=new Map(),loading=new Map(),bindings=new Map(),generations=new Map(),deleting=new Set();
@@ -12,30 +19,42 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
   const identity=entry=>({id:entry.record.id,title:entry.record.title,generation:entry.generation});
   const state=()=>({tabs:[...entries.values()].filter(entry=>entry.tabOpen).map(entry=>({...identity(entry),inUse:!!(entry.agents.size||entry.collab||!canDispose(entry)),saveError:entry.saveError??null})),activeTabId,libraryVisible:activeTabId===null});
   const changed=()=>onChange(state());
-  const snapshot=entry=>({id:entry.record.id,documentId:entry.record.id,title:entry.record.title,document:entry.record.replica.document,ack:entry.seq,generation:entry.generation,recovered:!!entry.record.recovered,...entry.bootstrapNonce?{bootstrapNonce:entry.bootstrapNonce}:{}});
+  const snapshot=entry=>({id:entry.record.id,documentId:entry.record.id,title:entry.record.title,document:entry.record.replica.document,ack:entry.seq,acceptedSeq:entry.acceptedSeq,revision:entry.revision,generation:entry.generation,recovered:!!entry.record.recovered,...entry.bootstrapNonce?{bootstrapNonce:entry.bootstrapNonce}:{}});
+  const acknowledgment=entry=>({type:'commit-ack',id:entry.record.id,documentId:entry.record.id,ack:entry.seq,acceptedSeq:entry.acceptedSeq,revision:entry.revision,generation:entry.generation});
   async function save(entry){
     clearTimeout(entry.saveTimer);
     try{await entry.writer.save(entry.record);entry.saveError=null;onEvent(entry,{type:'saved',id:entry.record.id,at:Date.now()});}
     catch(error){entry.saveError=error.message;changed();throw error;}
   }
   function makeEntry(record){
-    const entry={record,writer:createDocumentWriter(store),seq:0,generation:0,runtime:null,starting:null,tabOpen:false,agents:new Set(),collab:null,operations:Promise.resolve(),saveTimer:null};
-    entry.unsubscribe=record.replica.onUpdate(()=>{
+    const entry={record,writer:createDocumentWriter(store),seq:0,acceptedSeq:0,revision:0,generation:0,runtime:null,starting:null,tabOpen:false,agents:new Set(),collab:null,operations:Promise.resolve(),saveTimer:null,authoritativeDoc:record.replica.fields.size?record.replica.document:null};
+    entry.unsubscribe=record.replica.onUpdate((update,origin,doc,transaction)=>{
       clearTimeout(entry.saveTimer);entry.saveTimer=setTimeout(()=>{void save(entry).catch(error=>onEvent(entry,{type:'error',message:'Save failed: '+error.message}));},400);
-      onEvent(entry,{type:'document',...snapshot(entry)});
+      const fromRevision=entry.revision++;
+      if(entry.committingSeq!==undefined)entry.acceptedSeq=Math.max(entry.acceptedSeq,entry.committingSeq);
+      const keys=transaction?.changed?.get(record.replica.fields);
+      const before=entry.authoritativeDoc;entry.authoritativeDoc=record.replica.document;
+      if(keys&&before){
+        // A renderer projection does not retain deleted Yjs fields. History can
+        // resurrect a shape/page by toggling only `alive`, so topology must send
+        // the visible declarations and repairs from the canonical projection.
+        const changes=[...keys].some(canonicalDeltaRequired)?changesBetween(before,entry.authoritativeDoc):[...keys].map(key=>[key,record.replica.fields.get(key)??null]);
+        onEvent(entry,{...acknowledgment(entry),type:'document-delta',fromRevision,changes,...entry.committingSeq!==undefined?{originSequence:entry.committingSeq}:{}});
+      }else onEvent(entry,{type:'document',...snapshot(entry)});
     });
     return entry;
   }
   async function load(id,record){
     if(deleting.has(id))throw failure('busy','Document is being deleted');
     if(!validId(id))throw failure('bad_args','Invalid document ID');
+    if(record){if(store.prepareRecord)await store.prepareRecord(record);else await store.importAssets?.(record);}
     if(entries.has(id)){
       const entry=entries.get(id);
       if(entry.disposing){await entry.disposal;return load(id,record);}
-      if(record&&record!==entry.record){try{entry.record.replica.receive(record.replica.state);}finally{record.replica.destroy();}}
+      if(record&&record!==entry.record){try{entry.record.replica.receive(record.replica.state);await store.prepareRecord?.(entry.record);}finally{record.replica.destroy();}}
       return entry;
     }
-    if(loading.has(id)){const entry=await loading.get(id);if(record&&record!==entry.record){try{entry.record.replica.receive(record.replica.state);}finally{record.replica.destroy();}}return entry;}
+    if(loading.has(id)){const entry=await loading.get(id);if(record&&record!==entry.record){try{entry.record.replica.receive(record.replica.state);await store.prepareRecord?.(entry.record);}finally{record.replica.destroy();}}return entry;}
     const task=Promise.resolve().then(async()=>{
       const loaded=record??await store.load(id),entry=makeEntry(loaded);entries.set(id,entry);return entry;
     });
@@ -61,7 +80,7 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
     if(entry.runtime)return entry;
     reserve(entry);
     entry.generation=(generations.get(entry.record.id)??0)+1;generations.set(entry.record.id,entry.generation);
-    entry.seq=0;entry.bootstrapNonce=randomUUID();entry.bootstrapBase=entry.record.replica.document;
+    entry.seq=0;entry.acceptedSeq=0;entry.bootstrapNonce=randomUUID();entry.bootstrapBase=entry.record.replica.document;
     const waiting=new Promise((resolve,reject)=>{entry.resolveReady=resolve;entry.rejectReady=reject;});
     entry.starting=waiting;
     entry.readyTimer=setTimeout(()=>ready(entry,entry.generation,Error('Document renderer initialization timed out')),45000);
@@ -88,6 +107,8 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
     catch(error){await release(entry);throw error;}
   }
   async function create(title,document,{focus=false,agent,signal}={}){
+    signal?.throwIfAborted();
+    if(store.prepareDocument)document=await store.prepareDocument(document);
     signal?.throwIfAborted();
     const record={id:randomUUID(),title:canvasTitle(title??'Untitled canvas'),createdAt:new Date().toISOString(),replica:new Replica({document})};
     const entry=await load(record.id,record);
@@ -155,5 +176,5 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
   async function flushAll(){for(const entry of entries.values()){if(entry.runtime)await flushRuntime(entry);await entry.operations;await save(entry);}}
   async function disposeAll(){for(const entry of entries.values()){clearTimeout(entry.saveTimer);clearTimeout(entry.readyTimer);await entry.collab?.close();await disposeRuntime(entry);entry.unsubscribe();entry.record.replica.destroy();}entries.clear();bindings.clear();activeTabId=null;}
   function runtimeGone(entry){ready(entry,entry.generation,Error('Document renderer stopped'));entry.runtime=null;entry.generation++;generations.set(entry.record.id,entry.generation);entry.seq=0;changed();}
-  return {entries,bindings,deleting,state,identity,snapshot,load,enqueue,confirmGeneration,save,ensureRuntime,ready,bind,resolve,open,create,duplicate,rename,activate,release,releaseAgent,remove,discard,showLibrary(){activeTabId=null;changed();return state();},closeTab,endAgent,flushAll,disposeAll,runtimeGone,changed};
+  return {entries,bindings,deleting,state,identity,snapshot,acknowledgment,load,enqueue,confirmGeneration,save,ensureRuntime,ready,bind,resolve,open,create,duplicate,rename,activate,release,releaseAgent,remove,discard,showLibrary(){activeTabId=null;changed();return state();},closeTab,endAgent,flushAll,disposeAll,runtimeGone,changed};
 }

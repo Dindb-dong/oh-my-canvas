@@ -37,29 +37,30 @@ function style(style: unknown): void {
 /** Validate MCP file imports before conversion and before mounting; retain unrelated metadata verbatim. */
 export function validateImportedDocument(input: unknown): void {
     if (!record(input)) throw Error('Imported canvas must be an object');
-    const limit=documentLimits(input).shapes;
+    const limits=documentLimits(input),limit=limits.shapes;
     let count = 0;
     const shape = (value: unknown) => { if (++count > limit) throw Error(`Imported canvas exceeds ${limit} shapes`); visualShape(value); };
     if (input.pagesById !== undefined) {
-        if (!record(input.pagesById) || Object.keys(input.pagesById).length > 100) throw Error('Imported canvas has invalid pages');
+        if (!record(input.pagesById) || Object.keys(input.pagesById).length > limits.pages) throw Error('Imported canvas has invalid pages');
         for (const page of Object.values<Data>(input.pagesById)) {
             if (!record(page) || !record(page.objects)) throw Error('Imported page has invalid objects');
             for (const value of Object.values(page.objects)) shape(value);
             if (page.guides !== undefined) validateShapeProperties({ guides: page.guides });
         }
     } else {
-        if (!Array.isArray(input.pages ?? []) || (input.pages?.length ?? 0) > 20000) throw Error('Imported legacy pages must be a bounded array');
+        if (!Array.isArray(input.pages ?? []) || (input.pages?.length ?? 0) > limit) throw Error('Imported legacy pages must be a bounded array');
+        if (input.editorPages !== undefined && (!Array.isArray(input.editorPages) || input.editorPages.length > limits.pages)) throw Error('Imported canvas has invalid page metadata');
         if (input.editorRootLayers !== undefined && !record(input.editorRootLayers)) throw Error('Imported root layers must be a record');
         const stack = [...input.pages ?? []];
         for (const rows of Object.values(input.editorRootLayers ?? {})) {
-            if (!Array.isArray(rows) || stack.length + rows.length > 20000) throw Error('Imported root layers must be bounded arrays');
+            if (!Array.isArray(rows) || stack.length + rows.length > limit) throw Error('Imported root layers must be bounded arrays');
             stack.push(...rows);
         }
         while (stack.length) {
             const value = stack.pop(); shape(value);
             if (value.children !== undefined) {
                 if (!Array.isArray(value.children)) throw Error('Imported layer children must be an array');
-                if (stack.length + count + value.children.length > 20000) throw Error(`Imported canvas exceeds ${limit} shapes`);
+                if (stack.length + count + value.children.length > limit) throw Error(`Imported canvas exceeds ${limit} shapes`);
                 stack.push(...value.children);
             }
         }

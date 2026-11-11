@@ -4,13 +4,14 @@ import {inflateRawSync,zstdDecompressSync} from 'node:zlib';
 import { unzipSync } from 'fflate';
 import { parseFigBinary, nodeId, resolveVectorNodePaths, type FigNode } from 'openfig-core';
 import type { CanvasDocument, Data, Page, Matrix } from '../contracts';
-import { createDocument, createPage, createShape, insertShape, refreshFrames } from '../document';
-import { assertFiniteDocument, richText } from './model';
+import { createDocument, createPage, createShape, insertShape, refreshFrames, validateDocument } from '../document';
+import { richText } from './model';
 import { parseSvgPath } from './svg';
 import {validateImportedDocument} from '../mcp/import-document';
 import { multiply, identity } from '../geometry';
+import { assetRef } from '../../core/asset-refs.mjs';
 
-import {DESIGN_FILE_LIMIT,documentLimits} from '../../core/capacity.mjs';
+import {DESIGN_FILE_LIMIT} from '../../core/capacity.mjs';
 export {DESIGN_FILE_LIMIT} from '../../core/capacity.mjs';
 const EXPANDED_LIMIT = 512 * 1024 * 1024;
 const positionOrder = (a: FigNode, b: FigNode) => {const x=a.parentIndex?.position??'',y=b.parentIndex?.position??'';return x<y?-1:x>y?1:0;};
@@ -32,29 +33,39 @@ function archive(bytes: Uint8Array) {
     if (Object.values(files).reduce((sum, data) => sum + data.length, 0) > EXPANDED_LIMIT) throw Error('Design archive exceeds the expanded size limit');
     return files;
 }
-function imageSource(bytes: Uint8Array) {
+function imageMimeType(bytes: Uint8Array) {
     let mime = '';
     if (bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71) mime = 'image/png';
     else if (bytes[0] === 255 && bytes[1] === 216) mime = 'image/jpeg';
     else if (text(bytes.subarray(0, 3)) === 'GIF') mime = 'image/gif';
     else if (text(bytes.subarray(0, 4)) === 'RIFF' && text(bytes.subarray(8, 12)) === 'WEBP') mime = 'image/webp';
     if (!mime) throw Error('Unsupported embedded image format');
-    return `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`;
+    return mime;
 }
 const rgba = (c: Data = {}) => `rgba(${Math.round(finite(c.r ?? c.red) * 255)},${Math.round(finite(c.g ?? c.green) * 255)},${Math.round(finite(c.b ?? c.blue) * 255)},${finite(c.a ?? c.alpha, 1)})`;
 
-export function importDesignFile(bytes: Uint8Array, format: string): { document: CanvasDocument; warnings: string[] } {
+export interface DesignImportBlob { hash: string; mimeType: string; bytes: Uint8Array; }
+export function importDesignFile(bytes: Uint8Array, format: string, options: { binaryAssets?: boolean } = {}): { document: CanvasDocument; warnings: string[]; blobs?: DesignImportBlob[]; timings: Record<string, number> } {
     if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > DESIGN_FILE_LIMIT) throw Error('Design file exceeds 256 MiB or is empty');
     if (!['fig', 'sketch'].includes(format)) throw Error('Unsupported design file format');
+    const started = performance.now(), timings: Record<string, number> = {};
+    const timed = <T>(name: string, run: () => T): T => { const start = performance.now(); try { return run(); } finally { timings[name] = (timings[name] ?? 0) + performance.now() - start; } };
     const warnings = new Set<string>(), document = createDocument();
     document.capacity='large';
     document.pages = []; document.pagesById = {};
     const embedded = new Map<Uint8Array, string>();
+    const blobs = new Map<string, DesignImportBlob>();
     const imageRef = (bytes: Uint8Array) => {
         let id = embedded.get(bytes);
         if (!id) {
-            id = 'design-' + createHash('sha256').update(bytes).digest('hex');
-            (document.assets ??= {})[id] = {id, name: id, kind: 'image', src: imageSource(bytes)};
+            if (bytes.byteLength > 64 * 1024 * 1024) throw Error('Embedded image exceeds the 64 MiB asset limit');
+            const hash = createHash('sha256').update(bytes).digest('hex'), mimeType = imageMimeType(bytes);
+            id = 'design-' + hash;
+            if (!document.assets?.[id]) {
+                const src = options.binaryAssets ? assetRef(hash) : `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`;
+                (document.assets ??= {})[id] = {id, name: id, kind: 'image', src};
+                if (options.binaryAssets) blobs.set(hash, { hash, mimeType, bytes: bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : Uint8Array.from(bytes) });
+            }
             embedded.set(bytes, id);
         }
         return {assetId: id};
@@ -70,22 +81,23 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
         if (values.width < 0 || values.height < 0) throw Error('Invalid design-file dimensions');
         // Convert local transforms to world coordinates; the editor rotates around the shape center.
         const width = values.width, height = values.height;
-        const sx = Math.hypot(matrix.a, matrix.b), sy = Math.hypot(matrix.c, matrix.d);
-        if (Math.abs(sx - 1) > .001 || Math.abs(sy - 1) > .001 || Math.abs(matrix.a * matrix.c + matrix.b * matrix.d) > .001)
-            warn('Scaled or skewed transforms may differ from the source.');
         const cx = matrix.a * width / 2 + matrix.c * height / 2 + matrix.e, cy = matrix.b * width / 2 + matrix.d * height / 2 + matrix.f;
-        const s = createShape(type, { ...values, x: cx - width / 2, y: cy - height / 2, rotation: Math.atan2(matrix.b, matrix.a) * 180 / Math.PI, flipY: matrix.a * matrix.d - matrix.b * matrix.c < 0, parentId: parent });
+        const s = createShape(type, { ...values, x: cx - width / 2, y: cy - height / 2, transform: { ...matrix, e: 0, f: 0 }, rotation: Math.atan2(matrix.b, matrix.a) * 180 / Math.PI, flipY: matrix.a * matrix.d - matrix.b * matrix.c < 0, parentId: parent });
         insertShape(p, s, parent); return s;
     };
-    const pathContent = (d: string, x: number, y: number) => parseSvgPath(d).map(segment => ({ command: segment.type,
-        ...(segment.point ? { x: segment.point.x + x, y: segment.point.y + y } : {}),
-        ...(segment.control1 ? { x1: segment.control1.x + x, y1: segment.control1.y + y } : {}),
-        ...(segment.control2 ? { x2: segment.control2.x + x, y2: segment.control2.y + y } : {}) }));
+    const pathContent = (d: string, matrix: Matrix) => {
+        const world = (p: { x: number; y: number }) => ({ x: matrix.a * p.x + matrix.c * p.y + matrix.e, y: matrix.b * p.x + matrix.d * p.y + matrix.f });
+        return parseSvgPath(d).map(segment => {
+            const p = segment.point && world(segment.point), c1 = segment.control1 && world(segment.control1), c2 = segment.control2 && world(segment.control2);
+            return { command: segment.type, ...(p ?? {}), ...(c1 ? { x1: c1.x, y1: c1.y } : {}), ...(c2 ? { x2: c2.x, y2: c2.y } : {}) };
+        });
+    };
     if (format === 'fig') {
-        const files = bytes[0] === 0x50 && bytes[1] === 0x4b ? archive(bytes) : null;
+        const files = bytes[0] === 0x50 && bytes[1] === 0x4b ? timed('archive', () => archive(bytes)) : null;
         const binary = files ? files['canvas.fig'] : bytes;
         if (!binary || text(binary.subarray(0, 8)) !== 'fig-kiwi') throw Error('Expected a Figma Design .fig file with canvas.fig');
         // Bound inner compression too: the ZIP limit alone does not bound Kiwi chunks.
+        if (binary.length < 12) throw Error('Truncated Figma header');
         const view = new DataView(binary.buffer, binary.byteOffset, binary.byteLength);
         let offset = 12, expanded = 0;
         for (let i = 0; i < 2; i++) {
@@ -94,9 +106,10 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
             if (offset + length > binary.length) throw Error('Truncated Figma chunk');
             const chunk = binary.subarray(offset, offset + length); offset += length;
             const zstd = chunk[0] === 0x28 && chunk[1] === 0xb5 && chunk[2] === 0x2f && chunk[3] === 0xfd;
-            expanded += (zstd ? zstdDecompressSync : inflateRawSync)(chunk, {maxOutputLength: EXPANDED_LIMIT - expanded}).length;
+            if (expanded >= EXPANDED_LIMIT) throw Error('Figma chunks exceed the expanded size limit');
+            expanded += timed('decompressionPreflight', () => (zstd ? zstdDecompressSync : inflateRawSync)(chunk, {maxOutputLength: EXPANDED_LIMIT - expanded}).length);
         }
-        const fig = parseFigBinary(binary);
+        const fig = timed('decode', () => parseFigBinary(binary));
         if (!Array.isArray(fig.nodes) || fig.nodes.length > 100000) throw Error('Figma file exceeds 100000 nodes');
         const images = new Map(Object.entries(files ?? {}).filter(([name]) => name.startsWith('images/')).map(([name, data]) => [name.slice(7), data]));
         const paints = (list: Data[] = []): Data[] => list.filter(p => p.visible !== false).flatMap<Data>(p => {
@@ -113,6 +126,7 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
         const visit = (node: FigNode, p: Page, parent: string, parentMatrix: Matrix, depth: number) => {
             if (node.phase === 'REMOVED') return;
             const key = nodeId(node)!;
+            if (!key) throw Error('Figma layer has no source ID');
             if (depth > 100 || active.has(key)) throw Error('Figma layer hierarchy is cyclic or too deep');
             active.add(key);
             const t = node.transform;
@@ -120,7 +134,7 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
             let children = (fig.childrenMap.get(key) ?? []).filter(n => n.phase !== 'REMOVED').sort(positionOrder);
             if (node.type === 'INSTANCE' && !children.length) {
                 const masterId = node.symbolData?.symbolID;
-                if (masterId) children = fig.childrenMap.get(`${masterId.sessionID}:${masterId.localID}`) ?? [];
+                if (masterId) children = (fig.childrenMap.get(`${masterId.sessionID}:${masterId.localID}`) ?? []).filter(n => n.phase !== 'REMOVED').sort(positionOrder);
                 if (!children.length) warn('A Figma component instance has no available child layers.');
             }
             let type = ({ FRAME: node.resizeToFit ? 'group' : 'frame', GROUP: 'group', SYMBOL: 'frame', INSTANCE: 'group', ROUNDED_RECTANGLE: 'rect', RECTANGLE: 'rect', ELLIPSE: 'ellipse', TEXT: 'text', VECTOR: 'path', LINE: 'path', BOOLEAN_OPERATION: 'group' } as Data)[node.type];
@@ -128,6 +142,10 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
             if (node.type === 'INSTANCE' || node.type === 'SYMBOL') warn('Figma components and instances are imported as ordinary layers; overrides may differ.');
             if (node.stackMode && node.stackMode !== 'NONE') warn('Auto layout is imported at its saved positions.');
             if (node.effects?.length) warn('Figma effects are not imported.');
+            if (node.isMask || node.maskType) warn('Figma masks are not fully imported.');
+            if (node.type === 'BOOLEAN_OPERATION') warn('Figma boolean operations are imported as editable groups.');
+            if (Object.keys(node).some(key => /variable/i.test(key))) warn('Figma variable bindings are not imported.');
+            if (node.blendMode && !['NORMAL', 'PASS_THROUGH'].includes(node.blendMode)) warn('Figma blend modes may differ from the source.');
             const fills = paints(node.fillPaints), values: Data = { name: node.name ?? node.type, width: finite(node.size?.x), height: finite(node.size?.y), hidden: node.visible === false, locked: node.locked === true, opacity: finite(node.opacity, 1), fills, strokes: paints(node.strokePaints).map(p => ({ ...p, width: finite(node.strokeWeight, 1) })), radii: finite(node.cornerRadius), clipContent: !node.frameMaskDisabled };
             if (type === 'text') {
                 values.content = richText(node.textData?.characters ?? '', { fontFamily: node.fontName?.family ?? 'sans-serif', fontSize: finite(node.fontSize, 16), fontWeight: /bold/i.test(node.fontName?.style ?? '') ? 700 : 400, fontStyle: /italic/i.test(node.fontName?.style ?? '') ? 'italic' : 'normal', fills });
@@ -136,11 +154,12 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
                 if ((node.textData as Data)?.characterStyleIDs?.length || node.derivedTextData) warn('Mixed Figma text styles may be simplified.');
             }
             const s = add(p, parent, type, values, matrix);
+            s.importSource = { format: 'fig', nodeId: key, nodeType: node.type };
             if (type === 'path') {
                 const geometry = resolveVectorNodePaths(fig, node);
                 const d = geometry.fill.map(g => g.svgPath).join(' ') || geometry.stroke.map(g => g.svgPath).join(' ');
-                if (d) { s.content = pathContent(d, s.x, s.y); s.fillRule = geometry.fill[0]?.windingRule === 'ODD' ? 'evenodd' : 'nonzero'; }
-                else if (node.type === 'LINE') s.content = [{ command: 'move', x: s.x, y: s.y }, { command: 'line', x: s.x + s.width, y: s.y + s.height }];
+                if (d) { s.content = pathContent(d, matrix); s.fillRule = geometry.fill[0]?.windingRule === 'ODD' ? 'evenodd' : 'nonzero'; }
+                else if (node.type === 'LINE') s.content = pathContent(`M0 0L${s.width} ${s.height}`, matrix);
                 else warn('A Figma vector has no supported geometry.');
             }
             for (const child of children) visit(child, p, s.id, matrix, depth + 1);
@@ -148,20 +167,31 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
         };
         for (const n of fig.nodes.filter(n => n.type === 'CANVAS' && n.phase !== 'REMOVED' && !n.internalOnly).sort(positionOrder)) {
             const p = page(n.name ?? 'Page');
+            p.importSource = { format: 'fig', nodeId: nodeId(n), nodeType: 'CANVAS' };
             for (const child of (fig.childrenMap.get(nodeId(n)!) ?? []).sort(positionOrder)) visit(child, p, 'root', identity(), 0);
         }
     } else {
-        const files = archive(bytes);
+        const files = timed('archive', () => archive(bytes));
         if (!files['document.json']) throw Error('Expected a Sketch 43+ ZIP document');
         const sketch = JSON.parse(text(files['document.json']));
         if (!Array.isArray(sketch.pages) || sketch.pages.length > 100) throw Error('Invalid Sketch page references');
         const symbols = new Map<string, Data>();
+        let scanned = 0;
         const pages = sketch.pages.map((ref: Data) => {
             const key = `${ref._ref}.json`;
             if (!files[key]) throw Error(`Missing Sketch page: ${key}`);
             const p = JSON.parse(text(files[key]));
-            const stack = [p]; let scanned = 0;
-            while (stack.length) { const n = stack.pop()!; if (++scanned > 100000) throw Error('Sketch page exceeds 100000 layers'); if (n._class === 'symbolMaster') symbols.set(n.symbolID, n); stack.push(...n.layers ?? []); }
+            const stack = [{ node: p, depth: 0 }];
+            while (stack.length) {
+                const { node: n, depth } = stack.pop()!;
+                if (!n || typeof n !== 'object' || Array.isArray(n)) throw Error('Invalid Sketch layer');
+                if (++scanned > 100000) throw Error('Sketch file exceeds 100000 layers');
+                if (depth > 100) throw Error('Sketch layer hierarchy is too deep');
+                if (n._class === 'symbolMaster') symbols.set(n.symbolID, n);
+                if (n.layers !== undefined && !Array.isArray(n.layers)) throw Error('Invalid Sketch child layers');
+                if (scanned + stack.length + (n.layers?.length ?? 0) > 100000) throw Error('Sketch file exceeds 100000 layers');
+                for (const child of n.layers ?? []) stack.push({ node: child, depth: depth + 1 });
+            }
             return p;
         });
         const paints = (list: Data[] = []): Data[] => list.filter(p => p.isEnabled !== false).flatMap<Data>(p => {
@@ -198,6 +228,7 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
             }
             if (type === 'rect' && n.points?.length) values.radii = n.points.map((p: Data) => finite(p.cornerRadius));
             const s = add(p, parent, type, values, matrix);
+            s.importSource = { format: 'sketch', ...(typeof n.do_objectID === 'string' ? { nodeId: n.do_objectID } : {}), nodeType: n._class ?? 'unknown' };
             if (type === 'path' && n.points?.length) {
                 if (n.points.length > 20000) throw Error('Sketch path exceeds point limit');
                 const points = n.points.map((v: Data) => ({ ...v, p: point(v.point, width, height) }));
@@ -208,7 +239,7 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
                     else commands.push(`L${next.p.x} ${next.p.y}`);
                 }
                 if (n.isClosed) commands.push('Z');
-                s.content = pathContent(commands.join(' '), s.x, s.y);
+                s.content = pathContent(commands.join(' '), matrix);
             }
             let children = n.layers ?? [];
             if (n._class === 'symbolInstance') {
@@ -222,9 +253,9 @@ export function importDesignFile(bytes: Uint8Array, format: string): { document:
     }
     if (!document.pages.length) throw Error('Design file has no pages');
     for (const p of Object.values(document.pagesById)) refreshFrames(p);
-    assertFiniteDocument(document);
-    document.extra = { ...document.extra, importWarnings: [...warnings], importedFrom: format };
-    validateImportedDocument(document);
-    if (Buffer.byteLength(JSON.stringify(document)) > documentLimits(document).bytes) throw Error('Converted design exceeds the 256 MiB canvas limit');
-    return { document, warnings: [...warnings] };
+    document.extra = { ...document.extra, importWarnings: [...warnings], importedFrom: format, importFidelity: 'unverified' };
+    timed('validation', () => { validateImportedDocument(document); validateDocument(document); });
+    timings.total = performance.now() - started;
+    timings.conversion = timings.total - Object.entries(timings).filter(([name]) => name !== 'total').reduce((sum, [, value]) => sum + value, 0);
+    return { document, warnings: [...warnings], ...(options.binaryAssets ? { blobs: [...blobs.values()] } : {}), timings };
 }

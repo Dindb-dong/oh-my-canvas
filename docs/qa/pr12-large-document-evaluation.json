@@ -1,0 +1,370 @@
+{
+  "schemaVersion": 1,
+  "recordedOn": "2026-11-10",
+  "revision": "cfa052c8d08aa368017314f3ba08f50a36fd2e47",
+  "workflow": "https://github.com/Dindb-dong/oh-my-canvas/actions/runs/42869423111",
+  "runner": "scripts/large-document-e2e.mjs",
+  "source": {
+    "bytes": 160627671,
+    "sha256": "c7c4fdbe469ae451c9a3d3d384a2102fa08dfaa220a1277e2df17fc2146c5ee7"
+  },
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD EPYC 9V74 80-Core Processor",
+    "logicalCPUs": 2,
+    "totalMemory": 8317939712,
+    "node": "v22.23.4",
+    "electron": "45.2.1",
+    "playwright": "1.64.1",
+    "gpu": {
+      "2d_canvas": "disabled_software",
+      "direct_rendering_display_compositor": "disabled_off_ok",
+      "gpu_compositing": "disabled_software",
+      "multiple_raster_threads": "disabled_off",
+      "opengl": "disabled_off",
+      "rasterization": "disabled_software",
+      "raw_draw": "disabled_off_ok",
+      "skia_graphite": "disabled_off",
+      "trees_in_viz": "disabled_off",
+      "video_decode": "disabled_software",
+      "video_encode": "disabled_software",
+      "vulkan": "disabled_off",
+      "webgl": "disabled_off",
+      "webgpu": "disabled_off",
+      "webgpu_on_vk_via_gl_interop": "disabled_off",
+      "webnn": "disabled_off"
+    }
+  },
+  "verification": {
+    "syntaxAndTypes": "passed",
+    "documentation": "passed",
+    "nodeTestsPassed": 189,
+    "editorTestsPassed": 823,
+    "productionBuild": "passed",
+    "nativePassed": true,
+    "nativeChecks": [
+      {
+        "name": "native launch",
+        "passed": true,
+        "ms": 1376.791124
+      },
+      {
+        "name": "source import and ready",
+        "passed": true,
+        "ms": 41260.822005
+      },
+      {
+        "name": "install measurement probes",
+        "passed": true,
+        "ms": 3.6467409999968368
+      },
+      {
+        "name": "Cover page entry",
+        "passed": true,
+        "ms": 90.47753599999851
+      },
+      {
+        "name": "page rename UI paint and durable save",
+        "passed": true,
+        "ms": 1057.1008180000063
+      },
+      {
+        "name": "page rename complete MCP operation",
+        "passed": true,
+        "ms": 26.001389000004565
+      },
+      {
+        "name": "Examples page entry and layer window",
+        "passed": true,
+        "ms": 1930.9345790000007
+      },
+      {
+        "name": "pure pan has no document writes",
+        "passed": true,
+        "ms": 9599.674157999994
+      },
+      {
+        "name": "hover has no document writes",
+        "passed": true,
+        "ms": 3108.9352969999964
+      },
+      {
+        "name": "single leaf drag preview and commit",
+        "passed": true,
+        "ms": 13828.354759000002
+      },
+      {
+        "name": "asset closure and native missing-asset response",
+        "passed": true,
+        "ms": 2545.397085999997
+      },
+      {
+        "name": "portable JSON export",
+        "passed": true,
+        "ms": 11752.080734000003
+      },
+      {
+        "name": "portable SVG export",
+        "passed": true,
+        "ms": 1086.7700710000063
+      },
+      {
+        "name": "portable OMC export",
+        "passed": true,
+        "ms": 6543.033627000012
+      },
+      {
+        "name": "fresh process reopen retains all pages and edits",
+        "passed": true,
+        "ms": 24940.135613000006
+      },
+      {
+        "name": "fresh-profile omc round trip",
+        "passed": true,
+        "ms": 33128.945869999996
+      },
+      {
+        "name": "fresh-profile json round trip",
+        "passed": true,
+        "ms": 37960.82115999999
+      }
+    ],
+    "rendererExceptions": 0,
+    "expectedMissingAssetStatus": 404,
+    "cancelledBitmapFetches": 3
+  },
+  "integrity": {
+    "pages": 46,
+    "objectsIncludingPageRoots": 39363,
+    "externalBitmapHashes": 160,
+    "inlineSourcesInEditableDocument": 0,
+    "roundTripAssertions": [
+      "page IDs and order",
+      "per-page object counts",
+      "page names",
+      "original bitmap hash set",
+      "dragged shape coordinates within 1e-6"
+    ],
+    "omcRoundTrip": {
+      "pages": 46,
+      "objects": 39363,
+      "assets": 160,
+      "externalHashes": 160
+    },
+    "jsonRoundTrip": {
+      "pages": 46,
+      "objects": 39363,
+      "assets": 160,
+      "externalHashes": 160
+    },
+    "jsonPortable": {
+      "localReference": false,
+      "hasData": true,
+      "remoteImage": false
+    },
+    "svgPortable": {
+      "localReference": false,
+      "hasData": true,
+      "remoteImage": false
+    }
+  },
+  "timingsMs": {
+    "importToReady": 38890.973462999995,
+    "renameUI": {
+      "paintMs": 102.10000000000582,
+      "ackMs": 24,
+      "durableMs": 379.30000000001746
+    },
+    "renameMcpEndToEnd": 21.081324999999197,
+    "examplesEntry": {
+      "paintMs": 610.7999999999884,
+      "additionalSettleMs": 557.008050000004
+    },
+    "reopenExcludingLaunch": 21439.750605999987,
+    "omcFreshProfileImport": 28921.396859999993,
+    "jsonFreshProfileImport": 34471.437171
+  },
+  "gestures": {
+    "wheelEvents": 90,
+    "hoverEvents": 90,
+    "dragMovementSteps": 24,
+    "pan": {
+      "elapsedMs": 9385.100000000006,
+      "frameIntervalsMs": {
+        "n": 365,
+        "median": 16.700000000000728,
+        "p95": 50,
+        "max": 83.39999999999782,
+        "total": 9382.874
+      },
+      "inputHandlersMs": {
+        "n": 90,
+        "median": 0,
+        "p95": 0.10000000000582077,
+        "max": 0.20000000001164153,
+        "total": 4.599999999918509
+      },
+      "longTasksMs": {
+        "n": 90,
+        "median": 59,
+        "p95": 85,
+        "max": 96,
+        "total": 5545
+      },
+      "ackMs": null,
+      "durableMs": null,
+      "dom": {
+        "sceneNodes": 25351,
+        "shapeNodes": 6245,
+        "layerRows": 40
+      }
+    },
+    "hover": {
+      "elapsedMs": 3038.7000000000116,
+      "frameIntervalsMs": {
+        "n": 182,
+        "median": 16.69999999999709,
+        "p95": 16.799999999995634,
+        "max": 16.80000000000291,
+        "total": 3033.167999999998
+      },
+      "inputHandlersMs": {
+        "n": 90,
+        "median": 0.1999999999825377,
+        "p95": 0.39999999999417923,
+        "max": 1.2999999999883585,
+        "total": 18.70000000001164
+      },
+      "longTasksMs": {
+        "n": 0,
+        "median": null,
+        "p95": null,
+        "max": null,
+        "total": 0
+      },
+      "ackMs": null,
+      "durableMs": null,
+      "dom": {
+        "sceneNodes": 25351,
+        "shapeNodes": 6245,
+        "layerRows": 40
+      }
+    },
+    "drag": {
+      "elapsedMs": 5542.600000000006,
+      "frameIntervalsMs": {
+        "n": 83,
+        "median": 16.700000000004366,
+        "p95": 133.39999999999418,
+        "max": 1400,
+        "total": 5516.368000000002
+      },
+      "inputHandlersMs": {
+        "n": 26,
+        "median": 34.60000000000582,
+        "p95": 59.79999999998836,
+        "max": 1284.9000000000233,
+        "total": 2094.9000000000233
+      },
+      "longTasksMs": {
+        "n": 24,
+        "median": 139,
+        "p95": 164,
+        "max": 1406,
+        "total": 4609
+      },
+      "ackMs": 5352.600000000006,
+      "durableMs": 5486.3000000000175,
+      "dom": {
+        "sceneNodes": 25775,
+        "shapeNodes": 6333,
+        "layerRows": 40
+      },
+      "releaseMs": 5178.600000000006,
+      "releaseToDurableMs": 307.70000000001164
+    },
+    "panAndHoverDocumentWrites": 0
+  },
+  "fixedExamplesViewportDom": {
+    "sceneNodes": 25351,
+    "shapeNodes": 6245,
+    "layerRows": 40
+  },
+  "exports": {
+    "json": {
+      "ms": 10924.716401000012,
+      "bytes": 246625867
+    },
+    "svg": {
+      "ms": 605.0353450000111,
+      "bytes": 13984120
+    },
+    "omc": {
+      "ms": 6458.859996999992,
+      "bytes": 129899344
+    }
+  },
+  "workingSetSnapshotsMiB": {
+    "afterImportMemory": 2204.6328125,
+    "afterGestureMemory": 3567.73828125
+  },
+  "panDiagnosticTrace": {
+    "available": true,
+    "complete": true,
+    "wheelEventsRequested": 6,
+    "wheelEventsSent": 6,
+    "dataLossOccurred": false,
+    "traceBytes": 346982,
+    "windowMs": 651.034,
+    "eventCount": 1507,
+    "rendererMainEventCount": 398,
+    "wheelDispatchEvents": 6,
+    "exclusiveMainThreadMs": {
+      "garbageCollection": 0,
+      "styleAndLayout": 229.881,
+      "imageDecode": 0,
+      "paintAndComposite": 157.161,
+      "scriptAndCallbacks": 8.204,
+      "otherObserved": 11.159,
+      "idleOrUnobserved": 244.629
+    },
+    "mainThreadTasks": {
+      "eventName": "RunTask",
+      "count": 138,
+      "over50ms": 6,
+      "maxMs": 63.094,
+      "p95Ms": 9.008
+    },
+    "unpairedSynchronousEvents": {
+      "begins": 4,
+      "ends": 0
+    },
+    "method": "Main-thread interval attribution, not CPU utilization. Exclusive buckets partition the marked window; per-name/callback rows overlap and must not be added. Other threads run concurrently. Async events and other processes, including GPU work, are outside this attribution."
+  },
+  "limitations": [
+    "Single native process run per revision; automated input frame intervals include driver scheduling.",
+    "A screenshot is evidence of the rendered result, not a comparison against the Figma original.",
+    "Harness waits do not change the app worker/runtime deadlines.",
+    "Gesture samples are warmed by a completed native save/settle before sampling; page-entry timing is recorded separately.",
+    "Reopen measures document open in a fresh process after app launch, not cold-disk or app-start latency; startup library listing may already have read/warmed storage or overlap the open.",
+    "Software rendering on a two-core CI runner; not hardware GPU FPS.",
+    "Working-set snapshots are not a combined process peak or a decoded-image cache budget.",
+    "Known conversion losses include effects, variable bindings, component semantics, masks and mixed text.",
+    "The 1.4-second drag frame and initial import/reopen costs remain unresolved performance limitations.",
+    "This run does not qualify full-fixture four-peer native collaboration or current packaged cross-platform builds."
+  ],
+  "visualRegression": {
+    "referenceRevision": "75c9dcb2fb40a7f8810b01199eb5cbffe41d100b",
+    "referenceWorkflow": "https://github.com/Dindb-dong/oh-my-canvas/actions/runs/42866184948",
+    "sameSourceAndViewport": true,
+    "pngSha256": "1cfac30ac5b977be7867ea9d45e1bed8d1a3a6f4a78db7f6a2d6d920640ee798",
+    "width": 1500,
+    "height": 913,
+    "fullImagePixels": 1369500,
+    "fullImageDifferentPixels": 0,
+    "canvasPixels": 745780,
+    "canvasDifferentPixels": 0,
+    "scope": "Initial imported Examples viewport; not source Figma fidelity."
+  }
+}

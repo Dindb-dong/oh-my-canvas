@@ -108,6 +108,26 @@ describe("prepared native file placement atomicity", () => {
 
 
 describe("design file placement", () => {
+    it("keeps identical page IDs and colliding image catalogs isolated across imported files", async () => {
+        const t = setup();
+        t.services.assets.addFile({ id: 'bitmap', name: 'Existing', kind: 'image', src: 'data:image/png;base64,AA==' });
+        const before = structuredClone(t.editor.doc);
+        let decoded = 0;
+        t.services.formats.importDesignFile = async () => {
+            const src = ++decoded === 1 ? 'data:image/png;base64,AQID' : 'data:image/png;base64,BAUG';
+            const page = (name: string) => ({ objects: { root: { id: 'root', childIds: ['same'] }, same: createShape('image', { id: 'same', name, parentId: 'root', width: 20, height: 10, image: { assetId: 'bitmap' } }) } });
+            return { document: { pages: ['one', 'two'], pagesById: { one: page('First'), two: page('Second') }, assets: { bitmap: { id: 'bitmap', kind: 'image', name: 'Imported', src } } }, warnings: [] };
+        };
+        const file = new File(['binary'], 'pages.fig'); Object.defineProperty(file, 'arrayBuffer', { value: async () => new Uint8Array([1]).buffer });
+        await t.clipboard.importFiles([file, file], { x: 100, y: 200 });
+        const shapes = t.editor.page.objects.root.childIds!.map(id => t.editor.page.objects[id]);
+        expect(shapes).toHaveLength(4); expect(new Set(shapes.map(shape => shape.id)).size).toBe(4);
+        expect(shapes.map(shape => t.editor.doc.assets[shape.image.assetId].src)).toEqual(['data:image/png;base64,AQID', 'data:image/png;base64,AQID', 'data:image/png;base64,BAUG', 'data:image/png;base64,BAUG']);
+        expect(t.editor.doc.assets.bitmap.src).toBe('data:image/png;base64,AA==');
+        expect(Object.keys(t.editor.doc.assets)).toHaveLength(3);
+        expect(t.editor.undoStep()).toBe(true); expect(t.editor.doc).toEqual(before);
+        expect(t.editor.redoStep()).toBe(true); expect(t.editor.page.objects.root.childIds).toHaveLength(4);
+    });
     it("places every imported page in one undoable edit", async () => {
         const t = setup(), before = structuredClone(t.editor.doc);
         const one = createShape("rect", {id:"design-one", name:"First page", parentId:"root", width:20, height:10});

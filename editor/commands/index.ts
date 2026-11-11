@@ -1,5 +1,5 @@
 /** Independently authored command registry. No inherited editor implementation is used. */
-import {referencedAssets} from '../images/assets';
+import {referencedAssets, portableClipboard, prepareAssetTransfer, mergeTransferredAssets} from '../images/assets';
 import type { EditorStore, Commands, Data, Page, Shape, CanvasDocument, Tool, Point } from '../contracts';
 import { createShape, createPage, addPage, deletePage, duplicatePage, clone, newId, ROOT_ID, descendants, ancestors, topLevelIds, insertShape, removeShapes, reparentShapes, cloneShapes, moveTree, resizeTree, refreshFrames, isEditable, remapReferences } from '../document';
 import { bounds, unionBounds, shapeBounds, rectOf, center, moveShape, resizeShape, updateGeometry, rotationMatrix, zoomAt, fitViewport, polygonPoints, identity, pathBounds, setShapeOrientation } from '../geometry';
@@ -363,6 +363,7 @@ export function createCommands(editor: EditorStore, services: Data = {}): Comman
     }, () => true);
     edit('page.delete', 'Delete page', (_page, args, doc) => deletePage(doc, args.id ?? editor.pageId), () => editor.doc.pages.length > 1);
     async function writeClipboard(value: any): Promise<void> {
+        value = await portableClipboard(value, services.resolveImageSource);
         clipboard = clone(value);
         pasteCount = 0;
         const text = JSON.stringify(value);
@@ -396,14 +397,16 @@ export function createCommands(editor: EditorStore, services: Data = {}): Comman
         const chosen = topLevelIds(editor.page, ids(args));
         if (!chosen.length)
             return false;
-        await writeClipboard({ kind: 'oh-my-canvas/shapes', version: 1, capacity:editor.doc.capacity, assets:referencedAssets(chosen.flatMap(id=>descendants(editor.page,id,true)),editor.doc.assets),roots: chosen, shapes: chosen.flatMap(id => descendants(editor.page, id, true)).map(clone), pageId: editor.pageId, origin: unionBounds(chosen.map(id => shapeBounds(editor.page.objects[id]))) });
+        await writeClipboard({ kind: 'oh-my-canvas/shapes', version: 1, capacity:editor.doc.capacity, assetDefinitions:referencedAssets(chosen.flatMap(id=>descendants(editor.page,id,true)),editor.doc.assets),roots: chosen, shapes: chosen.flatMap(id => descendants(editor.page, id, true)).map(clone), pageId: editor.pageId, origin: unionBounds(chosen.map(id => shapeBounds(editor.page.objects[id]))) });
         return true;
     }
     register('edit.copy', 'Copy', copy, () => editor.selection.length > 0);
     register('edit.cut', 'Cut', async (args) => {
+        const sourceDocument = editor.doc;
         const sourceIds = [...ids(args)];
         if (!await copy({ ...args, ids: sourceIds }))
             return false;
+        if (editor.doc !== sourceDocument) throw Error('Canvas changed while copying; no layers were cut');
         return await commands.run('edit.delete', { ...args, ids: sourceIds });
     }, () => editable().length > 0);
     register('edit.copy-properties', 'Copy properties', async (args) => {
@@ -413,14 +416,15 @@ export function createCommands(editor: EditorStore, services: Data = {}): Comman
         properties = Object.fromEntries(PROPERTY_KEYS.filter(k => k in s).map(k => [k, clone(s[k])]));
         if (s.type === 'text' && s.content?.children)
             properties.textFormatting = clone(s.content.children).map((p: Data) => ({ ...p, children: p.children.map(({ text, ...format }: Data) => format) }));
-        await writeClipboard({ kind: 'oh-my-canvas/properties', version: 1, properties });
+        await writeClipboard({ kind: 'oh-my-canvas/properties', version: 1, properties, assetDefinitions: referencedAssets(properties, editor.doc.assets) });
         return true;
     }, () => editor.selection.length > 0);
     register('edit.paste-properties', 'Paste properties', async (args) => {
-        const payload = await readClipboard(), value = payload?.properties ?? properties;
+        const payload = prepareAssetTransfer(await readClipboard() ?? { properties }, editor.doc.assets), value = payload.properties ?? properties;
         if (!value)
             return false;
         editor.transact('Paste properties', doc => {
+            mergeTransferredAssets(doc, payload);
             for (const id of editable(args)) {
                 const shape = doc.pagesById[editor.pageId].objects[id];
                 for (const key of PROPERTY_KEYS)
@@ -442,6 +446,7 @@ export function createCommands(editor: EditorStore, services: Data = {}): Comman
     function pastePrepared(payload: Data, args: Data = {}, mode: 'paste' | 'paste-in-place' | 'paste-replace' = 'paste'): string[] {
         if (!payload || typeof payload !== 'object')
             throw new Error('A prepared clipboard payload is required');
+        payload = prepareAssetTransfer(payload, editor.doc.assets);
         if (payload.kind === 'text') {
             let id = '';
             editor.transact('Paste text', doc => {
@@ -462,10 +467,7 @@ export function createCommands(editor: EditorStore, services: Data = {}): Comman
             throw new Error('Prepared clipboard payload has no root layers');
         editor.transact('Paste layers', doc => {
             if(payload.capacity==='large')doc.capacity='large';
-            for(const [id,asset] of Object.entries<Data>(payload.assets??{})){
-                if(doc.assets?.[id]&&JSON.stringify(doc.assets[id])!==JSON.stringify(asset))throw Error('Clipboard asset ID conflicts with this canvas');
-                (doc.assets??={})[id]=clone(asset);
-            }
+            mergeTransferredAssets(doc, payload);
             const page = doc.pagesById[editor.pageId], replaced = mode === 'paste-replace' ? editable(args) : [], parentId = args.parentId ?? (replaced.length ? page.objects[replaced[0]].parentId : ROOT_ID), original = payload.origin ?? unionBounds(shapes.filter(s => roots.includes(s.id)).map(shapeBounds)), targetIds = mode === 'paste-in-place' ? editable(args) : replaced, target = targetIds.length ? unionBounds(targetIds.map(id => shapeBounds(page.objects[id]))) : null, offset = mode === 'paste-in-place' ? 0 : 10 * (++pasteCount), dx = target ? target.x + (mode === 'paste-in-place' ? (target.width - original.width) / 2 : 0) - original.x : args.x !== undefined ? args.x - original.x : offset, dy = target ? target.y + (mode === 'paste-in-place' ? (target.height - original.height) / 2 : 0) - original.y : args.y !== undefined ? args.y - original.y : offset;
             for (const s of shapes) {
                 const oldId = s.id;

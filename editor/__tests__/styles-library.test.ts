@@ -206,10 +206,12 @@ describe('offline library snapshots and local assets', () => {
         const { editor, assets } = setup();
         const asset = assets.addFile({ name: 'Pixel', src: 'data:image/png;base64,AA==', width: 2, height: 3, mimeType: 'image/png' });
         const result = assets.place(asset.id, { x: 42, y: 73 });
-        expect(editor.page.objects[result.selection[0]]).toMatchObject({ type: 'image', x: 42, y: 73, width: 2, height: 3, image: { src: 'data:image/png;base64,AA==' } });
+        expect(editor.page.objects[result.selection[0]]).toMatchObject({ type: 'image', x: 42, y: 73, width: 2, height: 3, image: { assetId: asset.id } });
         expect(assets.list('pixel')).toHaveLength(1);
         assets.remove(asset.id);
-        expect(editor.page.objects[result.selection[0]].image.src).toBe('data:image/png;base64,AA==');
+        expect(editor.doc.assets[editor.page.objects[result.selection[0]].image.assetId].src).toBe('data:image/png;base64,AA==');
+        expect(editor.doc.assets[asset.id].deleted).toBe(true);
+        expect(assets.list('pixel')).toEqual([]);
         const font = assets.addFile({ name: 'Font', src: 'data:font/woff2;base64,AA==', kind: 'font' });
         expect(() => assets.place(font.id)).toThrow(/font catalog/);
         expect(() => assets.addFile({ name: 'Unsafe', src: 'javascript:alert(1)' })).toThrow(/Unsupported/);

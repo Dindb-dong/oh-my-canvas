@@ -1,4 +1,6 @@
-import {DESIGN_FILE_LIMIT} from '../core/capacity.mjs';
+import {DESIGN_FILE_LIMIT,MAX_PORTABLE_BYTES} from '../core/capacity.mjs';
+import {persistDesignImport,portableAssetDocument} from './document-assets.mjs';
+import {createCanvasProtocolHandler} from './canvas-protocol.mjs';
 import {readDesignFile} from './design-import.mjs';
 import {readExplicitFile} from './file-transfer.mjs';
 import {createFileDialogs} from './file-dialogs.mjs';
@@ -8,14 +10,15 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import os from 'node:os';
-import {Store,atomicWrite,decodeFile,encodeFile,validId} from '../core/storage.mjs';
+import {Store,atomicWrite,decodeFile,validId} from '../core/storage.mjs';
 import {Replica} from '../core/replica.mjs';
 import {exportFileData} from '../core/export-file.mjs';
-import {assertDocument,same,MAX_ENVELOPE_BYTES} from '../core/document.mjs';
+import {assertDocument,same} from '../core/document.mjs';
 import {Collaboration,parseInvite} from '../core/collaboration.mjs';
 import {startMcpBridge,MCP_PORT} from './mcp-bridge.mjs';
 import {canvasTitle} from './document-actions.mjs';
 import {createDocumentManager} from './document-manager.mjs';
+import {commitDocument} from './document-commit.mjs';
 import {createWorkspaceReplay} from './workspace-replay.mjs';
 import {createWorkspaceTools,DESKTOP_TOOL_NAMES} from './workspace-tools.mjs';
 import {createScreenSampler} from './sample-color.mjs';
@@ -31,7 +34,7 @@ protocol.registerSchemesAsPrivileged([{scheme:'omc',privileges:{standard:true,se
 app.whenReady().then(async()=>{
   const fileDialogs=createFileDialogs(dialog),dir=app.getPath('userData'),store=new Store(path.join(dir,'documents'));
   const {TOOLS,WORKSPACE_TOOLS,DOCUMENT_MUTATIONS,validateDesktopToolArgs}=await import('../dist/tool-defs.mjs');
-  const {blankDocument,sampleDocument,importCanvasJson,exportCanvasJson,validateImportedDocument}=await import('../dist/document-factories.mjs');
+  const {blankDocument,sampleDocument,importCanvasJson,exportCanvasJson,portableDocument,validateImportedDocument}=await import('../dist/document-factories.mjs');
   const workspaceNames=new Set(WORKSPACE_TOOLS.map(tool=>tool.name)),mutations=new Set(DOCUMENT_MUTATIONS);
   const pending=new Map(),senders=new Map(),contexts=new Map(),activeCalls=new Set(),replay=createWorkspaceReplay();
   let win,bridge,bridgeError,closing=false,quitting=false,prefsWork=Promise.resolve(),shellWork=Promise.resolve();
@@ -58,7 +61,7 @@ app.whenReady().then(async()=>{
     if(!runtime.sender.isDestroyed())runtime.sender.close({waitForBeforeUnload:false});
   }
   function createRuntime(entry){
-    const generation=entry.generation,url=`omc://canvas/document.html?documentId=${entry.record.id}&generation=${generation}`;
+    const generation=entry.generation,url=`omc://canvas/document.html?documentId=${entry.record.id}&generation=${generation}${backgroundTest?'&startupDiagnostics=1':''}`;
     const view=new WebContentsView({webPreferences:{preload:path.join(root,'dist/preload.cjs'),backgroundThrottling:false,contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}});
     const runtime={view,sender:view.webContents,url,generation};
     senders.set(runtime.sender.id,{entry,generation,url});secure(runtime.sender,url);
@@ -127,7 +130,7 @@ app.whenReady().then(async()=>{
   async function checkBusy(entry,agent,signal){
     signal?.throwIfAborted();if(entry.runtime){const inspection=await runtimeRequest(entry,'inspect',{}, {signal,agent});if(inspection.busy)throw Object.assign(Error('A user edit is in progress in this canvas'),{code:'busy'});}
   }
-  const desktopTools=createWorkspaceTools({readDesignFile,sampleColor:createScreenSampler({screen,desktopCapturer,systemPreferences}),manager,store,profile:dir,sourceRoot:root,importCanvasJson,exportCanvasJson,validateImportedDocument,runtimeRequest,preferences,checkBusy,
+  const desktopTools=createWorkspaceTools({readDesignFile:importDesign,portableDocument,sampleColor:createScreenSampler({screen,desktopCapturer,systemPreferences}),manager,store,profile:dir,sourceRoot:root,importCanvasJson,exportCanvasJson,validateImportedDocument,runtimeRequest,preferences,checkBusy,
     notifyPreferences:value=>{sendShell({type:'preferences',preferences:value});for(const entry of manager.entries.values())sendRuntime(entry,{type:'preferences',preferences:value});},
     editorTool:(entry,call,signal)=>mcpDispatch({...call,args:{...call.args,documentId:entry.record.id}},{signal}),capabilities:()=>({tools:TOOLS,explicitDocumentMutations:DOCUMENT_MUTATIONS,protocol:{explicitTargets:true,implicitVisibleTabTarget:false,idempotency:'session-scoped',clipboard:'private-agent'},platform:{os:process.platform,windowControls:true,devTools:process.argv.includes('--debug-ui'),screenSampling:process.platform!=='darwin'||systemPreferences.getMediaAccessStatus('screen')==='granted'}}),requestQuit:()=>{setTimeout(()=>void closeApplication(),250).unref();},
     connection:mcpInfo,about:()=>({name:app.getName(),version:app.getVersion(),platform:process.platform,license:'MIT',notices:'omc://canvas/licenses/index.html',debugUi:process.argv.includes('--debug-ui')}),
@@ -160,24 +163,30 @@ app.whenReady().then(async()=>{
     data.signal?.throwIfAborted();
     try{entry=await manager.load(invitation.room);}catch(error){if(error.code!=='ENOENT')throw error;entry=await manager.load(invitation.room,{id:invitation.room,title:canvasTitle(invitation.title??'Shared canvas'),createdAt:new Date().toISOString(),replica:new Replica()});created=true;}
     entry.holds=(entry.holds??0)+1;let collab,joined=false;
-    try{if(data.replace===false){if(entry.collab||[...entry.agents].some(agent=>agent!==data.agent))throw Object.assign(Error('Canvas already has an active session; leave it first'),{code:'busy'});await checkBusy(entry,data.agent,data.signal);}if(entry.runtime)await runtimeRequest(entry,'flush');if(data.replace!==false)await stopSession(entry);collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:data.name??prefs.name});await collab.join(data.invite);joined=true;data.signal?.throwIfAborted();if(entry.collab||data.replace===false&&[...entry.agents].some(agent=>agent!==data.agent))throw Object.assign(Error('Canvas acquired another active session while connecting; leave it first'),{code:'busy'});bindSession(entry,collab);await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.bind(data.agent,entry);if(data.focus!==false)manager.activate(entry.record.id);else manager.changed();return {documentId:entry.record.id,document:{id:entry.record.id,title:entry.record.title},...collab.status()};}
+    try{if(data.replace===false){if(entry.collab||[...entry.agents].some(agent=>agent!==data.agent))throw Object.assign(Error('Canvas already has an active session; leave it first'),{code:'busy'});await checkBusy(entry,data.agent,data.signal);}if(entry.runtime)await runtimeRequest(entry,'flush');if(data.replace!==false)await stopSession(entry);collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:data.name??prefs.name,assets:store.assets,persist:()=>manager.save(entry)});await collab.join(data.invite);joined=true;data.signal?.throwIfAborted();if(entry.collab||data.replace===false&&[...entry.agents].some(agent=>agent!==data.agent))throw Object.assign(Error('Canvas acquired another active session while connecting; leave it first'),{code:'busy'});bindSession(entry,collab);await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.bind(data.agent,entry);if(data.focus!==false)manager.activate(entry.record.id);else manager.changed();return {documentId:entry.record.id,document:{id:entry.record.id,title:entry.record.title},...collab.status()};}
     catch(error){await collab?.close();if(entry.collab===collab)entry.collab=null;throw error;}
     finally{entry.holds--;if(created&&!joined&&!entry.runtime&&!entry.collab)manager.discard(entry);}
   }
   async function startHost(entry,data={}){
     if(data.replace===false&&entry.collab)throw Object.assign(Error('Leave the existing collaboration session first'),{code:'busy'});
-    if(data.replace!==false)await stopSession(entry);const collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:data.name??prefs.name});bindSession(entry,collab);
+    if(data.replace!==false)await stopSession(entry);const collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:data.name??prefs.name,assets:store.assets,persist:()=>manager.save(entry)});bindSession(entry,collab);
     try{await collab.host({port:Number(data.port)||0});}catch(error){await stopSession(entry);throw error;}
     return {port:collab.port,addresses:Object.values(os.networkInterfaces()).flat().filter(address=>address?.family==='IPv4'&&!address.internal).map(address=>address.address)};
   }
+  async function importDesign(bytes,format){return persistDesignImport(await readDesignFile(bytes,format),store);}
   async function importFile(){
     const result=await fileDialogs.open({title:'Open canvas',filters:[{name:'Canvas documents',extensions:['omc','json','fig','sketch']}],properties:['openFile']});if(result.canceled)return null;
     const extension=path.extname(result.filePaths[0]).slice(1).toLowerCase();
-    if(['fig','sketch'].includes(extension)){const resultData=await readDesignFile(await readExplicitFile(result.filePaths[0],{limit:DESIGN_FILE_LIMIT}),extension);await manager.create(path.basename(result.filePaths[0],path.extname(result.filePaths[0])),resultData.document,{focus:true});return {opened:true,warnings:resultData.warnings};}
-    const stat=await fs.stat(result.filePaths[0]);if(stat.size>MAX_ENVELOPE_BYTES)throw Error('Document file exceeds 24 MiB');
-    const raw=await fs.readFile(result.filePaths[0],'utf8');
-    if(!result.filePaths[0].endsWith('.omc'))return {json:JSON.parse(raw),title:path.basename(result.filePaths[0],'.json')};
+    if(['fig','sketch'].includes(extension)){const resultData=await importDesign(await readExplicitFile(result.filePaths[0],{limit:DESIGN_FILE_LIMIT}),extension);await manager.create(path.basename(result.filePaths[0],path.extname(result.filePaths[0])),resultData.document,{focus:true});return {opened:true,warnings:resultData.warnings};}
+    const raw=(await readExplicitFile(result.filePaths[0],{limit:MAX_PORTABLE_BYTES})).toString('utf8');
+    if(extension!=='omc'){
+      const input=JSON.parse(raw);validateImportedDocument(input);
+      const document=importCanvasJson(input);validateImportedDocument(document);
+      const entry=await manager.create(path.basename(result.filePaths[0],path.extname(result.filePaths[0])),document,{focus:true});
+      return {opened:metadata(entry)};
+    }
     const record=decodeFile(raw);let entry;
+    try{validateImportedDocument(record.replica.document);await store.prepareRecord(record);}catch(error){record.replica.destroy();throw error;}
     if(manager.entries.has(record.id)){entry=await manager.load(record.id,record);}
     else {try{const existing=await store.load(record.id);try{record.replica.receive(existing.replica.state);}finally{existing.replica.destroy();}}catch(error){if(error.code!=='ENOENT'){record.replica.destroy();throw error;}}entry=await manager.load(record.id,record);}
     entry.holds=(entry.holds??0)+1;
@@ -197,9 +206,10 @@ app.whenReady().then(async()=>{
       case 'bootstrap':{
         if(entry.seq!==0||typeof data?.nonce!=='string'||data.nonce!==entry.bootstrapNonce)throw Error('Invalid canvas initialization');
         if(!same(entry.bootstrapBase,entry.record.replica.document)){entry.bootstrapNonce=randomUUID();entry.bootstrapBase=entry.record.replica.document;return {...manager.snapshot(entry),bootstrapRetry:true};}
-        entry.bootstrapNonce=null;entry.bootstrapBase=null;entry.record.replica.patch(data.changes,'Initialize canvas',undefined,{recordHistory:false});await manager.save(entry);manager.confirmGeneration(entry,generation);return manager.snapshot(entry);
+        const changes=await store.prepareChanges(data.changes);manager.confirmGeneration(entry,generation);
+        entry.bootstrapNonce=null;entry.bootstrapBase=null;entry.record.replica.patch(changes,'Initialize canvas',undefined,{recordHistory:false});await manager.save(entry);manager.confirmGeneration(entry,generation);return manager.snapshot(entry);
       }
-      case 'commit':if(!Number.isSafeInteger(data.seq))throw Error('Invalid edit sequence');if(data.seq<=entry.seq)return manager.snapshot(entry);entry.record.replica.patch(data.changes,data.label,data.group);await manager.save(entry);manager.confirmGeneration(entry,generation);entry.seq=data.seq;return manager.snapshot(entry);
+      case 'commit':return commitDocument(entry,data,{store,save:entry=>manager.save(entry),confirmGeneration:(entry,generation)=>manager.confirmGeneration(entry,generation),acknowledgment:entry=>manager.acknowledgment(entry)});
       case 'undo':
       case 'redo':{
         if(data?.requestId){const request=pending.get(data.requestId);if(!request||request.agent!==data.agent||request.entry!==entry)throw Error('MCP history request cancelled');}
@@ -219,7 +229,7 @@ app.whenReady().then(async()=>{
       case 'export':{
         const format=data.format;if(!['omc','json','svg','png'].includes(format))throw Error('Unsupported export');
         const result=await fileDialogs.save({defaultPath:entry.record.title.replace(/[\\/:*?"<>|]/g,'-')+'.'+format,filters:[{name:format.toUpperCase(),extensions:[format]}]});if(result.canceled)return false;
-        let content=format==='omc'?encodeFile(entry.record):data.content;if(typeof content!=='string'||content.length>100*1024*1024)throw Error('Invalid export data');if(format==='png')content=Buffer.from(content.replace(/^data:image\/png;base64,/,''),'base64');await atomicWrite(result.filePath,content);return true;
+        let content=format==='omc'?await store.export(entry.record):format==='json'?JSON.stringify(exportCanvasJson(await portableAssetDocument(entry.record.replica.document,store.assets,portableDocument)),null,2):data.content;const limit=['omc','json'].includes(format)?MAX_PORTABLE_BYTES:100*1024*1024;if(typeof content!=='string'||Buffer.byteLength(content)>limit)throw Error('Invalid or oversized export data');if(format==='png')content=Buffer.from(content.replace(/^data:image\/png;base64,/,''),'base64');await atomicWrite(result.filePath,content);return true;
       }
       default:throw Error('Unknown document action');
     }
@@ -230,7 +240,7 @@ app.whenReady().then(async()=>{
     if(action==='preferences')return preferences(data);
     if(action==='mcp-info')return mcpInfo(data);
     if(action==='pick-files')return fileDialogs.pick(data);
-    if(action==='import-design')return readDesignFile(data?.bytes,data?.format);
+    if(action==='import-design')return importDesign(data?.bytes,data?.format);
     if(action==='join')return join(data);
     if(action==='show-library')return manager.showLibrary();
     if(sender.role==='document'){
@@ -268,13 +278,7 @@ app.whenReady().then(async()=>{
     if(!Number.isInteger(port)||port<0||port>65535)throw Error('Invalid MCP port');
     bridge=await startMcpBridge({dir,port,endSession:endAgent,dispatch:(call,options)=>{const task=mcpDispatch(call,options);activeCalls.add(task);void task.then(()=>activeCalls.delete(task),()=>activeCalls.delete(task));return task;}});
   }catch(error){bridgeError=error.code==='EADDRINUSE'?'MCP port is already in use. Close the other listener or choose --mcp-port.':error.message;}
-  const mime={'.html':'text/html','.js':'application/javascript','.mjs':'application/javascript','.css':'text/css','.wasm':'application/wasm','.woff2':'font/woff2','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'};
-  protocol.handle('omc',async request=>{
-    const url=new URL(request.url);if(url.hostname!=='canvas')return new Response('Not found',{status:404});
-    let name;try{name=decodeURIComponent(url.pathname);}catch{return new Response('Invalid path',{status:400});}
-    const base=path.join(root,'dist'),file=path.resolve(base,'.'+name);if(!file.startsWith(base+path.sep))return new Response('Forbidden',{status:403});
-    try{return new Response(await fs.readFile(file),{headers:{'Content-Type':mime[path.extname(file)]||'application/octet-stream','Content-Security-Policy':"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'"}});}catch{return new Response('Not found',{status:404});}
-  });
+  protocol.handle('omc',createCanvasProtocolHandler({directory:path.join(root,'dist'),assets:store.assets}));
   win=new BrowserWindow({show:!backgroundTest,width:1500,height:980,minWidth:960,minHeight:640,title:'Oh My Canvas',backgroundColor:'#ffffff',titleBarStyle:'hiddenInset',trafficLightPosition:{x:18,y:10},webPreferences:{preload:path.join(root,'dist/preload.cjs'),backgroundThrottling:false,contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}});
   secure(win.webContents,'omc://canvas/index.html');
   win.webContents.session.setPermissionRequestHandler((_,__,callback)=>callback(false));win.webContents.session.on('will-download',event=>event.preventDefault());

@@ -1,23 +1,53 @@
 import './style.css';
 import {icon} from './icons.js';
-import {mountEditor,exportCanvasJson,installLvMcp,screenToWorld,worldToScreen} from '../editor';
-import {changesBetween,applyPending,same} from '../core/document.mjs';
+import {mountEditor,installLvMcp,screenToWorld,worldToScreen} from '../editor';
+import {changesBetween,changesFromPatches} from '../core/document.mjs';
+import {DocumentProjection} from '../core/projection.mjs';
 import fontFaces from './fonts.json';
 import {removeBackground} from '../editor/images/background';
+import {embedImageSource,isExternalImageSource} from '../editor/images/assets';
+import {drainPendingCommits,createDocumentWriteQueue,createSnapshotResync,commitErrorMessage} from './document-sync.mjs';
+import {createThumbnailScheduler} from './document-thumbnail.mjs';
 
 const $=s=>document.querySelector(s), api=window.omc;
+const resolveImageSource=src=>/^omc-asset:sha256:[a-f0-9]{64}$/.test(src)?`omc://canvas/assets/${src.slice(-64)}`:src;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let handle,mcp,active,lastDoc,pending=[],nextSeq=0,queue=Promise.resolve(),mounting=false,unsubscribe;
-let session={mode:'offline',peers:[]},prefs={},toastTimer,thumbnailTimer,dialogFocus,hosting,sessionTab='host';
-let lastRejected,closing=false,titleEdit=null,ready=false;
+let handle,mcp,active,lastDoc,nextSeq=0,mounting=false,unsubscribe;
+let session={mode:'offline',peers:[]},prefs={},toastTimer,dialogFocus,hosting,sessionTab='host';
+let lastRejected,closing=false,titleEdit=null,ready=false,saveFailed=false;
+let projection;
 const params=new URLSearchParams(location.search),documentId=params.get('documentId'),generation=Number(params.get('generation'));
 if(!documentId||!Number.isSafeInteger(generation)||generation<1)throw Error('Invalid document runtime identity');
+const startupDiagnostics=params.get('startupDiagnostics')==='1',startupAt=performance.now();
+let startupReports=0,startupComplete=false;
+function startupTiming(value,ms){
+  if(!startupDiagnostics||startupComplete||startupReports>=128)return;
+  const phase=typeof value==='string'?value:value?.phase,duration=typeof value==='string'?ms:value?.ms;
+  if(typeof phase!=='string'||phase.length>80||!/^[-.\w]+$/.test(phase)||!Number.isFinite(duration))return;
+  startupReports++;
+  console.info('[omc-startup]',JSON.stringify({phase,ms:Math.round(duration*100)/100,elapsedMs:Math.round((performance.now()-startupAt)*100)/100}));
+}
+function startupSync(phase,run){
+  if(!startupDiagnostics)return run();
+  const start=performance.now();startupTiming(phase+'.start',0);
+  try{return run();}finally{startupTiming(phase,performance.now()-start);}
+}
+async function startupStep(phase,run){
+  if(!startupDiagnostics)return run();
+  const start=performance.now();startupTiming(phase+'.start',0);
+  try{return await run();}finally{startupTiming(phase,performance.now()-start);}
+}
 function assertIdentity(value){
   if(!value||(value.documentId??value.id)!==documentId||value.generation!==generation)throw Error('Document runtime identity mismatch');
 }
 const cursors=new Map(),colors=['#1d4ed8','#0369a1','#6d28d9','#475569'];
+const thumbnails=createThumbnailScheduler({
+  current:()=>handle&&active&&ready&&!mounting&&!closing?{id:active.id,view:handle.view,pageId:handle.editor.pageId,objects:handle.editor.page.objects,assets:handle.editor.doc.assets,viewport:handle.editor.viewport}:null,
+  save:shot=>api.invoke('thumbnail',{src:`data:${shot.mimeType};base64,${shot.data}`}),
+});
+window.addEventListener('pagehide',()=>thumbnails.reset());
 
-function toast(message,error=false){clearTimeout(toastTimer);$('#toast').textContent=message;$('#toast').classList.toggle('error-toast',error);$('#toast').hidden=false;toastTimer=setTimeout(()=>{$('#toast').hidden=true;},error?8000:3500);}
+function toast(message,error=false){clearTimeout(toastTimer);$('#toast').textContent=commitErrorMessage(message);$('#toast').classList.toggle('error-toast',error);$('#toast').hidden=false;toastTimer=setTimeout(()=>{$('#toast').hidden=true;},error?8000:3500);}
 const run=fn=>async(...args)=>{try{return await fn(...args);}catch(e){toast(e.message,true);return undefined;}};
 function modal(title,body){dialogFocus=document.activeElement;const d=$('#dialog');if(d.open)d.close();$('#dialog-content').innerHTML=`<div class="dialog-heading"><h2>${esc(title)}</h2><button class="close" aria-label="Close dialog">${icon('close')}</button></div>${body}`;$('.close').onclick=()=>d.close();d.showModal();}
 $('#dialog').addEventListener('close',()=>dialogFocus?.focus?.());
@@ -28,39 +58,74 @@ function setTitle(){
   const editing=!!titleEdit&&titleEdit.id===active?.id;
   $('#document-title').hidden=editing;$('#title-form').hidden=!editing;
   $('#document-title').disabled=!active;$('#document-title').setAttribute('aria-label','Rename canvas: '+(active?.title||''));
-  $('#save-state').textContent='Stored on this computer';document.title=(active?.title||'Oh My Canvas')+' — Oh My Canvas';
+  updateSaveState();document.title=(active?.title||'Oh My Canvas')+' — Oh My Canvas';
 }
-async function settle(flushEditor=true){if(mounting&&flushEditor)throw Error('Wait for the canvas to finish opening');if(flushEditor)await handle?.flush?.();await queue;for(const item of [...pending])project(await api.invoke('commit',{id:active.id,...item}));await api.invoke('flush');}
-function history(action,agent,signal,requestId){const task=queue.then(()=>{signal?.throwIfAborted();return api.invoke(action,{agent,requestId});}).then(snap=>{if(snap)project(snap);return !!snap;});queue=task.catch(()=>{});return task;}
-function project(snap){
-  if(!handle||snap.id!==documentId||snap.generation!==generation||mounting)return;
-  pending=pending.filter(p=>p.seq>snap.ack);
-  const doc=applyPending(snap.document,pending.map(p=>p.changes));
+function updateSaveState(){
+  const stored=!!projection&&projection.ack>=nextSeq&&!projection.pending.length;
+  $('#save-state').textContent=stored?'Stored on this computer':saveFailed?'Save failed':'Saving…';
+}
+const resync=createSnapshotResync({
+  snapshot:()=>api.invoke('snapshot'),getRevision:()=>projection?.revision??0,
+  accept:snap=>{assertIdentity(snap);return acceptProjection(snap);},
+});
+async function drain(through){
+  if(projection.pending.some(item=>item.seq<=through)){saveFailed=false;updateSaveState();}
+  try{await drainPendingCommits({
+    getProjection:()=>projection,commit:item=>api.invoke('commit',{id:documentId,...item}),project,
+    refresh:revision=>resync.request(revision??projection.revision,{force:true}),
+    onRejected:(seq,error)=>{lastRejected={seq,message:commitErrorMessage(error)};toast('Could not persist edit: '+lastRejected.message,true);},
+  },through);}catch(error){saveFailed=true;updateSaveState();throw error;}
+}
+const writes=createDocumentWriteQueue({drain,wait:()=>resync.wait(),flush:()=>api.invoke('flush'),invokeHistory:(action,args)=>api.invoke(action,args),project});
+async function settle(flushEditor=true){
+  if(mounting&&flushEditor)throw Error('Wait for the canvas to finish opening');
+  if(flushEditor)await handle?.flush?.();
+  await writes.flush(nextSeq);
+}
+function history(action,agent,signal,requestId){
+  return writes.history(action,{agent,requestId},nextSeq,signal);
+}
+function acceptProjection(snap){
+  const result=projection.accept(snap);
+  if(result.ignored||result.resync)return result;
+  updateSaveState();
+  const doc=result.document;
   // The durable baseline excludes an active local preview retained by receiveDocument.
   lastDoc=doc;
-  if(same(doc,handle.editor.doc))return;
-  handle.editor.receiveDocument(doc);
+  if(result.redundant||doc===handle.editor.doc)return result;
+  handle.editor.receiveDocument(doc,{incremental:!snap.document});
   paintCursors();
+  return result;
+}
+function project(snap){
+  if(snap.id!==documentId||snap.generation!==generation)return;
+  if(!handle||mounting){resync.note(snap.revision??0);return;}
+  const result=acceptProjection(snap);
+  if(result.resync)return resync.request(snap.revision);
 }
 async function openSnapshot(snap){
   assertIdentity(snap);
   mounting=true;$('#editor').inert=true;
-  try {mcp?.dispose?.();unsubscribe?.();await handle?.destroy();handle=null;clearTimeout(thumbnailTimer);cursors.clear();$('#remote-cursors').replaceChildren();
-  pending=[];nextSeq=0;lastRejected=null;active={id:snap.id,title:snap.title};setTitle();
+  try {thumbnails.reset();mcp?.dispose?.();unsubscribe?.();await handle?.destroy();handle=null;cursors.clear();$('#remote-cursors').replaceChildren();
+  projection=startupSync('startup.projection',()=>new DocumentProjection(snap));nextSeq=0;lastRejected=null;saveFailed=false;active={id:snap.id,title:snap.title};setTitle();
   let candidate=snap;
   for(let attempt=0;attempt<8;attempt++){
-    handle=await mountEditor($('#editor'),{
-      removeBackground,
+    handle=await startupStep('startup.mount',()=>mountEditor($('#editor'),{
+      onTiming:startupDiagnostics?startupTiming:undefined,
+      removeBackground:async(src,signal)=>removeBackground(isExternalImageSource(src)?await embedImageSource(src,resolveImageSource,{left:16*1024*1024},signal):src,signal),
+      resolveImageSource,
       importDesignFile:(bytes,format)=>api.invoke('import-design',{bytes,format}),
       pickFiles:async options=>{const files=await api.invoke('pick-files',options);const mime={svg:'image/svg+xml',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',avif:'image/avif',bmp:'image/bmp',ico:'image/x-icon',json:'application/json',woff:'font/woff',woff2:'font/woff2',ttf:'font/ttf',otf:'font/otf'};return files.map(file=>new File([file.bytes],file.name,{type:mime[file.name.split('.').pop().toLowerCase()]||'application/octet-stream'}));},
       exportFile:async(blob,name)=>api.invoke('export-file',{name,mime:blob.type,bytes:new Uint8Array(await blob.arrayBuffer())}),
       document:candidate.document,title:candidate.title,subtitle:'Oh My Canvas',faces:fontFaces.map(face=>({...face,url:new URL(face.url,location.href).href})),defaultFamily:'IBM Plex Sans',fallbacks:['Noto Sans KR','sans-serif'],wasmUrl:new URL('/canvaskit.wasm',location.href).href,
-    });
-    const initialization=changesBetween(candidate.document,handle.editor.doc);
+    }));
+    const initialization=startupSync('startup.diff',()=>changesBetween(candidate.document,handle.editor.doc));
     if(candidate.bootstrapNonce){
-      const initialized=await api.invoke('bootstrap',{id:snap.id,nonce:candidate.bootstrapNonce,changes:initialization});assertIdentity(initialized);
+      const initialized=await startupStep('startup.bootstrap',()=>api.invoke('bootstrap',{id:snap.id,nonce:candidate.bootstrapNonce,changes:initialization}));assertIdentity(initialized);
       if(initialized.bootstrapRetry){await handle.destroy();handle=null;candidate=initialized;continue;}
-      handle.editor.receiveDocument(initialized.document);
+      // Keep the runtime inert until the mandatory fresh snapshot below. That
+      // snapshot includes bootstrap and any intervening host edits, so applying
+      // this intermediate document would repeat a full validation needlessly.
     }else if(initialization.length){throw Error('Canvas initialization token is missing');}
     break;
   }
@@ -70,40 +135,28 @@ async function openSnapshot(snap){
   handle.editor.redoStep=()=>{if(handle.editor.undo.blocked)return false;void run(()=>history('redo'))();return true;};
   mcp=installLvMcp(handle.editor,handle.view,{services:handle.services,afterWrite:()=>settle(false),fonts:()=>handle.fonts.catalog(),editing:()=>titleEdit?'canvas name':handle.editingText(),onHighlight:handle.highlightAgent,undo:(agent,signal,requestId)=>history('undo',agent,signal,requestId),redo:(agent,signal,requestId)=>history('redo',agent,signal,requestId)});
   unsubscribe=handle.editor.on(event=>{
-    if(event.projection)return;
+    if(event.projection){thumbnails.schedule();return;}
     if(event.changes){
-      const changes=changesBetween(lastDoc,handle.editor.doc);lastDoc=handle.editor.doc;
+      const changes=changesFromPatches(lastDoc,handle.editor.doc,event.changes);lastDoc=handle.editor.doc;
       if(changes.length){
-        const id=active.id,seq=++nextSeq,label=event.operation?.label,group=event.operation?.id;pending.push({seq,changes,label,group});
-        queue=queue.then(async()=>{
-          try{const snap=await api.invoke('commit',{id,seq,changes,label,group});if(active?.id===id)project(snap);}
-          catch(e){
-            toast('Could not persist edit: '+e.message,true);
-            if(/exceeds?|Invalid|16 MiB|24 MiB|too large/i.test(e.message)){
-              lastRejected={seq,message:e.message};
-              pending=pending.filter(p=>p.seq!==seq);project(await api.invoke('snapshot'));
-            }
-            throw e;
-          }
-        }).catch(()=>{});
-        clearTimeout(thumbnailTimer);thumbnailTimer=setTimeout(()=>void updateThumbnail(),1200);
+        const seq=++nextSeq,label=event.operation?.label,group=event.operation?.id;projection.enqueue({seq,changes,label,group});
+        saveFailed=false;updateSaveState();
+        void writes.commit(seq).catch(error=>toast('Could not persist edit: '+commitErrorMessage(error),true));
+        thumbnails.schedule();
       }
     }
-    if(event.viewport||event.page)paintCursors();
+    if(event.viewport||event.page){paintCursors();thumbnails.schedule();}
     if(event.selection)sendCursor();
   });
   $('#editor button[aria-label="Collapse sidebar"]')?.remove();
   $('#editor button[aria-label="Comment (not available)"]')?.remove();
   $('#toggle-layers').setAttribute('aria-expanded','true');
-  const latest=await api.invoke('snapshot');assertIdentity(latest);
-  active.title=latest.title;lastDoc=latest.document;handle.editor.receiveDocument(latest.document);
+  const latest=await startupStep('startup.finalSnapshot',()=>api.invoke('snapshot'));assertIdentity(latest);
+  active.title=latest.title;projection=startupSync('startup.finalProjection',()=>new DocumentProjection(latest));lastDoc=latest.document;startupSync('startup.finalReceive',()=>handle.editor.receiveDocument(latest.document));
   setTitle();
-  void updateThumbnail();if(snap.recovered)toast('Recovered the last valid backup. Save a portable copy.',true);
+  thumbnails.schedule();if(snap.recovered)toast('Recovered the last valid backup. Save a portable copy.',true);
   }catch(error){mcp?.dispose?.();unsubscribe?.();await handle?.destroy().catch(()=>{});handle=null;throw error;}finally{mounting=false;$('#editor').inert=false;}
-}
-async function updateThumbnail(){
-  if(!handle||!active)return;const id=active.id;
-  try{const shot=await handle.view.screenshot(undefined,{mode:'overview'});if(active?.id===id&&shot?.data)await api.invoke('thumbnail',{src:`data:${shot.mimeType};base64,${shot.data}`});}catch{}
+  await startupStep('startup.resync',()=>resync.wait());
 }
 async function applyRename(id,title){const result=await api.invoke('rename',{id,title});if(active?.id===id){active.title=result.title;setTitle();}return result;}
 function editTitle(){
@@ -131,8 +184,7 @@ function exportDialog(){
   modal('Export canvas',`<p>A portable .omc file includes the full editable document, embedded images and merge history.</p><div class="export-options"><button data-format="omc">Oh My Canvas <small>Editable .omc document, for backup and sharing</small></button><button data-format="json">Canvas JSON <small>Open interchange format</small></button><button data-format="svg">SVG <small>Vector export of the selected board</small></button><button data-format="png">PNG <small>Raster preview of the selected board</small></button></div>`);
   for(const b of document.querySelectorAll('[data-format]'))b.onclick=run(async()=>{
     await settle();const format=b.dataset.format;let content;
-    if(format==='json')content=JSON.stringify(exportCanvasJson(handle.editor.doc),null,2);
-    else if(format==='svg'){
+    if(format==='svg'){
       const id=handle.editor.selection[0]||handle.editor.page.objects.root.childIds[0];
       if(!id)throw Error('Create a board or select an element first');
       content=await handle.export.svg([id]);
@@ -208,8 +260,8 @@ function nativeHistory(redo){
 }
 api.on(message=>{
   if(message.documentId!==undefined&&(message.documentId!==documentId||message.generation!==generation))return;
-  if(message.type==='document')project(message);
-  else if(message.type==='saved'){if(message.id===active?.id)$('#save-state').textContent='Stored on this computer';}
+  if(message.type==='document'||message.type==='document-delta')void Promise.resolve().then(()=>project(message)).catch(error=>toast('Could not synchronize canvas: '+error.message,true));
+  else if(message.type==='saved'){if(message.id===active?.id)updateSaveState();}
   else if(message.type==='error')toast(message.message,true);
   else if(message.type==='session'){session=message.status;renderPeers();}
   else if(message.type==='cursor'){
@@ -235,7 +287,7 @@ api.on(message=>{
         result=message.call.name==='get_context'?{...result,...toolResponse(context)}:{...result,structuredContent:context};
       }
       controller.signal.throwIfAborted();api.toolResult(message.id,result);
-    }catch(e){api.toolResult(message.id,{isError:true,content:[{type:'text',text:e.message}],structuredContent:{ok:false,revision:null,error:{code:/busy|opening/i.test(e.message)?'busy':/identity mismatch/i.test(e.message)?'document_mismatch':/invalid|exceeds|too large/i.test(e.message)?'bad_args':controller.signal.aborted?'cancelled':'failed',message:controller.signal.aborted?'MCP request cancelled; persisted changes are not rolled back. Read this document before retrying.':e.message},documentId,document:{...active},generation,durableSequence:nextSeq}});}finally{toolRequests.delete(message.id);}})();
+    }catch(e){api.toolResult(message.id,{isError:true,content:[{type:'text',text:e.message}],structuredContent:{ok:false,revision:null,error:{code:/busy|opening/i.test(e.message)?'busy':/identity mismatch/i.test(e.message)?'document_mismatch':/invalid|exceeds|too large/i.test(e.message)?'bad_args':controller.signal.aborted?'cancelled':'failed',message:controller.signal.aborted?'MCP request cancelled; persisted changes are not rolled back. Read this document before retrying.':e.message},documentId,document:{...active},generation,durableSequence:projection?.ack??0}});}finally{toolRequests.delete(message.id);}})();
     toolTasks.set(message.id,task);void task.finally(()=>toolTasks.delete(message.id));
   }else if(message.type==='preferences'){prefs=message.preferences;
   }else if(message.type==='metadata'){
@@ -295,11 +347,12 @@ $('#title-input').onkeydown=event=>{const composing=event.isComposing||titleEdit
 $('#title-input').onkeyup=()=>{if(titleEdit)titleEdit.composingKey=false;};
 for(const el of document.querySelectorAll('[data-icon]'))el.innerHTML=icon(el.dataset.icon);
 try{
-  prefs=await api.invoke('preferences');
-  await openSnapshot(await api.invoke('snapshot'));
+  prefs=await startupStep('startup.preferences',()=>api.invoke('preferences'));
+  await openSnapshot(await startupStep('startup.snapshot',()=>api.invoke('snapshot')));
   // The host only dispatches document calls after this mount and bootstrap have completed.
-  ready=true;assertIdentity(await api.invoke('runtime-ready'));
+  ready=true;assertIdentity(await startupStep('startup.ready',()=>api.invoke('runtime-ready')));startupComplete=true;thumbnails.schedule();
 }catch(error){
+  startupTiming('startup.failure',performance.now()-startupAt);startupComplete=true;
   ready=false;toast('Could not open canvas: '+error.message,true);
   await api.invoke('runtime-ready',{ok:false,error:{message:error.message}}).catch(()=>{});
 }

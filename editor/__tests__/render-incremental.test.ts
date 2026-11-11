@@ -65,6 +65,29 @@ it('updates and removes only a leaf\'s obsolete gradient/filter definitions', ()
     expect(stage.querySelectorAll('linearGradient')).toHaveLength(1); expect(stage.querySelectorAll('filter')).toHaveLength(0);
     expectFreshScene(editor, stage);
 });
+it('patches a leaf after its serialization cache entry was evicted and removes only its obsolete resources', () => {
+    const { editor, view, stage } = setup([
+        createShape('rect', { id: 'evicted', fills: [gradient('#ff0000')], blur: 4 }),
+        createShape('rect', { id: 'sibling', x: 200, fills: [gradient('#0000ff')], blur: 2 })
+    ]);
+    const edited = view.element('evicted')!, sibling = view.element('sibling')!;
+    const oldFill = edited.querySelector('path')!.getAttribute('fill')!, oldFilter = edited.getAttribute('filter')!;
+    const siblingFill = sibling.querySelector('path')!.getAttribute('fill')!, siblingResource = stage.querySelector(siblingFill.slice(4, -1));
+    // The LRU may drop any record when a large ancestor is serialized. Exercise
+    // the miss without allocating thousands of unrelated test DOM elements.
+    vi.spyOn(SceneNodeCache.prototype, 'get').mockReturnValue(undefined);
+    editor.transact('Edit evicted leaf', doc => {
+        const shape = doc.pagesById[editor.pageId].objects.evicted;
+        shape.x = 40; shape.fills = [{ color: '#123456' }]; shape.blur = 0;
+    });
+    expect(view.renderDiagnostics()).toMatchObject({ mode: 'leaf', generatedNodes: 1, changedNodes: 1 });
+    expect(view.element('evicted')).toBe(edited); expect(view.element('sibling')).toBe(sibling);
+    expect(stage.querySelector(oldFill.slice(4, -1))).toBeNull(); expect(stage.querySelector(oldFilter.slice(4, -1))).toBeNull();
+    expect(stage.querySelector(siblingFill.slice(4, -1))).toBe(siblingResource);
+    expect(edited.querySelector('path')!.getAttribute('fill')).toBe('#123456');
+    expectFreshScene(editor, stage);
+    editor.undoStep(); expect(view.renderDiagnostics().mode).toBe('leaf'); expectFreshScene(editor, stage);
+});
 it('retains decoded image elements during unrelated edits and updates image sources and adjustments in place', async () => {
     vi.stubGlobal('Image', class { complete = true; naturalWidth = 1; src = ''; });
     const first = 'data:image/png;base64,AA==', second = 'data:image/png;base64,AQ==';

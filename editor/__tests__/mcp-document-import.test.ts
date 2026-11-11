@@ -58,6 +58,12 @@ describe('MCP imported document boundary', () => {
         const legacy = exportCanvasJson(document);validateImportedDocument(legacy);const converted = importCanvasJson(legacy);validateImportedDocument(converted);
         expect(converted.pagesById[converted.pages[0]].objects.shape.width).toBe(100);
     });
+    it('applies the explicit document profile to legacy imports while retaining page metadata bounds', () => {
+        const legacy = { pages: [{ type: 'frame', children: Array.from({ length: 20001 }, () => ({ type: 'rect' })) }] };
+        expect(() => validateImportedDocument(legacy)).toThrow(/20000/);
+        expect(() => validateImportedDocument({ ...legacy, capacity: 'large' })).not.toThrow();
+        expect(() => validateImportedDocument({ pages: [], capacity: 'large', editorPages: Array.from({ length: 101 }, (_, id) => ({ id })) })).toThrow(/page metadata/);
+    });
 });
 
 

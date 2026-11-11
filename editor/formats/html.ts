@@ -264,7 +264,7 @@ export function exportHtml(doc: CanvasDocument, pageId: string, ids: string[], o
             style.opacity = String(s.opacity);
         if (s.rotation)
             style.transform = `rotate(${s.rotation}deg)`;
-        if(s.fills?.[0]?.image)style['background-image']=`url(${JSON.stringify(imageSource(s.fills[0].image,doc.assets))})`;
+        if(s.fills?.[0]?.image || s.fills?.[0]?.type === 'image')style['background-image']=`url(${JSON.stringify(imageSource(s.fills[0].image ?? s.fills[0],doc.assets))})`;
         if (s.fills?.[0]?.color)
             style['background-color'] = s.fills[0].color;
         if (s.strokes?.[0])
@@ -286,7 +286,7 @@ export function exportHtml(doc: CanvasDocument, pageId: string, ids: string[], o
         const attrs = `${options.alias ? ` data-id="${escapeAttr(options.alias(id))}"` : ''} data-name="${escapeAttr(s.name ?? s.type)}"${s.dataRef || s['data-ref'] ? ` data-ref="${escapeAttr(s.dataRef ?? s['data-ref'])}"` : ''} style="${escapeAttr(Object.entries(style).map(([k, v]) => `${k}:${v}`).join(';'))}"`;
         if (complex) {
             const bounds = { x: s.x, y: s.y, width: s.width, height: s.height };
-            const svg = view?.sceneSvg?.([id], { bounds }) ?? new SceneWriter(objects, { assets:doc.assets, exporting: true }).svg([id], bounds);
+            const svg = view?.sceneSvg?.([id], { bounds, assets: doc.assets }) ?? new SceneWriter(objects, { assets:doc.assets, exporting: true }).svg([id], bounds);
             return `<div${attrs}>${svg.replace('<svg ', '<svg overflow="visible" ')}</div>`;
         }
         if (s.type === 'image')
@@ -302,6 +302,8 @@ export function exportHtml(doc: CanvasDocument, pageId: string, ids: string[], o
         return `<div${attrs}>${(s.childIds ?? []).map(child => node(child, s)).join('')}</div>`;
     }
     const html = ids.map(id => node(id)).join('\n');
+    if (/\b(?:src|href)=["'](?:omc-asset:|omc:\/\/)|url\((?:&quot;|["'])?(?:omc-asset:|omc:\/\/)/.test(html))
+        throw new Error('Resolve image assets with portableDocument before exporting');
     if (html.length > (options.limit ?? 2000000))
         throw new Error('HTML response exceeds limit');
     return html;

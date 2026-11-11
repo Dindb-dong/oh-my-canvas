@@ -5,6 +5,7 @@ import { reconcileComponents } from '../components';
 import { reconcileStyles } from '../styles';
 import { reconcileLibraries } from '../assets';
 import { applyResourceOperation, readResourceOperation, prepareResourceOperation, isResourceRead } from '../mcp/resources';
+import { imageSource } from '../images/assets';
 
 const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=';
 function setup() {
@@ -140,7 +141,8 @@ describe('MCP resource operations', () => {
         expect(asset).toMatchObject({ kind: 'image', name: 'Pixel', width: 1, embedded: true });
         expect(asset.src).toBeUndefined();
         const { selection } = apply('document_assets', { action: 'place', id: asset.id, parentId: 'board', x: 10, y: 20 });
-        expect(editor.page.objects[selection[0]]).toMatchObject({ parentId: 'board', image: { src: pixel }, x: 10, y: 20 });
+        expect(editor.page.objects[selection[0]]).toMatchObject({ parentId: 'board', image: { assetId: asset.id }, x: 10, y: 20 });
+        expect(imageSource(editor.page.objects[selection[0]].image, editor.doc.assets)).toBe(pixel);
         const before = editor.doc;
         expect(() => apply('document_assets', { action: 'place', id: asset.id, parentId: 'shape' })).toThrow(/container/);
         expect(() => apply('document_assets', { action: 'add', id: asset.id, kind: 'image', name: 'Overwrite', dataUrl: pixel })).toThrow(/already exists/);
@@ -148,7 +150,9 @@ describe('MCP resource operations', () => {
         expect(editor.doc).toBe(before);
         apply('document_assets', { action: 'remove', id: asset.id });
         expect(read('document_assets', { action: 'list' }).assets).toEqual([]);
-        expect(editor.page.objects[selection[0]].image.src).toBe(pixel);
+        expect(imageSource(editor.page.objects[selection[0]].image, editor.doc.assets)).toBe(pixel);
+        expect(editor.page.objects[selection[0]].image.src).toBeUndefined();
+        expect(editor.doc.assets[asset.id].deleted).toBe(true);
         editor.destroy();
     });
 

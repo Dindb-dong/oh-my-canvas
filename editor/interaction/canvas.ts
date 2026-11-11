@@ -1,9 +1,10 @@
-import type { Data, EditorServices, Point, Shape, Tool } from "../contracts";
+import type { Data, EditorServices, Point, Shape, Tool, Viewport } from "../contracts";
 import { createShape, cloneShapes, topLevelIds, removeShapes, isEditable } from "../document";
 import { setPathHandle, movePathNodes, insertPathNode as splitPathNode, deletePathNodes, refreshPath, joinPathEnds, closePath, convertPathNode } from "../commands";
 import { hitTest, moveShape, resizeShape, setShapeOrientation, transformShapes, unorientPoint, orientedPoint, multiply, inverse, intersects } from "../geometry";
 import { el, clone, toast } from "../ui/dom";
 import type { createTextSession } from "./text";
+import { SpatialIndex, SnapIndex, hitBounds, type SpatialEntry } from '../render/spatial';
 type TextSession = ReturnType<typeof createTextSession>;
 const handles = [
     "nw",
@@ -46,6 +47,31 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
     let overlayState: unknown[] | null = null, decorationState: unknown[] | null = null;
     let decorationObjects: Record<string, Shape> | null = null, decorationShapes: Shape[] = [];
     let overlayBuilds = 0, decorationBuilds = 0;
+    let hitSource: Record<string, Shape> | undefined, hitRevision = -1, hitIndex: SpatialIndex | undefined, hitFallback: SpatialEntry[] = [], hitScale = 1;
+    let hitCandidates = 0, snapKey: unknown, snapIndex: SnapIndex | undefined, guideOwners: string[] = [];
+    let snapExcluded = new Set<string>();
+    let viewportFrame: number | null = null, queuedViewport: Viewport | null = null, queuedBase: Viewport | null = null;
+    function flushViewport() {
+        if (viewportFrame !== null) cancelAnimationFrame(viewportFrame);
+        viewportFrame = null;
+        const next = queuedViewport, base = queuedBase;
+        queuedViewport = queuedBase = null;
+        if (!destroyed && next && editor.viewport === base) editor.setViewport(next);
+    }
+    function queueViewport(kind: 'pan' | 'zoom', a: number, b: number | Point) {
+        if (typeof services.view.onRender !== 'function' || typeof requestAnimationFrame !== 'function') {
+            if (kind === 'pan') pan(a, b as number); else zoom(a, b as Point);
+            return;
+        }
+        if (queuedBase !== editor.viewport) { queuedViewport = editor.viewport; queuedBase = editor.viewport; }
+        const v = queuedViewport ?? editor.viewport;
+        if (kind === 'pan') queuedViewport = { ...v, vbox: { ...v.vbox, x: v.vbox.x - a / v.zoom, y: v.vbox.y - (b as number) / v.zoom } };
+        else {
+            const at = b as Point, z = Math.max(.01, Math.min(200, v.zoom * a));
+            queuedViewport = { ...v, zoom: z, vbox: { x: v.vbox.x + at.x / v.zoom - at.x / z, y: v.vbox.y + at.y / v.zoom - at.y / z, width: v.vport.width / z, height: v.vport.height / z } };
+        }
+        if (viewportFrame === null) viewportFrame = requestAnimationFrame(() => { viewportFrame = null; flushViewport(); });
+    }
     const sameState = (before: unknown[] | null, after: unknown[]) => !!before && before.length === after.length && before.every((value, index) => Object.is(value, after[index]));
     function cancelOverlayFrame() {
         if (pendingOverlay !== null) {
@@ -127,6 +153,47 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
     }
     function hit(point: Point, deep = false) {
         const objects = editor.page.objects;
+        const revision = services.view.geometryRevision ?? 0;
+        if (hitSource !== objects || hitRevision !== revision) {
+            hitSource = objects; hitRevision = revision; hitIndex = undefined; hitFallback = []; hitScale = 1;
+            if (Object.keys(objects).length > 512) {
+                const entries: SpatialEntry[] = [], seen = new Set<string>();
+                let order = 0;
+                const collect = (id: string) => {
+                    const stored = objects[id];
+                    if (!stored || seen.has(id) || stored.hidden || stored.locked) return;
+                    seen.add(id);
+                    const shape = stored.type === 'boolean' ? (services.view.projectedShape?.(id) ?? stored) : stored;
+                    if (id !== 'root') {
+                        const box = hitBounds(shape), entry = { id, order: order++, bounds: box ?? { x: 0, y: 0, width: 0, height: 0 } };
+                        if (box) entries.push(entry); else hitFallback.push(entry);
+                        const m = shape.transform;
+                        if (m) hitScale = Math.max(hitScale, Math.abs(m.a) + Math.abs(m.c), Math.abs(m.b) + Math.abs(m.d));
+                    }
+                    if (stored.type !== 'boolean') for (const child of stored.childIds ?? []) collect(child);
+                };
+                collect('root'); hitIndex = new SpatialIndex(entries);
+            }
+        }
+        if (hitIndex) {
+            const radius = 4 / editor.viewport.zoom * hitScale;
+            const candidates = [...hitIndex.query({ x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2 }), ...hitFallback].sort((a, b) => b.order - a.order);
+            hitCandidates = candidates.length;
+            for (const candidate of candidates) {
+                const stored = objects[candidate.id], shape = stored.type === 'boolean' ? (services.view.projectedShape?.(stored.id) ?? stored) : stored;
+                let valid = true, ancestor: Shape | undefined = shape;
+                while (ancestor && ancestor.id !== 'root') {
+                    if (ancestor.hidden || ancestor.locked || ancestor.type === 'frame' && ancestor.clipContent && !pointInShape(ancestor, point)) { valid = false; break; }
+                    ancestor = objects[ancestor.parentId];
+                }
+                if (!valid || !pointInShape(shape, point)) continue;
+                if (deep) return shape;
+                let target = shape;
+                while (target.parentId !== 'root' && objects[target.parentId] && objects[target.parentId].type !== 'frame') target = objects[target.parentId];
+                return target;
+            }
+            return null;
+        }
         const walk = (id: string): Shape | null => {
             const stored = objects[id];
             const s = stored?.type === "boolean" ? (services.view.projectedShape?.(id) ?? stored) : stored;
@@ -263,25 +330,18 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             }
         };
         exclude.forEach(hideChildren);
+        snapExcluded = excluded;
         const threshold = 5 / editor.viewport.zoom;
         let x = p.x, y = p.y, bx = threshold, by = threshold;
         const lines: Data[] = [];
-        const objects = Object.values(editor.page.objects);
-        for (const s of objects) {
-            if (s.id === "root" || excluded.has(s.id) || s.hidden)
-                continue;
-            for (const value of [s.x, s.x + s.width / 2, s.x + s.width])
-                if (Math.abs(value - p.x) < bx) {
-                    x = value;
-                    bx = Math.abs(value - p.x);
-                }
-            for (const value of [s.y, s.y + s.height / 2, s.y + s.height])
-                if (Math.abs(value - p.y) < by) {
-                    y = value;
-                    by = Math.abs(value - p.y);
-                }
+        const key = gesture ?? editor.page.objects;
+        if (snapKey !== key || !snapIndex) {
+            snapKey = key; snapIndex = new SnapIndex(editor.page.objects);
+            guideOwners = Object.values(editor.page.objects).filter(shape => shape.id !== 'root' && shape.guides?.length).map(shape => shape.id);
         }
-        const frameGuides = Object.values(editor.page.objects).filter(shape => shape.id !== "root" && !shape.hidden && !shape.flipX && !shape.flipY && Math.abs(shape.rotation % 360) < 0.000001 && ancestorEditable(shape)).flatMap(shape => (shape.guides ?? []).map((guide: Data) => ({
+        const sx = snapIndex.nearest('x', p.x, threshold, excluded), sy = snapIndex.nearest('y', p.y, threshold, excluded);
+        x = sx.value; bx = sx.distance; y = sy.value; by = sy.distance;
+        const frameGuides = guideOwners.map(id => editor.page.objects[id]).filter(shape => shape && !shape.hidden && !shape.flipX && !shape.flipY && Math.abs(shape.rotation % 360) < 0.000001 && ancestorEditable(shape)).flatMap(shape => (shape.guides ?? []).map((guide: Data) => ({
             ...guide,
             position: guide.position + (guide.axis === "x" ? shape.x : shape.y)
         })));
@@ -642,7 +702,9 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         gesture = {
             kind,
             start: world(local(event)),
-            base: clone(editor.page.objects),
+            // Published objects are immutable; geometry helpers only read this
+            // fixed origin and copy fields into each isolated preview draft.
+            base: editor.page.objects,
             bounds: shapes.length === 1 ? {
                 x: shapes[0].x,
                 y: shapes[0].y,
@@ -952,7 +1014,9 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                 gesture = {
                     kind: "move",
                     start: point,
-                    base: clone(editor.page.objects),
+                    // Capture after the duplicate preview so new IDs are part
+                    // of the fixed immutable origin for the entire gesture.
+                    base: editor.page.objects,
                     ids,
                     bounds: bounds(ids.map(id => editor.page.objects[id])),
                     moved: false,
@@ -990,8 +1054,8 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
                 y: (a.y + b.y) / 2
             };
             const nextDistance = Math.hypot(a.x - b.x, a.y - b.y);
-            zoom(nextDistance / pinch.distance, pinch.center);
-            pan(center.x - pinch.center.x, center.y - pinch.center.y);
+            queueViewport('zoom', nextDistance / pinch.distance, pinch.center);
+            queueViewport('pan', center.x - pinch.center.x, center.y - pinch.center.y);
             pinch = {
                 distance: nextDistance,
                 center,
@@ -1010,7 +1074,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
             return;
         }
         if (g.kind === "pan") {
-            pan(p.x - g.start.x, p.y - g.start.y);
+            queueViewport('pan', p.x - g.start.x, p.y - g.start.y);
             g.start = p;
             return;
         }
@@ -1685,6 +1749,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         return false;
     }
     stage.addEventListener("pointerdown", event => {
+        flushViewport();
         down(event).catch(error => {
             cancelInteraction();
             toast(String(error), "error");
@@ -1705,6 +1770,7 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
     });
     window.addEventListener("pointerup", event => {
         try {
+            flushViewport();
             up(event);
         }
         catch (error) {
@@ -1722,9 +1788,9 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
     stage.addEventListener("wheel", event => {
         event.preventDefault();
         if (event.ctrlKey || event.metaKey)
-            zoom(Math.exp(-event.deltaY * 0.01), local(event));
+            queueViewport('zoom', Math.exp(-event.deltaY * 0.01), local(event));
         else
-            pan(-event.deltaX, -event.deltaY);
+            queueViewport('pan', -event.deltaX, -event.deltaY);
     }, {
         signal,
         passive: false
@@ -1811,6 +1877,10 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
     });
     let interactionPage = editor.pageId;
     const unsubscribe = editor.on(event => {
+        if (event.changes || event.deltas || event.projection || event.page) {
+            const changed = (event as Data).changedShapeIds?.[editor.pageId] as string[] | undefined;
+            if (!changed || changed.some(id => !snapExcluded.has(id))) snapKey = undefined;
+        }
         if (editor.pageId !== interactionPage) {
             interactionPage = editor.pageId;
             pen = null;
@@ -1853,9 +1923,9 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
     renderOverlays();
     return {
         render: renderOverlays,
-        flush: () => renderOverlays(false),
+        flush: () => { flushViewport(); renderOverlays(false); },
         get diagnostics() {
-            return {overlayBuilds, decorationBuilds, pendingOverlay: pendingOverlay !== null};
+            return {overlayBuilds, decorationBuilds, pendingOverlay: pendingOverlay !== null, pendingViewport: viewportFrame !== null, hitCandidates};
         },
         world,
         screen,
@@ -1926,6 +1996,9 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         },
         destroy() {
             destroyed = true;
+            if (viewportFrame !== null) cancelAnimationFrame(viewportFrame);
+            viewportFrame = null; queuedViewport = queuedBase = null;
+            hitSource = undefined; hitIndex = undefined; hitFallback = []; snapIndex = undefined; snapKey = undefined; guideOwners = [];
             cancelOverlayFrame();
             abort.abort();
             unsubscribe();

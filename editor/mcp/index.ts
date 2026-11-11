@@ -9,6 +9,7 @@ import { identity, pathBounds } from '../geometry';
 import { createCommands } from '../commands';
 import { joinPathEnds, regeneratePrimitive } from '../commands/path';
 import { exportCanvasJson } from '../formats';
+import { portableDocument, portableClipboard } from '../images/assets';
 import { applyEditorOperation, applyView, requireEditable, clipboardPayload, pasteProperties, validateClipboardPayload, prepareClipboardPayload, selectionDocument } from './operations';
 import { isResourceRead, readResourceOperation, applyResourceOperation, prepareResourceOperation } from './resources';
 import { applyStyles } from './style';
@@ -150,7 +151,7 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             if (name === 'clipboard') {
                 if (['copy', 'cut', 'copy_properties'].includes(args.action)) {
                     if (args.action === 'cut') requireEditable(editor, resolved.ids);
-                    const payload = clipboardPayload(resolved, editor);
+                    const payload = args.preparedClipboardPayload ?? clipboardPayload(resolved, editor);
                     state(agent).clipboard = structuredClone(payload);
                     if (args.action === 'cut') removeShapes(page, resolved.ids);
                     result = { payload, ...(args.action === 'cut' ? { deleted: resolved.ids } : {}) };
@@ -411,8 +412,15 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         const guard = () => { check(signal); checkScope(); if (editor.doc !== snapshot || editor.pageId !== sourcePage) throw new McpError('stale_revision', 'Canvas changed during export; read context before retrying'); };
         const ids = args.ids?.length ? args.ids.map((id: string) => resolve(agent, id)) : [...editor.page.objects.root.childIds ?? []];
         let bytes: Uint8Array, mime: string;
-        if (args.format === 'json') { bytes = new TextEncoder().encode(JSON.stringify(wholeDocument ? exportCanvasJson(snapshot) : selectionDocument(editor, ids))); mime = 'application/json'; }
-        else if (args.format === 'html') { if (!ids.length) throw new McpError('invalid', 'Choose layers to export'); bytes = new TextEncoder().encode(exportHtml(snapshot, sourcePage, ids, { view, limit: maxBytes })); mime = 'text/html'; }
+        if (args.format === 'json') {
+            const portable = await portableDocument(wholeDocument ? snapshot : selectionDocument(editor, ids), services.resolveImageSource, { signal, maxBytes }); guard();
+            bytes = new TextEncoder().encode(JSON.stringify(wholeDocument ? exportCanvasJson(portable) : portable)); mime = 'application/json';
+        }
+        else if (args.format === 'html') {
+            if (!ids.length) throw new McpError('invalid', 'Choose layers to export');
+            const portable = await portableDocument(selectionDocument(editor, ids), services.resolveImageSource, { signal, maxBytes }); guard();
+            bytes = new TextEncoder().encode(exportHtml(portable, sourcePage, ids, { view, limit: maxBytes })); mime = 'text/html';
+        }
         else if (args.format === 'svg') {
             if (!services.export || !ids.length) throw new McpError('invalid', 'Choose layers to export');
             const source = await waiting((services.export as Data).svg(ids, args), signal); guard(); bytes = new TextEncoder().encode(source); mime = 'image/svg+xml';
@@ -443,8 +451,12 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         if (isResourceRead(name, args)) return response({ ok: true, revision, ...readResourceOperation(name, args, editor.doc, editor.pageId, services) });
         if (name === 'page' && args.action === 'list') return response({ ok: true, revision, pages: editor.doc.pages.map(id => ({ id, name: editor.doc.pagesById[id].name, guides: editor.doc.pagesById[id].guides ?? [] })), pageId: editor.pageId });
         if (name === 'clipboard' && ['copy', 'copy_properties'].includes(args.action)) {
+            const snapshot = editor.doc;
             const resolved = { ...args, ids: args.ids.map((id: string) => resolve(agent, id)) };
-            const payload = clipboardPayload(resolved, editor); state(agent).clipboard = structuredClone(payload);
+            const payload = await portableClipboard(clipboardPayload(resolved, editor), services.resolveImageSource, { signal, maxBytes: 16 * 1024 * 1024 });
+            checkPage();
+            if (editor.doc !== snapshot) throw new McpError('stale_revision', 'Canvas changed while copying; retry against the current revision');
+            state(agent).clipboard = structuredClone(payload);
             return response({ ok: true, revision, payload });
         }
         if (name === 'view') {
@@ -519,6 +531,14 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
             return response({ ok: true, revision, ids: created.map(id => alias(agent, id)), rawIds: created, diagnostics: diagnostics(created), warnings: [] });
         }
         if (writes.has(name)) {
+            if (name === 'clipboard' && args.action === 'cut') {
+                const sourceDocument = editor.doc;
+                const resolved = { ...args, ids: args.ids.map((id: string) => resolve(agent, id)) };
+                const preparedClipboardPayload = await portableClipboard(clipboardPayload(resolved, editor), services.resolveImageSource, { signal, maxBytes: 16 * 1024 * 1024 });
+                checkPage();
+                if (editor.doc !== sourceDocument) throw new McpError('stale_revision', 'Canvas changed while copying; no layers were cut');
+                args = { ...args, preparedClipboardPayload };
+            }
             if (name === 'clipboard' && ['paste', 'paste_properties'].includes(args.action) && !args.payload) args = { ...args, payload: state(agent).clipboard };
             const prepared = await waiting(prepareResourceOperation(name, args, editor.doc, editor.pageId, services, signal), signal);
             args = prepared.args;
@@ -640,12 +660,16 @@ export function installLvMcp(editor: EditorStore, view: RenderView, options: Mcp
         }
         if (name === 'get_html') {
             await settled(signal);
-            const id = resolve(agent, args.id);
+            const id = resolve(agent, args.id), snapshot = editor.doc, sourcePage = editor.pageId;
             let html: string;
             try {
-                html = exportHtml(editor.doc, editor.pageId, [id], { view, limit: 200000, alias: id => alias(agent, id) });
+                const portable = await portableDocument(selectionDocument(editor, [id]), services.resolveImageSource, { signal, maxBytes: 200000 });
+                check(signal);
+                if (editor.doc !== snapshot || editor.pageId !== sourcePage) throw new McpError('stale_revision', 'Canvas changed during export; read context before retrying');
+                html = exportHtml(portable, sourcePage, [id], { view, limit: 200000, alias: id => alias(agent, id) });
             }
             catch (e) {
+                if (e instanceof McpError) throw e;
                 throw new McpError('invalid', (e as Error).message);
             }
             return response({ ok: true, revision, html });

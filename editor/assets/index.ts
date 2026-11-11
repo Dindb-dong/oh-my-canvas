@@ -1,4 +1,4 @@
-import {detachImageAsset} from '../images/assets';
+import {referencedAssets, isExternalImageSource} from '../images/assets';
 import type { CanvasDocument, Data, EditorStore, Page, Shape } from '../contracts';
 import { copy, uid, geometry, cloneTree, validateComponents, locate } from '../components/model';
 import { createShape, refreshFrames } from '../document';
@@ -226,7 +226,7 @@ export function createAssetService(editor: EditorStore) {
                 const first = variants[0];
                 grouped.set(key, { id: key, componentId: first.id, name: c.variantSetId ? (editor.doc.pagesById[c.mainPageId]?.objects[c.variantSetId]?.name || c.name) : c.name, path: c.path || (c.name || '').split('/').slice(0, -1).join('/').trim(), pageId: c.mainPageId, pageName: editor.doc.pagesById[c.mainPageId]?.name || '', libraryId: c.libraryId, variants: variants.map(v => ({ id: v.id, name: v.name, variantProperties: copy(v.variantProperties || []) })), thumbnail: first.thumbnail });
             }
-            const files = Object.values<Data>(editor.doc.assets || {}).filter((a: Data) => a.name?.toLowerCase().includes(query.toLowerCase()));
+            const files = Object.values<Data>(editor.doc.assets || {}).filter((a: Data) => !a.deleted && a.name?.toLowerCase().includes(query.toLowerCase()));
             return [...grouped.values(), ...copy(files)];
         },
         insert(componentId: string, options: Data = {}) {
@@ -238,10 +238,15 @@ export function createAssetService(editor: EditorStore) {
         addFile(input: Data) {
             if (!input.name || !input.src || typeof input.src !== 'string')
                 throw Error('Asset name and source required');
-            if (!/^(data:|blob:|https?:|file:)/i.test(input.src))
+            if (!/^(data:|blob:|https?:|file:)/i.test(input.src) && !isExternalImageSource(input.src))
                 throw Error('Unsupported asset URL');
             return editor.transact('asset:add', doc => {
-                const asset = { ...copy(input), id: input.id || uid(), kind: input.kind || 'image' };
+                const asset: Data = { ...copy(input), id: input.id || uid(), kind: input.kind || 'image' };
+                const existing = doc.assets?.[asset.id];
+                if (existing) {
+                    if (existing.src === asset.src && existing.kind === asset.kind) return copy(existing);
+                    throw Error('Asset ID already exists');
+                }
                 (doc.assets ||= {})[asset.id] = asset;
                 return copy(asset);
             });
@@ -250,8 +255,9 @@ export function createAssetService(editor: EditorStore) {
             return editor.transact('asset:remove', doc => {
                 if (!doc.assets?.[id])
                     throw Error('Unknown asset');
-                for(const page of Object.values(doc.pagesById))detachImageAsset(page.objects,id,doc.assets[id].src);
-                delete doc.assets[id];
+                const referenced = referencedAssets({ pages: doc.pagesById, components: doc.components, styles: doc.styles, libraries: doc.libraries }, doc.assets);
+                if (doc.assets[id].kind !== 'font' && referenced[id]) doc.assets[id].deleted = true;
+                else delete doc.assets[id];
                 return true;
             });
         },
@@ -268,7 +274,7 @@ export function createAssetService(editor: EditorStore) {
                 const parentId = options.parentId || 'root';
                 if (!page.objects[parentId])
                     throw Error('Unknown parent');
-                const s = createShape(a.kind === 'svg' ? 'svg' : 'image', { id: uid(), name: a.name, parentId, enclosingFrameId: parentId, x: options.x || 0, y: options.y || 0, width: options.width || a.width || 100, height: options.height || a.height || 100, rotation: 0, box: { x: 0, y: 0, width: 0, height: 0 }, corners: [], transform: { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }, inverseTransform: { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }, image: { src: a.src, width: a.width, height: a.height, mimeType: a.mimeType }, assetId: id });
+                const s = createShape(a.kind === 'svg' ? 'svg' : 'image', { id: uid(), name: a.name, parentId, enclosingFrameId: parentId, x: options.x || 0, y: options.y || 0, width: options.width || a.width || 100, height: options.height || a.height || 100, rotation: 0, box: { x: 0, y: 0, width: 0, height: 0 }, corners: [], transform: { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }, inverseTransform: { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }, image: { assetId: id, width: a.width, height: a.height, mimeType: a.mimeType }, assetId: id });
                 geometry(s);
                 page.objects[s.id] = s;
                 (page.objects[parentId].childIds ||= []).push(s.id);
