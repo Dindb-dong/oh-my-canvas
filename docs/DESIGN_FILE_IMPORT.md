@@ -237,6 +237,8 @@ The review inspected the prototype code and existing measurements without modify
 
 ## Architecture direction adopted
 
+This section records the incremental architecture adopted for PR #12/#13. The [native engine rewrite plan](NATIVE_ENGINE_PLAN.md) supersedes the recommendations to retain Electron, the DOM/SVG renderer and one whole-document Y.Doc for future architecture. The implementation evidence and historical measurements below remain applicable to the PR #12/#13 runtime.
+
 Preserve the import worker, content hashes, all-page traversal, existing validation guarantees, retained renderer, and reopen regression. Avoid a complete rewrite before measuring individual phases.
 
 ```mermaid
