@@ -117,7 +117,50 @@ impl Node {
         {
             return Err("invalid parent ID".into());
         }
-        validate_properties(&self.properties)
+        validate_properties(&self.properties)?;
+        if self.kind == NodeKind::Text {
+            let text = match self.properties.get("text") {
+                Some(Value::String(text)) => text.as_str(),
+                None => "",
+                _ => return Err("text must be a string".into()),
+            };
+            if let Some(runs) = self.properties.get("textRuns") {
+                let runs = runs.as_array().ok_or("textRuns must be an array")?;
+                let mut offset = 0;
+                for run in runs {
+                    let object = run.as_object().ok_or("text run must be an object")?;
+                    if object
+                        .keys()
+                        .any(|key| key != "text" && key != "attributes")
+                    {
+                        return Err("unknown text run field".into());
+                    }
+                    let part = object
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .ok_or("text run requires text")?;
+                    let attributes = object
+                        .get("attributes")
+                        .and_then(Value::as_object)
+                        .ok_or("text run requires attributes")?;
+                    validate_properties(
+                        &attributes
+                            .iter()
+                            .map(|(key, value)| (key.clone(), value.clone()))
+                            .collect(),
+                    )?;
+                    let end = offset + part.len();
+                    if text.get(offset..end) != Some(part) {
+                        return Err("textRuns must concatenate to canonical text".into());
+                    }
+                    offset = end;
+                }
+                if offset != text.len() {
+                    return Err("textRuns must concatenate to canonical text".into());
+                }
+            }
+        }
+        Ok(())
     }
 }
 

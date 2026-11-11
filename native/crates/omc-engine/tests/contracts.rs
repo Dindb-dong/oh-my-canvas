@@ -38,6 +38,114 @@ fn set(id: &str, key: &str, value: Value) -> Command {
 }
 
 #[test]
+fn unset_removes_authored_override_and_undo_preserves_foreign_properties() {
+    let directory = tempfile::tempdir().unwrap();
+    let (content, id, text) = content();
+    let mut engine =
+        DocumentEngine::create_from_content(directory.path().join("d.sqlite"), content).unwrap();
+    engine
+        .execute(
+            &context("a"),
+            &command(&engine, set(&id, "fill", "red".into())),
+        )
+        .unwrap();
+    let removal = command(
+        &engine,
+        Command::Batch {
+            commands: vec![
+                set(
+                    &id,
+                    "fillStyleId",
+                    "style_00000000000000000000000000000001".into(),
+                ),
+                Command::NodeUnset {
+                    node_id: id.clone(),
+                    properties: vec!["fill".into()],
+                },
+            ],
+        },
+    );
+    assert_eq!(
+        serde_json::to_value(&removal.command).unwrap()["commands"][1]["type"],
+        "node.unset"
+    );
+    engine.execute(&context("a"), &removal).unwrap();
+    assert!(
+        !engine
+            .node(&id)
+            .unwrap()
+            .unwrap()
+            .properties
+            .contains_key("fill")
+    );
+    engine
+        .execute(&context("b"), &command(&engine, set(&id, "x", 27.into())))
+        .unwrap();
+    engine
+        .execute(&context("a"), &command(&engine, Command::Undo))
+        .unwrap();
+    let node = engine.node(&id).unwrap().unwrap();
+    assert_eq!(node.properties["fill"], "red");
+    assert_eq!(node.properties["x"], 27);
+    assert!(!node.properties.contains_key("fillStyleId"));
+    let bad = command(
+        &engine,
+        Command::NodeUnset {
+            node_id: text,
+            properties: vec!["text".into()],
+        },
+    );
+    assert_eq!(
+        engine.execute(&context("a"), &bad).unwrap_err().code,
+        "invalid_argument"
+    );
+}
+
+#[test]
+fn imported_rich_text_survives_projection_edit_and_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("d.sqlite");
+    let (mut content, _, id) = content();
+    let text = content.nodes.get_mut(&id).unwrap();
+    text.properties.insert("textRuns".into(),json!([{"text":"ab","attributes":{"fontWeight":700,"fill":"red"}},{"text":"c😀","attributes":{"fontSize":24,"fill":"blue"}}]));
+    let mut engine = DocumentEngine::create_from_content(&path, content).unwrap();
+    assert_eq!(
+        engine.node(&id).unwrap().unwrap().properties["textRuns"][0]["attributes"]["fontWeight"],
+        700
+    );
+    engine
+        .execute(
+            &context("a"),
+            &command(
+                &engine,
+                Command::TextInsert {
+                    node_id: id.clone(),
+                    offset: 2,
+                    text: "X".into(),
+                    attributes: [("fill".into(), json!("green"))].into(),
+                },
+            ),
+        )
+        .unwrap();
+    drop(engine);
+    let engine = DocumentEngine::open(&path).unwrap();
+    let node = engine.node(&id).unwrap().unwrap();
+    assert_eq!(node.properties["text"], "abXc😀");
+    assert_eq!(
+        node.properties["textRuns"][0],
+        json!({"text":"ab","attributes":{"fontWeight":700,"fill":"red"}})
+    );
+    assert_eq!(
+        node.properties["textRuns"][1],
+        json!({"text":"X","attributes":{"fill":"green"}})
+    );
+    assert_eq!(
+        node.properties["textRuns"][2],
+        json!({"text":"c😀","attributes":{"fontSize":24,"fill":"blue"}})
+    );
+}
+
+#[test]
 fn durable_receipt_replays_after_restart_and_epoch_checks_precede_replay() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("document.sqlite");
