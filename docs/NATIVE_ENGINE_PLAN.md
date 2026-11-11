@@ -6,6 +6,22 @@
 **Status:** Product direction accepted; native implementation and performance qualification are pending.  
 **Reference baseline:** PR #13, merged as `950dec5f0329de0ee5ece60e5a88b83f083aeffd`; its measured runtime is `cf9f18433924a7d581c815be5df9bfb96505cd75`.
 
+## Reading order and specification status
+
+This is the entry point to the native version 1 implementation specification. It is written for a contributor who has this repository and public references, without access to the original discussion or private planning notes. Start with the requirements below, then follow the owning contracts and work packages. All native implementations, packages and qualification results remain **planned** until their evidence is recorded.
+
+| Document | What it specifies |
+| --- | --- |
+| [Implementation guide](native-engine/IMPLEMENTATION_GUIDE.md) | Proposed crate/process boundaries, dependency order, 18 work packages, resource defaults, contributor workflow and release procedure |
+| [Engine contracts](native-engine/ENGINE_CONTRACTS.md) | Canonical entities, command/result examples, revisions, conflicts, idempotency, text coediting, Undo, jobs and errors |
+| [Storage and collaboration](native-engine/STORAGE_AND_COLLABORATION.md) | Per-document SQLite/shard storage, durable commit/recovery, asset ordering, replication and cross-shard publication |
+| [Rendering and interchange](native-engine/RENDERING_AND_INTERCHANGE.md) | Editable HTML/CSS profile, incremental layout, native text/input, coordinates, effects, shaders and complete exports |
+| [Capability matrix](native-engine/CAPABILITY_MATRIX.md) | Dated Paper/local scope, every current MCP tool, desktop/interchange features and required evidence |
+| [Qualification](native-engine/QUALIFICATION.md) | Reproducible W1–W7 workloads, hardware profiles, timing/memory definitions, correctness cases and PASS/FAIL rules |
+| [Reference projects](native-engine/REFERENCE_PROJECTS.md) | Pinned upstream code landmarks, observed license declarations, integration experiments and fallback decisions |
+
+This overview owns product requirements N1–N8 and historical evidence. The linked documents own their detailed contracts; implementation changes must keep both levels consistent. Proposed paths, native CLI commands and version identifiers are explicitly labeled and must not be mistaken for existing runtime behavior. Upstream reading snapshots are not a tested dependency lock. An implementation PR closes a requirement only with code and the matching executable evidence, not by changing a status label.
+
 ## 1. Product decision
 
 Build Oh My Canvas into a fully local replacement for the agreed Paper design-and-agent workflows, using a native Rust application and an independently owned design engine. A substantial rewrite, including the desktop UI, is within scope.
@@ -29,7 +45,7 @@ This decision supersedes the earlier recommendation to retain Electron, the DOM/
 | N7 | Edits remain durable and recoverable | Termination/restart after durable ACK; interrupted migration, journal and checkpoint cases |
 | N8 | Memory and work are bounded across the application | Peak CPU/GPU accounting, budget enforcement, eviction and repeated-navigation stability |
 
-"Paper replacement" is the product goal, not an assertion of present parity. Establish and version the actual Paper workflow inventory in milestone M0. Preserve the existing Oh My Canvas capability set as well; features already supported locally are not implicitly dropped because a reference product has different limits. Tool count, a fast rectangle demo or one attractive screenshot is insufficient evidence.
+"Paper replacement" is the product goal, not an assertion of present parity. The [dated capability matrix](native-engine/CAPABILITY_MATRIX.md) supplies the initial workflow inventory; M0 verifies and versions it against the cited sources and actual behavior. Preserve the existing Oh My Canvas capability set as well; features already supported locally are not implicitly dropped because a reference product has different limits. Tool count, a fast rectangle demo or one attractive screenshot is insufficient evidence.
 
 No hosted account, paid service, cloud database or telemetry dependency is introduced by this architecture. Local collaboration still requires a reachable peer; four-user editing is not a promise of automatic NAT traversal or a hosted relay.
 
@@ -129,7 +145,7 @@ Computed styles, layout boxes, glyph runs, world transforms, spatial indexes, di
 
 Define a versioned compatibility matrix covering elements/metadata, inline styles, selectors and cascade, inheritance, units, intrinsic sizing, flex/grid/block/inline behavior, wrapping, fonts, transforms, overflow, masks, blending and effects. Taffy is a layout component, not a complete HTML/CSS engine. Unsupported constructs produce explicit errors or retained diagnostics according to a documented policy; never silently drop them and call the import faithful.
 
-Paper's current HTML paste documentation specifies inline-style and element-conversion limits [S2]. Record a dated reference inventory rather than treating arbitrary browser/JavaScript compatibility as an undocumented promise. The replacement must cover the agreed design workflows and existing local capabilities. A smaller initial compatibility surface is a staged milestone, not permission to declare full replacement early.
+Paper's HTML paste page documents inline-style and element-conversion limits [S2], but parts of it lag newer dated releases. The [reference catalog](native-engine/REFERENCE_PROJECTS.md) records that conflict; the [capability matrix](native-engine/CAPABILITY_MATRIX.md) reconciles the sources. Implement the versioned [editable HTML/CSS profile](native-engine/RENDERING_AND_INTERCHANGE.md), rather than treating arbitrary browser/JavaScript compatibility as an undocumented promise. A smaller intermediate surface is a staged milestone, not permission to declare full replacement early.
 
 ### Visual editing and source round trips
 
@@ -167,6 +183,8 @@ The native runtime decision is firm. Exact libraries, versions and adapters rema
 Winit supplies windows/events, while the graphics backend draws [S3]. Native Skia exposes native GPU backends through Rust bindings [S4]. Taffy supplies CSS layout algorithms [S5]. Blitz demonstrates a modular native HTML/CSS composition, but its beta status and feature gaps make direct adoption a hypothesis to test, not a finished editor [S6, S7].
 
 GPUI is a possible native controls framework, not a substitute for a qualified design-canvas compositor [S8]. If a separate renderer is embedded, prove efficient surface/texture interoperability; do not copy a full GPU canvas through CPU memory every frame. Vello is an alternative renderer to compare after checking its current feature and maturity matrix [S9]. Do not make a custom low-level rasterizer a prerequisite for delivering the document engine.
+
+The [reference catalog](native-engine/REFERENCE_PROJECTS.md) pins actual code-reading landmarks, including Blitz's AnyRender boundary and the native Skia adapter, and defines DEP-01–DEP-09 experiments. The implementation guide selects an initial native composition and assigns each complete experiment to the work package that can actually exercise it. A compile-only spike cannot qualify the full editor.
 
 Tauri is not the target UI foundation because its standard application model renders UI through a WebView [S10]. Desktop builds use native compilation. WASM can be a later shared-core target; it is not the performance mechanism or a required desktop layer [S11].
 
@@ -241,7 +259,7 @@ Four users means four independent client processes actively editing heavy conten
 
 Synchronize authored structure, styles, text and semantic changes. Derive layout and GPU resources locally. Define schema/layout versions, font identity and deterministic geometry policies so equal supported inputs can be meaningfully compared across peers.
 
-Set the same-text concurrency policy in M0. The current application resolves rich-text content as an atomic shape property; it does not provide character-by-character coediting. Any required character/range coediting is an explicit native schema and command deliverable, including concurrent formatting, offsets, IME reconciliation and Undo. Choosing Yrs alone does not supply those semantics. An intermediate implementation retaining atomic text must disclose that limitation and cannot establish richer text parity.
+Native final acceptance requires character/range coediting, concurrent formatting, relative anchors, IME reconciliation and author Undo as specified in [ENGINE_CONTRACTS.md](native-engine/ENGINE_CONTRACTS.md). The current application's atomic rich-text property is an intermediate migration behavior only. Choosing Yrs alone does not supply those semantics; the native adapter must pass the specified merge/offset/Undo cases.
 
 Use a small document catalog, independently loadable page or bounded-subpage shards, and explicit shared-component/style dependency indexes. Evaluate Yrs against actual legacy state and the selected update encoding/version [S13]. Moving a monolithic Y.Doc into a monolithic Rust document alone does not satisfy independent page loading.
 
@@ -271,6 +289,8 @@ Use versioned invitations/protocols with explicit compatibility or rejection. Pr
 
 Store a versioned small catalog plus independently recoverable page/chunk snapshots and journals, with immutable resources addressed by content hash. Keep portable export separate from the working representation. Normal edits append bounded semantic/state changes; checkpoint/compaction preparation runs outside the input and short commit paths.
 
+The concrete native default is a per-document SQLite WAL database for catalog, shard updates/checkpoints and durable transaction receipts, plus immutable asset files. [STORAGE_AND_COLLABORATION.md](native-engine/STORAGE_AND_COLLABORATION.md) defines the transaction and crash ordering. This is a proposed new representation; it does not describe the current Electron working files.
+
 For a loaded page, accepted edits must not depend on restoring unrelated pages. Its required cross-page dependencies must nevertheless be available and valid. A first-page preview cache alone does not satisfy this property.
 
 Preserve distinct milestones for first usable content, command acceptance, local durability, replication and complete document availability. A Stored indicator follows a recoverable durable commit. Test process termination at each journal/checkpoint/manifest transition, including truncated final records, complete corrupt records, missing assets and obsolete snapshots.
@@ -293,7 +313,7 @@ Preserve or explicitly diagnose source components/instances/overrides, variables
 
 ## 10. Capability coverage and migration rules
 
-M0 must create a dated coverage matrix combining the Paper workflow inventory, the current [MCP map](MCP_PARITY.md), the [behavior inventory](independent/behavior-contract.md) and actual current code. Reconcile historical limits and stale completion labels rather than copying them into the new contract.
+The [native capability matrix](native-engine/CAPABILITY_MATRIX.md) combines the dated Paper workflow inventory, all current MCP tools, the [MCP map](MCP_PARITY.md), the [behavior inventory](independent/behavior-contract.md) and source-observed behavior. M0 verifies this denominator and creates executable fixtures. Reconcile historical limits and stale completion labels rather than copying them into the new contract.
 
 | Capability family | Native coverage required |
 | --- | --- |
@@ -308,6 +328,8 @@ M0 must create a dated coverage matrix combining the Paper workflow inventory, t
 | Collaboration | Four active users, presence, concurrent semantic edits, author Undo, offline work and reconnect |
 | Desktop integration | Keyboard/focus, native dialogs, menus, clipboard, accessibility, packaging and platform availability |
 
+The detailed matrix also covers local folder/archive workflows, comment threads, static React/Tailwind export and the pinned native shader catalog. Their additive commands and exact acceptance obligations are explicit; they are not falsely counted as features already present in the current 50-tool catalog.
+
 Any additional Paper workflow required for replacement must be explicitly added with its acceptance evidence. Do not claim implementation parity because a command name exists. Qualify runtime behavior, persisted data, collaboration and exported output as applicable.
 
 The old renderer can remain temporarily as a compatibility/reference harness during development. It is not a permanent production fallback that satisfies N1. Default-runtime replacement happens after native correctness, capability and workload gates pass. Preserve licenses and implementation provenance; retired company source and copied tests remain excluded.
@@ -315,6 +337,8 @@ The old renderer can remain temporarily as a compatibility/reference harness dur
 ## 11. Delivery milestones
 
 Organize substantial milestones into reviewable PRs with smaller commits. A milestone can require multiple PRs; numbers and dates are not assigned in advance. Every milestone below is pending native implementation at the time this plan is written.
+
+Use [WP-01–WP-18 in the implementation guide](native-engine/IMPLEMENTATION_GUIDE.md#6-work-packages-and-dependency-order) for concrete deliverables, predecessors, module ownership and exit evidence. The milestones below are the summary, not a substitute for those work packages.
 
 | Milestone | Deliverables | Exit evidence |
 | --- | --- | --- |
@@ -355,12 +379,14 @@ These are initial engineering targets, not measured achievements. M0 must bind t
 | Concern | Initial target and scope |
 | --- | --- |
 | Ordinary native pan/drag | At 60 Hz, frame interval p95 ≤16.7 ms and p99 ≤33.3 ms on the defined interactive workload; also report input-to-presentation latency and missed refreshes |
-| Small MCP requests | End-to-end p95 ≤100 ms for already resident bounded queries and small edit acceptance, including queueing; cold-load/large-layout operations reported separately |
+| Small MCP requests | End-to-end p95 ≤100 ms for already resident bounded queries and small durable write responses, including queueing; cold-load/large-layout operations reported separately |
 | Small edit durability | p95 ≤500 ms from edit submission to verified local durable acknowledgment, including queue time |
 | Background interference | Preserve the defined interaction/MCP/save gates while other documents import/export/checkpoint; report same-document dependencies separately |
 | Open/reopen | Report first usable page, first fully ready viewport, first durable edit and all-content completion separately; set native cold/warm thresholds after M0 measurements |
 | Memory | Enforced workspace-wide budgets, measured peak CPU/GPU resources and no unexplained continuing steady-state growth across repeated traversals |
 | Collaboration | All four clients stay editable under W3; record local/remote propagation p50/p95/p99, queue growth and convergence separately from network transit |
+
+Native ordinary writes return success after durable commit. Therefore the 100 ms resident MCP write gate includes that commit; an accepted ticket or private preview does not satisfy it. The general 500 ms small-edit durability gate still applies, and a workload covered by both must meet both. The [qualification guide](native-engine/QUALIFICATION.md) fixes samples, operation classes and result interpretation; [resource defaults](native-engine/IMPLEMENTATION_GUIDE.md#4-resource-defaults) supply the standard/extended memory budgets.
 
 Use actual native timing/presentation instrumentation where supported. An animation callback or the reciprocal of an automated event interval is not hardware FPS. If a larger supported operation genuinely invalidates many nodes, report its own workload class and its interference with ordinary interaction.
 
@@ -379,7 +405,7 @@ Measure parser, conversion, authority load, validation, layout, text, scene prep
 
 ## 13. Decisions to close during implementation
 
-The following require measured or compatibility evidence. They do not reopen the accepted native product scope.
+The following require measured or compatibility evidence. The detailed contracts now provide concrete initial choices; these are qualification decisions with explicit experiments and fallbacks, not blank design tasks. They do not reopen the accepted native product scope.
 
 | Decision | Required evidence |
 | --- | --- |
