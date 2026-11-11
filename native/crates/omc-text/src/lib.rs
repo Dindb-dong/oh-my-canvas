@@ -305,6 +305,7 @@ fn paragraph(
                         "fontWeight" => "font-weight",
                         "fontStyle" => "font-style",
                         "letterSpacing" => "letter-spacing",
+                        "wordSpacing" => "word-spacing",
                         "lineHeight" => "line-height",
                         "textDecoration" => "text-decoration",
                         "textDecorationStyle" => "text-decoration-style",
@@ -441,28 +442,34 @@ fn styled_text(
         a: 1.,
     });
     text_style.set_color(Color4f::new(color.r, color.g, color.b, color.a).to_color());
-    if let Some(spacing) = style.get("letter-spacing").and_then(|v| {
-        resolve_length(
-            v,
-            LengthContext {
-                font_size,
-                ..Default::default()
-            },
-        )
-    }) {
+    let lengths = LengthContext {
+        font_size,
+        ..Default::default()
+    };
+    if let Some(spacing) = style
+        .get("letter-spacing")
+        .and_then(|v| resolve_length(v, lengths))
+    {
         text_style.set_letter_spacing(spacing as f32);
     }
+    if let Some(value) = style.get("word-spacing")
+        && !value.trim().eq_ignore_ascii_case("normal")
+    {
+        // shortcut: percentage spacing needs the shaped space advance, add it when qualified.
+        match resolve_length(value, lengths)
+            .filter(|v| !value.contains('%') && v.abs() <= 1_000_000.)
+        {
+            Some(spacing) => {
+                text_style.set_word_spacing(spacing as f32);
+            }
+            None => diagnostics.push(Diagnostic::unsupported(None, Some("word-spacing"), value)),
+        }
+    }
     if let Some(line) = style.get("line-height") {
-        let ratio = line.parse::<f64>().ok().or_else(|| {
-            resolve_length(
-                line,
-                LengthContext {
-                    font_size,
-                    ..Default::default()
-                },
-            )
-            .map(|v| v / font_size)
-        });
+        let ratio = line
+            .parse::<f64>()
+            .ok()
+            .or_else(|| resolve_length(line, lengths).map(|v| v / font_size));
         if let Some(ratio) = ratio.filter(|v| v.is_finite() && *v > 0.) {
             text_style.set_height(ratio as f32);
             text_style.set_height_override(true);
@@ -554,5 +561,62 @@ mod tests {
         )
         .unwrap();
         assert!(narrow.height > wide.height);
+    }
+
+    #[test]
+    fn word_spacing_changes_measurement_wrapping_and_caret_geometry() {
+        let text = "A😀 B";
+        let mut style = ComputedStyle::default();
+        style.values.insert("font-size".into(), "20".into());
+        let plain = shape(text, &style, 200.).unwrap();
+        style.values.insert("word-spacing".into(), "0.5em".into());
+        let spaced = shape(text, &style, 200.).unwrap();
+        assert!((spaced.intrinsic_width - plain.intrinsic_width - 10.).abs() < 0.1);
+        assert_eq!(spaced.grapheme_offsets, vec![0, 1, 3, 4, 5]);
+        let last_glyph = |layout: &TextLayout| layout.selection_rects(4, 5)[0][0];
+        assert!((last_glyph(&spaced) - last_glyph(&plain) - 10.).abs() < 0.1);
+        let [x, y, _, height] = spaced.caret_rect(5).unwrap();
+        assert_eq!(spaced.caret_offset(x, y + height / 2.), 5);
+
+        let width = (plain.intrinsic_width + spaced.intrinsic_width) / 2.;
+        let measured = measure_runs(text, None, &style, width).unwrap();
+        assert_eq!(measured.height, shape(text, &style, width).unwrap().height);
+        assert!(measured.height > plain.height);
+    }
+
+    #[test]
+    fn rich_runs_can_set_and_reset_word_spacing() {
+        let mut style = ComputedStyle::default();
+        let text = "A B\nC D";
+        let plain = shape(text, &style, 200.).unwrap();
+        style.values.insert("word-spacing".into(), "8px".into());
+        let runs = serde_json::json!([
+            {"text": "A B\n", "attributes": {"wordSpacing": 12}},
+            {"text": "C D", "attributes": {"word-spacing": "normal"}}
+        ]);
+        let mixed = shape_runs(text, Some(&runs), &style, 200.).unwrap();
+        assert!(
+            (mixed.selection_rects(2, 3)[0][0] - plain.selection_rects(2, 3)[0][0] - 12.).abs()
+                < 0.1
+        );
+        assert!(
+            (mixed.selection_rects(6, 7)[0][0] - plain.selection_rects(6, 7)[0][0]).abs() < 0.1
+        );
+        assert!(mixed.diagnostics.is_empty());
+
+        for invalid in ["10%", "potato", "1000001px"] {
+            style.values.insert("word-spacing".into(), invalid.into());
+            let rejected = shape(text, &style, 200.).unwrap();
+            assert_eq!(rejected.intrinsic_width, plain.intrinsic_width);
+            assert!(
+                rejected
+                    .diagnostics
+                    .iter()
+                    .any(
+                        |diagnostic| diagnostic.property.as_deref() == Some("word-spacing")
+                            && diagnostic.fidelity_lost
+                    )
+            );
+        }
     }
 }

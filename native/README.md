@@ -32,3 +32,7 @@ Bundled SQLite WAL/FULL storage, transactional receipts, retained entity version
 ## Document authority
 
 Validated atomic commands, durable idempotency, scoped Undo, immutable query cuts and independent replica delivery.
+
+## MCP masks
+
+`edit_shapes` with `action: "mask"` groups fixed-position native siblings and uses `maskId` as the source, or the first requested layer if omitted. Alpha is the default. Luminance and vector modes are available, with vector coverage limited to rectangles, ellipses, and paths without children. Mask creation rejects layout-driven reparenting and selections under locked or hidden layers. `action: "unmask"` releases the mask while preserving the group and its children. Both actions use the native Undo history.

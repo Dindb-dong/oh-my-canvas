@@ -248,6 +248,7 @@ fn compute_one(
             "textAlign" => "text-align",
             "lineHeight" => "line-height",
             "letterSpacing" => "letter-spacing",
+            "wordSpacing" => "word-spacing",
             "cornerRadius" => "border-radius",
             "x" => "left",
             "y" => "top",
@@ -351,6 +352,7 @@ fn inherited(property: &str) -> bool {
             | "font-weight"
             | "line-height"
             | "letter-spacing"
+            | "word-spacing"
             | "text-align"
             | "direction"
             | "white-space"
@@ -469,6 +471,35 @@ mod tests {
         assert_eq!(styles[&id].get("color"), Some("red"));
         assert_eq!(styles[&id].get("width"), Some("50%"));
         assert!(styles[&id].provenance["color"].important);
+    }
+    #[test]
+    fn word_spacing_inherits_and_accepts_authored_overrides() {
+        let mut s = snapshot();
+        let root = s.pages[0].root_node_id.clone();
+        s.metadata
+            .insert("css".into(), json!(":root { word-spacing: 8px; }"));
+        let mut node = Node::new(NodeKind::Text);
+        node.parent_id = Some(root.clone());
+        let id = node.id.clone();
+        s.nodes.insert(id.clone(), node);
+        let styles = compute_styles(&s, (1440., 900.));
+        assert_eq!(styles[&id].get("word-spacing"), Some("8px"));
+        assert_eq!(
+            styles[&id].provenance["word-spacing"]
+                .inherited_from
+                .as_deref(),
+            Some(root.as_str())
+        );
+
+        s.nodes
+            .get_mut(&id)
+            .unwrap()
+            .properties
+            .insert("wordSpacing".into(), json!(12));
+        assert_eq!(
+            compute_styles(&s, (1440., 900.))[&id].get("word-spacing"),
+            Some("12")
+        );
     }
     #[test]
     fn invalid_variable_cycle_uses_fallback_without_hanging() {

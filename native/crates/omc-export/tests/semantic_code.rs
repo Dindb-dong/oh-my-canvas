@@ -68,6 +68,122 @@ fn code_preserves_token_style_links_and_rich_run_appearance() {
 }
 
 #[test]
+fn code_exports_linear_box_fills_with_authored_stop_positions() {
+    let mut snapshot = snapshot();
+    snapshot.metadata.extend([
+        ("styles/accent/type".into(), json!("fill")),
+        (
+            "styles/accent/value".into(),
+            json!([{
+                "type": "linear",
+                "gradient": {
+                    "start": {"x": 0.75, "y": 0.5},
+                    "end": {"x": 0.25, "y": 0.5},
+                    "stops": [
+                        {"offset": 0, "color": "rgba(255,0,0,1)"},
+                        {"position": 0.5, "color": "blue"},
+                        {"offset": 1, "color": "#fff"}
+                    ]
+                }
+            }]),
+        ),
+    ]);
+    let mut node = Node::new(NodeKind::Rect);
+    node.parent_id = Some(snapshot.pages[0].root_node_id.clone());
+    node.properties.extend([
+        ("fillStyleId".into(), json!("accent")),
+        ("htmlId".into(), json!("swatch")),
+        ("width".into(), json!(32)),
+        ("height".into(), json!(8)),
+    ]);
+    let swatch = node.id.clone();
+    snapshot.nodes.insert(node.id.clone(), node);
+
+    let expected = "linear-gradient(to left, #ff0000ff 25%, #0000ffff 50%, #ffffffff 75%)";
+    let (html, diagnostics) = export_html(&snapshot, None).unwrap();
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(html.contains(&format!(
+        "background-image:{expected};background-origin:border-box"
+    )));
+    let (jsx, diagnostics) = export_react(&snapshot, None, false).unwrap();
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(jsx.contains(&format!("\"backgroundImage\":\"{expected}\"")));
+    let (tailwind, diagnostics) = export_react(&snapshot, None, true).unwrap();
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(tailwind.contains(&format!(
+        "[background-image:{}]",
+        expected.replace(' ', "_")
+    )));
+
+    let imported = omc_import::import_bytes("html", html.as_bytes(), &Default::default()).unwrap();
+    let imported_swatch = &imported.source_map["html:#swatch"];
+    let imported_snapshot = DocumentSnapshot {
+        pages: imported.content.pages,
+        nodes: imported.content.nodes,
+        metadata: imported.content.metadata,
+        ..snapshot.clone()
+    };
+    let sample = |snapshot: &DocumentSnapshot, id: &str| {
+        let scene = omc_scene::build_scene(
+            snapshot,
+            &omc_scene::SceneOptions {
+                width: 64.,
+                height: 32.,
+                strict: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let image =
+            omc_render::render_rgba(&scene, &Default::default(), &omc_render::EmptyResources)
+                .unwrap();
+        let [x, y, _, _] = scene.bounds(id).unwrap();
+        [2, 9, 16, 23, 30].map(|offset| {
+            let at = ((y as usize + 2) * image.width as usize + x as usize + offset) * 4;
+            <[u8; 4]>::try_from(&image.pixels[at..at + 4]).unwrap()
+        })
+    };
+    let native_pixels = sample(&snapshot, &swatch);
+    let imported_pixels = sample(&imported_snapshot, imported_swatch);
+    assert_eq!(imported_pixels, native_pixels);
+    assert_eq!(imported_pixels[0], [255, 255, 255, 255]);
+    assert_eq!(imported_pixels[4], [255, 0, 0, 255]);
+}
+
+#[test]
+fn unsupported_linear_fills_keep_loss_diagnostics_and_exclude_invalid_css() {
+    for (end, color) in [
+        (json!({"x": 1, "y": 1}), "red"),
+        (json!({"x": 1, "y": 0.5}), "rgba(255,0,0,0.5)"),
+        (
+            json!({"x": 1, "y": 0.5}),
+            "red);background-image:url(https://example.test/unsafe)",
+        ),
+    ] {
+        let mut snapshot = snapshot();
+        let mut node = Node::new(NodeKind::Rect);
+        node.parent_id = Some(snapshot.pages[0].root_node_id.clone());
+        node.properties.insert(
+            "fills".into(),
+            json!([{
+                "type": "linear",
+                "gradient": {"end": end, "stops": [
+                    {"offset": 0, "color": color}, {"offset": 1, "color": "#fff"}
+                ]}
+            }]),
+        );
+        let id = node.id.clone();
+        snapshot.nodes.insert(id.clone(), node);
+        let (html, diagnostics) = export_html(&snapshot, None).unwrap();
+        assert!(diagnostics.iter().any(|d| d.node_id.as_deref() == Some(&id)
+            && d.property.as_deref() == Some("fills")
+            && d.fidelity_lost));
+        assert!(!html.contains("background-image:"));
+        assert!(!html.contains("example.test"));
+    }
+}
+
+#[test]
 fn single_source_artifact_embeds_verified_images() {
     let mut snapshot = snapshot();
     let bytes = base64::engine::general_purpose::STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==").unwrap();

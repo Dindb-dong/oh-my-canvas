@@ -440,13 +440,34 @@ fn paint_item(
                         .then_some("alpha")
                 })
         };
-        if let Some(mode) = mask_mode.filter(|_| !item.children.is_empty()) {
-            let mask = item.children[0];
+        let mask = match (mask_mode, item.properties.get("maskId")) {
+            (Some(_), Some(id)) => {
+                let mask = item
+                    .children
+                    .iter()
+                    .copied()
+                    .find(|child| id.as_str() == Some(scene.items[*child].id.as_str()));
+                if mask.is_none() {
+                    diagnose(
+                        scene,
+                        item,
+                        "maskId",
+                        "Mask must be a direct child",
+                        diagnostics,
+                    )?;
+                }
+                mask
+            }
+            (Some(_), None) => item.children.first().copied(),
+            (None, _) => None,
+        };
+        if let (Some(mode), Some(mask)) = (mask_mode, mask) {
+            let content = item.children.iter().copied().filter(|child| *child != mask);
             match mode {
                 "alpha" | "luminance" => {
                     canvas.save_layer(&SaveLayerRec::default());
-                    for child in &item.children[1..] {
-                        paint_item(canvas, scene, *child, resources, diagnostics, translations)?;
+                    for child in content {
+                        paint_item(canvas, scene, child, resources, diagnostics, translations)?;
                     }
                     let mut mask_paint = Paint::default();
                     mask_paint.set_blend_mode(BlendMode::DstIn);
@@ -482,8 +503,8 @@ fn paint_item(
                         )?;
                     }
                     canvas.clip_path(&path, None, true);
-                    for child in &item.children[1..] {
-                        paint_item(canvas, scene, *child, resources, diagnostics, translations)?;
+                    for child in content {
+                        paint_item(canvas, scene, child, resources, diagnostics, translations)?;
                     }
                 }
                 other => {
@@ -493,7 +514,7 @@ fn paint_item(
                     }
                 }
             }
-        } else {
+        } else if mask_mode.is_none() {
             for child in &item.children {
                 paint_item(canvas, scene, *child, resources, diagnostics, translations)?;
             }
