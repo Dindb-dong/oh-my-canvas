@@ -1,0 +1,23 @@
+[package]
+name = "omc-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+fault-injection = ["omc-storage/fault-injection"]
+
+[dependencies]
+omc-model = { path = "../omc-model" }
+omc-protocol = { path = "../omc-protocol" }
+omc-sync = { path = "../omc-sync" }
+omc-storage = { path = "../omc-storage" }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
