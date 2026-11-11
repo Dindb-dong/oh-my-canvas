@@ -5,6 +5,10 @@ work/
 .DS_Store
 *.log
 
+# Native build products and isolated validation profiles.
+/native/target/
+/native/.profiles/
+
 .omx/
 
 .worktrees/

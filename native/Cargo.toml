@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = ["crates/omc-model", "crates/omc-protocol"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "MIT"
+repository = "https://github.com/Dindb-dong/oh-my-canvas"
+
+[workspace.dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+serde_jcs = "=0.2.0"
+uuid = { version = "=1.29.2", features = ["v4", "serde"] }
+sha2 = "=0.11.1"
+hex = "=0.4.3"
+
+[profile.dev]
+debug = 0
+
+[profile.test]
+debug = 0
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
