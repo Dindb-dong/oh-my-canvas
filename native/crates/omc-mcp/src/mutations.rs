@@ -594,6 +594,11 @@ impl ToolRouter {
             .map(|id| draft.node(id).cloned())
             .collect::<Result<_>>()?;
         let action = string(args, "action")?;
+        if action == "order"
+            && let Some(mode @ ("forward" | "backward")) = args["mode"].as_str()
+        {
+            return step_order(draft, &nodes, mode == "forward");
+        }
         if matches!(action, "group" | "frame") {
             let parent = nodes
                 .first()
@@ -757,12 +762,7 @@ impl ToolRouter {
                         Some("back") => {
                             rank_between(None, siblings.first().map(|n| n.rank.as_str()))
                         }
-                        _ => {
-                            return Err(EngineError::new(
-                                "unsupported_feature",
-                                "single-step ordering not implemented",
-                            ));
-                        }
+                        _ => return Err(EngineError::invalid("order requires an ordering mode")),
                     }
                     .ok_or_else(|| EngineError::new("resource_limit", "rank rebalance required"))?;
                     draft.apply(Command::NodeMove {
@@ -1032,6 +1032,62 @@ fn placement(draft: &Draft, target: &str, position: &str) -> Result<(String, Str
             .ok_or_else(|| EngineError::new("resource_limit", "rank rebalance required"))?,
     ))
 }
+fn step_order(draft: &mut Draft, nodes: &[Node], forward: bool) -> Result<()> {
+    let selected: BTreeSet<_> = nodes.iter().map(|node| node.id.as_str()).collect();
+    let mut groups: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+    for node in nodes {
+        let parent = node
+            .parent_id
+            .as_deref()
+            .ok_or_else(|| EngineError::invalid("cannot reorder root"))?;
+        let mut ancestors = std::iter::successors(Some(parent), |id| {
+            draft.snapshot.nodes.get(*id)?.parent_id.as_deref()
+        });
+        if !ancestors.any(|id| selected.contains(id)) {
+            groups.entry(parent).or_default().insert(node.id.as_str());
+        }
+    }
+
+    for (parent, selected) in groups {
+        let mut siblings: Vec<_> = children(&draft.snapshot, parent)
+            .into_iter()
+            .map(|node| (node.id.clone(), node.rank.clone()))
+            .collect();
+        // Visit the leading selection first so adjacent selected layers move as a block.
+        for offset in 1..siblings.len() {
+            let (from, to) = if forward {
+                (siblings.len() - offset - 1, siblings.len() - offset)
+            } else {
+                (offset, offset - 1)
+            };
+            if !selected.contains(siblings[from].0.as_str())
+                || selected.contains(siblings[to].0.as_str())
+            {
+                continue;
+            }
+            let neighbor = Some(siblings[to].1.as_str());
+            let (left, right) = if forward {
+                (
+                    neighbor,
+                    siblings.get(to + 1).map(|(_, rank)| rank.as_str()),
+                )
+            } else {
+                (to.checked_sub(1).map(|i| siblings[i].1.as_str()), neighbor)
+            };
+            let rank = rank_between(left, right)
+                .ok_or_else(|| EngineError::new("resource_limit", "rank rebalance required"))?;
+            draft.apply(Command::NodeMove {
+                node_id: siblings[from].0.clone(),
+                parent_id: Some(parent.into()),
+                rank: rank.clone(),
+            })?;
+            siblings[from].1 = rank;
+            siblings.swap(from, to);
+        }
+    }
+    Ok(())
+}
+
 fn duplicate_subtree(draft: &mut Draft, source: &str, parent: &str, rank: &str) -> Result<()> {
     let mut pending = vec![source.to_owned()];
     let mut order = Vec::new();
