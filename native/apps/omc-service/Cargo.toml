@@ -1,0 +1,20 @@
+[package]
+name = "omc-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+omc-model = { path = "../../crates/omc-model" }
+omc-protocol = { path = "../../crates/omc-protocol" }
+omc-workspace = { path = "../../crates/omc-workspace" }
+omc-mcp = { path = "../../crates/omc-mcp" }
+omc-assets = { path = "../../crates/omc-assets" }
+serde_json.workspace = true
+base64.workspace = true
+tokio.workspace = true
+axum.workspace = true
+clap.workspace = true
+uuid.workspace = true
+
