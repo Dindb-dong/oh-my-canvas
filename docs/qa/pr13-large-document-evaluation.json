@@ -1,0 +1,735 @@
+{
+  "schemaVersion": 1,
+  "recordedOn": "2026-11-11",
+  "revision": "cf9f18433924a7d581c815be5df9bfb96505cd75",
+  "workflow": "https://github.com/Dindb-dong/oh-my-canvas/actions/runs/42949164362",
+  "runner": "scripts/large-document-e2e.mjs",
+  "source": {
+    "bytes": 160627671,
+    "sha256": "c7c4fdbe469ae451c9a3d3d384a2102fa08dfaa220a1277e2df17fc2146c5ee7"
+  },
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "logicalCPUs": 2,
+    "totalMemory": 8317935616,
+    "node": "v22.23.4",
+    "electron": "45.2.1",
+    "playwright": "1.64.1",
+    "gpu": {
+      "2d_canvas": "disabled_software",
+      "direct_rendering_display_compositor": "disabled_off_ok",
+      "gpu_compositing": "disabled_software",
+      "multiple_raster_threads": "disabled_off",
+      "opengl": "disabled_off",
+      "rasterization": "disabled_software",
+      "raw_draw": "disabled_off_ok",
+      "skia_graphite": "disabled_off",
+      "trees_in_viz": "disabled_off",
+      "video_decode": "disabled_software",
+      "video_encode": "disabled_software",
+      "vulkan": "disabled_off",
+      "webgl": "disabled_off",
+      "webgpu": "disabled_off",
+      "webgpu_on_vk_via_gl_interop": "disabled_off",
+      "webnn": "disabled_off"
+    }
+  },
+  "verification": {
+    "syntaxAndTypes": "passed",
+    "documentation": "passed",
+    "nodeTestsPassed": 257,
+    "editorTestsPassed": 843,
+    "productionBuild": "passed",
+    "nativePassed": true,
+    "nativeChecks": [
+      {
+        "name": "native launch",
+        "passed": true,
+        "ms": 1598.7589480000001
+      },
+      {
+        "name": "source import first paint, early edit, and all pages",
+        "passed": true,
+        "ms": 43480.581501
+      },
+      {
+        "name": "install measurement probes",
+        "passed": true,
+        "ms": 3.711331999998947
+      },
+      {
+        "name": "Cover page entry",
+        "passed": true,
+        "ms": 79.72163
+      },
+      {
+        "name": "page rename UI paint and durable save",
+        "passed": true,
+        "ms": 703.9706809999989
+      },
+      {
+        "name": "page rename complete MCP operation",
+        "passed": true,
+        "ms": 79.1843000000008
+      },
+      {
+        "name": "Examples page entry and layer window",
+        "passed": true,
+        "ms": 3750.3552380000037
+      },
+      {
+        "name": "pure pan has no document writes",
+        "passed": true,
+        "ms": 5747.194349000005
+      },
+      {
+        "name": "hover has no document writes",
+        "passed": true,
+        "ms": 3152.815075999999
+      },
+      {
+        "name": "single leaf drag preview and commit",
+        "passed": true,
+        "ms": 10820.212194
+      },
+      {
+        "name": "asset closure and native missing-asset response",
+        "passed": true,
+        "ms": 3171.9963740000094
+      },
+      {
+        "name": "portable JSON export",
+        "passed": true,
+        "ms": 11783.449282000001
+      },
+      {
+        "name": "portable SVG export",
+        "passed": true,
+        "ms": 949.4512480000121
+      },
+      {
+        "name": "portable OMC export",
+        "passed": true,
+        "ms": 6109.335284999994
+      },
+      {
+        "name": "fresh process first paint, early edit, and complete reopen",
+        "passed": true,
+        "ms": 16940.024732000005
+      },
+      {
+        "name": "fresh-profile omc round trip",
+        "passed": true,
+        "ms": 34304.50779700001
+      },
+      {
+        "name": "fresh-profile json round trip",
+        "passed": true,
+        "ms": 41391.598420000024
+      }
+    ],
+    "rendererExceptions": 0,
+    "expectedMissingAssetStatus": 404,
+    "cancelledBitmapFetches": 11
+  },
+  "integrity": {
+    "pages": 46,
+    "objectsIncludingPageRoots": 39363,
+    "externalBitmapHashes": 160,
+    "inlineSourcesInEditableDocument": 0,
+    "roundTripAssertions": [
+      "page IDs and order",
+      "per-page object counts",
+      "recorded page names at export",
+      "original bitmap hash set",
+      "dragged shape coordinates within 1e-6"
+    ],
+    "progressiveEditAssertions": [
+      "Source-import and cached-reopen inspector edits survive remaining-page delivery",
+      "The Stored indicator is followed by host ACK and edited-value verification before the harness intentionally renames the page later"
+    ],
+    "omcRoundTrip": {
+      "pages": 46,
+      "objects": 39363,
+      "assets": 160,
+      "externalHashes": 160
+    },
+    "jsonRoundTrip": {
+      "pages": 46,
+      "objects": 39363,
+      "assets": 160,
+      "externalHashes": 160
+    },
+    "jsonPortable": {
+      "localReference": false,
+      "hasData": true,
+      "remoteImage": false
+    },
+    "svgPortable": {
+      "localReference": false,
+      "hasData": true,
+      "remoteImage": false
+    }
+  },
+  "timingsMs": {
+    "import": {
+      "firstEditableMs": 7169.400146484375,
+      "firstPaintMs": 7345.800048828125,
+      "firstEditablePageCount": 1,
+      "firstPaintPageCount": 1,
+      "allPagesMs": 41369.800048828125,
+      "earlyEdit": {
+        "loadingStateAtChange": "loading",
+        "saveStateAtChange": "Saving\u2026",
+        "changeToStoredIndicatorObservedMs": 19.0,
+        "hostAckAndNameVerifiedAfterStoredIndicator": true,
+        "hostAck": 1,
+        "hostAcceptedSeq": 1,
+        "loadedPagesAtObservedDurability": 1,
+        "nameRetainedInCompleteDocument": true
+      }
+    },
+    "reopenExcludingLaunch": {
+      "firstEditableMs": 572.199951171875,
+      "firstPaintMs": 773.300048828125,
+      "firstEditablePageCount": 1,
+      "firstPaintPageCount": 1,
+      "allPagesMs": 13379.699951171875,
+      "earlyEdit": {
+        "loadingStateAtChange": "loading",
+        "saveStateAtChange": "Saving\u2026",
+        "changeToStoredIndicatorObservedMs": 5504.299999999988,
+        "hostAckAndNameVerifiedAfterStoredIndicator": true,
+        "hostAck": 1,
+        "hostAcceptedSeq": 1,
+        "loadedPagesAtObservedDurability": 3,
+        "nameRetainedInCompleteDocument": true
+      }
+    },
+    "renameUI": {
+      "paintMs": 520.1000000000058,
+      "ackMs": 497.20000000001164,
+      "durableMs": 501.20000000001164,
+      "longTasksMs": {
+        "n": 0,
+        "median": null,
+        "p95": null,
+        "max": null,
+        "total": 0
+      },
+      "frameIntervalsMs": {
+        "n": 21,
+        "median": 16.69999999999709,
+        "p95": 16.700000000004366,
+        "max": 116.56999999999971,
+        "total": 449.8700000000026
+      }
+    },
+    "renameMcpEndToEnd": 68.63363599999866,
+    "examplesEntry": {
+      "paintMs": 773.2000000000116,
+      "additionalSettleMs": 98.77390000000014
+    },
+    "omcFreshProfileImport": 29818.800048828125,
+    "jsonFreshProfileImport": 37399.7001953125
+  },
+  "gestures": {
+    "wheelEvents": 90,
+    "hoverEvents": 90,
+    "dragMovementSteps": 24,
+    "pan": {
+      "elapsedMs": 4529.600000000006,
+      "frameIntervalsMs": {
+        "n": 271,
+        "median": 16.69999999999709,
+        "p95": 16.700000000004366,
+        "max": 16.80000000000291,
+        "total": 4516.442000000003
+      },
+      "inputHandlersMs": {
+        "n": 90,
+        "median": 0,
+        "p95": 0.10000000000582077,
+        "max": 0.20000000001164153,
+        "total": 3.3000000000174623
+      },
+      "longTasksMs": {
+        "n": 0,
+        "median": null,
+        "p95": null,
+        "max": null,
+        "total": 0
+      },
+      "ackMs": null,
+      "durableMs": null,
+      "dom": {
+        "sceneNodes": 25351,
+        "shapeNodes": 6245,
+        "layerRows": 40
+      }
+    },
+    "hover": {
+      "elapsedMs": 3028.100000000006,
+      "frameIntervalsMs": {
+        "n": 182,
+        "median": 16.69999999999709,
+        "p95": 16.799999999995634,
+        "max": 16.80000000000291,
+        "total": 3033.167999999998
+      },
+      "inputHandlersMs": {
+        "n": 90,
+        "median": 0.10000000000582077,
+        "p95": 0.29999999998835847,
+        "max": 0.39999999999417923,
+        "total": 11.000000000029104
+      },
+      "longTasksMs": {
+        "n": 0,
+        "median": null,
+        "p95": null,
+        "max": null,
+        "total": 0
+      },
+      "ackMs": null,
+      "durableMs": null,
+      "dom": {
+        "sceneNodes": 25351,
+        "shapeNodes": 6245,
+        "layerRows": 40
+      }
+    },
+    "drag": {
+      "elapsedMs": 2981.1999999999825,
+      "frameIntervalsMs": {
+        "n": 85,
+        "median": 16.69999999999709,
+        "p95": 83.40000000000146,
+        "max": 183.40000000000146,
+        "total": 2966.525999999998
+      },
+      "inputHandlersMs": {
+        "n": 26,
+        "median": 37.10000000000582,
+        "p95": 57.70000000001164,
+        "max": 104,
+        "total": 959.0000000000291
+      },
+      "longTasksMs": {
+        "n": 24,
+        "median": 85,
+        "p95": 111,
+        "max": 184,
+        "total": 2157
+      },
+      "ackMs": 2945.399999999994,
+      "durableMs": 2957.899999999994,
+      "dom": {
+        "sceneNodes": 25775,
+        "shapeNodes": 6333,
+        "layerRows": 40
+      },
+      "releaseMs": 2844.600000000006,
+      "releaseToDurableMs": 113.29999999998836
+    },
+    "panAndHoverDocumentWrites": 0
+  },
+  "fixedExamplesViewportDom": {
+    "sceneNodes": 25351,
+    "shapeNodes": 6245,
+    "layerRows": 40
+  },
+  "exports": {
+    "json": {
+      "ms": 10871.861063999997,
+      "bytes": 246625867
+    },
+    "svg": {
+      "ms": 351.6586099999986,
+      "bytes": 13886839
+    },
+    "omc": {
+      "ms": 6042.267024999994,
+      "bytes": 129903997
+    }
+  },
+  "workingSetSnapshotsMiB": {
+    "afterImportMemory": 2871.0703125,
+    "afterGestureMemory": 2987.671875
+  },
+  "panDiagnosticTrace": {
+    "available": true,
+    "complete": true,
+    "dataLossOccurred": false,
+    "traceBytes": 280435,
+    "description": "Separate diagnostic after the measured pan; tracing overhead is excluded from phases.pan.",
+    "windowMs": 333.794,
+    "eventCount": 1188,
+    "rendererMainEventCount": 377,
+    "exclusiveMainThreadMs": {
+      "garbageCollection": 0,
+      "styleAndLayout": 41.221,
+      "imageDecode": 0,
+      "paintAndComposite": 10.216,
+      "scriptAndCallbacks": 6.811,
+      "otherObserved": 8.449,
+      "idleOrUnobserved": 267.097
+    },
+    "mainThreadTasks": {
+      "eventName": "RunTask",
+      "count": 104,
+      "over50ms": 0,
+      "maxMs": 9.271,
+      "p95Ms": 5.89
+    },
+    "method": "Main-thread interval attribution, not CPU utilization. Exclusive buckets partition the marked window; per-name/callback rows overlap and must not be added. Other threads run concurrently. Async events and other processes, including GPU work, are outside this attribution."
+  },
+  "dragStartDiagnosticTrace": {
+    "available": true,
+    "complete": true,
+    "dataLossOccurred": false,
+    "traceBytes": 219343,
+    "description": "Separate pointerdown/up diagnostic immediately after the measured drag, without movement. Caches may be warm. Tracing overhead is excluded from phases.drag.",
+    "windowMs": 161.485,
+    "eventCount": 797,
+    "rendererMainEventCount": 308,
+    "exclusiveMainThreadMs": {
+      "garbageCollection": 0,
+      "styleAndLayout": 23.316,
+      "imageDecode": 0,
+      "paintAndComposite": 3.575,
+      "scriptAndCallbacks": 82.729,
+      "otherObserved": 50.963,
+      "idleOrUnobserved": 0.902
+    },
+    "mainThreadTasks": {
+      "eventName": "RunTask",
+      "count": 60,
+      "over50ms": 1,
+      "maxMs": 80.223,
+      "p95Ms": 5.251
+    },
+    "method": "Main-thread interval attribution, not CPU utilization. Exclusive buckets partition the marked window; per-name/callback rows overlap and must not be added. Other threads run concurrently. Async events and other processes, including GPU work, are outside this attribution."
+  },
+  "viewportOracle": {
+    "runner": "scripts/viewport-motion-e2e.mjs",
+    "harnessSHA256": "029baf427e9b2dbc079ba60da8dc6fb9b5f09907e8d7700501e99dc8acc69bbd",
+    "pass": true,
+    "thresholds": {
+      "meanAbsoluteChannelError": 1,
+      "largeDifferenceCutoff": 24,
+      "largeDifferenceFraction": 0.015,
+      "maxTileMeanAbsoluteChannelError": 16,
+      "tileSize": 32
+    },
+    "comparison": "Live translated SVG surface against the existing direct SVG viewport, with the same logical camera and text measurements.",
+    "cases": [
+      {
+        "name": "initial",
+        "pass": true,
+        "camera": {
+          "name": "initial",
+          "x": 0,
+          "y": 0,
+          "zoom": 1,
+          "width": 800,
+          "height": 601
+        },
+        "mapping": {
+          "hit": "shadow",
+          "screen": {
+            "x": 150,
+            "y": 290
+          },
+          "roundTrip": {
+            "x": 150,
+            "y": 290
+          }
+        },
+        "pixels": {
+          "width": 800,
+          "height": 601,
+          "meanAbsoluteChannelError": 0,
+          "maximumChannelError": 0,
+          "differentPixels": 0,
+          "largeDifferencePixels": 0,
+          "largeDifferenceFraction": 0,
+          "maxTileMeanAbsoluteChannelError": 0,
+          "worstTile": {
+            "x": 0,
+            "y": 0
+          },
+          "referenceBluePixels": 14889,
+          "pass": true
+        }
+      },
+      {
+        "name": "pan-integer",
+        "pass": true,
+        "camera": {
+          "name": "pan-integer",
+          "x": 120,
+          "y": 80,
+          "zoom": 1,
+          "width": 800,
+          "height": 601
+        },
+        "mapping": {
+          "hit": "shadow",
+          "screen": {
+            "x": 30,
+            "y": 210
+          },
+          "roundTrip": {
+            "x": 150,
+            "y": 290
+          }
+        },
+        "pixels": {
+          "width": 800,
+          "height": 601,
+          "meanAbsoluteChannelError": 0,
+          "maximumChannelError": 0,
+          "differentPixels": 0,
+          "largeDifferencePixels": 0,
+          "largeDifferenceFraction": 0,
+          "maxTileMeanAbsoluteChannelError": 0,
+          "worstTile": {
+            "x": 0,
+            "y": 0
+          },
+          "referenceBluePixels": 12395,
+          "pass": true
+        }
+      },
+      {
+        "name": "pan-fractional",
+        "pass": true,
+        "camera": {
+          "name": "pan-fractional",
+          "x": 120.25,
+          "y": 80.5,
+          "zoom": 1,
+          "width": 800,
+          "height": 601
+        },
+        "mapping": {
+          "hit": "shadow",
+          "screen": {
+            "x": 29.75,
+            "y": 209.5
+          },
+          "roundTrip": {
+            "x": 150,
+            "y": 290
+          }
+        },
+        "pixels": {
+          "width": 800,
+          "height": 601,
+          "meanAbsoluteChannelError": 0,
+          "maximumChannelError": 0,
+          "differentPixels": 0,
+          "largeDifferencePixels": 0,
+          "largeDifferenceFraction": 0,
+          "maxTileMeanAbsoluteChannelError": 0,
+          "worstTile": {
+            "x": 0,
+            "y": 0
+          },
+          "referenceBluePixels": 12183,
+          "pass": true
+        }
+      },
+      {
+        "name": "zoom",
+        "pass": true,
+        "camera": {
+          "name": "zoom",
+          "x": 200,
+          "y": 180,
+          "zoom": 1.5,
+          "width": 800,
+          "height": 601
+        },
+        "mapping": {
+          "hit": "shadow",
+          "screen": {
+            "x": -75,
+            "y": 165
+          },
+          "roundTrip": {
+            "x": 150,
+            "y": 290
+          }
+        },
+        "pixels": {
+          "width": 800,
+          "height": 601,
+          "meanAbsoluteChannelError": 6.932889628397116e-07,
+          "maximumChannelError": 1,
+          "differentPixels": 1,
+          "largeDifferencePixels": 0,
+          "largeDifferenceFraction": 0,
+          "maxTileMeanAbsoluteChannelError": 0.0003255208333333333,
+          "worstTile": {
+            "x": 0,
+            "y": 0
+          },
+          "referenceBluePixels": 11617,
+          "pass": true
+        }
+      },
+      {
+        "name": "overscan-exit",
+        "pass": true,
+        "camera": {
+          "name": "overscan-exit",
+          "x": 600,
+          "y": 300,
+          "zoom": 1.5,
+          "width": 800,
+          "height": 601
+        },
+        "mapping": {
+          "hit": "shadow",
+          "screen": {
+            "x": -675,
+            "y": -15
+          },
+          "roundTrip": {
+            "x": 150,
+            "y": 290
+          }
+        },
+        "pixels": {
+          "width": 800,
+          "height": 601,
+          "meanAbsoluteChannelError": 0,
+          "maximumChannelError": 0,
+          "differentPixels": 0,
+          "largeDifferencePixels": 0,
+          "largeDifferenceFraction": 0,
+          "maxTileMeanAbsoluteChannelError": 0,
+          "worstTile": {
+            "x": 0,
+            "y": 0
+          },
+          "referenceBluePixels": 0,
+          "pass": true
+        }
+      },
+      {
+        "name": "resize",
+        "pass": true,
+        "camera": {
+          "name": "resize",
+          "x": 300,
+          "y": 160,
+          "zoom": 0.75,
+          "width": 641,
+          "height": 479
+        },
+        "mapping": {
+          "hit": "shadow",
+          "screen": {
+            "x": -112.5,
+            "y": 97.5
+          },
+          "roundTrip": {
+            "x": 150,
+            "y": 290
+          }
+        },
+        "pixels": {
+          "width": 641,
+          "height": 479,
+          "meanAbsoluteChannelError": 0.22412787952019125,
+          "maximumChannelError": 209,
+          "differentPixels": 18677,
+          "largeDifferencePixels": 981,
+          "largeDifferenceFraction": 0.003195033855633975,
+          "maxTileMeanAbsoluteChannelError": 10.7744140625,
+          "worstTile": {
+            "x": 32,
+            "y": 192
+          },
+          "referenceBluePixels": 0,
+          "pass": true
+        }
+      },
+      {
+        "name": "root-blend-fallback",
+        "pass": true,
+        "camera": {
+          "name": "root-blend-fallback",
+          "x": 0,
+          "y": 0,
+          "zoom": 1,
+          "width": 800,
+          "height": 601,
+          "rootBlend": "multiply"
+        },
+        "mapping": {
+          "hit": "shadow",
+          "screen": {
+            "x": 150,
+            "y": 290
+          },
+          "roundTrip": {
+            "x": 150,
+            "y": 290
+          }
+        },
+        "pixels": {
+          "width": 800,
+          "height": 601,
+          "meanAbsoluteChannelError": 0,
+          "maximumChannelError": 0,
+          "differentPixels": 0,
+          "largeDifferencePixels": 0,
+          "largeDifferenceFraction": 0,
+          "maxTileMeanAbsoluteChannelError": 0,
+          "worstTile": {
+            "x": 0,
+            "y": 0
+          },
+          "referenceBluePixels": 0,
+          "pass": true
+        }
+      }
+    ],
+    "scope": "Pixels, hit testing and coordinate mapping versus the retained direct renderer at seven camera/fallback cases; not original Figma visual fidelity."
+  },
+  "historicalReference": {
+    "revision": "cfa052c8d08aa368017314f3ba08f50a36fd2e47",
+    "workflow": "https://github.com/Dindb-dong/oh-my-canvas/actions/runs/42869423111",
+    "evaluation": "pr12-large-document-evaluation.json",
+    "qualification": "Separate CI runner instance and CPU model. PR12 did not expose a progressive first-page milestone. Current completion includes one early edit and cooperative loading pauses. These observations are not a controlled speedup ratio."
+  },
+  "limitations": [
+    "Single native process run per revision; automated input frame intervals include driver scheduling.",
+    "A screenshot is evidence of the rendered result, not a comparison against the Figma original.",
+    "Harness waits do not change the app worker/runtime deadlines.",
+    "Gesture samples are warmed by a completed native save/settle before sampling; page-entry timing is recorded separately.",
+    "Reopen measures document open in a fresh process after app launch, not cold-disk or app-start latency; startup library listing may already have read/warmed storage or overlap the open.",
+    "Progressive import/reopen completion includes one early page-name edit and the app cooperative pauses for that interaction. First-editable and first-paint marks precede that edit.",
+    "First paint is the runtime milestone after two animation frames following editable mount (with a one-second fallback), not a measurement of all bitmap/font decoding or complete visual settling.",
+    "Early edit latency measures change to the observed Stored indicator; a subsequent host snapshot independently verifies ACK and page name. It is not exact fsync duration.",
+    "The entire source archive/shared graph is decoded before first-page publication. A very large first page still carries its complete conversion cost.",
+    "Cached reopen is conditional on a fresh, bounded, self-contained first-page cache. Missing, stale, oversized or unsuitable caches use full open; older documents obtain a cache on a later successful save.",
+    "Full Yjs restoration and large-page publication still perform synchronous main-process work. A visible early edit can wait seconds for a durable acknowledgment.",
+    "Full source import still takes tens of seconds; progressive availability does not remove total conversion, validation and checkpoint work.",
+    "Software rendering on a two-core CI runner; frame intervals are not hardware GPU FPS.",
+    "Working-set snapshots are not a combined process peak or a decoded-image cache budget. Asset garbage collection and a decoded-pixel memory ceiling are not implemented.",
+    "Drag and the measured post-load page rename still have material end-to-end latency. Individual observations do not prove all editing or pan workloads are smooth.",
+    "Known conversion losses include effects, variable bindings, component semantics, masks, mixed text and font availability. Import fidelity remains unverified.",
+    "This run does not qualify full-fixture four-peer native collaboration or current packaged macOS/Windows builds."
+  ],
+  "artifact": {
+    "id": 13824701104,
+    "zipSHA256": "a3224e489eab4fa1f322d22ba1af4a135c56d67b0f7ccce0e4d38cf216c5b1d8"
+  }
+}
