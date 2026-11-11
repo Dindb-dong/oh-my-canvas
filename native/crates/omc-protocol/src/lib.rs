@@ -68,6 +68,13 @@ pub enum LatestBasis {
     Latest,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryChannel {
+    Design,
+    Comments,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FieldPrecondition {
@@ -138,6 +145,13 @@ pub enum Command {
     DocumentRename { title: String },
     #[serde(rename = "document.metadata")]
     DocumentMetadata { properties: Properties },
+    #[serde(rename = "catalog.set")]
+    CatalogSet {
+        namespace: String,
+        #[serde(rename = "entityId")]
+        entity_id: String,
+        properties: Properties,
+    },
     #[serde(rename = "text.insert")]
     TextInsert {
         #[serde(rename = "nodeId")]
@@ -181,6 +195,10 @@ pub enum Command {
     Undo,
     #[serde(rename = "redo")]
     Redo,
+    #[serde(rename = "history.undo")]
+    HistoryUndo { channel: HistoryChannel },
+    #[serde(rename = "history.redo")]
+    HistoryRedo { channel: HistoryChannel },
 }
 
 impl Command {
