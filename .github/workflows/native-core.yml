@@ -1,0 +1,24 @@
+name: Native core contracts
+on:
+  pull_request:
+    paths: ['native/**', '.github/workflows/native-core.yml']
+  push:
+    branches: ['main']
+    paths: ['native/**', '.github/workflows/native-core.yml']
+permissions:
+  contents: read
+jobs:
+  contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.92.0
+          components: rustfmt
+      - run: cargo fmt --manifest-path native/Cargo.toml --all --check
+      - run: cargo test --manifest-path native/Cargo.toml --locked --workspace
