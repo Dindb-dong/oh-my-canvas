@@ -1,0 +1,20 @@
+[package]
+name = "omc-scene"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+omc-model = { path = "../omc-model" }
+omc-style = { path = "../omc-style" }
+omc-text = { path = "../omc-text" }
+omc-layout = { path = "../omc-layout" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+skia-safe.workspace = true
+thiserror.workspace = true
+
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+skia-safe = { workspace = true, features = ["vulkan"] }
