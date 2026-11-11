@@ -674,6 +674,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "omc-mcp"
+version = "0.1.0"
+dependencies = [
+ "omc-protocol",
+ "regex",
+ "serde_json",
+]
+
+[[package]]
 name = "omc-model"
 version = "0.1.0"
 dependencies = [

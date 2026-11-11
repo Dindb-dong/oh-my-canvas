@@ -1,0 +1,11 @@
+[package]
+name = "omc-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+omc-protocol = { path = "../omc-protocol" }
+serde_json.workspace = true
+regex = "=1.13.1"

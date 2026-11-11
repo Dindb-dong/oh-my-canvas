@@ -1,0 +1,4518 @@
+[
+  {
+    "name": "get_context",
+    "description": "Read the active page, viewport, selection, revision, and available boards. Optional documentId targets a document; otherwise uses this MCP session’s binding, never the visible tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "select_page",
+    "description": "Select a page by its raw page ID and return refreshed context. Refuses active user edits; old page aliases cannot target the new page. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "id",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_tree",
+    "description": "Read an ordered layer tree. Depth defaults to 4; output is capped at 400 nodes. Optional documentId targets a document; otherwise uses this MCP session’s binding, never the visible tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4
+        },
+        "detail": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "detailed"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_html",
+    "description": "Export a layer as editable HTML with inline styles. Optional documentId targets a document; otherwise uses this MCP session’s binding, never the visible tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_styles",
+    "description": "Read computed CSS styles of up to 50 layers. Optional documentId targets a document; otherwise uses this MCP session’s binding, never the visible tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 50
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 40
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "find",
+    "description": "Search layer text, type, or name inside an optional subtree. Returns at most 50 matches. Optional documentId targets a document; otherwise uses this MCP session’s binding, never the visible tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "within": {
+          "type": "string"
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "text"
+          ]
+        },
+        {
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "required": [
+            "name"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "screenshot",
+    "description": "Capture a settled layer or page. Slice mode supports zero-based slices; overview fits the scene. Optional documentId targets a document; otherwise uses this MCP session’s binding, never the visible tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "slice",
+            "overview"
+          ]
+        },
+        "slice": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "write_html",
+    "description": "Insert sanitized HTML with inline CSS relative to a target layer. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "html": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "position": {
+          "type": "string",
+          "enum": [
+            "before",
+            "after",
+            "first",
+            "last",
+            "replace"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "html",
+        "target",
+        "position",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "write_svg",
+    "description": "Insert SVG as editable vector layers; unsupported elements are preserved as pictures with warnings. Standalone operation. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "svg": {
+          "type": "string",
+          "maxLength": 200000
+        },
+        "target": {
+          "type": "string"
+        },
+        "position": {
+          "type": "string",
+          "enum": [
+            "before",
+            "after",
+            "first",
+            "last",
+            "replace"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "svg",
+        "target",
+        "position",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_path",
+    "description": "Read native cubic path segments and node indices in world coordinates. Use the returned revision when editing. Optional documentId targets a document; otherwise uses this MCP session’s binding, never the visible tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "edit_path",
+    "description": "Edit native path nodes in world coordinates. Requires the revision from get_path; standalone atomic operation. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "move_nodes",
+            "insert_node",
+            "delete_nodes",
+            "set_handle",
+            "convert_node",
+            "close",
+            "open",
+            "join",
+            "merge",
+            "primitive"
+          ]
+        },
+        "otherId": {
+          "type": "string"
+        },
+        "firstStart": {
+          "type": "boolean"
+        },
+        "secondEnd": {
+          "type": "boolean"
+        },
+        "primitive": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "polygon",
+                "star"
+              ]
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 3,
+              "maximum": 1000
+            },
+            "ratio": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "indices": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 1,
+          "maxItems": 1000
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dx": {
+          "type": "number"
+        },
+        "dy": {
+          "type": "number"
+        },
+        "t": {
+          "type": "number"
+        },
+        "handle": {
+          "type": "string",
+          "enum": [
+            "in",
+            "out"
+          ]
+        },
+        "point": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "free",
+            "aligned",
+            "symmetric"
+          ]
+        },
+        "nodeKind": {
+          "type": "string",
+          "enum": [
+            "corner",
+            "smooth",
+            "symmetric"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "action",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "boolean",
+    "description": "Combine ordered vector operands non-destructively. Subtract removes later operands from the first. Flatten creates an editable path and hides preserved sources; other operations retain source children. Standalone operation. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 200
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "union",
+            "subtract",
+            "intersect",
+            "exclude",
+            "flatten"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "ids",
+        "operation",
+        "revision",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "outline",
+    "description": "Convert strokes or text into editable paths while preserving hidden source layers. Standalone atomic operation. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 200
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "stroke",
+            "text"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "ids",
+        "kind",
+        "revision",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "image",
+    "description": "Remove an image background locally or restore its preserved original. Standalone atomic operation. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "remove_background",
+            "restore"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "id",
+        "action",
+        "revision",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "update",
+    "description": "Update a layer using CSS declarations, text, or supported attributes. An empty CSS value removes a property. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "style": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "text": {
+          "type": "string"
+        },
+        "attrs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "id",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "move",
+    "description": "Move a layer before or after a sibling, or first or last inside a container. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "position": {
+          "type": "string",
+          "enum": [
+            "before",
+            "after",
+            "first",
+            "last"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "id",
+        "target",
+        "position",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "duplicate",
+    "description": "Duplicate a subtree, optionally positioning the copy relative to a target. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "position": {
+          "type": "string",
+          "enum": [
+            "before",
+            "after",
+            "first",
+            "last"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "id",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "delete",
+    "description": "Remove up to 200 layers atomically, including their descendants. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 200
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "ids",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "batch",
+    "description": "Apply 1–100 supported writes atomically as one agent operation. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ops": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tool": {
+                "type": "string",
+                "enum": [
+                  "write_html",
+                  "update",
+                  "move",
+                  "duplicate",
+                  "delete",
+                  "create_board",
+                  "create_shape",
+                  "edit_shapes",
+                  "edit_text",
+                  "styles",
+                  "libraries",
+                  "document_assets"
+                ]
+              },
+              "args": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "tool",
+              "args"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "ops",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "create_board",
+    "description": "Create a vertically laid-out board to the right of existing boards. Height hugs content when omitted. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "width": {
+          "type": "number",
+          "minimum": 1
+        },
+        "height": {
+          "type": "number",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "width",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "assets",
+    "description": "Search configured local or optional asset providers. Unconfigured providers return no records. Optional documentId targets a document; otherwise uses this MCP session’s binding, never the visible tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "brand",
+            "upload",
+            "stock"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_guide",
+    "description": "Read practical guidance for layout, text, review, components, vector authoring, or local image editing. Optional documentId targets a document; otherwise uses this MCP session’s binding, never the visible tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string",
+          "enum": [
+            "html",
+            "layout",
+            "text",
+            "review",
+            "components",
+            "vector",
+            "image",
+            "workspace"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "undo",
+    "description": "Undo the latest edit only when it belongs to this agent. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "components",
+    "description": "Search reusable components, with pages of at most 200 records. Optional documentId targets a document; otherwise uses this MCP session’s binding, never the visible tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "component",
+    "description": "Create or modify reusable components, variants, instances, and typed properties atomically. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "add_variant",
+            "combine",
+            "instance",
+            "variant",
+            "property",
+            "edit_property",
+            "remove_property",
+            "bind",
+            "set_property",
+            "reset",
+            "detach",
+            "axes"
+          ]
+        },
+        "variantProperties": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "value": {
+                "type": "string",
+                "maxLength": 1000
+              }
+            },
+            "required": [
+              "name",
+              "value"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "id": {
+          "type": "string"
+        },
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 200
+        },
+        "source": {
+          "type": "string"
+        },
+        "parent": {
+          "type": "string"
+        },
+        "layer": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "property": {
+          "type": "string"
+        },
+        "propertyType": {
+          "type": "string",
+          "enum": [
+            "text",
+            "boolean",
+            "swap"
+          ]
+        },
+        "value": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "action",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "fonts",
+    "description": "List configured font families, optionally filtering by a case-insensitive query. Optional documentId targets a document; otherwise uses this MCP session’s binding, never the visible tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "page",
+    "description": "List, create, rename, duplicate, delete, reorder or update page guides. Returns refreshed page context. Keeps at least one page; copies remap layer and component identities. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "list",
+            "create",
+            "rename",
+            "duplicate",
+            "delete",
+            "reorder",
+            "update"
+          ]
+        },
+        "pageId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "properties": {
+          "type": "object",
+          "properties": {
+            "guides": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "axis": {
+                    "type": "string",
+                    "enum": [
+                      "x",
+                      "y"
+                    ]
+                  },
+                  "position": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "axis",
+                  "position"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 200
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "action",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "create_shape",
+    "description": "Create a native editable shape with explicit geometry and inspector properties, without drawing gestures. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "frame",
+            "group",
+            "rect",
+            "ellipse",
+            "polygon",
+            "star",
+            "line",
+            "arrow",
+            "pencil",
+            "pen",
+            "path",
+            "text",
+            "image",
+            "svg"
+          ]
+        },
+        "parentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 0
+        },
+        "height": {
+          "type": "number",
+          "minimum": 0
+        },
+        "properties": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "x": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": -1000000000,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "y": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": -1000000000,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rotation": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": -1000000000,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "opacity": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "hidden": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "locked": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "constrainProportions": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "flipX": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "flipY": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "blendMode": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fills": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokes": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokeWidth": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokeAlignment": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokeCap": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokeJoin": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokeDashArray": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "maxItems": 200
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokeSides": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radius": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radii": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radiusTopLeft": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radiusTopRight": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radiusBottomLeft": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radiusBottomRight": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cornerSmoothing": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "clip": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "clipContent": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "omitFillOnExport": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "layout": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "hSizing": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "hug",
+                    "fill"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "vSizing": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "hug",
+                    "fill"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "widthSizing": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "hug",
+                    "fill"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "heightSizing": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "hug",
+                    "fill"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "minWidth": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxWidth": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "minHeight": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxHeight": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "absolute": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "horizontalConstraint": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "left",
+                    "right",
+                    "leftAndRight",
+                    "center",
+                    "scale"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "verticalConstraint": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "top",
+                    "bottom",
+                    "topAndBottom",
+                    "center",
+                    "scale"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "gridCell": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "layoutGrids": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "guides": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "shadows": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "effects": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "blur": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "blurHidden": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "backgroundBlur": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "backgroundBlurHidden": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "image": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "src": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 16777216
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "objectFit": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "fill",
+                    "contain",
+                    "cover"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "crop": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "adjust": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "svg": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 2000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "content": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "autoResize": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "widthAndHeight",
+                    "height",
+                    "width",
+                    "fixed",
+                    "auto"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "truncate": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxLines": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "leadingTrim": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "capHeight"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fillRule": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "nonzero",
+                    "evenodd"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "handleMode": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "free",
+                    "aligned",
+                    "symmetric"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "primitive": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "isMaskGroup": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maskType": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "alpha",
+                    "vector",
+                    "luminance"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "booleanOperation": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "union",
+                    "subtract",
+                    "intersect",
+                    "exclude"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "exportSettings": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "textBackground": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    {
+                      "type": "string",
+                      "maxLength": 200000
+                    }
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "type",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "edit_shapes",
+    "description": "Atomically edit explicit layers using native inspector properties, structure, geometry, layout or arrangement operations. Never uses the human selection. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "patch",
+            "group",
+            "ungroup",
+            "frame",
+            "mask",
+            "unmask",
+            "align",
+            "distribute",
+            "tidy",
+            "order",
+            "flip",
+            "translate",
+            "resize",
+            "rotate",
+            "layout"
+          ]
+        },
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 1,
+          "maxItems": 200
+        },
+        "properties": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "x": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": -1000000000,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "y": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": -1000000000,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rotation": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": -1000000000,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "opacity": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "hidden": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "locked": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "constrainProportions": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "flipX": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "flipY": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "blendMode": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fills": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokes": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokeWidth": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokeAlignment": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokeCap": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokeJoin": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokeDashArray": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "maxItems": 200
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strokeSides": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radius": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radii": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radiusTopLeft": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radiusTopRight": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radiusBottomLeft": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radiusBottomRight": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cornerSmoothing": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "clip": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "clipContent": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "omitFillOnExport": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "layout": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "hSizing": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "hug",
+                    "fill"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "vSizing": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "hug",
+                    "fill"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "widthSizing": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "hug",
+                    "fill"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "heightSizing": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "hug",
+                    "fill"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "minWidth": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxWidth": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "minHeight": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxHeight": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "absolute": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "horizontalConstraint": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "left",
+                    "right",
+                    "leftAndRight",
+                    "center",
+                    "scale"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "verticalConstraint": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "top",
+                    "bottom",
+                    "topAndBottom",
+                    "center",
+                    "scale"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "gridCell": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "layoutGrids": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "guides": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "shadows": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "effects": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "blur": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "blurHidden": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "backgroundBlur": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "backgroundBlurHidden": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "image": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "src": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 16777216
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "objectFit": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "fill",
+                    "contain",
+                    "cover"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "crop": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "adjust": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "svg": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 2000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "content": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "autoResize": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "widthAndHeight",
+                    "height",
+                    "width",
+                    "fixed",
+                    "auto"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "truncate": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxLines": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "leadingTrim": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "capHeight"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fillRule": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "nonzero",
+                    "evenodd"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "handleMode": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "free",
+                    "aligned",
+                    "symmetric"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "primitive": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "isMaskGroup": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maskType": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "alpha",
+                    "vector",
+                    "luminance"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "booleanOperation": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "union",
+                    "subtract",
+                    "intersect",
+                    "exclude"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "exportSettings": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxItems": 10000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "textBackground": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    {
+                      "type": "string",
+                      "maxLength": 200000
+                    }
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "alignment": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right",
+            "top",
+            "bottom",
+            "h-center",
+            "v-center"
+          ]
+        },
+        "axis": {
+          "type": "string",
+          "enum": [
+            "h",
+            "v"
+          ]
+        },
+        "gap": {
+          "type": "number"
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "front",
+            "back",
+            "forward",
+            "backward",
+            "alpha",
+            "luminance",
+            "vector"
+          ]
+        },
+        "dx": {
+          "type": "number"
+        },
+        "dy": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 0
+        },
+        "height": {
+          "type": "number",
+          "minimum": 0
+        },
+        "angle": {
+          "type": "number"
+        },
+        "origin": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        },
+        "layout": {},
+        "maskId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "parentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "clipContent": {
+          "type": "boolean"
+        },
+        "fills": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "action",
+        "ids",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "edit_text",
+    "description": "Edit rich text ranges and paragraph styles, or find and replace text while preserving unaffected runs. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "replace",
+            "range_style",
+            "paragraph_style",
+            "find_replace"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "range": {
+          "type": "object",
+          "properties": {
+            "start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "start",
+            "end"
+          ],
+          "additionalProperties": false
+        },
+        "text": {
+          "type": "string"
+        },
+        "find": {
+          "type": "string",
+          "minLength": 1
+        },
+        "replace": {
+          "type": "string"
+        },
+        "style": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fontFamily": {
+              "type": "string",
+              "maxLength": 200000
+            },
+            "fontSize": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "fontWeight": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "fontStyle": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "italic"
+              ]
+            },
+            "letterSpacing": {
+              "type": "number",
+              "minimum": -1000000000,
+              "maximum": 1000000000
+            },
+            "fills": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "maxItems": 10000
+            },
+            "highlight": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "textDecoration": {
+              "type": "string",
+              "enum": [
+                "none",
+                "underline",
+                "line-through"
+              ]
+            },
+            "textDecorationStyle": {
+              "type": "string",
+              "enum": [
+                "solid",
+                "dotted",
+                "wavy",
+                "double",
+                "dashed"
+              ]
+            },
+            "textDecorationThickness": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "textTransform": {
+              "type": "string",
+              "enum": [
+                "none",
+                "uppercase",
+                "lowercase",
+                "capitalize",
+                "smallCaps"
+              ]
+            },
+            "textAlign": {
+              "type": "string",
+              "enum": [
+                "left",
+                "center",
+                "right",
+                "justify"
+              ]
+            },
+            "lineHeight": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "paragraphSpacing": {
+              "type": "number",
+              "minimum": -1000000000,
+              "maximum": 1000000000
+            },
+            "paragraphIndent": {
+              "type": "number",
+              "minimum": -1000000000,
+              "maximum": 1000000000
+            },
+            "listType": {
+              "type": "string",
+              "enum": [
+                "none",
+                "ordered",
+                "bullet"
+              ]
+            },
+            "listLevel": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "verticalAlign": {
+              "type": "string",
+              "enum": [
+                "top",
+                "center",
+                "bottom"
+              ]
+            }
+          }
+        },
+        "caseSensitive": {
+          "type": "boolean"
+        },
+        "wholeWord": {
+          "type": "boolean"
+        },
+        "all": {
+          "type": "boolean"
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "id",
+        "action",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "styles",
+    "description": "Manage shared paint, text and effect styles; inspect users, apply and detach styles. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "list",
+            "get",
+            "create",
+            "update",
+            "duplicate",
+            "delete",
+            "apply",
+            "detach",
+            "users"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 1,
+          "maxItems": 200
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "paint",
+            "text",
+            "effect"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "value": {},
+        "patch": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "pattern": "\\S"
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 10000
+            },
+            "value": {}
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "fill",
+            "stroke",
+            "text",
+            "effect"
+          ]
+        },
+        "query": {
+          "type": "string"
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "action",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "libraries",
+    "description": "Manage embedded component library snapshots, enable or unlink them, insert instances and export snapshots. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "list",
+            "get",
+            "add",
+            "update",
+            "enable",
+            "remove",
+            "insert",
+            "export"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "snapshot": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "componentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "parentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "action",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "document_assets",
+    "description": "Manage embedded images, SVG and font assets. Sources must be embedded data URLs; no implicit filesystem or network fetch. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "list",
+            "add",
+            "remove",
+            "place"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "image",
+            "svg",
+            "font"
+          ]
+        },
+        "dataUrl": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "faces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "family": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "url": {
+                "type": "string"
+              },
+              "dataUrl": {
+                "type": "string"
+              },
+              "weight": {},
+              "style": {
+                "type": "string",
+                "enum": [
+                  "normal",
+                  "italic",
+                  "oblique"
+                ]
+              },
+              "unicodeRange": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "family"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "family": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "weight": {},
+        "fontStyle": {
+          "type": "string",
+          "enum": [
+            "normal",
+            "italic",
+            "oblique"
+          ]
+        },
+        "unicodeRange": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "parentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 0
+        },
+        "height": {
+          "type": "number",
+          "minimum": 0
+        },
+        "query": {
+          "type": "string"
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "action",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "clipboard",
+    "description": "Copy or cut native layers and properties to a private agent clipboard or explicit transferable payload; paste in place, at coordinates or replacing explicit layers. Does not read the system clipboard. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "copy",
+            "cut",
+            "paste",
+            "copy_properties",
+            "paste_properties"
+          ]
+        },
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 1,
+          "maxItems": 200
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "normal",
+            "in_place",
+            "replace"
+          ]
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "parentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "action",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "view",
+    "description": "Read or set canvas viewport, selection, tool and display flags, or fit explicit layers. Changes are targeted to this document. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "get",
+            "set",
+            "select",
+            "tool",
+            "fit"
+          ]
+        },
+        "viewport": {
+          "type": "object",
+          "properties": {
+            "vport": {
+              "type": "object",
+              "properties": {
+                "width": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "height": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "width",
+                "height"
+              ],
+              "additionalProperties": false
+            },
+            "vbox": {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "width": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "height": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "x",
+                "y",
+                "width",
+                "height"
+              ],
+              "additionalProperties": false
+            },
+            "zoom": {
+              "type": "number",
+              "minimum": 0.01,
+              "maximum": 256
+            }
+          },
+          "required": [
+            "vport",
+            "vbox",
+            "zoom"
+          ],
+          "additionalProperties": false
+        },
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 0,
+          "maxItems": 200
+        },
+        "tool": {
+          "type": "string",
+          "enum": [
+            "move",
+            "frame",
+            "rect",
+            "ellipse",
+            "polygon",
+            "star",
+            "line",
+            "arrow",
+            "pencil",
+            "pen",
+            "text"
+          ]
+        },
+        "flags": {
+          "type": "object",
+          "properties": {
+            "showOutlines": {
+              "type": "boolean"
+            },
+            "uiHidden": {
+              "type": "boolean"
+            },
+            "pixelSnap": {
+              "type": "boolean"
+            },
+            "showRulers": {
+              "type": "boolean"
+            },
+            "showGrids": {
+              "type": "boolean"
+            },
+            "multiSelect": {
+              "type": "boolean"
+            },
+            "snapping": {
+              "type": "boolean"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "action",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "export_selection",
+    "description": "Export explicit layers as SVG, PNG, JPG, WebP, PDF, HTML or editable JSON. Returns typed content or base64; no save dialog. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": [
+            "svg",
+            "png",
+            "jpg",
+            "webp",
+            "pdf",
+            "json",
+            "html"
+          ]
+        },
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 1,
+          "maxItems": 200
+        },
+        "scale": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 16
+        },
+        "quality": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "bounds": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0
+            },
+            "height": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        "background": {
+          "type": "string"
+        },
+        "omitFill": {
+          "type": "boolean"
+        },
+        "constraint": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "scale",
+                "width",
+                "height"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0.01
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "format",
+        "ids",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "redo",
+    "description": "Redo only an edit previously undone by this agent, without consuming another user or agent history. Requires explicit documentId; never targets the visible tab implicitly.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_documents",
+    "description": "List local canvas metadata without opening a document. Optional query, zero-based offset and limit (default 50, maximum 100). No paths, thumbnails or document content.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "starredOnly": {
+          "type": "boolean"
+        },
+        "sort": {
+          "type": "string",
+          "enum": [
+            "recent",
+            "oldest",
+            "title"
+          ]
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "open_document",
+    "description": "Open and bind a local canvas by its document ID. Keeps other documents and sessions open. focus defaults to false; true reveals its tab. Returns document identity and context.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        },
+        "focus": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "create_document",
+    "description": "Create and bind a blank local canvas, optionally named with 1–120 characters. focus defaults to false; true reveals its tab. Returns its saved document ID and context.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        },
+        "focus": {
+          "type": "boolean",
+          "default": false
+        },
+        "sample": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "rename_document",
+    "description": "Rename a local canvas by document ID without switching the open canvas. The trimmed title must contain 1–120 characters.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "duplicate_document",
+    "description": "Flush and duplicate the specified canvas, optionally naming the copy. Binds the caller to the new document. focus defaults to false; true reveals its tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        },
+        "focus": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "workspace",
+    "description": "Inspect tabs, focus or close an explicit document, show the library, inspect public connection/app information, control the app window or request a saved quit. Closing may release only this caller’s binding.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "state",
+            "focus",
+            "close",
+            "show_library",
+            "connection",
+            "about",
+            "window",
+            "quit",
+            "capabilities",
+            "sample_color"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        },
+        "release": {
+          "type": "boolean"
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "http",
+            "stdio"
+          ]
+        },
+        "fullscreen": {
+          "type": "boolean"
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "hideOthers": {
+          "type": "boolean"
+        },
+        "devTools": {
+          "type": "boolean"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "displayId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "preferences",
+    "description": "Read or update display name, library view and an explicit document favorite.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "get",
+            "set"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "view": {
+          "type": "string",
+          "enum": [
+            "grid",
+            "list"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        },
+        "starred": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "save_document",
+    "description": "Flush and durably save an explicit canvas without changing the visible tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "delete_document",
+    "description": "Delete an unused canvas only when expectedTitle matches. Close and release its agent binding first; other agents or collaborators prevent deletion.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        },
+        "expectedTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "id",
+        "expectedTitle"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "import_document",
+    "description": "Import .omc or canvas JSON from a bounded payload or explicit absolute local file path; .fig and .sketch require filePath without a dialog. Opening stays in the background by default.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": [
+            "omc",
+            "json",
+            "fig",
+            "sketch"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "merge",
+            "copy"
+          ]
+        },
+        "payload": {
+          "type": "string"
+        },
+        "filePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        },
+        "focus": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "format"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "export_document",
+    "description": "Export a targeted canvas to typed content or an explicit absolute file path. Existing files are preserved unless overwrite is explicitly true.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "omc",
+            "json",
+            "svg",
+            "png",
+            "jpg",
+            "webp",
+            "pdf",
+            "html"
+          ]
+        },
+        "filePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "overwrite": {
+          "type": "boolean"
+        },
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 1,
+          "maxItems": 200
+        },
+        "scale": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 16
+        },
+        "quality": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "bounds": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0
+            },
+            "height": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        "background": {
+          "type": "string"
+        },
+        "omitFill": {
+          "type": "boolean"
+        },
+        "constraint": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "scale",
+                "width",
+                "height"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0.01
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "format"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "import_resource",
+    "description": "Import an image, SVG, font or library snapshot from an explicit bounded local file into a targeted canvas. Uses no file dialog or HTTP body expansion.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "image",
+            "svg",
+            "font",
+            "library"
+          ]
+        },
+        "filePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "family": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "weight": {},
+        "fontStyle": {
+          "type": "string",
+          "enum": [
+            "normal",
+            "italic",
+            "oblique"
+          ]
+        },
+        "unicodeRange": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "documentId",
+        "kind",
+        "filePath"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "collaboration",
+    "description": "Inspect, host, create invitations, join or leave an explicitly targeted collaboration session. Network actions happen only when requested; invitations grant edit access.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "status",
+            "host",
+            "invite",
+            "join",
+            "leave",
+            "cursor"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[a-f0-9-]{36}$"
+        },
+        "invite": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16000
+        },
+        "address": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "focus": {
+          "type": "boolean"
+        },
+        "cursor": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "page": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "selection": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "minItems": 0,
+              "maxItems": 200
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "page"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  }
+]
