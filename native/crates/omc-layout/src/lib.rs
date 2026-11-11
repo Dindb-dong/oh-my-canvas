@@ -509,16 +509,28 @@ fn content_alignment(value: Option<&str>) -> Option<AlignContent> {
         _ => None,
     }
 }
+const MAX_GRID_TRACKS: usize = 128;
+
 fn placement(value: &str) -> Option<Line<GridPlacement>> {
     let parse = |s: &str| -> Option<GridPlacement> {
-        let s = s.trim();
-        if let Some(n) = s.strip_prefix("span ") {
-            Some(GridPlacement::Span(n.parse().ok()?))
-        } else if s == "auto" {
-            Some(auto())
-        } else {
-            Some(line(s.parse::<i16>().ok()?))
-        }
+        let mut words = s.split_ascii_whitespace();
+        let placement = match words.next()? {
+            "span" => {
+                let span = words.next()?.parse::<u16>().ok()?;
+                (span > 0 && usize::from(span) <= MAX_GRID_TRACKS)
+                    .then_some(GridPlacement::Span(span))?
+            }
+            "auto" => auto(),
+            n => {
+                let index = n.parse::<i16>().ok()?;
+                // Taffy uses signed line arithmetic for implicit placement and spans.
+                if index == 0 || usize::from(index.unsigned_abs()) > MAX_GRID_TRACKS + 1 {
+                    return None;
+                }
+                line(index)
+            }
+        };
+        words.next().is_none().then_some(placement)
     };
     if let Some((start, end)) = value.split_once('/') {
         Some(Line {
@@ -532,33 +544,107 @@ fn placement(value: &str) -> Option<Line<GridPlacement>> {
         })
     }
 }
-fn tracks(value: &str, c: LengthContext) -> Option<Vec<GridTemplateComponent<String>>> {
-    if let Some(body) = value
-        .strip_prefix("repeat(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
-        let (count, body) = body.split_once(',')?;
-        let count = count.trim().parse::<usize>().ok()?;
-        if count > 128 {
+
+fn grid_parts(value: &str, comma_separated: bool) -> Option<Vec<&str>> {
+    if value.len() > 4096 {
+        return None;
+    }
+    let mut parts = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+    for (index, byte) in value.bytes().enumerate() {
+        if byte == b'(' {
+            depth += 1;
+            if depth > 24 {
+                return None;
+            }
+        } else if byte == b')' {
+            depth -= 1;
+            if depth < 0 {
+                return None;
+            }
+        } else if depth == 0
+            && if comma_separated {
+                byte == b','
+            } else {
+                byte.is_ascii_whitespace()
+            }
+        {
+            if comma_separated || index > start {
+                parts.push(value[start..index].trim());
+            }
+            start = index + 1;
+        }
+    }
+    if comma_separated || start < value.len() {
+        parts.push(value[start..].trim());
+    }
+    (depth == 0 && !parts.is_empty() && parts.len() <= MAX_GRID_TRACKS).then_some(parts)
+}
+
+fn grid_function<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    value.strip_prefix(prefix)?.strip_suffix(')')
+}
+
+fn grid_breadth(value: &str, context: LengthContext) -> Option<TrackSizingFunction> {
+    let nonnegative = |number: f32| (number.is_finite() && number >= 0.).then_some(number);
+    Some(match value {
+        "auto" => auto(),
+        "min-content" => min_content(),
+        "max-content" => max_content(),
+        _ if value.ends_with("fr") => fr(nonnegative(value.strip_suffix("fr")?.parse().ok()?)?),
+        _ if value.ends_with('%') => {
+            percent(nonnegative(value.strip_suffix('%')?.parse().ok()?)? / 100.)
+        }
+        _ => length(nonnegative(resolve_length(value, context)? as f32)?),
+    })
+}
+
+fn grid_track(value: &str, context: LengthContext) -> Option<GridTemplateComponent<String>> {
+    let track = if let Some(body) = grid_function(value, "minmax(") {
+        let [min, max] = grid_parts(body, true)?.try_into().ok()?;
+        if min.ends_with("fr") {
             return None;
         }
-        let inner = tracks(body.trim(), c)?;
-        return Some((0..count).flat_map(|_| inner.clone()).collect());
-    }
+        minmax(
+            grid_breadth(min, context)?.min_sizing_function(),
+            grid_breadth(max, context)?.max_sizing_function(),
+        )
+    } else {
+        grid_breadth(value, context)?
+    };
+    Some(GridTemplateComponent::Single(track))
+}
+
+fn tracks(value: &str, c: LengthContext) -> Option<Vec<GridTemplateComponent<String>>> {
     let mut result = Vec::new();
-    for token in value.split_whitespace() {
-        let track = if token == "auto" {
-            auto()
-        } else if let Some(v) = token.strip_suffix("fr") {
-            fr(v.parse::<f32>().ok()?)
-        } else if let Some(v) = token.strip_suffix('%') {
-            percent(v.parse::<f32>().ok()? / 100.)
-        } else {
-            length(resolve_length(token, c)? as f32)
-        };
-        result.push(track);
+    if value.trim() == "none" {
+        return Some(result);
     }
-    (!result.is_empty() && result.len() <= 128).then_some(result)
+    // shortcut: numeric repeat only, add auto-repeat when its responsive geometry has fixtures.
+    for token in grid_parts(value.trim(), false)? {
+        if let Some(body) = grid_function(token, "repeat(") {
+            let [count, body] = grid_parts(body, true)?.try_into().ok()?;
+            let count = count.parse::<usize>().ok()?;
+            let inner = grid_parts(body, false)?;
+            if count == 0 || count > (MAX_GRID_TRACKS - result.len()) / inner.len() {
+                return None;
+            }
+            let inner = inner
+                .into_iter()
+                .map(|part| grid_track(part, c))
+                .collect::<Option<Vec<_>>>()?;
+            for _ in 0..count {
+                result.extend_from_slice(&inner);
+            }
+        } else {
+            if result.len() == MAX_GRID_TRACKS {
+                return None;
+            }
+            result.push(grid_track(token, c)?);
+        }
+    }
+    Some(result)
 }
 
 #[cfg(test)]
@@ -566,6 +652,90 @@ mod tests {
     use super::*;
     use omc_model::DocumentContent;
     use serde_json::json;
+
+    #[test]
+    fn grid_sizes_mixed_repeats_and_places_spanning_items() {
+        let content = DocumentContent::empty("grid placement");
+        let mut snapshot = DocumentSnapshot {
+            id: "d".into(),
+            title: content.title,
+            epoch: "e".into(),
+            sequence: 0,
+            pages: content.pages,
+            nodes: content.nodes,
+            metadata: content.metadata,
+        };
+        let root = snapshot.pages[0].root_node_id.clone();
+        snapshot.nodes.get_mut(&root).unwrap().properties.insert(
+            "style".into(),
+            json!("display:grid;width:100%;height:140px;grid-template-columns:20px repeat(2, minmax(50px, 1fr)) 30px;grid-template-rows:20px 30px 40px;gap:10px"),
+        );
+        let mut child = Node::new(NodeKind::Frame);
+        child.parent_id = Some(root.clone());
+        child.properties.insert(
+            "style".into(),
+            json!("grid-column:2 / span 2;grid-row:-2 / -1"),
+        );
+        let child_id = child.id.clone();
+        snapshot.nodes.insert(child.id.clone(), child);
+
+        for (viewport, width) in [(300., 230.), (180., 110.), (140., 110.)] {
+            let result = layout(&snapshot, None, (viewport, 140.)).unwrap();
+            let item = result.boxes[&child_id];
+            assert_eq!(
+                (item.x, item.y, item.width, item.height),
+                (30., 70., width, 40.)
+            );
+            assert!(result.diagnostics.is_empty());
+        }
+
+        let invalid = "repeat(128, repeat(128, 1px))";
+        snapshot.nodes.get_mut(&root).unwrap().properties.insert(
+            "style".into(),
+            json!(format!("display:grid;grid-template-columns:{invalid}")),
+        );
+        snapshot
+            .nodes
+            .get_mut(&child_id)
+            .unwrap()
+            .properties
+            .insert("style".into(), json!("grid-column:0;grid-row:span 0"));
+        let result = layout(&snapshot, None, (300., 140.)).unwrap();
+        for (id, property, value) in [
+            (&root, "grid-template-columns", invalid),
+            (&child_id, "grid-column", "0"),
+            (&child_id, "grid-row", "span 0"),
+        ] {
+            assert!(result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.node_id.as_ref() == Some(id)
+                    && diagnostic.property.as_deref() == Some(property)
+                    && diagnostic.original == value
+                    && diagnostic.fidelity_lost
+            }));
+        }
+    }
+
+    #[test]
+    fn grid_rejects_invalid_or_oversized_tracks() {
+        let context = LengthContext::default();
+        assert_eq!(tracks("repeat(128, 1px)", context).unwrap().len(), 128);
+        for value in [
+            "repeat(0, 1px)",
+            "10px repeat(64, 1px 2px)",
+            "repeat(2,)",
+            "minmax(,1px)",
+            "minmax(1fr, 20px)",
+            "repeat(2, minmax(50px, 1fr)",
+            "NaNfr",
+            "-1px",
+        ] {
+            assert!(tracks(value, context).is_none(), "{value}");
+        }
+        for value in ["span 65535", "span -1", "32767", "-32768"] {
+            assert!(placement(value).is_none(), "{value}");
+        }
+    }
+
     #[test]
     fn responsive_grid_and_native_flex_keep_authored_constraints() {
         let c = DocumentContent::empty("responsive");
