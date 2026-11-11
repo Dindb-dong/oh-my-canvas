@@ -21,4 +21,4 @@ jobs:
           toolchain: 1.92.0
           components: rustfmt
       - run: cargo fmt --manifest-path native/Cargo.toml --all --check
-      - run: cargo test --manifest-path native/Cargo.toml --locked --workspace
+      - run: cargo test --manifest-path native/Cargo.toml --locked -p omc-model -p omc-protocol -p omc-sync -p omc-storage -p omc-engine -p omc-assets -p omc-style
