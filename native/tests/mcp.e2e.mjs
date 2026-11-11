@@ -107,4 +107,8 @@ try{
   });
   await client.client.close();
  });
-}finally{for(const child of children)if((child.exitCode===null&&child.signalCode===null)){child.kill();await new Promise(resolve=>child.once('exit',resolve));}await rm(temporary,{recursive:true,force:true});}
+}finally{
+ for(const child of children)await stop({child});
+ // Windows can still report a transient SQLite file lock after child exit.
+ await rm(temporary,{recursive:true,force:true,maxRetries:10});
+}

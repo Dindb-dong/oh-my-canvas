@@ -4,6 +4,8 @@
 
 Run the smallest relevant check first. Use synthetic files and isolated temporary profiles. Normal development does not require Docker, cloud credentials, a production database, or an external host.
 
+For the Rust workspace, follow [native local verification](../native/README.md#local-verification).
+
 ## Commands
 
 ```sh
