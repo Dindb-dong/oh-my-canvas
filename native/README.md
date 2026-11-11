@@ -14,3 +14,7 @@ This first increment defines contracts. It does not replace the runtime or claim
 ## CRDT operations
 
 Versioned attributed operations, stable text identities, selective retractions, and bounded fragment assembly.
+
+## SQLite persistence
+
+Bundled SQLite WAL/FULL storage, transactional receipts, retained entity versions, staging and recovery.
