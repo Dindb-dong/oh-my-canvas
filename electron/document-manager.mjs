@@ -262,10 +262,19 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
     await awaitPages(entry,revision);
     return entry;
   }
-  async function finishImport(entry,status){
+  async function finishImport(entry,status,warnings){
     return enqueue(entry,async()=>{
-      entry.record.importStatus=status;entry.loadingState={...status,kind:'import',format:status.kind,phase:status.state==='complete'?'complete':'stopped'};
-      try{await save(entry);}finally{loadingChanged(entry);}
+      if(warnings!==undefined){
+        if(!Array.isArray(warnings)||warnings.length>40||warnings.some(value=>typeof value!=='string'||value.length>1024))throw Error('Invalid import diagnostics');
+        const extra={...entry.record.replica.document.extra,importWarnings:[...new Set(warnings)]};
+        if(!same(extra,entry.record.replica.document.extra))entry.record.replica.patch([[JSON.stringify(['meta','extra']),extra]],'Import diagnostics',undefined,{recordHistory:false});
+      }
+      entry.record.importStatus=status;
+      const terminal={...status,kind:'import',format:status.kind,phase:status.state==='complete'?'complete':'stopped'};
+      entry.loadingState={...terminal,...status.state==='complete'?{state:'loading'}:{},phase:'saving'};loadingChanged(entry);
+      try{await save(entry);entry.loadingState=terminal;}
+      catch(error){entry.loadingState={...terminal,state:'failed',phase:'stopped',error:error.message};throw error;}
+      finally{loadingChanged(entry);}
     },{allowStopping:true});
   }
   function assertChanges(entry,changes){if(entry.loadingState?.state==='loading')assertLoadedPageChanges(visibleDocument(entry),changes);}

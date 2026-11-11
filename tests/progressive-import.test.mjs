@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Store } from '../core/storage.mjs';
+import { Store,decodeFile } from '../core/storage.mjs';
 import { DocumentProjection } from '../core/projection.mjs';
 import { createDocumentManager } from '../electron/document-manager.mjs';
 import { startProgressiveImport } from '../electron/progressive-import.mjs';
@@ -25,7 +25,9 @@ function batch(id, index) {
   const document = documentFixture(), page = document.pagesById.page;
   document.pages = [id]; document.pagesById = { [id]: { ...page, id, name: `Source page ${index}` } };
   document.pagesById[id].objects.label.text = `Source content ${index}`;
-  return { document, pageIds: [id], blobs: [], warnings: [`Page ${index} warning`] };
+  const warnings=[`Page ${index} warning`];
+  document.extra={importWarnings:[...warnings],importFidelity:'unverified',sourceNote:'Retained source metadata'};
+  return { document, pageIds: [id], blobs: [], warnings };
 }
 const batches = () => [batch('first', 1), batch('second', 2), batch('third', 3)];
 function worker(source, { afterBatch = async () => {}, complete = true } = {}) {
@@ -67,7 +69,8 @@ test('first durable page is editable before later batches, and early edits/Undo 
     if (['document', 'document-delta', 'document-pages'].includes(event.type)) projection?.accept(event);
   } });
   const paint = deferred(), enteredPaint = deferred();
-  const first = await start(worker(batches()), { afterFirstPaint: async entry => { enteredPaint.resolve(); await Promise.race([paint.promise, untilAborted(entry.importSignal)]); } });
+  const read=worker(batches());
+  const first = await start(async(...args)=>({...await read(...args),warnings:['Final source check warning']}), { afterFirstPaint: async entry => { enteredPaint.resolve(); await Promise.race([paint.promise, untilAborted(entry.importSignal)]); } });
   const { entry, completion } = first; await enteredPaint.promise;
   assert.deepEqual(entry.record.replica.document.pages, ['first']);
   assert.equal(entry.record.importStatus.state, 'loading'); assert.equal(entry.record.importStatus.loadedPages, 1);
@@ -80,19 +83,27 @@ test('first durable page is editable before later batches, and early edits/Undo 
   projection.accept(await commit(manager, store, entry, { seq: 1, changes, label: 'Early user edit' }));
   let complete = false; const exportReady = manager.complete(entry).then(() => { complete = true; });
   await turn(); assert.equal(complete, false); assert.equal(projection.pending.length, 0);
-  paint.resolve(); await completion; await exportReady;
+  paint.resolve(); const completed=await completion; await exportReady;
   assert.equal(complete, true); assert.equal(entry.record.importStatus.state, 'complete');
   assert.deepEqual(entry.record.replica.document.pages, ['first', 'second', 'third']);
   assert.equal(entry.record.replica.document.pagesById.first.name, 'Edited before page two');
+  const warnings=['Page 1 warning','Page 2 warning','Page 3 warning','Final source check warning'];
+  assert.deepEqual(completed.warnings,warnings);
+  assert.deepEqual(entry.record.replica.document.extra,{importWarnings:warnings,importFidelity:'unverified',sourceNote:'Retained source metadata'});
+  assert.equal(entry.record.replica.undo.undoStack.length,1,'diagnostics must not create a user Undo item');
   assert.deepEqual(projection.projected, entry.record.replica.document);
   assert.deepEqual(events.filter(event => event.type === 'document-pages').map(event => event.pageDocument.pages), [['second'], ['third']]);
   assert.equal(progress.at(-1).phase, 'complete'); assert.equal(progress.at(-1).loadedPages, 3);
   entry.record.replica.history('undo');
   assert.equal(entry.record.replica.document.pagesById.first.name, 'Source page 1');
   assert.deepEqual(entry.record.replica.document.pages, ['first', 'second', 'third']);
+  assert.deepEqual(entry.record.replica.document.extra.importWarnings,warnings);
   await manager.save(entry);
   const reopened = await persisted(t, store, entry.record.id);
   assert.deepEqual(reopened.replica.document, entry.record.replica.document);
+  const portable=decodeFile(await store.export(entry.record));t.after(()=>portable.replica.destroy());
+  assert.deepEqual(portable.replica.document.extra.importWarnings,warnings);
+  assert.equal(portable.replica.document.extra.importFidelity,'unverified');
 });
 
 test('worker failure after the first page retains a durable partial document and forbids full export', async t => {
@@ -107,6 +118,7 @@ test('worker failure after the first page retains a durable partial document and
   const read = await persisted(t, store, entry.record.id);
   assert.equal(read.importStatus.state, 'failed'); assert.equal(read.importStatus.loadedPages, 1);
   assert.deepEqual(read.replica.document.pages, ['first']);
+  assert.deepEqual(read.replica.document.extra.importWarnings,['Page 1 warning']);
 });
 
 test('cancellation after the first page persists cancelled metadata and no invented remaining pages', async t => {
@@ -119,6 +131,40 @@ test('cancellation after the first page persists cancelled metadata and no inven
   const read = await persisted(t, store, entry.record.id);
   assert.equal(read.importStatus.state, 'cancelled'); assert.deepEqual(read.replica.document.pages, ['first']);
   assert.deepEqual(read.importStatus.pages.map(page => page.id), ['first', 'second', 'third']);
+  assert.deepEqual(read.replica.document.extra.importWarnings,['Page 1 warning']);
+});
+
+test('late decoder failure preserves observed later-page warnings without claiming complete import',async t=>{
+  const {store,progress,start}=await fixture(t);
+  const {entry,completion}=await start(worker(batches(),{afterBatch:async index=>{if(index===1)throw Error('Third page failed');}}));
+  await assert.rejects(completion,/Third page failed/);
+  const warnings=['Page 1 warning','Page 2 warning'];
+  assert.deepEqual(entry.record.replica.document.extra.importWarnings,warnings);
+  assert.equal(entry.record.importStatus.state,'failed');assert.equal(entry.record.importStatus.loadedPages,2);
+  assert.equal(progress.some(event=>event.phase==='complete'),false);
+  const reopened=await persisted(t,store,entry.record.id);
+  assert.deepEqual(reopened.replica.document.extra.importWarnings,warnings);
+  assert.equal(reopened.importStatus.state,'failed');assert.equal(reopened.replica.document.extra.importFidelity,'unverified');
+});
+
+test('diagnostics remain deduplicated and bounded across batches and final result',async t=>{
+  const {start}=await fixture(t),source=batches();
+  source[0].warnings=['Repeated'];source[1].warnings=['Repeated','x'.repeat(1023)+'🙂','\ud800'];source[2].warnings=['Last'];
+  const {entry,completion}=await start(worker(source));await completion;
+  const warnings=entry.record.replica.document.extra.importWarnings;
+  assert.deepEqual(warnings,['Repeated','x'.repeat(1023),'�','Last']);
+  assert.ok(warnings.every(value=>value.length<=1024&&value.isWellFormed()));
+  const capped=batches();capped[0].warnings=Array.from({length:40},(_,index)=>`Warning ${index}`);capped[1].warnings=['Later warning'];capped[2].warnings=[];
+  const read=worker(capped),next=await start(async(...args)=>({...await read(...args),warnings:capped[0].warnings}));
+  await next.completion;assert.deepEqual(next.entry.record.replica.document.extra.importWarnings,capped[0].warnings);
+});
+
+test('malformed later diagnostics fail explicitly and retain previously observed warnings',async t=>{
+  const {store,start}=await fixture(t),source=batches();source[1].warnings=[{message:'not a string'}];
+  const {entry,completion}=await start(worker(source));await assert.rejects(completion,/Invalid design import warnings/);
+  assert.equal(entry.record.importStatus.state,'failed');assert.equal(entry.record.importStatus.loadedPages,1);
+  const reopened=await persisted(t,store,entry.record.id);
+  assert.deepEqual(reopened.replica.document.extra.importWarnings,['Page 1 warning']);
 });
 
 test('failure before a first usable page rejects the open request without creating a canvas', async t => {

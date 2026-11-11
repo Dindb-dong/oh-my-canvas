@@ -8,6 +8,17 @@ const fail=message=>Object.assign(Error(message),{code:'invalid_import'});
  */
 export async function startProgressiveImport(bytes,format,{readDesignFile,store,manager,title,options={},onProgress=()=>{},afterFirstPaint=async()=>{}}){
   const controller=new AbortController(),consumer=new AbortController(),inFlight=new Set();
+  const warnings=new Set();
+  const rememberWarnings=values=>{
+    if(values===undefined)return;
+    if(!Array.isArray(values)||values.length>40||values.some(value=>typeof value!=='string'))throw fail('Invalid design import warnings');
+    for(const value of values){
+      if(warnings.size>=40)break;
+      let message=value.slice(0,1024);
+      if(value.length>1024&&/[\uD800-\uDBFF]$/.test(message))message=message.slice(0,-1);
+      warnings.add(message.toWellFormed());
+    }
+  };
   let manifest,entry,completedPages=0,resolveFirst,rejectFirst,ownsHold=false,accepting=true,terminalError,consumerError;
   const first=new Promise((resolve,reject)=>{resolveFirst=resolve;rejectFirst=reject;});
   const abortConsumer=()=>consumer.abort(controller.signal.reason);
@@ -44,6 +55,7 @@ export async function startProgressiveImport(bytes,format,{readDesignFile,store,
             const expected=manifest.pages.slice(completedPages,completedPages+batch.pageIds.length).map(p=>p.id);
             if(JSON.stringify(expected)!==JSON.stringify(batch.pageIds)||JSON.stringify(batch.document.pages)!==JSON.stringify(batch.pageIds))throw fail('Design pages arrived out of order');
             consumer.signal.throwIfAborted();
+            rememberWarnings(batch.warnings);
             const prepared=await persistDesignImport(batch,store);consumer.signal.throwIfAborted();
             const nextCount=completedPages+batch.pageIds.length;
             if(!entry){
@@ -54,7 +66,7 @@ export async function startProgressiveImport(bytes,format,{readDesignFile,store,
               // saving/mounting. Claim its result, then observe the terminal cause
               // before exposing it as a successful first-page open.
               consumer.signal.throwIfAborted();
-              resolveFirst({entry,completion,warnings:prepared.warnings});
+              resolveFirst({entry,completion,warnings:[...warnings]});
               await paint(entry);
             }else{
               await manager.appendPages(entry,prepared.document,status('loading',undefined,nextCount));
@@ -74,9 +86,10 @@ export async function startProgressiveImport(bytes,format,{readDesignFile,store,
       if(consumerError)throw consumerError;
       consumer.signal.throwIfAborted();
       if(!entry||completedPages!==manifest.pages.length||!result.complete)throw fail('Design import ended before every page arrived');
-      await manager.finishImport(entry,status('complete'));
+      rememberWarnings(result.warnings);
+      await manager.finishImport(entry,status('complete'),[...warnings]);
       onProgress({phase:'complete',loadedPages:completedPages,totalPages:manifest.pages.length,documentId:entry.record.id});
-      return {...result,entry};
+      return {...result,warnings:[...warnings],entry};
     }catch(error){
       // Do not turn a worker failure into a user cancellation merely because we
       // abort its pending paint/projection wait to finish the consumer lifetime.
@@ -87,7 +100,7 @@ export async function startProgressiveImport(bytes,format,{readDesignFile,store,
         // Replica publication may have succeeded before a later save failed.
         // Report the actual retained page count, without advancing a save ACK.
         completedPages=entry.record.replica.document.pages.length;
-        try{await manager.finishImport(entry,status(terminalState,error));}
+        try{await manager.finishImport(entry,status(terminalState,error),[...warnings]);}
         catch(saveError){error.saveError=saveError.message;}
       }
       // Rejection is harmless if the first page was already exposed. Otherwise

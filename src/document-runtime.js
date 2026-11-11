@@ -70,14 +70,25 @@ function updateSaveState(){
 function renderLoading(){
   const loading=loadingState?.state==='loading',incomplete=importStatus&&importStatus.state!=='complete',failed=loadingState?.state==='failed';
   const status=loading?loadingState:incomplete?importStatus:failed?loadingState:null,notice=$('#loading-notice');
-  notice.hidden=!status;document.body.dataset.loadingState=loading?'loading':status?'incomplete':'complete';
+  const notes=Array.isArray(handle?.editor.doc.extra?.importWarnings)?handle.editor.doc.extra.importWarnings.filter(value=>typeof value==='string').slice(0,40):[];
+  notice.hidden=!status&&!notes.length;document.body.dataset.loadingState=loading?'loading':status?'incomplete':'complete';
   $('#export').disabled=!!status;$('#collaborate').disabled=!!status;
-  if(!status){updateSaveState();return;}
+  $('#loading-progress').hidden=!status;
+  if(!status){
+    if(notes.length){
+      $('#loading-label').textContent=`Import notes (${notes.length})`;
+      $('#loading-description').textContent='Conversion finished. These features need review against the original design.';
+      $('#loading-pages').setAttribute('aria-label','Import notes');
+      $('#loading-pages').replaceChildren(...notes.map(text=>{const note=document.createElement('p');note.textContent=text.slice(0,1024);return note;}));
+    }
+    $('#stop-loading').hidden=true;updateSaveState();return;
+  }
   const count=status.loadedPages??0,total=status.totalPages??0;
   $('#loading-label').textContent=loading?`Loading ${count} of ${total} pages…`:failed?'Opening failed':`Import incomplete (${count}/${total})`;
   $('#loading-progress').max=Math.max(1,total);$('#loading-progress').value=count;
   $('#loading-description').textContent=loading?'You can edit loaded pages. The remaining pages are loading in the background.':incomplete?`${status.error?status.error+' ':''}The pages already saved are kept. Reimport the original file as a new canvas to load every page.`:status.error??'Could not finish opening. Keep this tab open while changes are unsaved.';
   const ids=new Set(handle?.editor.doc.pages??[]);
+  $('#loading-pages').setAttribute('aria-label','Loading page list');
   $('#loading-pages').replaceChildren(...(status.pages??[]).map(item=>{
     const button=document.createElement('button');button.type='button';button.textContent=item.name??'Untitled page';button.disabled=!ids.has(item.id);button.dataset.loadingPage=item.id;
     if(button.disabled)button.title='This page is still loading';

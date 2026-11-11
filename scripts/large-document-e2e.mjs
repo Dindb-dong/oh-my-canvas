@@ -81,8 +81,9 @@ async function launch(directory){
     const state={timeOrigin:performance.timeOrigin,marks:{},states:[],earlyEdit:null},keyOf=value=>JSON.stringify([value.pageCount,value.selectedPageId,value.selectedPageName,value.loadingState,value.saveState,value.ready,value.inert]);
     let previous,observer;
     const sample=reason=>{
-      const select=document.querySelector('select[aria-label="Current page"]');
-      const value={at:performance.now(),reason,pageCount:select?.options.length??0,selectedPageId:select?.value??null,selectedPageName:select?.selectedOptions[0]?.textContent??null,loadingState:document.body?.dataset.loadingState??null,saveState:document.querySelector('#save-state')?.textContent??null,ready:document.body?.dataset.documentReady==='true',inert:!!document.querySelector('#editor')?.inert,hidden:document.hidden};
+      const select=document.querySelector('select[aria-label="Current page"]'),rows=select?[]:[...document.querySelectorAll('#editor .pages .page-row[data-id]')],active=rows.find(row=>row.classList.contains('active'));
+      // One/two-page documents use compact rows; the picker appears at page three.
+      const value={at:performance.now(),reason,pageCount:select?.options.length??rows.length,selectedPageId:select?.value??active?.dataset.id??null,selectedPageName:select?.selectedOptions[0]?.textContent??active?.querySelector('.name')?.textContent??null,pageNavigation:select?'select':rows.length?'rows':'unmounted',loadingState:document.body?.dataset.loadingState??null,saveState:document.querySelector('#save-state')?.textContent??null,ready:document.body?.dataset.documentReady==='true',inert:!!document.querySelector('#editor')?.inert,hidden:document.hidden};
       const key=keyOf(value);if(key!==previous){previous=key;if(state.states.length<100)state.states.push(value);}
       if(value.ready&&value.loadingState==='complete'&&!state.complete)state.complete={...value,absoluteMs:performance.timeOrigin+value.at};
       const edit=state.earlyEdit;
@@ -163,9 +164,9 @@ async function loadingJourney(timing,{progressive=false,earlyName,phase}={}){
   await page.waitForFunction(()=>!!window.__largeDocumentStartup?.state.marks['omc-first-paint'],null,{timeout:30000});
   const initial=await page.evaluate(()=>({marks:window.__largeDocumentStartup.state.marks,current:window.__largeDocumentStartup.sample('first-ready-observation')}));
   const first=initial.marks['omc-first-editable'],paint=initial.marks['omc-first-paint'];
-  assert.ok(first&&paint,'Runtime did not emit both startup marks');assert.ok(paint.at>=first.at,'First paint preceded editability');
-  const report={firstReadyObservedMs:timing.firstReadyObservedMs,firstEditableMs:first.absoluteMs-timing.requestedAt,firstPaintMs:paint.absoluteMs-timing.requestedAt,firstEditable:first,firstPaint:paint,initialObservation:initial.current};
+  const report={firstReadyObservedMs:timing.firstReadyObservedMs,firstEditableMs:first?first.absoluteMs-timing.requestedAt:null,firstPaintMs:paint?paint.absoluteMs-timing.requestedAt:null,firstEditable:first??null,firstPaint:paint??null,initialObservation:initial.current};
   if(phase){result.phases[phase]=report;await checkpoint();}
+  assert.ok(first&&paint,'Runtime did not emit both startup marks');assert.ok(paint.at>=first.at,'First paint preceded editability');
   let early;
   if(progressive){
     assert.equal(first.detail?.loadedPages,1,'First editable mark did not contain exactly one loaded page');
