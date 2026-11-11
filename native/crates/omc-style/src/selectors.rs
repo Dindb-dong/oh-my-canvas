@@ -6,11 +6,7 @@ pub fn matches(
     node: &Node,
     snapshot: &DocumentSnapshot,
 ) -> Result<Option<u32>, ()> {
-    let tokens = tokenize(selector)?;
-    if tokens.is_empty() {
-        return Err(());
-    }
-    let specificity = specificity(selector);
+    let (tokens, specificity) = tokenize(selector)?;
     let mut position = tokens.len() - 1;
     let mut candidate = node;
     if !simple(&tokens[position], candidate, snapshot)? {
@@ -19,9 +15,6 @@ pub fn matches(
     while position > 0 {
         position -= 1;
         if tokens[position] == ">" {
-            if position == 0 {
-                return Err(());
-            }
             position -= 1;
             let Some(parent) = candidate
                 .parent_id
@@ -60,11 +53,12 @@ pub fn matches(
     }
     Ok(Some(specificity))
 }
-fn tokenize(input: &str) -> Result<Vec<String>, ()> {
+fn tokenize(input: &str) -> Result<(Vec<String>, u32), ()> {
     let mut result = Vec::new();
     let mut current = String::new();
-    let mut depth = 0;
+    let mut close = None;
     let mut quote = None;
+    let mut specificity = 0u32;
     for ch in input.chars() {
         if let Some(q) = quote {
             current.push(ch);
@@ -73,44 +67,55 @@ fn tokenize(input: &str) -> Result<Vec<String>, ()> {
             }
             continue;
         }
-        match ch {
-            '\'' | '"' => {
-                quote = Some(ch);
-                current.push(ch);
+        if let Some(end) = close {
+            match ch {
+                c if c == end => close = None,
+                '\'' | '"' if end == ']' => quote = Some(ch),
+                '[' | ']' | '(' | ')' | '\'' | '"' => return Err(()),
+                _ => (),
             }
-            '[' | '(' => {
-                depth += 1;
-                current.push(ch);
+            current.push(ch);
+            continue;
+        }
+        if ch == '>' || ch.is_whitespace() {
+            if !current.is_empty() {
+                result.push(std::mem::take(&mut current));
             }
-            ']' | ')' => {
-                depth -= 1;
-                if depth < 0 {
+            if ch == '>' {
+                if result.last().is_none_or(|token| token == ">") {
                     return Err(());
-                }
-                current.push(ch);
-            }
-            '+' | '~' | '|' if depth == 0 => return Err(()),
-            '>' if depth == 0 => {
-                if !current.is_empty() {
-                    result.push(std::mem::take(&mut current));
                 }
                 result.push(">".into());
             }
-            c if c.is_whitespace() && depth == 0 => {
-                if !current.is_empty() {
-                    result.push(std::mem::take(&mut current));
-                }
-            }
-            _ => current.push(ch),
+            continue;
         }
+        let weight = match ch {
+            '[' => {
+                close = Some(']');
+                100
+            }
+            '(' => {
+                close = Some(')');
+                0
+            }
+            '#' => 10000,
+            '.' | ':' => 100,
+            '+' | '~' | '|' | ']' | ')' | '\'' | '"' => return Err(()),
+            c => u32::from(current.is_empty() && c.is_ascii_alphabetic()),
+        };
+        specificity = specificity.checked_add(weight).ok_or(())?;
+        current.push(ch);
     }
-    if depth != 0 || quote.is_some() {
+    if close.is_some() || quote.is_some() {
         return Err(());
     }
     if !current.is_empty() {
         result.push(current);
     }
-    Ok(result)
+    if result.last().is_none_or(|token| token == ">") {
+        return Err(());
+    }
+    Ok((result, specificity))
 }
 fn simple(input: &str, node: &Node, snapshot: &DocumentSnapshot) -> Result<bool, ()> {
     let bytes = input.as_bytes();
@@ -158,16 +163,42 @@ fn simple(input: &str, node: &Node, snapshot: &DocumentSnapshot) -> Result<bool,
             }
         } else if marker == b'[' {
             let start = p;
-            let Some(end) = input[p..].find(']').map(|i| i + p) else {
+            let mut quote = None;
+            let Some(end) = input[p..]
+                .find(|ch| {
+                    if let Some(q) = quote {
+                        if ch == q {
+                            quote = None;
+                        }
+                        false
+                    } else {
+                        if matches!(ch, '\'' | '"') {
+                            quote = Some(ch);
+                        }
+                        ch == ']'
+                    }
+                })
+                .map(|i| i + p)
+            else {
                 return Err(());
             };
             p = end + 1;
-            let (attribute, expected) = input[start..end]
-                .split_once('=')
-                .map_or((input[start..end].trim(), None), |(a, v)| {
-                    (a.trim(), Some(v.trim().trim_matches(['\'', '"'])))
-                });
-            if attribute.contains(['~', '|', '^', '$', '*']) {
+            let selector = input[start..end].trim();
+            let (attribute, expected) = if let Some((attribute, value)) = selector.split_once('=') {
+                let value = value.trim();
+                let expected = match value.chars().next() {
+                    Some(q @ ('\'' | '"')) => value
+                        .strip_prefix(q)
+                        .and_then(|s| s.strip_suffix(q))
+                        .ok_or(())?,
+                    Some(_) if !value.contains(char::is_whitespace) => value,
+                    _ => return Err(()),
+                };
+                (attribute.trim(), Some(expected))
+            } else {
+                (selector, None)
+            };
+            if attribute.is_empty() || attribute.contains(['~', '|', '^', '$', '*']) {
                 return Err(());
             }
             let value = node
@@ -184,17 +215,17 @@ fn simple(input: &str, node: &Node, snapshot: &DocumentSnapshot) -> Result<bool,
                 p += 1;
             }
             let pseudo = &input[start..p];
-            let mut siblings: Vec<_> = snapshot
-                .nodes
-                .values()
-                .filter(|n| n.parent_id == node.parent_id)
-                .collect();
-            siblings.sort_by(|a, b| (&a.rank, &a.id).cmp(&(&b.rank, &b.id)));
-            let index = siblings.iter().position(|n| n.id == node.id).ok_or(())? + 1;
+            let siblings = || {
+                snapshot
+                    .nodes
+                    .values()
+                    .filter(|n| n.parent_id == node.parent_id)
+            };
+            let key = (&node.rank, &node.id);
             let matched = match pseudo {
                 "root" => node.parent_id.is_none(),
-                "first-child" => index == 1,
-                "last-child" => index == siblings.len(),
+                "first-child" => siblings().all(|n| (&n.rank, &n.id) >= key),
+                "last-child" => siblings().all(|n| (&n.rank, &n.id) <= key),
                 "nth-child" => {
                     if bytes.get(p) != Some(&b'(') {
                         return Err(());
@@ -205,11 +236,8 @@ fn simple(input: &str, node: &Node, snapshot: &DocumentSnapshot) -> Result<bool,
                     };
                     let expr = input[p..end].trim();
                     p = end + 1;
-                    match expr {
-                        "odd" => index % 2 == 1,
-                        "even" => index % 2 == 0,
-                        _ => index == expr.parse::<usize>().map_err(|_| ())?,
-                    }
+                    let index = siblings().filter(|n| (&n.rank, &n.id) < key).count() + 1;
+                    nth_child(expr, index)?
                 }
                 _ => return Err(()),
             };
@@ -222,15 +250,43 @@ fn simple(input: &str, node: &Node, snapshot: &DocumentSnapshot) -> Result<bool,
     }
     Ok(true)
 }
-fn specificity(input: &str) -> u32 {
-    let ids = input.bytes().filter(|c| *c == b'#').count() as u32;
-    let classes = input
-        .bytes()
-        .filter(|c| matches!(c, b'.' | b'[' | b':'))
-        .count() as u32;
-    let types = input
-        .split([' ', '>'])
-        .filter(|s| s.as_bytes().first().is_some_and(u8::is_ascii_alphabetic))
-        .count() as u32;
-    ids * 10000 + classes * 100 + types
+fn nth_child(expr: &str, index: usize) -> Result<bool, ()> {
+    if expr.eq_ignore_ascii_case("odd") {
+        return Ok(index % 2 == 1);
+    }
+    if expr.eq_ignore_ascii_case("even") {
+        return Ok(index % 2 == 0);
+    }
+    // shortcut: An+B uses 32-bit signed integers, expand if larger CSS integer literals are required.
+    let Some((a, b)) = expr.split_once(['n', 'N']) else {
+        return Ok(i128::from(expr.parse::<i32>().map_err(|_| ())?) == index as i128);
+    };
+    let step = match a {
+        "" | "+" => 1,
+        "-" => -1,
+        _ => a.parse::<i32>().map_err(|_| ())?,
+    };
+    let offset = b.trim_start();
+    let offset = if offset.is_empty() {
+        0
+    } else {
+        let sign = offset
+            .chars()
+            .next()
+            .filter(|c| matches!(c, '+' | '-'))
+            .ok_or(())?;
+        let digits = offset[1..].trim_start();
+        if !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(());
+        }
+        let magnitude = digits.parse::<i64>().map_err(|_| ())?;
+        i32::try_from(if sign == '-' { -magnitude } else { magnitude }).map_err(|_| ())?
+    };
+    let delta = index as i128 - i128::from(offset);
+    let step = i128::from(step);
+    Ok(if step == 0 {
+        delta == 0
+    } else {
+        delta % step == 0 && delta / step >= 0
+    })
 }
