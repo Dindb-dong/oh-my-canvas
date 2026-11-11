@@ -10,6 +10,27 @@ const sameDefinition=(before,after)=>{
   const semantic=value=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).filter(([key])=>key!=='name')):value;
   return documentModel.same(semantic(before),semantic(after));
 };
+// Reusing a pre-encoding projection requires values which Yjs's Any codec
+// preserves exactly. Unusual structured-clone values still import through the
+// ordinary decoded-state validation path. Inspect descriptors, never getters.
+function stableAtomicValue(value,seen){
+  if(value===null||['undefined','boolean','number'].includes(typeof value))return true;
+  if(typeof value==='string')return value.isWellFormed();
+  if(typeof value!=='object')return false;
+  if(seen.has(value))return true;seen.add(value);
+  const array=Array.isArray(value),proto=Object.getPrototypeOf(value);
+  if(proto!==(array?Array.prototype:Object.prototype))return false;
+  const keys=Reflect.ownKeys(value);
+  if(array&&keys.length!==value.length+1)return false;
+  for(const key of keys){
+    if(array&&key==='length')continue;
+    if(typeof key!=='string'||!key.isWellFormed()||key==='__proto__')return false;
+    if(array&&(!/^(0|[1-9]\d*)$/.test(key)||Number(key)>=value.length))return false;
+    const descriptor=Object.getOwnPropertyDescriptor(value,key);
+    if(!descriptor?.enumerable||!owns(descriptor,'value')||!stableAtomicValue(descriptor.value,seen))return false;
+  }
+  return true;
+}
 const canonicalChanges=changes=>changes?.some(([key])=>{
   const p=JSON.parse(key);
   return p[0]==='page'&&['alive','order','id','objects'].includes(p[2])||
@@ -218,6 +239,7 @@ export class Replica {
    * document, never an externally asserted validation proof or opaque update.
    * It derives canonical fields itself and validates the complete new pages
    * plus the immutable combined document before a single live transaction.
+   * As with ordinary model patches, supplied values are immutable after handoff.
    */
   appendNewPages(batch){
     const started=performance.now(),before=this.document;
@@ -234,7 +256,7 @@ export class Replica {
     const ordered=ranks.every(Number.isSafeInteger)&&before.pages.every(id=>this.fields.get(JSON.stringify(['page',id,'alive']))===true);
     const lastOrder=ordered?Math.max(-1,...ranks):before.pages.length-1;
     const safeOrder=ordered&&lastOrder<=Number.MAX_SAFE_INTEGER-batch.pages.length;
-    const index=new Map(batch.pages.map((id,i)=>[id,i])),writes=new Map();
+    const index=new Map(batch.pages.map((id,i)=>[id,i])),writes=new Map(),stableValues=new WeakSet();let stable=true;
     for(const [key,value] of flatten(batch)){
       const p=documentModel.fieldParts(key);
       if(p[0]==='meta')continue;
@@ -246,6 +268,7 @@ export class Replica {
         if(this.fields._map.has(key))throw Error('An imported catalog ID was previously deleted; its dependencies cannot be restored by a page batch');
       }
       collectAssetRefs(value);
+      stable=stable&&stableAtomicValue(value,stableValues);
       writes.set(key,p[0]==='page'&&p[2]==='order'?(safeOrder?lastOrder+1:before.pages.length)+index.get(p[1]):value);
     }
     // A standalone fragment's last-page recovery must not conceal tombstoned
@@ -260,7 +283,7 @@ export class Replica {
       while(scratch.clientID===this.ydoc.clientID||this.ydoc.store.clients.has(scratch.clientID))scratch.clientID=(scratch.clientID+1)>>>0;
       scratch.transact(()=>{for(const [key,value] of writes)fields.set(key,value);},'import-pages');
       const update=Y.encodeStateAsUpdate(scratch),preparedAt=performance.now();
-      const ceiling=safeOrder?independentMapStateBound(this.ydoc,scratch,this.encodedStateCeiling,update.byteLength):null;
+      const ceiling=safeOrder&&stable?independentMapStateBound(this.ydoc,scratch,this.encodedStateCeiling,update.byteLength):null;
       const bounded=ceiling!==null&&ceiling<=documentModel.documentLimits(document).stateBytes;
       if(bounded)this.publishLocal(document,ceiling,undefined,undefined,false,()=>Y.applyUpdate(this.ydoc,update,'remote'));
       else this.receive(update);

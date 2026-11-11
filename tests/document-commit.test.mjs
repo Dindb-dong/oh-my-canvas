@@ -18,7 +18,7 @@ async function fixture(t){
   const record={id:randomUUID(),title:'Sequence test',replica:new Replica({document:documentFixture()})};
   const entry={record,seq:0,acceptedSeq:0,revision:0,generation:1};
   record.replica.onUpdate(()=>{entry.revision++;if(entry.committingSeq!==undefined)entry.acceptedSeq=entry.committingSeq;});
-  t.after(async()=>{record.replica.destroy();await fs.rm(directory,{recursive:true,force:true});});
+  t.after(async()=>{await store.flushPreviews();record.replica.destroy();await fs.rm(directory,{recursive:true,force:true});});
   const acknowledgment=()=>({type:'commit-ack',id:record.id,generation:entry.generation,revision:entry.revision,ack:entry.seq,acceptedSeq:entry.acceptedSeq});
   const snapshot=()=>({...acknowledgment(),document:record.replica.document});
   const options={store,save:()=>store.save(record),confirmGeneration:(e,generation)=>{if(e.generation!==generation)throw Object.assign(Error('Runtime restarted'),{code:'runtime_restarted'});},acknowledgment};

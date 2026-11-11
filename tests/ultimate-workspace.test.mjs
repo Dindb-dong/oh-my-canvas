@@ -21,7 +21,7 @@ async function fixture(t){
     async join(data){events.push(data);return {documentId:data.documentId};},async host(entry){entry.collab={mode:'host',status:()=>({mode:'host',peers:[]}),invite:address=>'invitation:'+address};return {port:12345};},async stopSession(entry){entry.collab=null;},
     async context(entry){return {documentId:entry.record.id};},async editorTool(entry,call){events.push({id:entry.record.id,...call});return {structuredContent:{ok:true,asset:{id:'asset'}}};}
   });
-  t.after(async()=>{for(const entry of manager.entries.values())entry.collab=null;await manager.disposeAll();await fs.rm(directory,{recursive:true,force:true});});
+  t.after(async()=>{for(const entry of manager.entries.values())entry.collab=null;await manager.disposeAll();await store.flushPreviews();await fs.rm(directory,{recursive:true,force:true});});
   return {directory,profile,store,manager,events,runtimeCalls,setBusy:value=>{busy=value;},call:(name,args,agent='agent')=>invoke({name,args,agent})};
 }
 

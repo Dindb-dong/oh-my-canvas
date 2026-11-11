@@ -10,8 +10,13 @@ import { startProgressiveImport } from '../electron/progressive-import.mjs';
 import { commitDocument } from '../electron/document-commit.mjs';
 import { documentFixture } from './helpers.mjs';
 
-function deferred() { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; }
+function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 const turn = () => new Promise(resolve => setImmediate(resolve));
+async function bounded(promise) {
+  let timer;
+  try { return await Promise.race([promise, new Promise((resolve, reject) => { timer = setTimeout(() => reject(Error('Import cleanup did not finish')), 2000); })]); }
+  finally { clearTimeout(timer); }
+}
 function untilAborted(signal) {
   if (signal.aborted) return Promise.reject(signal.reason);
   return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
@@ -175,6 +180,129 @@ test('dispose cancels an active worker and durably records the partial result be
   const eventCount = events.length; await turn();
   assert.equal(events.length, eventCount); assert.equal(manager.entries.size, 0);
   const read = await persisted(t, store, entry.record.id);
+  assert.equal(read.importStatus.state, 'cancelled'); assert.equal(read.importStatus.loadedPages, 1);
+  assert.deepEqual(read.replica.document.pages, ['first']);
+});
+
+// The real worker transport rejects immediately on cancellation/timeout, even
+// when its consumer is still saving or waiting for first paint. Do not await
+// this callback here: the coordinator must retain its lifetime independently.
+function detachedWorker(source, terminal, capture = () => {}) {
+  return async (bytes, format, options) => {
+    capture(options.signal);
+    options.onManifest({ pages: source.map(item => ({ id: item.pageIds[0], name: item.document.pagesById[item.pageIds[0]].name })) });
+    const consuming = options.onBatch(source[0]); void consuming.catch(() => {});
+    await Promise.race([terminal.promise, untilAborted(options.signal)]);
+    return { complete: false };
+  };
+}
+
+test('worker rejection waits for a late create result before terminal status and hold cleanup', async t => {
+  const { manager, store, progress, start } = await fixture(t), create = manager.create.bind(manager);
+  const entered = deferred(), release = deferred(), terminal = deferred(); let lateEntry, settled = false;
+  manager.create = async (...args) => { entered.resolve(); await release.promise; return lateEntry = await create(...args); };
+  const opening = start(detachedWorker(batches(), terminal));
+  const rejected = assert.rejects(opening, /Worker total lifetime expired/).then(() => { settled = true; });
+  await entered.promise; terminal.reject(Error('Worker total lifetime expired')); await turn();
+  assert.equal(settled, false, 'consumer mutation must settle before the open request rejects');
+  release.resolve(); await bounded(rejected);
+  assert.ok(lateEntry); assert.equal(lateEntry.holds, 0); assert.equal(lateEntry.cancelImport, null); assert.equal(lateEntry.importSignal, null);
+  assert.equal(lateEntry.record.importStatus.state, 'failed'); assert.equal(progress.at(-1).phase, 'failed');
+  assert.equal(progress.some(value => value.phase === 'pages' || value.phase === 'complete'), false);
+  const read = await persisted(t, store, lateEntry.record.id);
+  assert.equal(read.importStatus.state, 'failed'); assert.deepEqual(read.replica.document.pages, ['first']);
+  await manager.closeTab(lateEntry.record.id); assert.equal(manager.entries.size, 0, 'late entry is releasable, without a leaked import hold');
+});
+
+test('cancellation across a late create return keeps only the saved first page and releases its hold', async t => {
+  const { manager, store, progress, start } = await fixture(t), create = manager.create.bind(manager);
+  const entered = deferred(), release = deferred(), terminal = deferred(), cancellation = new AbortController(); let lateEntry, settled = false;
+  manager.create = async (...args) => { lateEntry = await create(...args); entered.resolve(); await release.promise; return lateEntry; };
+  const opening = start(detachedWorker(batches(), terminal), { options: { signal: cancellation.signal } });
+  const rejected = assert.rejects(opening, /Caller cancelled during create/).then(() => { settled = true; });
+  await entered.promise; cancellation.abort(Error('Caller cancelled during create')); await turn(); assert.equal(settled, false);
+  release.resolve(); await bounded(rejected);
+  assert.equal(lateEntry.holds, 0); assert.equal(lateEntry.cancelImport, null); assert.equal(lateEntry.record.importStatus.state, 'cancelled');
+  assert.equal(progress.at(-1).loadedPages, 1); assert.equal(progress.at(-1).phase, 'cancelled');
+  const read = await persisted(t, store, lateEntry.record.id);
+  assert.deepEqual(read.replica.document.pages, ['first']); assert.equal(read.importStatus.loadedPages, 1); assert.equal(read.importStatus.state, 'cancelled');
+});
+
+test('worker failure aborts a pending first-paint wait but remains a failure', async t => {
+  const { store, progress, start } = await fixture(t), terminal = deferred(), painting = deferred(), release = deferred(); let workerSignal;
+  const { entry, completion } = await start(detachedWorker(batches(), terminal, signal => { workerSignal = signal; }), {
+    afterFirstPaint: async () => { painting.resolve(); await release.promise; },
+  });
+  await painting.promise; terminal.reject(Error('Worker crashed during first paint'));
+  await bounded(assert.rejects(completion, /Worker crashed/));
+  assert.equal(workerSignal.aborted, false); assert.equal(entry.record.importStatus.state, 'failed'); assert.equal(entry.holds, 0);
+  assert.equal(progress.at(-1).phase, 'failed'); const count = progress.length;
+  release.resolve(); await turn(); assert.equal(progress.length, count, 'late paint cannot emit progress after termination');
+  const read = await persisted(t, store, entry.record.id); assert.equal(read.importStatus.state, 'failed'); assert.deepEqual(read.replica.document.pages, ['first']);
+});
+
+test('transport cancellation during a saved batch barrier counts durable pages, without consuming the next batch', async t => {
+  const waiting = deferred(), terminal = deferred();
+  const { store, progress, start } = await fixture(t, { async waitForPages(entry) { waiting.resolve(); await untilAborted(entry.importSignal); } });
+  const source = batches();
+  const { entry, completion } = await start(async (bytes, format, options) => {
+    options.onManifest({ pages: source.map(item => ({ id: item.pageIds[0], name: item.pageIds[0] })) });
+    await options.onBatch(source[0]);
+    const second = options.onBatch(source[1]); void second.catch(() => {});
+    await Promise.race([terminal.promise, untilAborted(options.signal)]); return { complete: false };
+  });
+  await waiting.promise; entry.cancelImport(); await bounded(assert.rejects(completion, /Import stopped/));
+  assert.equal(entry.record.importStatus.state, 'cancelled'); assert.equal(entry.record.importStatus.loadedPages, 2); assert.equal(entry.holds, 0);
+  assert.deepEqual(entry.record.replica.document.pages, ['first', 'second']);
+  assert.deepEqual(progress.filter(value => value.phase === 'pages').map(value => value.loadedPages), [1]);
+  const read = await persisted(t, store, entry.record.id);
+  assert.deepEqual(read.replica.document.pages, ['first', 'second']); assert.equal(read.importStatus.state, 'cancelled'); assert.equal(read.importStatus.loadedPages, 2);
+});
+
+test('real create cancellation after its first save records cancelled metadata before releasing startup', async t => {
+  const entered = deferred(), cancellation = new AbortController(), terminal = deferred();
+  const { manager, store, start } = await fixture(t, { createRuntime(entry) { entered.resolve(entry); return { id: entry.record.id }; } });
+  const opening = start(detachedWorker(batches(), terminal), { options: { signal: cancellation.signal } });
+  const rejected = assert.rejects(opening, /Caller cancelled startup/), entry = await entered.promise;
+  cancellation.abort(Error('Caller cancelled startup')); manager.ready(entry, entry.generation);
+  await bounded(rejected); assert.equal(manager.entries.size, 0);
+  const read = await persisted(t, store, entry.record.id);
+  assert.equal(read.importStatus.state, 'cancelled'); assert.equal(read.importStatus.loadedPages, 1); assert.deepEqual(read.replica.document.pages, ['first']);
+});
+
+test('real create runtime failure after its first save records failed metadata before destroying the entry', async t => {
+  const entered = deferred();
+  const { manager, store, start } = await fixture(t, { createRuntime(entry) { entered.resolve(entry); return { id: entry.record.id }; } });
+  const opening = start(worker(batches())), rejected = assert.rejects(opening, /Renderer could not start/), entry = await entered.promise;
+  manager.ready(entry, entry.generation, Error('Renderer could not start'));
+  await bounded(rejected); assert.equal(manager.entries.size, 0);
+  const read = await persisted(t, store, entry.record.id);
+  assert.equal(read.importStatus.state, 'failed'); assert.equal(read.importStatus.loadedPages, 1); assert.deepEqual(read.replica.document.pages, ['first']);
+});
+
+test('shutdown drains the first save before destroying its Replica and never starts the runtime', async t => {
+  let runtimeStarts = 0;
+  const { manager, store, start } = await fixture(t, { createRuntime() { runtimeStarts++; throw Error('Runtime must not start after shutdown'); } });
+  const save = store.save.bind(store), entered = deferred(), release = deferred(); let firstSave = true, destroyed = false;
+  store.save = async record => {
+    if (firstSave) {
+      firstSave = false; record.replica.ydoc.on('destroy', () => { destroyed = true; }); entered.resolve(record);
+      await release.promise;
+      assert.equal(destroyed, false, 'shutdown destroyed the authority while its first save was still using it');
+    }
+    return save(record);
+  };
+  const opening = start(worker(batches())), rejected = assert.rejects(opening, /closing/), record = await entered.promise;
+  let closed = false;
+  const shutdown = manager.disposeAll().then(() => { closed = true; });
+  try {
+    await turn();
+    assert.equal(closed, false, 'shutdown returned before first-page creation drained');
+    assert.equal(destroyed, false); assert.equal(runtimeStarts, 0); assert.equal(manager.entries.has(record.id), true);
+  } finally { release.resolve(); }
+  await bounded(Promise.all([shutdown, rejected]));
+  assert.equal(destroyed, true); assert.equal(runtimeStarts, 0); assert.equal(manager.entries.size, 0);
+  const read = await persisted(t, store, record.id);
   assert.equal(read.importStatus.state, 'cancelled'); assert.equal(read.importStatus.loadedPages, 1);
   assert.deepEqual(read.replica.document.pages, ['first']);
 });

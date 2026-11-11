@@ -76,7 +76,7 @@ function renderLoading(){
   const count=status.loadedPages??0,total=status.totalPages??0;
   $('#loading-label').textContent=loading?`Loading ${count} of ${total} pages…`:failed?'Opening failed':`Import incomplete (${count}/${total})`;
   $('#loading-progress').max=Math.max(1,total);$('#loading-progress').value=count;
-  $('#loading-description').textContent=loading?'You can edit loaded pages. The remaining pages are loading in the background.':status.error??'The pages already loaded are kept. Reimport the original file to load the remaining pages.';
+  $('#loading-description').textContent=loading?'You can edit loaded pages. The remaining pages are loading in the background.':incomplete?`${status.error?status.error+' ':''}The pages already saved are kept. Reimport the original file as a new canvas to load every page.`:status.error??'Could not finish opening. Keep this tab open while changes are unsaved.';
   const ids=new Set(handle?.editor.doc.pages??[]);
   $('#loading-pages').replaceChildren(...(status.pages??[]).map(item=>{
     const button=document.createElement('button');button.type='button';button.textContent=item.name??'Untitled page';button.disabled=!ids.has(item.id);button.dataset.loadingPage=item.id;

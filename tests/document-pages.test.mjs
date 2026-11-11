@@ -104,6 +104,18 @@ test('a near-capacity ceiling falls back to exact validation for page additions'
   }finally{replica.destroy();}
 });
 
+test('values normalized by Yjs use decoded-state validation rather than a pre-encoding projection',()=>{
+  const unusual=[new Date('2025-01-01T00:00:00Z'),Object.assign([1,2],{label:'extra'}),[,2],{text:'\ud800'},Object.defineProperty({},'value',{enumerable:true,get:()=>4}),{toJSON(){return 'serialized';},kept:5}];
+  for(const value of unusual){
+    const events=[],replica=new Replica({document:documentFixture(),onMetric:event=>events.push(event)}),batch=pageDocument();
+    batch.pagesById.later.objects.label.extension={value};
+    try{
+      appendImportedPages(replica,batch);
+      assert.equal(events.at(-1).sizeValidation,'exact');assert.deepEqual(replica.document,materialize(replica.fields));
+    }finally{replica.destroy();}
+  }
+});
+
 test('used page namespaces cannot be resurrected through retained orphan or deleted registers',()=>{
   for(const family of ['page','shape','geometry'])for(const hardDelete of [false,true]){
     const replica=new Replica({document:documentFixture()}),field=family==='page'?key('page','later','alive'):key(family,'later','orphan','x');

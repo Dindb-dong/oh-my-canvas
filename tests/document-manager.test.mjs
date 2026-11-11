@@ -15,7 +15,7 @@ async function fixture(t,options={}){
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-doc-manager-')),store=new Store(dir),disposed=[],flushed=[];
   let manager;
   manager=createDocumentManager({store,createRuntime(entry){queueMicrotask(()=>manager.ready(entry,entry.generation));return {id:entry.record.id,generation:entry.generation};},async disposeRuntime(entry){if(entry.runtime)disposed.push(entry.record.id);},async flushRuntime(entry){flushed.push(entry.record.id);},...options});
-  t.after(async()=>{await manager.disposeAll();await fs.rm(dir,{recursive:true,force:true});});
+  t.after(async()=>{await manager.disposeAll();await store.flushPreviews();await fs.rm(dir,{recursive:true,force:true});});
   return {manager,store,disposed,flushed};
 }
 function change(entry,name){const before=entry.record.replica.document,after=structuredClone(before);after.pagesById.page.objects.label.name=name;entry.record.replica.patch(changesBetween(before,after));}

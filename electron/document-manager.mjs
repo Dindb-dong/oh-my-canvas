@@ -16,8 +16,8 @@ const canonicalDeltaRequired=key=>{
 };
 
 export function createDocumentManager({store,createRuntime,disposeRuntime,flushRuntime,waitForPages=async()=>{},onChange=()=>{},onEvent=()=>{},canDispose=()=>true,maxResidents=MAX_DOCUMENT_RUNTIMES}) {
-  const entries=new Map(),loading=new Map(),bindings=new Map(),generations=new Map(),deleting=new Set();
-  let activeTabId=null;
+  const entries=new Map(),loading=new Map(),bindings=new Map(),generations=new Map(),deleting=new Set(),creating=new Set();
+  let activeTabId=null,stopping=false;
   const identity=entry=>({id:entry.record.id,title:entry.record.title,generation:entry.generation});
   const state=()=>({tabs:[...entries.values()].filter(entry=>entry.tabOpen).map(entry=>({...identity(entry),inUse:!!(entry.agents.size||entry.collab||!canDispose(entry)),saveError:entry.saveError??null,loading:entry.loadingState??null})),activeTabId,libraryVisible:activeTabId===null});
   const changed=()=>onChange(state());
@@ -129,10 +129,11 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
     if(entry.loadingState?.kind==='reopen')await beginLoading(entry);
     if(entry.importTask)await entry.importTask;
     if(entry.loadError)throw entry.loadError;
-    if(entry.record.importStatus&&entry.record.importStatus.state!=='complete')throw failure('import_incomplete','The source import is incomplete. Reimport the original file to load its remaining pages.');
+    if(entry.record.importStatus&&entry.record.importStatus.state!=='complete')throw failure('import_incomplete','The source import is incomplete. Reimport the original file as a new canvas to load every page; the saved partial canvas is kept.');
     return entry;
   }
   async function load(id,record,{preview=false}={}){
+    if(stopping)throw failure('runtime_restarted','Document manager is closing');
     if(deleting.has(id))throw failure('busy','Document is being deleted');
     if(!validId(id))throw failure('bad_args','Invalid document ID');
     if(record){if(store.prepareRecord)await store.prepareRecord(record);else await store.importAssets?.(record);}
@@ -147,6 +148,7 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
     const task=Promise.resolve().then(async()=>{
       const cached=!record&&preview?await store.loadPreview?.(id):null;
       const loaded=record??(cached?{id:cached.id,title:cached.title,createdAt:cached.createdAt,updatedAt:cached.updatedAt,thumbnail:cached.thumbnail,recovered:cached.recovered,importStatus:cached.importStatus,replica:null}:await store.load(id));
+      if(stopping){loaded.replica?.destroy();throw failure('runtime_restarted','Document manager is closing');}
       const entry=makeEntry(loaded,cached);entries.set(id,entry);return entry;
     });
     loading.set(id,task);
@@ -202,20 +204,26 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
     try{signal?.throwIfAborted();await ensureRuntime(entry);signal?.throwIfAborted();entry.tabOpen=true;bind(agent,entry);if(focus)activeTabId=id;changed();return entry;}
     catch(error){await release(entry);throw error;}
   }
-  async function create(title,document,{focus=false,agent,signal,importStatus}={}){
+  function create(...args){
+    if(stopping)return Promise.reject(failure('runtime_restarted','Document manager is closing'));
+    const task=createEntry(...args);creating.add(task);
+    void task.then(()=>creating.delete(task),()=>creating.delete(task));return task;
+  }
+  async function createEntry(title,document,{focus=false,agent,signal,importStatus}={}){
     signal?.throwIfAborted();
     if(store.prepareDocument)document=await store.prepareDocument(document);
     signal?.throwIfAborted();
     const record={id:randomUUID(),title:canvasTitle(title??'Untitled canvas'),createdAt:new Date().toISOString(),replica:new Replica({document}),...(importStatus?{importStatus}:{})};
-    const entry=await load(record.id,record);
+    let entry;
+    try{entry=await load(record.id,record);}catch(error){record.replica.destroy();throw error;}
     if(importStatus)entry.loadingState={...importStatus,kind:'import',format:importStatus.kind,phase:'pages'};
     let initiallySaved=false;
-    try{signal?.throwIfAborted();reserve(entry);await save(entry);initiallySaved=true;signal?.throwIfAborted();await ensureRuntime(entry);signal?.throwIfAborted();entry.tabOpen=true;bind(agent,entry);if(focus)activeTabId=record.id;changed();return entry;}
+    try{signal?.throwIfAborted();if(stopping)throw failure('runtime_restarted','Document manager is closing');reserve(entry);await save(entry);initiallySaved=true;signal?.throwIfAborted();entry.lifecycle.signal.throwIfAborted();await ensureRuntime(entry);signal?.throwIfAborted();entry.tabOpen=true;bind(agent,entry);if(focus)activeTabId=record.id;changed();return entry;}
     catch(error){
       // The importer has not received this entry yet. If the first page was
       // already durable, retain an honest terminal status before releasing it.
       if(importStatus&&initiallySaved){
-        record.importStatus={...importStatus,state:signal?.aborted?'cancelled':'failed',loadedPages:record.replica.document.pages.length,error:String(error.message??error).slice(0,1024)};
+        record.importStatus={...importStatus,state:signal?.aborted||entry.stopping?'cancelled':'failed',loadedPages:record.replica.document.pages.length,error:String(error.message??error).slice(0,1024)};
         entry.loadingState={...record.importStatus,kind:'import',format:importStatus.kind,phase:'stopped'};
         try{await save(entry);}catch(saveError){error.saveError=saveError.message;}
       }
@@ -325,9 +333,12 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
   async function endAgent(agent){bindings.delete(agent);for(const entry of [...entries.values()]){entry.agents.delete(agent);await release(entry);}}
   async function flushAll(){for(const entry of entries.values()){if(entry.importTask)await entry.importTask.catch(()=>{});if(entry.loadingState?.kind==='reopen')await beginLoading(entry);if(entry.runtime)await flushRuntime(entry);await entry.operations;await save(entry);}await store.flushPreviews?.();}
   async function disposeAll(){
-    const residents=[...entries.values()];
-    for(const entry of residents){entry.stopping=true;ready(entry,entry.generation,Error('Document runtime is closing'));clearTimeout(entry.saveTimer);clearTimeout(entry.readyTimer);clearTimeout(entry.resumeTimer);entry.cancelImport?.();entry.lifecycle.abort(failure('runtime_restarted','Document runtime is closing'));}
-    for(const entry of residents){
+    stopping=true;
+    for(const entry of entries.values()){entry.stopping=true;ready(entry,entry.generation,Error('Document runtime is closing'));clearTimeout(entry.saveTimer);clearTimeout(entry.readyTimer);clearTimeout(entry.resumeTimer);entry.cancelImport?.();entry.lifecycle.abort(failure('runtime_restarted','Document runtime is closing'));}
+    // A first page can be saving before the importer receives its entry and
+    // attaches importTask. Creation owns that earlier lifetime explicitly.
+    await Promise.allSettled([...creating,...loading.values()]);
+    for(const entry of [...entries.values()]){
       // A cancelled importer still owns its terminal metadata/save. Let it and
       // any already admitted edit finish before releasing the authority.
       await Promise.allSettled([entry.importTask,entry.deliveryTask,entry.hydrating,entry.operations]);
@@ -335,6 +346,7 @@ export function createDocumentManager({store,createRuntime,disposeRuntime,flushR
       await entry.collab?.close();await disposeRuntime(entry);entry.runtime=null;entry.generation++;
       generations.set(entry.record.id,entry.generation);entry.unsubscribe();entry.record.replica?.destroy();entries.delete(entry.record.id);
     }
+    await store.flushPreviews?.();
     bindings.clear();activeTabId=null;
   }
   function runtimeGone(entry){ready(entry,entry.generation,Error('Document renderer stopped'));entry.runtime=null;entry.generation++;generations.set(entry.record.id,entry.generation);entry.seq=0;changed();}

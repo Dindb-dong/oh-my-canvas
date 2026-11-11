@@ -14,10 +14,17 @@ import { documentFixture } from './helpers.mjs';
 import { changesBetween, MAX_ENVELOPE_BYTES } from '../core/document.mjs';
 import { hashAsset, assetRef } from '../core/assets.mjs';
 
+const testStores = new WeakMap();
+function trackStore(t, store) {
+  if (!testStores.has(t)) testStores.set(t, new Set());
+  testStores.get(t).add(store); return store;
+}
+async function flushStores(t) { await Promise.all([...testStores.get(t) ?? []].map(store => store.flushPreviews())); }
+
 async function fixture(t, options = {}, document = documentFixture()) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'omc-storage-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const events = [], store = new Store(directory, { onMetric: event => events.push(event), ...options });
+  t.after(async () => { await flushStores(t); await fs.rm(directory, { recursive: true, force: true }); });
+  const events = [], store = trackStore(t, new Store(directory, { onMetric: event => events.push(event), ...options }));
   const record = { id: randomUUID(), title: 'Original', createdAt: new Date().toISOString(), replica: new Replica({ document }) };
   t.after(() => record.replica.destroy());
   return { directory, events, store, record };
@@ -28,7 +35,7 @@ function renameShape(record, name) {
   record.replica.patch(changesBetween(before, after), 'Rename');
 }
 async function manifestFor(store, id) { return JSON.parse(await fs.readFile(store.file(id), 'utf8')); }
-async function reopen(t, store, id) { const record = await store.load(id); t.after(() => record.replica.destroy()); return record; }
+async function reopen(t, store, id) { trackStore(t, store); const record = await store.load(id); t.after(() => record.replica.destroy()); return record; }
 
 test('local manifests and portable exports reopen, and manifest recovery preserves acknowledged journal edits', async t => {
   const { store, record } = await fixture(t);
@@ -151,7 +158,7 @@ test('a truncated final journal record recovers, while corruption in a complete 
   const clean = await reopen(t, new Store(store.dir), record.id); assert.equal(clean.recovered, false); assert.equal(clean.title, 'After recovery');
   // Corrupt a complete record in the current generation, with a valid backup
   // available: recovery must not hide acknowledged-edit corruption.
-  clean.title = 'One'; const nextStore = new Store(store.dir); await nextStore.load(record.id).then(r => r.replica.destroy());
+  clean.title = 'One'; const nextStore = trackStore(t, new Store(store.dir)); await nextStore.load(record.id).then(r => r.replica.destroy());
   await nextStore.save(clean); clean.title = 'Two'; await nextStore.save(clean);
   const current = await manifestFor(nextStore, record.id), currentJournal = nextStore.generationFiles(record.id, current.generation).journal;
   const damaged = await fs.readFile(currentJournal); assert.ok(damaged.length > 40); damaged[40] ^= 1; await fs.writeFile(currentJournal, damaged);
@@ -253,8 +260,8 @@ test('large libraries opt into a bounded budget and reopen with shared assets in
 });
 
 test('library listing refreshes metadata after external changes',async t=>{
-  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-list-cache-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
-  const store=new Store(dir),record={id:randomUUID(),title:'First',replica:new Replica({document:documentFixture()})};t.after(()=>record.replica.destroy());await store.save(record);
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'omc-list-cache-'));t.after(async()=>{await flushStores(t);await fs.rm(dir,{recursive:true,force:true});});
+  const store=trackStore(t,new Store(dir)),record={id:randomUUID(),title:'First',replica:new Replica({document:documentFixture()})};t.after(()=>record.replica.destroy());await store.save(record);
   const results=await Promise.all([store.list(),store.list(),store.list()]);assert.ok(results.every(items=>items[0].title==='First'));
   record.title='External rename';await fs.writeFile(store.file(record.id),encodeFile(record));assert.equal((await store.list())[0].title,record.title);
 });
