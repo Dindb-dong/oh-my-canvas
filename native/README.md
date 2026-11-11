@@ -18,3 +18,7 @@ Versioned attributed operations, stable text identities, selective retractions, 
 ## SQLite persistence
 
 Bundled SQLite WAL/FULL storage, transactional receipts, retained entity versions, staging and recovery.
+
+## Document authority
+
+Validated atomic commands, durable idempotency, scoped Undo, immutable query cuts and independent replica delivery.
