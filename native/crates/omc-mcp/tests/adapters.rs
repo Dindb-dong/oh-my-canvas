@@ -31,6 +31,93 @@ fn setup() -> (
 }
 
 #[test]
+fn authored_masks_keep_world_geometry_and_render_the_selected_source() {
+    for (mode, alpha) in [("alpha", 128), ("luminance", 64), ("vector", 255)] {
+        let (_dir, workspace, router, session, id) = setup();
+        let content = invoke(
+            &router,
+            &session,
+            "create_shape",
+            json!({
+                "documentId":id,"type":"rect","x":10,"y":10,"width":60,"height":60,
+                "properties":{"fills":[{"type":"solid","color":"#0000ff"}]}
+            }),
+        )["rawIds"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mask = invoke(
+            &router,
+            &session,
+            "create_shape",
+            json!({
+                "documentId":id,"type":"ellipse","x":30,"y":20,"width":20,"height":20,
+                "properties":{"opacity":0.5,"fills":[{"type":"solid","color":"#808080"}]}
+            }),
+        )["rawIds"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let native = format!("doc_{}", id.replace('-', ""));
+        let before = workspace.snapshot(&native).unwrap();
+        for args in [
+            json!({"ids":[content,content],"maskId":content}),
+            json!({"ids":[content,mask],"maskId":"root"}),
+            json!({"ids":[content,mask],"mode":"front"}),
+        ] {
+            let mut args = args;
+            args["documentId"] = json!(id);
+            args["action"] = json!("mask");
+            assert!(
+                router
+                    .call(&session, "edit_shapes", args, Value::Null)
+                    .is_err()
+            );
+        }
+        assert_eq!(
+            workspace.snapshot(&native).unwrap().sequence,
+            before.sequence
+        );
+        let group = invoke(
+            &router,
+            &session,
+            "edit_shapes",
+            json!({
+                "documentId":id,"action":"mask","ids":[content,mask],"maskId":mask,"mode":mode
+            }),
+        );
+        assert_eq!(group["receipt"]["status"], "durable");
+        let group = group["rawIds"][0].as_str().unwrap();
+        let snapshot = workspace.snapshot(&native).unwrap();
+        assert_eq!(snapshot.nodes[group].properties["maskId"], mask);
+        assert_eq!(snapshot.nodes[&content].parent_id.as_deref(), Some(group));
+        assert!(snapshot.nodes[&content].rank < snapshot.nodes[&mask].rank);
+
+        let options = omc_scene::SceneOptions {
+            width: 128.,
+            height: 96.,
+            strict: true,
+            ..Default::default()
+        };
+        let original = omc_scene::build_scene(&before, &options).unwrap();
+        let scene = omc_scene::build_scene(&snapshot, &options).unwrap();
+        for layer in [&content, &mask] {
+            assert_eq!(scene.bounds(layer), original.bounds(layer));
+        }
+        let rendered =
+            omc_render::render_rgba(&scene, &Default::default(), &omc_render::EmptyResources)
+                .unwrap();
+        assert_eq!(rendered.pixels[(12 * 128 + 12) * 4 + 3], 0, "{mode}");
+        let pixel = &rendered.pixels[(30 * 128 + 40) * 4..][..4];
+        assert_eq!(&pixel[..3], &[0, 0, 255], "{mode}");
+        assert!(
+            (i32::from(pixel[3]) - alpha).abs() <= 1,
+            "{mode}: {pixel:?}"
+        );
+    }
+}
+
+#[test]
 fn linked_style_apply_update_and_detach_keep_correct_authored_state() {
     let (_dir, workspace, router, session, id) = setup();
     let node = invoke(

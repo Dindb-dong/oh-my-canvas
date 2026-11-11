@@ -599,7 +599,7 @@ impl ToolRouter {
         {
             return step_order(draft, &nodes, mode == "forward");
         }
-        if matches!(action, "group" | "frame") {
+        if matches!(action, "group" | "frame" | "mask") {
             let parent = nodes
                 .first()
                 .and_then(|n| n.parent_id.clone())
@@ -615,16 +615,42 @@ impl ToolRouter {
             } else {
                 NodeKind::Group
             });
-            group.parent_id = Some(parent);
+            group.parent_id = Some(parent.clone());
             group.home_shard = nodes[0].home_shard.clone();
             group.rank = nodes[0].rank.clone();
             group.properties.insert(
                 "name".into(),
                 json!(args["name"].as_str().unwrap_or("Group")),
             );
+            let mask = if action == "mask" {
+                let source = args["maskId"]
+                    .as_str()
+                    .map(|raw| self.resolve(session, id, raw))
+                    .transpose()?
+                    .unwrap_or_else(|| nodes[0].id.clone());
+                let mode = args["mode"].as_str().unwrap_or("alpha");
+                prepare_mask_group(draft, &parent, &nodes, &source, mode, &mut group)?;
+                Some(source)
+            } else {
+                None
+            };
+            let (group_x, group_y) = (group.number("x", 0.), group.number("y", 0.));
             let group_id = group.id.clone();
             draft.apply(Command::NodeCreate { node: group })?;
             for node in nodes {
+                if let Some(source) = &mask {
+                    let mut properties = Properties::from([
+                        ("x".into(), json!(node.number("x", 0.) - group_x)),
+                        ("y".into(), json!(node.number("y", 0.) - group_y)),
+                    ]);
+                    if source == &node.id {
+                        properties.insert("isMask".into(), json!(true));
+                    }
+                    draft.apply(Command::NodeSet {
+                        node_id: node.id.clone(),
+                        properties,
+                    })?;
+                }
                 draft.apply(Command::NodeMove {
                     node_id: node.id,
                     parent_id: Some(group_id.clone()),
@@ -1032,6 +1058,164 @@ fn placement(draft: &Draft, target: &str, position: &str) -> Result<(String, Str
             .ok_or_else(|| EngineError::new("resource_limit", "rank rebalance required"))?,
     ))
 }
+fn mask_editable(draft: &Draft, id: &str) -> Result<()> {
+    let node = draft.node(id)?;
+    if node.parent_id.is_none() {
+        return Err(EngineError::invalid("page roots cannot be masked"));
+    }
+    let mut current = Some(node);
+    let mut seen = BTreeSet::new();
+    while let Some(node) = current {
+        if !seen.insert(&node.id) {
+            return Err(EngineError::invalid("containment cycle"));
+        }
+        if node.properties.get("locked") == Some(&Value::Bool(true))
+            || node.properties.get("hidden") == Some(&Value::Bool(true))
+            || node.properties.get("visible") == Some(&Value::Bool(false))
+        {
+            return Err(EngineError::invalid(
+                "layer or ancestor is locked or hidden",
+            ));
+        }
+        current = node
+            .parent_id
+            .as_deref()
+            .map(|id| draft.node(id))
+            .transpose()?;
+    }
+    Ok(())
+}
+
+fn prepare_mask_group(
+    draft: &Draft,
+    parent: &str,
+    nodes: &[Node],
+    source: &str,
+    mode: &str,
+    group: &mut Node,
+) -> Result<()> {
+    if nodes.len() < 2 || nodes.iter().map(|n| &n.id).collect::<BTreeSet<_>>().len() != nodes.len()
+    {
+        return Err(EngineError::invalid(
+            "choose distinct mask and content layers",
+        ));
+    }
+    let mask = nodes
+        .iter()
+        .find(|node| node.id == source)
+        .ok_or_else(|| EngineError::invalid("mask must belong to the chosen layers"))?;
+    if !matches!(mode, "alpha" | "luminance" | "vector") {
+        return Err(EngineError::invalid(
+            "mask requires alpha, luminance or vector mode",
+        ));
+    }
+    if mode == "vector"
+        && (!matches!(
+            mask.kind,
+            NodeKind::Rect | NodeKind::Ellipse | NodeKind::Path
+        ) || !children(&draft.snapshot, source).is_empty())
+    {
+        return Err(EngineError::new(
+            "unsupported_feature",
+            "vector masks require a rectangle, ellipse or path without children",
+        ));
+    }
+    for node in nodes {
+        mask_editable(draft, &node.id)?;
+    }
+    let parent_node = draft.node(parent)?;
+    let styles = omc_style::compute_styles(&draft.snapshot, (1440., 900.));
+    let style = styles
+        .get(parent)
+        .ok_or_else(|| EngineError::invalid("invalid mask parent"))?;
+    // shortcut: only fixed native placement is supported, expand when reparenting preserves CSS and flow layout.
+    if draft
+        .snapshot
+        .metadata
+        .get("css")
+        .and_then(Value::as_str)
+        .is_some_and(|css| !css.trim().is_empty())
+        || [
+            "tag",
+            "layout",
+            "maskId",
+            "maskType",
+            "maskMode",
+            "mask",
+            "isMaskGroup",
+        ]
+        .iter()
+        .any(|key| {
+            parent_node
+                .properties
+                .get(*key)
+                .is_some_and(|value| !value.is_null())
+        })
+        || !matches!(style.get("display"), None | Some("block"))
+        || [
+            "border-width",
+            "padding-left",
+            "padding-right",
+            "padding-top",
+            "padding-bottom",
+        ]
+        .iter()
+        .any(|key| {
+            style
+                .get(key)
+                .is_some_and(|value| !matches!(value, "0" | "0px"))
+        })
+        || nodes.iter().any(|node| {
+            node.properties.contains_key("tag") || node.properties.contains_key("style")
+        })
+    {
+        return Err(EngineError::new(
+            "unsupported_feature",
+            "mask grouping requires fixed native placement in an unmasked container",
+        ));
+    }
+    let (mut left, mut top, mut right, mut bottom) = (
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    );
+    for node in nodes {
+        let [x, y, width, height] =
+            ["x", "y", "width", "height"].map(|key| node.number(key, f64::NAN));
+        if ![x, y, width, height, x + width, y + height]
+            .iter()
+            .all(|v| v.is_finite())
+            || width < 0.
+            || height < 0.
+        {
+            return Err(EngineError::invalid(
+                "mask layers require finite authored bounds",
+            ));
+        }
+        left = left.min(x);
+        top = top.min(y);
+        right = right.max(x + width);
+        bottom = bottom.max(y + height);
+    }
+    if !(right - left).is_finite() || !(bottom - top).is_finite() {
+        return Err(EngineError::invalid(
+            "mask group bounds exceed the coordinate range",
+        ));
+    }
+    group.rank = nodes.iter().map(|node| &node.rank).min().unwrap().clone();
+    group.properties.extend([
+        ("x".into(), json!(left)),
+        ("y".into(), json!(top)),
+        ("width".into(), json!(right - left)),
+        ("height".into(), json!(bottom - top)),
+        ("isMaskGroup".into(), json!(true)),
+        ("maskId".into(), json!(source)),
+        ("maskType".into(), json!(mode)),
+    ]);
+    Ok(())
+}
+
 fn step_order(draft: &mut Draft, nodes: &[Node], forward: bool) -> Result<()> {
     let selected: BTreeSet<_> = nodes.iter().map(|node| node.id.as_str()).collect();
     let mut groups: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
