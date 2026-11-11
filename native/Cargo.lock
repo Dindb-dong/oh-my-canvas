@@ -677,9 +677,23 @@ dependencies = [
 name = "omc-mcp"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
+ "hex",
+ "omc-assets",
+ "omc-export",
+ "omc-import",
+ "omc-model",
  "omc-protocol",
+ "omc-render",
+ "omc-scene",
+ "omc-style",
+ "omc-workspace",
  "regex",
+ "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]
