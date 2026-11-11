@@ -45,3 +45,28 @@ export function scratchMapStateBound(previousBytes, scratchBytes, writes) {
   const bound = previousBytes + scratchBytes + 256 * (writes + 1);
   return Number.isSafeInteger(bound) ? bound : null;
 }
+
+/** A complete, independent client's new map keys cannot replace, split or
+ * delete any existing struct. Its V1 client block is copied unchanged into the
+ * combined state, and the old delete set is unchanged. Only the outer number
+ * of clients can grow (at most eight bytes for a safe-integer varuint); the
+ * scratch encoding already includes its own client-count and empty-delete-set
+ * headers. Sixteen extra bytes conservatively cover all outer framing.
+ *
+ * Prove these restrictions from the actual docs, not caller-supplied counts.
+ * Pending causal data, another root/shared type, used keys, client collisions,
+ * or deleted/split items require the ordinary full-state preflight instead.
+ */
+export function independentMapStateBound(live, scratch, previousBytes, scratchBytes) {
+  if (![previousBytes,scratchBytes].every(value=>Number.isSafeInteger(value)&&value>=0)) return null;
+  if(live.store.pendingStructs||live.store.pendingDs||scratch.store.pendingStructs||scratch.store.pendingDs||scratch.store.clients.size!==1||scratch.share.size!==1)return null;
+  const [[client,structs]]=scratch.store.clients,fields=scratch.share.get('fields'),current=live.getMap('fields');
+  if(!(fields instanceof Y.Map)||live.clientID===client||live.store.clients.has(client)||!structs.length)return null;
+  let clock=0;
+  for(const item of structs){
+    if(!(item instanceof Y.Item)||item.id.client!==client||item.id.clock!==clock||item.deleted||item.length!==1||item.origin||item.rightOrigin||item.parent!==fields||typeof item.parentSub!=='string'||!(item.content instanceof Y.ContentAny)||current._map.has(item.parentSub))return null;
+    clock++;
+  }
+  const bound=previousBytes+scratchBytes+16;
+  return Number.isSafeInteger(bound)?bound:null;
+}

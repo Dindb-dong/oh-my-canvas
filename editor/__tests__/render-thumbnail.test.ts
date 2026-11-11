@@ -41,6 +41,17 @@ it('creates a viewport thumbnail without preparing any offscreen images or the f
     expect(source).not.toContain('data-shape-id="r599"'); expect(source).not.toContain('remote.png');
     expect(vi.mocked(rasterizeSVG).mock.calls[0][1]).toEqual({ x: 0, y: 0, width: 800, height: 600 });
 });
+it('removes screen transforms and crops a translated scene to the logical thumbnail viewport', async () => {
+    const { editor, view, stage } = setup();
+    const svg = stage.querySelector('svg')!, anchor = svg.getAttribute('viewBox');
+    editor.setViewport({ ...editor.viewport, vbox: { x: 100, y: 20, width: 800, height: 600 } });
+    expect(svg.getAttribute('viewBox')).toBe(anchor); expect(svg.style.transform).toBe('translate(-500px, -320px)');
+    await view.thumbnailSnapshot!();
+    const source = vi.mocked(inlineSVGImages).mock.calls[0][0], parsed = new DOMParser().parseFromString(source, 'image/svg+xml').documentElement;
+    expect(parsed.getAttribute('viewBox')).toBe('100 20 800 600');
+    expect(parsed.getAttribute('style')).not.toContain('transform'); expect(parsed.getAttribute('style')).not.toContain('will-change');
+    expect(vi.mocked(rasterizeSVG).mock.calls[0][1]).toEqual({ x: 100, y: 20, width: 800, height: 600 });
+});
 it('preserves the previous preview when mounted SVG exceeds the element or markup budget', async () => {
     const { view, stage } = setup(), svg = stage.querySelector('svg')!;
     const fragment = document.createDocumentFragment();

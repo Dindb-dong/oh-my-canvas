@@ -25,7 +25,7 @@ flowchart TB
 | `core/document.mjs` | Field representation, changed-entity diff, containment repair, limits, pending edit projection |
 | `core/geometry.mjs` | Canonical scalar box and coherent orientation/path; derive render caches after merge |
 | `core/replica.mjs` | Yjs state, speculative validation, local/remote edits, author/group-aware Undo, caches |
-| `core/storage.mjs`, `core/journal.mjs` | Local manifests, durable append journals, checkpoints, recovery and explicit portable export |
+| `core/storage.mjs`, `core/journal.mjs`, `core/preview-cache.mjs` | Local manifests, durable append journals, checkpoints, derived first-page caches, recovery and explicit portable export |
 | `core/assets.mjs` | Immutable raster bytes addressed by SHA-256, verified before document publication |
 | `core/projection.mjs` | Revisioned renderer deltas, accepted sequences and durable acknowledgments |
 | `core/collaboration.mjs`, `core/collaboration-transfer.mjs` | Pinned TLS, protocol v3, bounded state/blob transfers, presence and reconnect |
@@ -64,6 +64,8 @@ Each HTTP session keeps its own aliases, Undo ownership, and bounded in-memory i
 Under the profile's `documents/` directory, the local `<id>.omc` is a small `oh-my-canvas-local` manifest. Its immutable checkpoint and append journal live under `.omc-data/<id>/`; shared bitmap bytes live under `assets/<hash-prefix>/<hash>`. Older apps cannot read this new working manifest. Copying only the manifest is not a portable backup. Keep the directory and its dependencies together, or use **Export canvas → Oh My Canvas** or MCP `export_document` to assemble a complete portable file. Legacy portable v1/v2/v3 files remain readable; portable v4 image packages require the updated app. Collaboration independently requires protocol v3 on every peer and a new invitation.
 
 Incomplete final journal writes recover to the last complete record. Complete checksum/sequence/Yjs corruption fails explicitly rather than silently omitting acknowledged edits. Current and backup checkpoint generations are retained, including active readers. Asset collection is deliberately deferred: hidden pages, Undo and other documents may still need a blob.
+
+An optional bounded first-page cache lets a document renderer mount before the full Yjs authority is restored. Cache identity includes checkpoint, manifest and journal state; stale or unsuitable caches fall back to full opening. Cached edits remain pending until the original authority is verified and the edit is durably saved. The cache cannot replace the complete document. Additional real pages enter the renderer through revisioned page-addition messages, rebasing pending edits without replacing loaded pages. Background delivery waits outside the authority mutation queue, so active user edits can finish. Source imports use the same page-addition boundary after a first durable page and retain explicit complete/interrupted/failed/cancelled metadata. See [progressive opening and import](DESIGN_FILE_IMPORT.md#progressive-opening-and-import) for the operation gates and fallback cases.
 
 Opening legacy embedded images externalizes the current raster manifest without reseeding the Y.Doc or changing its merge identity. Historical data that Yjs must retain is not discarded. SVG and font resources retain their existing dedicated inline paths.
 

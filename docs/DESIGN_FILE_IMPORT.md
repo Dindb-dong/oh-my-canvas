@@ -1,6 +1,6 @@
 # Design-file import and large-document boundaries
 
-Status: **incremental architecture implemented; performance and source fidelity remain separately qualified**. Updated 2026-11-10 UTC.
+Status: **incremental architecture and progressive loading implemented; native performance and source fidelity are qualified separately**. Updated 2026-11-11.
 
 PR #12 continues the import work with a different storage, editing and rendering boundary. PR #11 is a reference checkpoint; its successful structure import is not proof of acceptable performance or source fidelity. The [full original fixture](../fixtures/design-files/README.md) is available through Git LFS and its byte count and SHA-256 were verified during this work.
 
@@ -15,6 +15,27 @@ PR #12 continues the import work with a different storage, editing and rendering
 - Collaboration v3 transfers state and missing blobs in bounded chunks. A 1 MiB frame budget is independent of the 384 MiB portable-file budget. Assets are digest-checked and persisted before remote publication; the document save precedes transfer ACK.
 
 These are implemented contracts, not a claim that all acceptance targets below have been met. The immutable plain-object shape index still imposes some work proportional to the edited page size. Full initial validation/materialization, text layout, large root subtrees and export can remain expensive. No decoded-pixel memory ceiling, packaged cross-platform qualification, or perfect source reproduction is claimed.
+
+## Progressive opening and import
+
+PR #13 changes when a document becomes available. A native FIG/Sketch import publishes its first **complete, editable, durably saved page** before conversion and publication of the remaining pages. The worker first decodes the shared source graph, so this is progressive page conversion and publication, not streaming decompression of the original file. Later delivery groups contain at most four pages and approximately 4,000 objects; a larger page is kept complete in its own group. Required bitmap bytes are verified and saved before their page is published. Awaited consumer backpressure is separate from the unchanged 30-second active conversion limit, with a bounded ten-minute overall job lifetime.
+
+Working-document saves also maintain an optional, derived first-page cache. Reopening can mount that page before the full Yjs authority is restored. The cache is checked against its manifest, checkpoint and journal identities; the first page must be self-contained with respect to component dependencies. Missing, stale, oversized or unsuitable caches take the existing full-open path. Older documents receive the cache on a subsequent successful save. The cache is never accepted as a replacement for the complete document.
+
+The following rules apply while loading:
+
+- Loaded pages can be edited. Unloaded pages are listed separately as unavailable, without fake empty pages in the editable document.
+- New page messages carry revisions and merge into the normal pending-edit/ACK projection. Already loaded pages and their user edits are not replaced by later source batches. Background import is excluded from user Undo history.
+- Early edits after cached reopen remain pending until the full authority has been verified, the edit accepted, and its durable save completed. They cannot display a durable save acknowledgment merely because the cached page rendered.
+- Page delivery waits for active gestures and text composition to finish. That renderer wait does not hold the authority mutation queue, so a title save or a pending edit can complete.
+- A stopped or failed import retains its actual saved page count and an explicit incomplete status. A process restart changes a persisted active import to interrupted; it does not silently treat those pages as a complete import or restart conversion without the source.
+- Whole-document export, duplication and collaboration require complete content. An incomplete source import cannot be exported as though every source page had arrived.
+
+The first-page cache is bounded and disposable. It does not add an alternative edit authority or split the document into multiple CRDTs. Full restoration still has main-process work after the first renderer becomes available; a first-page measurement must be reported separately from all-pages completion and early-edit durability.
+
+Large-scene panning uses a bounded, overscanned SVG surface moved by CSS translation. Zoom, viewport resize and overscan exit reanchor that surface. Backdrop-dependent scenes and top-level non-normal blend modes use the existing direct viewport path. Screen surface transforms are removed from thumbnails, and exports retain their own logical viewport. The native viewport oracle compares pixels, hit testing and world coordinates against the direct renderer; it is not an original-Figma fidelity oracle.
+
+The progressive native journey records first-editable and first-paint milestones, editing while background work is active, all-pages completion, and the corresponding cached-reopen phases. Native measurements for the current PR #13 candidate are pending; the PR #12 results below remain the last recorded desktop measurements until that gate completes.
 
 ## Current conversion limits
 

@@ -11,7 +11,7 @@ const rejected=error=>failure('commit_rejected',error?.message??String(error));
  * acceptedSeq means applied (or explicitly discarded); seq means durable.
  * No later request may skip a slot whose validation/asset preparation failed.
  */
-export async function commitDocument(entry,data,{store,save,confirmGeneration,acknowledgment}){
+export async function commitDocument(entry,data,{store,save,confirmGeneration,acknowledgment,validateChanges=()=>{}}){
   const seq=data?.seq,generation=entry.generation;
   if(!Number.isSafeInteger(seq)||seq<1)throw rejected(Error('Invalid edit sequence'));
   if(data.discard!==undefined&&typeof data.discard!=='boolean')throw rejected(Error('Invalid edit discard flag'));
@@ -26,6 +26,7 @@ export async function commitDocument(entry,data,{store,save,confirmGeneration,ac
       try{changes=await store.prepareChanges(data.changes);}
       catch(error){throw knownInputFailure(error)?rejected(error):retry(error);}
       confirmGeneration(entry,generation);
+      try{validateChanges(changes);}catch(error){throw rejected(error);}
       entry.committingSeq=seq;
       try{entry.record.replica.patch(changes,data.label,data.group);entry.acceptedSeq=seq;}
       catch(error){

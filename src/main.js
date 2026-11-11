@@ -5,7 +5,7 @@ import {sampleCanvas,blankCanvas} from './sample';
 
 const $=selector=>document.querySelector(selector),api=window.omc;
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let prefs={},documents=[],section='recent',workspace={tabs:[],activeTabId:null},toastTimer,dialogFocus,libraryLoad,libraryDirty=false;
+let prefs={},documents=[],section='recent',workspace={tabs:[],activeTabId:null},toastTimer,dialogFocus,libraryLoad,libraryDirty=false,importing=false;
 function toast(message,error=false){clearTimeout(toastTimer);$('#toast').textContent=message;$('#toast').classList.toggle('error-toast',error);$('#toast').hidden=false;toastTimer=setTimeout(()=>{$('#toast').hidden=true;},error?8000:3500);}
 const run=fn=>async(...args)=>{try{return await fn(...args);}catch(error){toast(error.message,true);}};
 function modal(title,body){dialogFocus=document.activeElement;if($('#dialog').open)$('#dialog').close();$('#dialog-content').innerHTML=`<div class="dialog-heading"><h2>${esc(title)}</h2><button class="close" aria-label="Close dialog">${icon('close')}</button></div>${body}`;$('.close').onclick=()=>$('#dialog').close();$('#dialog').showModal();}
@@ -42,14 +42,24 @@ $('#document-tabs').onkeydown=event=>{
   const id=tabs[next].dataset.tab;void run(async()=>{await selectTab(id);document.querySelector(`[data-tab="${id}"]`)?.focus();})();
 };
 async function newCanvas(sample=false){await api.invoke('create',{title:sample?'Studio 01':'Untitled canvas',document:importCanvasJson(sample?sampleCanvas():blankCanvas()),focus:true});}
-async function importFile(){const file=await api.invoke('import');if(!file)return;if(file.warnings?.length)toast('Imported with limitations: '+file.warnings.join(' '));if(file.opened)return;if(file.json)await api.invoke('create',{title:file.title,document:file.json.pagesById?file.json:importCanvasJson(file.json),focus:true});}
+async function importFile(){
+  if(importing)return;
+  const button=$('#import'),label=button.innerHTML;importing=true;button.disabled=true;button.textContent='Opening…';
+  try{const file=await api.invoke('import');if(!file)return;if(file.warnings?.length)toast('Imported with limitations: '+file.warnings.join(' '));if(file.opened)return;if(file.json)await api.invoke('create',{title:file.title,document:file.json.pagesById?file.json:importCanvasJson(file.json),focus:true});}
+  finally{importing=false;button.disabled=false;button.innerHTML=label;}
+}
+function documentDescription(doc){
+  const status=doc.importStatus;
+  if(status&&status.state!=='complete')return `${status.state==='loading'?'Loading':'Import incomplete'} · ${status.loadedPages}/${status.totalPages} pages`;
+  return doc.damaged?'Could not read file':doc.inUse?'Open · Agent or collaborator active':doc.recovered?'Backup available':'Edited '+new Date(doc.updatedAt).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+}
 function renderLibrary(){
   const query=$('#search').value.trim().toLocaleLowerCase();
   const docs=documents.filter(doc=>(section!=='starred'||(prefs.starred??[]).includes(doc.id))&&doc.title.toLocaleLowerCase().includes(query)).sort((a,b)=>$('#sort').value==='title'?a.title.localeCompare(b.title):(b.updatedAt??'').localeCompare(a.updatedAt??''));
   $('#section-title').textContent=section==='starred'?'Starred':section==='all'?'All canvases':'Recents';$('#document-count').textContent=`${docs.length} canvas${docs.length===1?'':'es'}`;
   $('#documents').classList.toggle('list-view',prefs.view==='list');
   if(!docs.length){$('#documents').innerHTML=documents.length?`<div class="empty-library"><h2>${query?'No matching canvases':'Your favorites, gathered here.'}</h2><p>${query?'Try another name.':'Star a canvas to keep it close.'}</p></div>`:`<div class="empty-library"><div class="empty-symbol" aria-hidden="true">${icon('plus')}</div><h2>Your first idea starts here.</h2><p>Create a canvas, or explore a working sample.</p><div class="actions"><button id="start-blank" class="primary">Create a canvas</button><button id="start-sample">Explore a sample</button></div></div>`;if($('#start-blank'))$('#start-blank').onclick=run(()=>newCanvas());if($('#start-sample'))$('#start-sample').onclick=run(()=>newCanvas(true));return;}
-  $('#documents').innerHTML=docs.map(doc=>`<article class="document-card"><button class="preview" data-open="${doc.id}" aria-label="Open ${esc(doc.title)}">${doc.thumbnail?`<img src="${esc(doc.thumbnail)}" alt="Canvas preview">`:`<span class="empty-preview">${doc.damaged?'!':icon('plus')}</span>`}</button><div class="card-meta"><span class="file-icon" aria-hidden="true">${icon('file')}</span><div><h3>${esc(doc.title)}</h3><p>${doc.damaged?'Could not read file':doc.inUse?'Open · Agent or collaborator active':doc.recovered?'Backup available':'Edited '+new Date(doc.updatedAt).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</p></div><button class="star" data-star="${doc.id}" aria-label="Star ${esc(doc.title)}" aria-pressed="${(prefs.starred??[]).includes(doc.id)}">${icon('star')}</button><button class="more" data-more="${doc.id}" aria-label="Actions for ${esc(doc.title)}">${icon('more')}</button></div></article>`).join('');
+  $('#documents').innerHTML=docs.map(doc=>`<article class="document-card"><button class="preview" data-open="${doc.id}" aria-label="Open ${esc(doc.title)}">${doc.thumbnail?`<img src="${esc(doc.thumbnail)}" alt="Canvas preview">`:`<span class="empty-preview">${doc.damaged?'!':icon('plus')}</span>`}</button><div class="card-meta"><span class="file-icon" aria-hidden="true">${icon('file')}</span><div><h3>${esc(doc.title)}</h3><p>${esc(documentDescription(doc))}</p></div><button class="star" data-star="${doc.id}" aria-label="Star ${esc(doc.title)}" aria-pressed="${(prefs.starred??[]).includes(doc.id)}">${icon('star')}</button><button class="more" data-more="${doc.id}" aria-label="Actions for ${esc(doc.title)}">${icon('more')}</button></div></article>`).join('');
   for(const button of document.querySelectorAll('[data-open]'))button.onclick=run(()=>api.invoke('open',{id:button.dataset.open,focus:true}));
   for(const button of document.querySelectorAll('[data-star]'))button.onclick=run(async()=>{prefs=await api.invoke('preferences',{toggleStar:button.dataset.star});renderLibrary();});
   for(const button of document.querySelectorAll('[data-more]'))button.onclick=()=>documentActions(docs.find(doc=>doc.id===button.dataset.more));
@@ -74,6 +84,10 @@ api.on(message=>{
   if(message.type==='workspace')renderWorkspace(message.state??message);
   else if(message.type==='preferences'){prefs=message.preferences;renderView();renderLibrary();}
   else if(message.type==='library-changed'&&workspace.activeTabId==null)void run(refreshLibrary)();
+  else if(message.type==='import-progress'){
+    if(importing&&['decoding','decoded'].includes(message.phase))$('#import').textContent=message.phase==='decoding'?'Reading design…':'Preparing first page…';
+    if(message.documentId&&['failed','cancelled'].includes(message.phase))toast(message.error??'Import stopped; loaded pages have been kept.',message.phase==='failed');
+  }
   else if(message.type==='error')toast(message.message,true);
   else if(message.type==='command'){const actions={new:()=>newCanvas(),import:importFile,library:()=>api.invoke('show-library'),join:joinDialog};void run(actions[message.name]??(()=>{}))();}
 });

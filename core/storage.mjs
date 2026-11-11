@@ -8,6 +8,7 @@ import * as limits from './document.mjs';
 import { AssetStore, assertAsset, collectAssetRefs, assetRef, decodeBase64, extractInlineAssets } from './assets.mjs';
 import { atomicWrite, syncDirectory } from './durable-file.mjs';
 import { encodeJournalRecord, decodeJournal, appendJournal } from './journal.mjs';
+import { capturePreview, serializePreview, encodePreview, decodePreview, matchingPreviewTokens, previewSignature, samePreviewSignature, previewSource, restorePreviewSource, MAX_PREVIEW_BYTES, MAX_PREVIEW_JOURNAL_BYTES } from './preview-cache.mjs';
 
 export { atomicWrite } from './durable-file.mjs';
 export const validId = id => typeof id === 'string' && /^[a-f0-9-]{36}$/.test(id);
@@ -18,19 +19,72 @@ const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
 const checksum = data => createHash('sha256').update(data).digest('hex');
 const diskWrites = new Map();
 const generationReaders = new Map();
+const loadedPreviewOwners = new WeakMap();
 const tokenOwner = token => token?.replica instanceof WeakRef ? token.replica.deref() : token?.replica;
 const saveToken = captured => ({ replica: new WeakRef(captured.replica), revision: captured.revision });
+const turn = () => new Promise(resolve => setImmediate(resolve));
+const MAX_PREVIEW_BODY_CACHE_BYTES = 32 * 1024 * 1024;
+
+function assertImportStatus(status) {
+  if (status === undefined) return;
+  const keys = ['kind', 'state', 'totalPages', 'loadedPages', 'pages', 'error'];
+  if (!status || typeof status !== 'object' || Array.isArray(status) || Object.keys(status).some(key => !keys.includes(key)) ||
+      !['fig', 'sketch', 'json', 'omc'].includes(status.kind) || !['loading', 'complete', 'interrupted', 'failed', 'cancelled'].includes(status.state) ||
+      !Number.isSafeInteger(status.totalPages) || status.totalPages < 1 || status.totalPages > 100 ||
+      !Number.isSafeInteger(status.loadedPages) || status.loadedPages < 0 || status.loadedPages > status.totalPages ||
+      status.state === 'complete' && status.loadedPages !== status.totalPages ||
+      !Array.isArray(status.pages) || status.pages.length !== status.totalPages ||
+      status.error !== undefined && (typeof status.error !== 'string' || status.error.length > 1024)) throw Error('Invalid canvas metadata: importStatus');
+  const ids = new Set();
+  for (const page of status.pages) {
+    if (!page || typeof page !== 'object' || Object.keys(page).some(key => !['id', 'name'].includes(key)) ||
+        typeof page.id !== 'string' || !page.id || page.id.length > 1024 || ['__proto__', 'constructor', 'prototype'].includes(page.id) || ids.has(page.id) ||
+        typeof page.name !== 'string' || page.name.length > 1024) throw Error('Invalid canvas metadata: importStatus pages');
+    ids.add(page.id);
+  }
+}
+
+function copyImportStatus(status) {
+  return status === undefined ? undefined : { ...status, pages: status.pages.map(page => ({ id: page.id, name: page.name })) };
+}
+function openedMetadata(metadata) {
+  const result = metadataOf(metadata);
+  if (result.importStatus?.state === 'loading') result.importStatus.state = 'interrupted';
+  return result;
+}
+function assertImportProgress(record, document) {
+  const status = record.importStatus;
+  if (status?.state === 'loading' && (document.pages.length !== status.loadedPages || document.pages.some((id, index) => id !== status.pages[index]?.id))) throw Error('Invalid canvas metadata: importStatus does not match loaded pages');
+}
+function previewToken(details, source = 'primary') {
+  return { id: details.manifest.id, generation: details.manifest.generation, checkpointSha256: details.manifest.checkpoint.sha256,
+    manifestSha256: checksum(JSON.stringify(details.manifest)), journalSequence: details.sequence, journalBytes: details.journalBytes,
+    journalSha256: details.journalHash.copy().digest('hex'), source };
+}
+function markLoadedPreview(record, token) {
+  record.loadedPreviewToken = Object.freeze(token);
+  loadedPreviewOwners.set(record, { replica: new WeakRef(record.replica), revision: record.replica.revision });
+  return record;
+}
+function journalRecordUpperBound(captured, metadata) {
+  // All captured hashes bound the newly added subset, and the largest safe
+  // sequence bounds its eventual queued value. Base64 contains no JSON escapes.
+  const envelope = { version: 1, sequence: Number.MAX_SAFE_INTEGER, metadata, update: null, assetHashes: captured.assetHashes };
+  return 36 + Buffer.byteLength(JSON.stringify(envelope)) + (captured.update ? 4 * Math.ceil(captured.update.byteLength / 3) + 2 : 0);
+}
 
 function assertMetadata(record) {
   if (!record || !validId(record.id) || typeof record.title !== 'string' || !record.title.trim() || record.title.length > 1024) throw Error('Invalid canvas metadata: title or ID');
   for (const field of ['createdAt', 'updatedAt']) if (record[field] !== undefined && (typeof record[field] !== 'string' || record[field].length > 64 || !Number.isFinite(Date.parse(record[field])))) throw Error(`Invalid canvas metadata: ${field}`);
   if (record.thumbnail !== undefined && (typeof record.thumbnail !== 'string' || record.thumbnail.length >= 500000 || !record.thumbnail.startsWith('data:image/'))) throw Error('Invalid canvas metadata: thumbnail');
+  assertImportStatus(record.importStatus);
 }
 
 function metadataOf(record, updatedAt = record.updatedAt) {
-  return { id: record.id, title: record.title, createdAt: record.createdAt, updatedAt, thumbnail: record.thumbnail };
+  return { id: record.id, title: record.title, createdAt: record.createdAt, updatedAt, thumbnail: record.thumbnail,
+    ...(record.importStatus === undefined ? {} : { importStatus: copyImportStatus(record.importStatus) }) };
 }
-function metadataKey(record) { return JSON.stringify([record.title, record.createdAt, record.thumbnail]); }
+function metadataKey(record) { return JSON.stringify([record.title, record.createdAt, record.thumbnail, record.importStatus]); }
 function assertHashes(hashes) {
   if (!Array.isArray(hashes) || hashes.length > 100000) throw Error('Invalid retained asset manifest');
   for (const hash of hashes) assetRef(hash);
@@ -87,19 +141,25 @@ export function decodeFile(data) {
     replica.document;
     for (const hash of replica.retainedAssetRefs) if (!assets.has(hash)) throw Error('Portable file is missing a referenced asset');
     for (const hash of assets.keys()) replica.retainedAssetRefs.add(hash);
-    return { ...metadataOf(file), format: file.format, version: file.version, sha256: file.sha256, replica, ...(assets.size ? { assets, assetHashes: [...assets.keys()] } : {}) };
+    assertImportProgress(file, replica.document);
+    return { ...openedMetadata(file), format: file.format, version: file.version, sha256: file.sha256, replica, ...(assets.size ? { assets, assetHashes: [...assets.keys()] } : {}) };
   } catch (error) { replica?.destroy(); throw error; }
 }
 
 async function readBounded(file, maximum, encoding) {
   const stat = await fs.stat(file);
   if (!stat.isFile() || stat.size > maximum) throw Error('Stored file exceeds its size limit');
-  return fs.readFile(file, encoding);
+  const data = await fs.readFile(file, encoding);
+  if (Buffer.byteLength(data) > maximum) throw Error('Stored file exceeds its size limit');
+  return data;
 }
 
 export class Store {
-  constructor(directory, { onMetric, checkpointRecords = 128, checkpointBytes = 8 * 1024 * 1024 } = {}) {
+  constructor(directory, { onMetric, checkpointRecords = 128, checkpointBytes = 8 * 1024 * 1024, journalLimitBytes = MAX_PORTABLE_BYTES } = {}) {
+    if (!Number.isSafeInteger(journalLimitBytes) || journalLimitBytes < 1 || journalLimitBytes > MAX_PORTABLE_BYTES) throw Error('Invalid journal storage limit');
     this.dir = directory; this.pending = new Map(); this.saved = new Map(); this.requested = new Map();
+    this.previewJobs = new Map(); this.previewBodies = new Map(); this.previewBodyBytes = 0; this.previewWriter = Promise.resolve();
+    this.journalReservations = new Map(); this.journalLimitBytes = journalLimitBytes;
     this.onMetric = onMetric; this.checkpointRecords = checkpointRecords; this.checkpointBytes = checkpointBytes;
     this.assets = new AssetStore(path.join(directory, 'assets'), { onMetric: event => this.metric(event) });
   }
@@ -108,7 +168,106 @@ export class Store {
   generationFiles(id, generation) {
     this.file(id); if (!validId(generation)) throw Error('Invalid checkpoint generation');
     const directory = path.join(this.dir, '.omc-data', id);
-    return { state: path.join(directory, `${generation}.state`), journal: path.join(directory, `${generation}.journal`) };
+    return { state: path.join(directory, `${generation}.state`), journal: path.join(directory, `${generation}.journal`), preview: path.join(directory, `${generation}.preview`) };
+  }
+  previewMatches(record, token) {
+    const loaded = loadedPreviewOwners.get(record);
+    return !!loaded && loaded.replica.deref() === record.replica && loaded.revision === record.replica.revision && matchingPreviewTokens(record.loadedPreviewToken, token);
+  }
+  cachePreviewBody(id, projection) {
+    let cached = this.previewBodies.get(id);
+    if (cached && samePreviewSignature(cached.signature, projection.document)) {
+      this.previewBodies.delete(id); this.previewBodies.set(id, cached);
+      return cached.serialized;
+    }
+    const serialized = serializePreview(projection);
+    this.dropPreviewBody(id);
+    cached = { serialized, signature: previewSignature(projection.document) };
+    this.previewBodies.set(id, cached); this.previewBodyBytes += serialized.body.length;
+    while (this.previewBodies.size > 8 || this.previewBodyBytes > MAX_PREVIEW_BODY_CACHE_BYTES) this.dropPreviewBody(this.previewBodies.keys().next().value);
+    return serialized;
+  }
+  dropPreviewBody(id) {
+    const previous = this.previewBodies.get(id);
+    if (previous) { this.previewBodyBytes -= previous.serialized.body.length; this.previewBodies.delete(id); }
+  }
+  schedulePreview(id, projection, details) {
+    // Capture after durability, but never put optional serialization or I/O on
+    // the save ACK path. Later saves supersede an unstarted cache refresh.
+    const request = { source: previewSource(projection), token: previewToken(details) }, existing = this.previewJobs.get(id);
+    if (existing) { existing.request = request; return; }
+    if (this.previewJobs.size >= 8) return;
+    const job = { request, promise: null };
+    this.previewJobs.set(id, job);
+    job.promise = this.previewWriter.catch(() => {}).then(async () => {
+      await turn();
+      while (job.request) {
+        const next = job.request; job.request = null;
+        const projection = restorePreviewSource(next.source);
+        if (projection) {
+          const saved = this.saved.get(id);
+          if (saved && matchingPreviewTokens(next.token, previewToken(saved))) {
+            const files = this.generationFiles(id, next.token.generation), key = files.state;
+            generationReaders.set(key, (generationReaders.get(key) ?? 0) + 1);
+            try {
+              const started = performance.now(), serialized = this.cachePreviewBody(id, projection);
+              await atomicWrite(files.preview, encodePreview(projection, next.token, serialized), { backup: false });
+              this.metric({ stage: 'store-preview', durationMs: performance.now() - started, bytes: serialized.body.length, pageCount: projection.pages.length });
+            } catch (error) {
+              this.dropPreviewBody(id);
+              this.metric({ stage: 'store-preview-deferred', reason: error.code ?? error.message });
+            } finally {
+              const remaining = generationReaders.get(key) - 1;
+              if (remaining) generationReaders.set(key, remaining); else generationReaders.delete(key);
+            }
+          }
+        } else this.dropPreviewBody(id);
+        if (job.request) await turn();
+      }
+    }).finally(() => { if (this.previewJobs.get(id) === job) this.previewJobs.delete(id); });
+    this.previewWriter = job.promise;
+  }
+  async flushPreviews(id) {
+    // Explicit close/test seam. A crash before this completes only loses a cache.
+    while (id === undefined ? this.previewJobs.size : this.previewJobs.has(id)) {
+      await Promise.all(id === undefined ? [...this.previewJobs.values()].map(job => job.promise) : [this.previewJobs.get(id).promise]);
+    }
+  }
+  async loadPreview(id) {
+    await this.pending.get(id);
+    const started = performance.now(); let files, readerKey;
+    try {
+      const { manifest } = await this.readManifest(id);
+      if (!manifest) return null; // Legacy portable data takes the full load path.
+      files = this.generationFiles(id, manifest.generation); readerKey = files.state;
+      generationReaders.set(readerKey, (generationReaders.get(readerKey) ?? 0) + 1);
+      const cached = decodePreview(await readBounded(files.preview, MAX_PREVIEW_BYTES));
+      const before = await fs.stat(files.journal);
+      const details = await this.readGeneration(manifest, { materialize: false, maximumJournalBytes: MAX_PREVIEW_JOURNAL_BYTES });
+      const token = previewToken(details);
+      if (!matchingPreviewTokens(cached.token, token) || (await fs.stat(files.state)).size !== manifest.checkpoint.bytes) return null;
+      for (const hash of cached.assetHashes) {
+        if (!details.retainedAssets.has(hash)) return null;
+        await this.assets.get(hash);
+      }
+      const current = await this.readManifest(id), after = await fs.stat(files.journal);
+      if (!current.manifest || checksum(JSON.stringify(current.manifest)) !== token.manifestSha256 ||
+          before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || before.ino !== after.ino) return null;
+      const metadata = openedMetadata(details.metadata);
+      this.metric({ stage: 'store-load-preview', durationMs: performance.now() - started, pages: cached.pages.length, assetCount: cached.assetHashes.length });
+      return { ...metadata, document: cached.document, pageId: cached.pageId, pages: cached.pages, token, recovered: details.truncatedBytes > 0 };
+    } catch (error) {
+      // A complete bad journal must never become an apparently healthy older
+      // preview. Missing/stale/corrupt optional caches simply use full loading.
+      if (error.code === 'JOURNAL_CORRUPT') throw error;
+      this.metric({ stage: 'store-preview-miss', reason: error.code ?? error.message });
+      return null;
+    } finally {
+      if (readerKey) {
+        const remaining = generationReaders.get(readerKey) - 1;
+        if (remaining) generationReaders.set(readerKey, remaining); else generationReaders.delete(readerKey);
+      }
+    }
   }
   async prepareDocument(document) {
     const result = extractInlineAssets(document);
@@ -191,9 +350,9 @@ export class Store {
       if (remaining) generationReaders.set(key, remaining); else generationReaders.delete(key);
     }
   }
-  async readGeneration(manifest, { materialize = true } = {}) {
+  async readGeneration(manifest, { materialize = true, maximumJournalBytes = MAX_PORTABLE_BYTES } = {}) {
     const files = this.generationFiles(manifest.id, manifest.generation);
-    const raw = await readBounded(files.journal, MAX_PORTABLE_BYTES);
+    const raw = await readBounded(files.journal, maximumJournalBytes);
     const journal = decodeJournal(raw);
     let metadata = metadataOf(manifest);
     const retainedAssets = new Set(manifest.assetHashes), updates = [];
@@ -207,7 +366,8 @@ export class Store {
         if (materialize && record.update !== null) updates.push(decodeBase64(record.update, 'journal update'));
       } catch (error) { throw Object.assign(Error(`Invalid save journal record: ${error.message}`), { code: 'JOURNAL_CORRUPT' }); }
     }
-    const details = { manifest, metadata, retainedAssets, journalBytes: journal.validBytes, journalRecords: journal.records.length, sequence: journal.sequence, truncatedBytes: journal.truncatedBytes };
+    const details = { manifest, metadata, retainedAssets, journalBytes: journal.validBytes, journalRecords: journal.records.length, sequence: journal.sequence, truncatedBytes: journal.truncatedBytes,
+      journalHash: createHash('sha256').update(raw.subarray(0, journal.validBytes)) };
     if (!materialize) return details;
     const state = await readBounded(files.state, MAX_STATE_BYTES);
     if (state.length !== manifest.checkpoint.bytes || checksum(state) !== manifest.checkpoint.sha256) throw Error('Damaged canvas checkpoint');
@@ -221,6 +381,8 @@ export class Store {
       }
       for (const hash of replica.retainedAssetRefs) if (!retainedAssets.has(hash)) throw Error('Canvas asset manifest is incomplete');
       for (const hash of retainedAssets) { await this.assets.get(hash); replica.retainedAssetRefs.add(hash); }
+      try { assertImportProgress(metadata, replica.document); }
+      catch (error) { if (journal.records.length) error.code = 'JOURNAL_CORRUPT'; throw error; }
       return { ...details, replica };
     } catch (error) { replica?.destroy(); throw error; }
   }
@@ -245,6 +407,7 @@ export class Store {
       try {
         await this.prepareRecord(record);
         await this.save(record);
+        markLoadedPreview(record, previewToken(this.saved.get(id)));
         // Retain the recovery notice for the caller even after durable migration.
         record.recovered = recovered;
         this.metric({ stage: 'store-legacy-migration', durationMs: performance.now() - started, stateBytes: record.replica.state.byteLength });
@@ -254,21 +417,37 @@ export class Store {
     const { replica, metadata } = result;
     const token = saveToken({ replica, revision: replica.revision }), { replica: _, ...details } = result;
     this.saved.set(id, { ...details, token, metadataKey: metadataKey(metadata), repairedTail: result.truncatedBytes > 0 });
-    const record = { ...metadata, replica, assetHashes: [...result.retainedAssets], recovered: recovered || result.truncatedBytes > 0 };
+    const record = markLoadedPreview({ ...openedMetadata(metadata), replica, assetHashes: [...result.retainedAssets], recovered: recovered || result.truncatedBytes > 0 }, previewToken(result, recovered ? 'backup' : 'primary'));
     this.metric({ stage: 'store-load', durationMs: performance.now() - started, checkpointBytes: result.manifest.checkpoint.bytes, journalBytes: result.journalBytes, journalRecords: result.journalRecords, truncatedBytes: result.truncatedBytes });
     return record;
   }
   async save(record) {
     assertMetadata(record);
+    const document = record.replica.document;
+    assertImportProgress(record, document);
+    let projection;
+    try { projection = capturePreview(document); } catch { projection = null; }
     const id = record.id, previous = this.saved.get(id), requested = this.requested.get(id)?.deref();
-    const needsCheckpoint = !previous || record.recovered || requested && requested !== record.replica || tokenOwner(previous?.token) !== record.replica || previous.journalRecords >= this.checkpointRecords || previous.journalBytes >= this.checkpointBytes;
-    const captured = record.replica.captureSince(previous?.token, { full: !!needsCheckpoint });
+    const importing = record.importStatus?.state === 'loading', finishedImport = previous?.metadata?.importStatus?.state === 'loading' && !importing;
+    const needsCheckpoint = !previous || record.recovered || requested && requested !== record.replica || tokenOwner(previous?.token) !== record.replica || finishedImport ||
+      !importing && (previous.journalRecords >= this.checkpointRecords || previous.journalBytes >= this.checkpointBytes);
+    let captured = record.replica.captureSince(previous?.token, { full: !!needsCheckpoint });
     const metadata = metadataOf(record, new Date().toISOString()), key = metadataKey(record), assets = record.assets, wasRecovered = !!record.recovered;
+    let reservation = captured.full ? 0 : journalRecordUpperBound(captured, metadata);
+    // Source import defers ordinary compaction, never the file-size ceiling.
+    // Capture any needed full state now, before awaits can admit another edit.
+    // Reservations cover earlier queued captures, including overlapping deltas.
+    if (!captured.full && (previous.journalBytes + (this.journalReservations.get(id) ?? 0) + reservation > this.journalLimitBytes)) {
+      captured = record.replica.captureSince(previous.token, { full: true }); reservation = 0;
+    }
     this.requested.set(id, new WeakRef(record.replica));
     const disk = path.resolve(this.file(id));
+    if (reservation) this.journalReservations.set(id, (this.journalReservations.get(id) ?? 0) + reservation);
     const writing = (diskWrites.get(disk) ?? Promise.resolve()).catch(() => {}).then(async () => {
       const started = performance.now(), saved = this.saved.get(id);
-      if (!wasRecovered && tokenOwner(saved?.token) === captured.replica && saved.token.revision === captured.revision && saved.metadataKey === key) return;
+      if (!wasRecovered && tokenOwner(saved?.token) === captured.replica && saved.token.revision === captured.revision && saved.metadataKey === key) {
+        this.schedulePreview(id, projection, saved); return;
+      }
       if (saved && !wasRecovered) {
         const current = await this.readManifest(id);
         if (current.manifest?.generation !== saved.manifest.generation) throw Object.assign(Error('Canvas changed in another store; reload before saving'), { code: 'STORE_CONFLICT' });
@@ -292,23 +471,30 @@ export class Store {
           catch (error) { if (error.code !== 'ENOENT') throw error; await atomicWrite(`${this.file(id)}.bak`, bytes, { backup: false }); }
         }
         await atomicWrite(this.file(id), bytes, { backup: !wasRecovered });
-        next = { manifest, journalBytes: 0, journalRecords: 0, sequence: 0, retainedAssets };
+        next = { manifest, journalBytes: 0, journalRecords: 0, sequence: 0, retainedAssets, journalHash: createHash('sha256') };
         this.metric({ stage: 'store-checkpoint', durationMs: performance.now() - started, stateBytes: state.length, manifestBytes: Buffer.byteLength(bytes), assetCount: retainedAssets.size });
       } else {
         const addedAssets = [...retainedAssets].filter(hash => !saved.retainedAssets.has(hash));
         const sequence = saved.sequence + 1;
         const bytes = encodeJournalRecord({ version: 1, sequence, metadata, update: captured.update ? Buffer.from(captured.update).toString('base64') : null, assetHashes: addedAssets });
+        if (saved.journalBytes + bytes.length > Math.min(this.journalLimitBytes, MAX_PORTABLE_BYTES)) throw Object.assign(Error('Save journal reached its storage limit; retry to create a checkpoint'), { code: 'STORE_CHECKPOINT_REQUIRED' });
         const files = this.generationFiles(id, saved.manifest.generation);
         await appendJournal(files.journal, bytes, saved.journalBytes, { repairTail: saved.repairedTail });
-        next = { ...saved, journalBytes: saved.journalBytes + bytes.length, journalRecords: saved.journalRecords + 1, sequence, retainedAssets, repairedTail: false };
+        next = { ...saved, journalBytes: saved.journalBytes + bytes.length, journalRecords: saved.journalRecords + 1, sequence, retainedAssets, repairedTail: false,
+          journalHash: saved.journalHash.copy().update(bytes) };
         this.metric({ stage: 'store-journal', durationMs: performance.now() - started, bytes: bytes.length, updateBytes: captured.update?.byteLength ?? 0, sequence });
       }
       this.saved.set(id, { ...next, metadata, metadataKey: key, token: saveToken(captured) });
       if (captured.full) await this.pruneCheckpoints(id);
+      this.schedulePreview(id, projection, this.saved.get(id));
     });
     diskWrites.set(disk, writing); this.pending.set(id, writing);
     try { await writing; record.recovered = false; if (record.assets === assets) delete record.assets; }
     finally {
+      if (reservation) {
+        const remaining = this.journalReservations.get(id) - reservation;
+        if (remaining) this.journalReservations.set(id, remaining); else this.journalReservations.delete(id);
+      }
       if (this.pending.get(id) === writing) this.pending.delete(id);
       if (diskWrites.get(disk) === writing) diskWrites.delete(disk);
     }
@@ -325,7 +511,7 @@ export class Store {
       const directory = path.dirname(this.generationFiles(id, current.manifest.generation).state);
       let removed = false;
       for (const name of await fs.readdir(directory)) {
-        const match = /^([a-f0-9-]{36})\.(state|journal)$/.exec(name);
+        const match = /^([a-f0-9-]{36})\.(state|journal|preview)$/.exec(name);
         if (!match || keep.has(match[1]) || generationReaders.has(this.generationFiles(id, match[1]).state)) continue;
         await fs.rm(path.join(directory, name), { force: true }); removed = true;
       }
@@ -347,17 +533,20 @@ export class Store {
         const source = await this.readManifest(id);
         if (source.legacy) {
           const record = decodeFile(source.legacy);
-          items.push({ ...metadataOf(record), recovered: false }); record.replica.destroy();
+          items.push({ ...openedMetadata(record), recovered: false }); record.replica.destroy();
         } else {
           const result = await this.readLocal(source.manifest, { materialize: false });
-          items.push({ ...result.metadata, recovered: result.truncatedBytes > 0 });
+          items.push({ ...openedMetadata(result.metadata), recovered: result.truncatedBytes > 0 });
         }
       } catch { items.push({ id, title: 'Damaged document', damaged: true }); }
     }
     return items.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
   }
   async remove(id) {
-    await this.pending.get(id); this.saved.delete(id); this.requested.delete(id);
+    await this.pending.get(id);
+    const preview = this.previewJobs.get(id); if (preview) preview.request = null;
+    await this.flushPreviews(id); this.dropPreviewBody(id);
+    this.saved.delete(id); this.requested.delete(id);
     await fs.rm(this.file(id), { force: true }); await fs.rm(`${this.file(id)}.bak`, { force: true });
     await fs.rm(path.join(this.dir, '.omc-data', id), { recursive: true, force: true });
     // Assets remain: safe GC must account for documents, Undo and in-flight work.
