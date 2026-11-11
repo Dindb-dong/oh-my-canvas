@@ -1,0 +1,33 @@
+[package]
+name = "omc-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+omc-assets = { path = "../../crates/omc-assets" }
+omc-style = { path = "../../crates/omc-style" }
+omc-text = { path = "../../crates/omc-text" }
+omc-model = { path = "../../crates/omc-model" }
+omc-scene = { path = "../../crates/omc-scene" }
+omc-render = { path = "../../crates/omc-render" }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+winit.workspace = true
+softbuffer.workspace = true
+skia-safe.workspace = true
+accesskit.workspace = true
+accesskit_winit.workspace = true
+arboard.workspace = true
+reqwest = { workspace = true, features = ["blocking", "json"] }
+unicode-segmentation.workspace = true
+base64.workspace = true
+rfd = { version = "=0.18.0", default-features = false, features = ["xdg-portal"] }
+tempfile.workspace = true
+
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+skia-safe = { workspace = true, features = ["vulkan"] }

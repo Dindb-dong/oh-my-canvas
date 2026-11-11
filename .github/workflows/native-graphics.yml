@@ -23,7 +23,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
-      - run: cargo test --manifest-path native/Cargo.toml --locked -p omc-text -p omc-layout -p omc-scene -p omc-render -p omc-import -p omc-export -p omc-mcp
+      - run: cargo test --manifest-path native/Cargo.toml --locked -p omc-text -p omc-layout -p omc-scene -p omc-render -p omc-import -p omc-export -p omc-mcp -p omc-desktop
       - name: Native service and stdio bridge
         run: cargo build --manifest-path native/Cargo.toml --locked -p omc-service -p omc-cli
       - uses: actions/setup-node@v4
