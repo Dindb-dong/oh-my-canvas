@@ -95,6 +95,33 @@ try{
    const stdio=new Client({name:'stdio-contracts',version:'1.0.0'});
    try{await stdio.connect(transport);const listed=await stdio.listTools();assert.equal(listed.tools.filter(t=>!t.name.startsWith('native_')).length,50);const result=await stdio.callTool({name:'create_document',arguments:{title:'Rust stdio document'}});assert.notEqual(result.isError,true);assert.ok(result.structuredContent.documentId);}finally{await stdio.close();}
   });
+  await t.test('single-step layer order preserves blocks, parents, and Undo',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Layer order'});
+   const add=async(name,type='rect',parentId)=>{
+    const result=await client.call('create_shape',{documentId,type,parentId,properties:{name}});
+    return result.rawIds[0];
+   };
+   const group=await add('Group','group');
+   await add('X','rect',group);const y=await add('Y','rect',group);await add('Z','rect',group);
+   await add('A');const b=await add('B');const c=await add('C');await add('D');await add('E');
+   const order=(mode,ids)=>client.call('edit_shapes',{documentId,action:'order',mode,ids});
+   const siblings=async(id)=>{
+    const tree=await client.call('get_tree',{documentId,id,depth:1});
+    return tree.nodes.slice(1).map(node=>node.name);
+   };
+   const original=['Group','A','B','C','D','E'];
+   const advanced=['Group','A','D','B','C','E'];
+   assert.equal((await order('forward',[c,y,b])).receipt.status,'durable');
+   assert.deepEqual(await siblings(),advanced);
+   assert.deepEqual(await siblings(group),['X','Z','Y']);
+   assert.equal((await order('backward',[b,c,y])).receipt.status,'durable');
+   assert.deepEqual(await siblings(),original);
+   assert.deepEqual(await siblings(group),['X','Y','Z']);
+   assert.equal((await order('backward',[y,group])).changed,false);
+   await client.call('undo',{documentId});
+   assert.deepEqual(await siblings(),advanced);
+   assert.deepEqual(await siblings(group),['X','Z','Y']);
+  });
   await t.test('four processes with separate profiles converge',async()=>{
    const session=(await rpc(service,null,'session.open')).sessionId;
    const packageData=await rpc(service,session,'sync.package',{documentId:doc});const peers=[{service,session}];
@@ -107,4 +134,8 @@ try{
   });
   await client.client.close();
  });
-}finally{for(const child of children)if((child.exitCode===null&&child.signalCode===null)){child.kill();await new Promise(resolve=>child.once('exit',resolve));}await rm(temporary,{recursive:true,force:true});}
+}finally{
+ for(const child of children)await stop({child});
+ // Windows can still report a transient SQLite file lock after child exit.
+ await rm(temporary,{recursive:true,force:true,maxRetries:10});
+}
