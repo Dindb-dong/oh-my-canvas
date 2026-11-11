@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/omc-assets", "crates/omc-engine", "crates/omc-model", "crates/omc-protocol", "crates/omc-storage", "crates/omc-sync"]
+members = ["crates/omc-assets", "crates/omc-engine", "crates/omc-model", "crates/omc-protocol", "crates/omc-storage", "crates/omc-style", "crates/omc-sync"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,6 +15,7 @@ serde_json = "=1.0.154"
 serde_jcs = "=0.2.0"
 uuid = { version = "=1.29.2", features = ["v4", "serde"] }
 sha2 = "=0.11.1"
+thiserror = "=2.0.21"
 rusqlite = { version = "=0.42.0", features = ["bundled", "backup"] }
 hex = "=0.4.3"
 tempfile = "=3.27.0"

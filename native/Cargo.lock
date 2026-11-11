@@ -297,6 +297,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "omc-style"
+version = "0.1.0"
+dependencies = [
+ "omc-model",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "omc-sync"
 version = "0.1.0"
 dependencies = [
