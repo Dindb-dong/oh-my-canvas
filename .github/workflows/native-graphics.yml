@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Linux native libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y clang cmake ninja-build pkg-config libfontconfig1-dev libfreetype6-dev libx11-dev libxkbcommon-dev libwayland-dev
+        run: bash native/ci/linux-libs.sh
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.92.0
