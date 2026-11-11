@@ -396,6 +396,16 @@ export class Editor implements EditorStore {
             this.normalize(remote);
             validateDocumentSize(remote);
         }
+        // Validate the normalized identity that will become the next baseline.
+        // Host validators keep immutable-branch proofs; losing that proof on a
+        // remote metadata/page update makes the next small local edit validate
+        // the entire document. Rejections must precede every session/publication
+        // change, and an external snapshot still uses the full host boundary.
+        remote = share(baseline, remote);
+        if (options.incremental && this.options.validateChanges)
+            this.options.validateChanges(baseline, remote, changeScope(baseline, remote));
+        else
+            this.options.validate?.(remote);
         if (this.session) {
             const previousBase = this.session.base;
             const rebased = new Map<CanvasDocument, CanvasDocument>();
@@ -435,7 +445,7 @@ export class Editor implements EditorStore {
             this.session.paths = new Map([...history, ...future, current].flatMap(snapshot => changedPaths(remote, snapshot)).map(path => [JSON.stringify(path), path]));
         }
         else
-            this.doc = share(this.doc, remote);
+            this.doc = remote;
         this.prune();
         this.emit({ projection: true, deltas: true, changedShapeIds: this.changedShapeIds(previous, this.doc) });
     }
