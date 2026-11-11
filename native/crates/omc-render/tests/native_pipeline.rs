@@ -105,6 +105,8 @@ fn alpha_mask_paints_complete_child_group() {
         ("height".into(), json!(60)),
         ("fill".into(), json!("blue")),
     ]);
+    let group_id = group.id.clone();
+    let mask_id = mask.id.clone();
     for node in [group, mask, content] {
         s.nodes.insert(node.id.clone(), node);
     }
@@ -112,6 +114,48 @@ fn alpha_mask_paints_complete_child_group() {
     assert_eq!(at(&image, 0, 0)[3], 0);
     assert_eq!(&at(&image, 30, 30)[..3], &[0, 0, 255]);
     assert!((at(&image, 30, 30)[3] as i32 - 128).abs() <= 1);
+
+    s.nodes
+        .get_mut(&group_id)
+        .unwrap()
+        .properties
+        .insert("maskId".into(), json!(mask_id));
+    s.nodes.get_mut(&mask_id).unwrap().rank = "00000000000000000000000000000003".into();
+    let explicit = pixels(&s);
+    assert_eq!(at(&explicit, 0, 0), at(&image, 0, 0));
+    assert_eq!(at(&explicit, 30, 30), at(&image, 30, 30));
+
+    // A stale or foreign reference must not turn another child into the mask.
+    s.nodes
+        .get_mut(&group_id)
+        .unwrap()
+        .properties
+        .insert("maskId".into(), json!("missing"));
+    for strict in [false, true] {
+        let scene = build_scene(
+            &s,
+            &SceneOptions {
+                width: 128.,
+                height: 96.,
+                strict,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let result = render_rgba(&scene, &RenderOptions::default(), &EmptyResources);
+        if strict {
+            assert!(matches!(result, Err(error) if error.to_string().contains("maskId")));
+        } else {
+            let preview = result.unwrap();
+            assert_eq!(at(&preview.pixels, 30, 30)[3], 0);
+            assert!(
+                preview
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.property.as_deref() == Some("maskId"))
+            );
+        }
+    }
 }
 
 #[test]
