@@ -278,8 +278,10 @@ fn render(app: &App, width: u32, height: u32, scale: f64) -> Result<Surface, Str
     let canvas = surface.canvas();
     canvas.scale((scale as f32, scale as f32));
     canvas.clear(Color::WHITE);
-    let typeface = FontMgr::default()
+    let font_manager = FontMgr::default();
+    let typeface = font_manager
         .match_family_style("sans-serif", FontStyle::normal())
+        .or_else(|| font_manager.legacy_make_typeface(None, FontStyle::normal()))
         .ok_or("No native UI font is available.")?;
     let font = Font::from_typeface(typeface, 13.);
     fill(canvas, Rect::new(0., 0., app.width, HEADER), Color::WHITE);
