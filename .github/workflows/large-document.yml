@@ -100,9 +100,10 @@ jobs:
         with:
           name: large-document-current-${{ github.run_id }}
           path: |
-            evidence/current/*.json
+            evidence/current/result.json
+            evidence/current/*-trace.json
             evidence/current/*.png
-            evidence/viewport/*.json
+            evidence/viewport/result.json
             evidence/viewport/*.png
             evidence/*.log
           retention-days: 7
@@ -120,7 +121,8 @@ jobs:
         with:
           name: large-document-${{ github.run_id }}
           path: |
-            evidence/**/*.json
+            evidence/**/result.json
+            evidence/**/*-trace.json
             evidence/**/*.png
             evidence/*.log
           retention-days: 7

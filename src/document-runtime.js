@@ -17,7 +17,7 @@ let projectionWork=Promise.resolve();
 let lastInteractionAt=-Infinity;
 for(const type of ['pointerdown','wheel','keydown','input'])document.addEventListener(type,()=>{lastInteractionAt=performance.now();},{capture:true,passive:true});
 let session={mode:'offline',peers:[]},prefs={},toastTimer,dialogFocus,hosting,sessionTab='host';
-let lastRejected,closing=false,titleEdit=null,ready=false,saveFailed=false;
+let lastRejected,closing=false,titleEdit=null,ready=false,saveFailed=false,hostSaveError=null;
 let projection;
 const params=new URLSearchParams(location.search),documentId=params.get('documentId'),generation=Number(params.get('generation'));
 if(!documentId||!Number.isSafeInteger(generation)||generation<1)throw Error('Invalid document runtime identity');
@@ -64,8 +64,8 @@ function setTitle(){
   updateSaveState();document.title=(active?.title||'Oh My Canvas')+' — Oh My Canvas';
 }
 function updateSaveState(){
-  const stored=!!projection&&projection.ack>=nextSeq&&!projection.pending.length&&loadingState?.phase!=='saving'&&!saveFailed;
-  $('#save-state').textContent=stored?'Stored on this computer':saveFailed?'Save failed':'Saving…';
+  const stored=!!projection&&projection.ack>=nextSeq&&!projection.pending.length&&loadingState?.phase!=='saving'&&!saveFailed&&!hostSaveError;
+  $('#save-state').textContent=stored?'Stored on this computer':saveFailed||hostSaveError?'Save failed':'Saving…';
 }
 function renderLoading(){
   const loading=loadingState?.state==='loading',incomplete=importStatus&&importStatus.state!=='complete',failed=loadingState?.state==='failed';
@@ -92,7 +92,7 @@ function renderLoading(){
   $('#loading-pages').replaceChildren(...(status.pages??[]).map(item=>{
     const button=document.createElement('button');button.type='button';button.textContent=item.name??'Untitled page';button.disabled=!ids.has(item.id);button.dataset.loadingPage=item.id;
     if(button.disabled)button.title='This page is still loading';
-    button.onclick=()=>{handle?.editor.setPage(item.id);notice.open=false;};return button;
+    button.onclick=run(async()=>{await handle?.flush();handle?.editor.setPage(item.id);notice.open=false;});return button;
   }));
   $('#stop-loading').hidden=!(loading&&loadingState.kind==='import');
   updateSaveState();
@@ -100,7 +100,7 @@ function renderLoading(){
 function acceptLoading(value){
   if(Object.hasOwn(value,'loading'))loadingState=value.loading;
   if(Object.hasOwn(value,'importStatus'))importStatus=value.importStatus;
-  if(value.saveError)saveFailed=true;
+  if(Object.hasOwn(value,'saveError'))hostSaveError=value.saveError;
   renderLoading();
 }
 async function afterPaint(){
@@ -157,7 +157,7 @@ async function openSnapshot(snap){
   assertIdentity(snap);
   mounting=true;$('#editor').inert=true;
   try {thumbnails.reset();mcp?.dispose?.();unsubscribe?.();await handle?.destroy();handle=null;cursors.clear();$('#remote-cursors').replaceChildren();
-  projection=startupSync('startup.projection',()=>new DocumentProjection(snap));nextSeq=0;lastRejected=null;saveFailed=false;active={id:snap.id,title:snap.title};acceptLoading(snap);setTitle();
+  projection=startupSync('startup.projection',()=>new DocumentProjection(snap));nextSeq=0;lastRejected=null;saveFailed=false;hostSaveError=null;active={id:snap.id,title:snap.title};acceptLoading(snap);setTitle();
   let candidate=snap;
   for(let attempt=0;attempt<8;attempt++){
     handle=await startupStep('startup.mount',()=>mountEditor($('#editor'),{
@@ -312,7 +312,7 @@ api.on(message=>{
   if(message.documentId!==undefined&&(message.documentId!==documentId||message.generation!==generation))return;
   if(message.type==='document'||message.type==='document-delta'||message.type==='document-pages')void project(message).catch(error=>toast('Could not synchronize canvas: '+error.message,true));
   else if(message.type==='document-loading')acceptLoading(message);
-  else if(message.type==='saved'){if(message.id===active?.id)updateSaveState();}
+  else if(message.type==='saved'){if(message.id===active?.id){hostSaveError=null;updateSaveState();}}
   else if(message.type==='error')toast(message.message,true);
   else if(message.type==='session'){session=message.status;renderPeers();}
   else if(message.type==='cursor'){
