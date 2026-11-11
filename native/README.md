@@ -10,3 +10,7 @@ This workspace implements the architecture accepted in PR #14 in reviewable step
 The workspace requires Rust 1.92.0. Run `cargo test --manifest-path native/Cargo.toml --locked --workspace` and `cargo fmt --manifest-path native/Cargo.toml --all --check`.
 
 This first increment defines contracts. It does not replace the runtime or claim the native release acceptance gates have passed.
+
+## CRDT operations
+
+Versioned attributed operations, stable text identities, selective retractions, and bounded fragment assembly.

@@ -1,0 +1,15 @@
+[package]
+name = "omc-sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+omc-model = { path = "../omc-model" }
+omc-protocol = { path = "../omc-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+uuid.workspace = true
+
