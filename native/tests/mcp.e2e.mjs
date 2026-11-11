@@ -122,6 +122,32 @@ try{
    assert.deepEqual(await siblings(),advanced);
    assert.deepEqual(await siblings(group),['X','Z','Y']);
   });
+  await t.test('mask release preserves children and Undo restores the exported pixels',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Mask round trip'});
+   const content=(await client.call('create_shape',{documentId,type:'rect',x:10,y:10,width:60,height:60,properties:{fills:[{type:'solid',color:'#0000ff'}]}})).rawIds[0];
+   const source=(await client.call('create_shape',{documentId,type:'ellipse',x:30,y:20,width:20,height:20,properties:{fills:[{type:'solid',color:'#ffffff'}]}})).rawIds[0];
+   const {receipt,rawIds:[group]}=await client.call('edit_shapes',{documentId,action:'mask',ids:[content,source],maskId:source});
+   assert.equal(receipt.status,'durable');
+   const inspect=()=>client.call('get_tree',{documentId,id:group,detail:'detailed'});
+   const png=async()=> (await client.call('export_document',{id:documentId,format:'png',bounds:{x:0,y:0,width:100,height:80}})).base64;
+   const before=await inspect();
+   const clipped=await png();
+   assert.equal(Buffer.from(clipped,'base64').subarray(1,4).toString(),'PNG');
+   assert.equal(before.nodes[0].properties.maskId,source);
+   const release=()=>client.call('edit_shapes',{documentId,action:'unmask',ids:[group]});
+   const result=await release();
+   assert.equal(result.receipt.status,'durable');
+   assert.deepEqual(new Set(result.changedIds),new Set([group,source]));
+   const after=await inspect();
+   assert.equal(after.nodes[0].properties.maskId,undefined);
+   assert.equal(after.nodes[2].properties.isMask,undefined);
+   assert.deepEqual(after.nodes.map(node=>[node.rawId,node.parent,node.x,node.y]),before.nodes.map(node=>[node.rawId,node.parent,node.x,node.y]));
+   assert.notEqual(await png(),clipped);
+   assert.equal((await release()).changed,false);
+   await client.call('undo',{documentId});
+   assert.equal((await inspect()).nodes[0].properties.maskId,source);
+   assert.equal(await png(),clipped);
+  });
   await t.test('four processes with separate profiles converge',async()=>{
    const session=(await rpc(service,null,'session.open')).sessionId;
    const packageData=await rpc(service,session,'sync.package',{documentId:doc});const peers=[{service,session}];

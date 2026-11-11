@@ -40,6 +40,7 @@ impl Draft {
                 for key in properties {
                     node.properties.remove(key);
                 }
+                self.affected.insert(node_id.clone());
             }
             Command::NodeMove {
                 node_id,
@@ -594,6 +595,20 @@ impl ToolRouter {
             .map(|id| draft.node(id).cloned())
             .collect::<Result<_>>()?;
         let action = string(args, "action")?;
+        if matches!(action, "mask" | "unmask") {
+            if nodes
+                .iter()
+                .map(|node| &node.id)
+                .collect::<BTreeSet<_>>()
+                .len()
+                != nodes.len()
+            {
+                return Err(EngineError::invalid("choose distinct layers"));
+            }
+            for node in &nodes {
+                mask_editable(draft, &node.id)?;
+            }
+        }
         if action == "order"
             && let Some(mode @ ("forward" | "backward")) = args["mode"].as_str()
         {
@@ -655,6 +670,38 @@ impl ToolRouter {
                     node_id: node.id,
                     parent_id: Some(group_id.clone()),
                     rank: node.rank,
+                })?;
+            }
+            return Ok(());
+        }
+        if action == "unmask" {
+            for group in nodes {
+                let properties = ["maskId", "maskType", "maskMode", "mask", "isMaskGroup"]
+                    .into_iter()
+                    .filter(|key| group.properties.contains_key(*key))
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>();
+                if properties.is_empty() {
+                    continue;
+                }
+                let children = children(&draft.snapshot, &group.id);
+                let source = if let Some(id) = group.properties.get("maskId") {
+                    children
+                        .iter()
+                        .find(|node| id.as_str() == Some(node.id.as_str()))
+                        .copied()
+                } else {
+                    children.first().copied()
+                };
+                if let Some(source) = source.filter(|node| node.properties.contains_key("isMask")) {
+                    draft.apply(Command::NodeUnset {
+                        node_id: source.id.clone(),
+                        properties: vec!["isMask".into()],
+                    })?;
+                }
+                draft.apply(Command::NodeUnset {
+                    node_id: group.id,
+                    properties,
                 })?;
             }
             return Ok(());
@@ -1094,8 +1141,7 @@ fn prepare_mask_group(
     mode: &str,
     group: &mut Node,
 ) -> Result<()> {
-    if nodes.len() < 2 || nodes.iter().map(|n| &n.id).collect::<BTreeSet<_>>().len() != nodes.len()
-    {
+    if nodes.len() < 2 {
         return Err(EngineError::invalid(
             "choose distinct mask and content layers",
         ));
@@ -1119,9 +1165,6 @@ fn prepare_mask_group(
             "unsupported_feature",
             "vector masks require a rectangle, ellipse or path without children",
         ));
-    }
-    for node in nodes {
-        mask_editable(draft, &node.id)?;
     }
     let parent_node = draft.node(parent)?;
     let styles = omc_style::compute_styles(&draft.snapshot, (1440., 900.));
