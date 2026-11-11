@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as Y from 'yjs';
 import {Replica} from '../core/replica.mjs';
 import {MAX_STATE_BYTES,materialize} from '../core/document.mjs';
-import {localMapStateBound,supportsLocalMapBound} from '../core/state-budget.mjs';
+import {localMapStateBound,independentMapStateBound,supportsLocalMapBound} from '../core/state-budget.mjs';
 import {documentFixture} from './helpers.mjs';
 
 const key=(...parts)=>JSON.stringify(parts);
@@ -142,4 +142,44 @@ test('binary shared content and pending causal updates use exact validation inst
     replica.patch([[key('page','page','name'),'Pending dependency']]);assert.equal(events.at(-1).sizeValidation,'exact');assertCeiling(replica);
     replica.receive(updates[0]);assert.equal(replica.document.causal,'second');assertCeiling(replica);
   }finally{source.destroy();replica.destroy();}
+});
+
+test('independent new-key client blocks bound exact state across client counts, identifier widths, GC and Undo',()=>{
+  const live=new Y.Doc();live.clientID=0xffffffff;
+  const fields=live.getMap('fields'),undo=new Y.UndoManager(fields);
+  try{
+    fields.set('retained','first'.repeat(400));fields.set('retained','second');
+    for(const client of [...Array.from({length:130},(_,i)=>i+1),16383,16384,2097151,2097152]){
+      const scratch=new Y.Doc();scratch.clientID=client;
+      try{
+        scratch.transact(()=>{scratch.getMap('fields').set('new-'+client,{unicode:'한🙂',array:[null,true,client],payload:'x'.repeat(client%129)});});
+        const update=Y.encodeStateAsUpdate(scratch),previous=Y.encodeStateAsUpdate(live).byteLength,bound=independentMapStateBound(live,scratch,previous,update.byteLength);
+        assert.notEqual(bound,null);Y.applyUpdate(live,update,'remote');assert.ok(Y.encodeStateAsUpdate(live).byteLength<=bound);
+        if(client%37===0){undo.undo();undo.redo();}
+      }finally{scratch.destroy();}
+    }
+  }finally{undo.destroy();live.destroy();}
+});
+
+test('independent-state bounds reject reused/deleted keys, collisions, shared types and pending data',()=>{
+  const live=new Y.Doc(),scratch=new Y.Doc(),source=new Y.Doc();
+  try{
+    live.getMap('fields').set('used','old');live.getMap('fields').set('deleted','old');live.getMap('fields').delete('deleted');
+    scratch.getMap('fields').set('new','value');
+    const bound=()=>independentMapStateBound(live,scratch,Y.encodeStateAsUpdate(live).byteLength,Y.encodeStateAsUpdate(scratch).byteLength);
+    assert.notEqual(bound(),null);
+    for(const name of ['used','deleted']){
+      const reused=new Y.Doc();try{reused.getMap('fields').set(name,'new');assert.equal(independentMapStateBound(live,reused,1,1),null);}finally{reused.destroy();}
+    }
+    const client=scratch.clientID;scratch.clientID=live.clientID;
+    // The store's encoded client identity, not a mutable doc.clientID label, is
+    // what establishes collision freedom.
+    Y.applyUpdate(live,Y.encodeStateAsUpdate(scratch));assert.equal(bound(),null);scratch.clientID=client;
+    const shared=new Y.Doc();try{shared.getMap('fields').set('shared',new Y.Text('text'));assert.equal(independentMapStateBound(live,shared,1,1),null);}finally{shared.destroy();}
+    const updates=[];source.on('update',update=>updates.push(update));source.getMap('fields').set('causal','first');source.getMap('fields').set('causal','second');
+    const empty=new Y.Doc(),fresh=new Y.Doc();try{
+      Y.applyUpdate(empty,updates[1]);assert.ok(empty.store.pendingStructs);fresh.getMap('fields').set('fresh',true);
+      assert.equal(independentMapStateBound(empty,fresh,1,1),null);
+    }finally{empty.destroy();fresh.destroy();}
+  }finally{live.destroy();scratch.destroy();source.destroy();}
 });

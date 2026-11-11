@@ -105,13 +105,28 @@ test('bounded persistence update log falls back to a complete checkpoint after e
  }finally{replica.destroy();}
 });
 
-test('an update larger than the log budget clears the gap and subsequent small deltas remain replayable',()=>{
+test('large immediate deltas use a weak last-update reference; missed gaps still require a checkpoint',()=>{
  const document=documentFixture();document.notes='';const replica=new Replica({document});
  try{
   const previous=replica.captureSince();replica.patch([[JSON.stringify(['meta','notes']),'x'.repeat(5*1024*1024)]],'Large import',undefined,{recordHistory:false});
-  assert.equal(replica.updateLog.length,0);assert.equal(replica.updateLogBytes,0);assert.equal(replica.captureSince(previous).full,true);
+  assert.equal(replica.updateLog.length,0);assert.equal(replica.updateLogBytes,0);
+  const recent=replica.captureSince(previous);assert.equal(recent.full,false);assert.ok(recent.update.length>4*1024*1024);
+  const copy=new Replica({state:previous.update,updates:[recent.update]});try{assert.deepEqual(copy.document,replica.document);}finally{copy.destroy();}
+  const weak=replica.latestUpdate;replica.latestUpdate={...weak,update:{deref:()=>undefined}};
+  assert.equal(replica.captureSince(previous).full,true);replica.latestUpdate=weak;
   const baseline={replica,revision:replica.revision};replica.patch([[JSON.stringify(['page','page','name']),'After large import']]);
   const delta=replica.captureSince(baseline);assert.equal(delta.full,false);assert.ok(delta.update.byteLength<1024);assert.equal(replica.updateLog.length,1);
+  assert.equal(replica.captureSince(previous).full,true);
+ }finally{replica.destroy();}
+});
+
+test('mutating subscriber event bytes cannot corrupt an immediate persistence capture',()=>{
+ const replica=new Replica({document:documentFixture()});
+ try{
+  const before=replica.captureSince();const unsubscribe=replica.onUpdate(update=>update.fill(0));
+  replica.patch([[JSON.stringify(['meta','notes']),'x'.repeat(5*1024*1024)]],'Large import',undefined,{recordHistory:false});unsubscribe();
+  const delta=replica.captureSince(before);assert.equal(delta.full,false);
+  const reopened=new Replica({state:before.update,updates:[delta.update]});try{assert.deepEqual(reopened.document,replica.document);}finally{reopened.destroy();}
  }finally{replica.destroy();}
 });
 

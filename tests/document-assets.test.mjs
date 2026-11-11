@@ -18,10 +18,11 @@ test.before(async()=>{
 });
 async function fixture(t){
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'omc-asset-boundary-')),store=new Store(path.join(directory,'profile'));
-  t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+  const cleanup=[];
+  t.after(async()=>{for(const dispose of cleanup)await dispose();await store.flushPreviews();await fs.rm(directory,{recursive:true,force:true});});
   const bytes=Buffer.from('verified synthetic bitmap bytes'),hash=hashAsset(bytes),document=documentFixture();
   document.assets={bitmap:{id:'bitmap',kind:'image',src:assetRef(hash)}};
-  return {directory,store,bytes,hash,document,result:{document,warnings:[],blobs:[{hash,mimeType:'image/png',bytes}]}};
+  return {directory,store,cleanup,bytes,hash,document,result:{document,warnings:[],blobs:[{hash,mimeType:'image/png',bytes}]}};
 }
 test('worker bytes are verified and durable before their referenced document is returned',async t=>{
   const f=await fixture(t);let release;
@@ -59,7 +60,7 @@ test('native portable JSON uses original bytes once without mutating the working
 test('workspace portable export and copy import preserve image dependencies across profiles',async t=>{
   const f=await fixture(t);await persistDesignImport(f.result,f.store);
   let manager;manager=createDocumentManager({store:f.store,createRuntime(entry){queueMicrotask(()=>manager.ready(entry,entry.generation));return {};},async disposeRuntime(){},async flushRuntime(){}});
-  t.after(()=>manager.disposeAll());
+  f.cleanup.push(()=>manager.disposeAll());
   const invoke=createWorkspaceTools({manager,store:f.store,profile:f.store.dir,...formats,runtimeRequest:async()=>({}),checkBusy:async()=>{},context:async()=>({})});
   const entry=await manager.create('Image document',f.document);
   const exported=await invoke({name:'export_document',agent:'test',args:{id:entry.record.id,format:'omc'}});

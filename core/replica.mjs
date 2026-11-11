@@ -2,7 +2,35 @@ import * as Y from 'yjs';
 import { flatten, materialize, assertDocument,MAX_STATE_BYTES } from './document.mjs';
 import * as documentModel from './document.mjs';
 import { collectAssetRefs } from './asset-refs.mjs';
-import {localMapStateBound,scratchMapStateBound,supportsLocalMapBound} from './state-budget.mjs';
+import {localMapStateBound,scratchMapStateBound,independentMapStateBound,supportsLocalMapBound} from './state-budget.mjs';
+import {mergePageDocuments,pageProjection} from './page-projection.mjs';
+const catalogs=new Set(['assets','components','styles','libraries']);
+const owns=(value,key)=>Object.prototype.hasOwnProperty.call(value??{},key);
+const sameDefinition=(before,after)=>{
+  const semantic=value=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).filter(([key])=>key!=='name')):value;
+  return documentModel.same(semantic(before),semantic(after));
+};
+// Reusing a pre-encoding projection requires values which Yjs's Any codec
+// preserves exactly. Unusual structured-clone values still import through the
+// ordinary decoded-state validation path. Inspect descriptors, never getters.
+function stableAtomicValue(value,seen){
+  if(value===null||['undefined','boolean','number'].includes(typeof value))return true;
+  if(typeof value==='string')return value.isWellFormed();
+  if(typeof value!=='object')return false;
+  if(seen.has(value))return true;seen.add(value);
+  const array=Array.isArray(value),proto=Object.getPrototypeOf(value);
+  if(proto!==(array?Array.prototype:Object.prototype))return false;
+  const keys=Reflect.ownKeys(value);
+  if(array&&keys.length!==value.length+1)return false;
+  for(const key of keys){
+    if(array&&key==='length')continue;
+    if(typeof key!=='string'||!key.isWellFormed()||key==='__proto__')return false;
+    if(array&&(!/^(0|[1-9]\d*)$/.test(key)||Number(key)>=value.length))return false;
+    const descriptor=Object.getOwnPropertyDescriptor(value,key);
+    if(!descriptor?.enumerable||!owns(descriptor,'value')||!stableAtomicValue(descriptor.value,seen))return false;
+  }
+  return true;
+}
 const canonicalChanges=changes=>changes?.some(([key])=>{
   const p=JSON.parse(key);
   return p[0]==='page'&&['alive','order','id','objects'].includes(p[2])||
@@ -22,11 +50,14 @@ export class Replica {
       this.cachedDocument=this.publishingDocument;this.cachedState=undefined;this.encodedStateCeiling=this.publishingCeiling;
       this.revision++;
       // Persistence readers that fall behind this bounded log receive a fresh
-      // checkpoint instead. A large seed/load update would be evicted at once;
-      // do not allocate a second full-state buffer merely to discard it.
+      // checkpoint instead. Keep the latest detached copy weakly, so immediate
+      // saves can capture a large page delta without retaining it in this log.
+      // Subscriber-owned event bytes cannot mutate the persistence snapshot.
+      const copy=update.slice();
+      this.latestUpdate={revision:this.revision,update:new WeakRef(copy)};
       if(update.byteLength>4*1024*1024){this.updateLog=[];this.updateLogBytes=0;}
       else{
-        const copy=update.slice();this.updateLog.push({revision:this.revision,update:copy});this.updateLogBytes+=copy.byteLength;
+        this.updateLog.push({revision:this.revision,update:copy});this.updateLogBytes+=copy.byteLength;
         while(this.updateLog.length>512||this.updateLogBytes>4*1024*1024){this.updateLogBytes-=this.updateLog.shift().update.byteLength;}
       }
       if(this.validationDoc)Y.applyUpdate(this.validationDoc,update,'mirror');
@@ -72,6 +103,9 @@ export class Replica {
     const base={replica:this,revision:this.revision,assetHashes:[...this.retainedAssetRefs]};
     const owner=token?.replica instanceof WeakRef?token.replica.deref():token?.replica;
     if(!full&&owner===this&&token.revision===this.revision)return {...base,full:false,update:null};
+    if(!full&&owner===this&&token.revision===this.revision-1&&this.latestUpdate?.revision===this.revision){
+      const update=this.latestUpdate.update.deref();if(update)return {...base,full:false,update:update.slice()};
+    }
     if(!full&&owner===this&&Number.isSafeInteger(token.revision)&&token.revision<=this.revision&&token.revision>=((this.updateLog[0]?.revision??this.revision+1)-1)){
       const updates=this.updateLog.filter(item=>item.revision>token.revision).map(item=>item.update);
       return {...base,full:false,update:updates.length===1?updates[0].slice():Y.mergeUpdates(updates)};
@@ -200,6 +234,62 @@ export class Replica {
       document=this.validateState(trial,{previous:this.document,changes:writes,stateCeiling,budget});
     }catch(e){this.rejectValidation();throw e;}
     this.publishLocal(document,budget.bytes,label,group,recordHistory,()=>Y.applyUpdate(this.ydoc,update,recordHistory?this.local:'bootstrap'));
+  }
+  /** Import only previously unused page namespaces. This method accepts a
+   * document, never an externally asserted validation proof or opaque update.
+   * It derives canonical fields itself and validates the complete new pages
+   * plus the immutable combined document before a single live transaction.
+   * As with ordinary model patches, supplied values are immutable after handoff.
+   */
+  appendNewPages(batch){
+    const started=performance.now(),before=this.document;
+    assertDocument(batch);
+    const ids=new Set(batch.pages);
+    if(ids.size!==batch.pages.length)throw Error('Invalid imported page order');
+    for(const id of ids)if(owns(before.pagesById,id))throw Error('A loading batch cannot replace an existing page');
+    // Include hard-deleted keys retained by Yjs, not just visible map entries.
+    for(const key of this.fields._map.keys()){
+      const p=documentModel.fieldParts(key);
+      if(['page','shape','geometry'].includes(p[0])&&ids.has(p[1]))throw Error('An imported page ID is already used by document history');
+    }
+    const ranks=before.pages.map(id=>this.fields.get(JSON.stringify(['page',id,'order'])));
+    const ordered=ranks.every(Number.isSafeInteger)&&before.pages.every(id=>this.fields.get(JSON.stringify(['page',id,'alive']))===true);
+    const lastOrder=ordered?Math.max(-1,...ranks):before.pages.length-1;
+    const safeOrder=ordered&&lastOrder<=Number.MAX_SAFE_INTEGER-batch.pages.length;
+    const index=new Map(batch.pages.map((id,i)=>[id,i])),writes=new Map(),stableValues=new WeakSet();let stable=true;
+    for(const [key,value] of flatten(batch)){
+      const p=documentModel.fieldParts(key);
+      if(p[0]==='meta')continue;
+      if(catalogs.has(p[0])){
+        if(owns(before[p[0]],p[1])){
+          if(!sameDefinition(before[p[0]][p[1]],value))throw Error('An imported catalog ID conflicts with an existing definition');
+          continue;
+        }
+        if(this.fields._map.has(key))throw Error('An imported catalog ID was previously deleted; its dependencies cannot be restored by a page batch');
+      }
+      collectAssetRefs(value);
+      stable=stable&&stableAtomicValue(value,stableValues);
+      writes.set(key,p[0]==='page'&&p[2]==='order'?(safeOrder?lastOrder+1:before.pages.length)+index.get(p[1]):value);
+    }
+    // A standalone fragment's last-page recovery must not conceal tombstoned
+    // declarations: recovery would disappear when merged into a live document.
+    for(const id of ids)if(writes.get(JSON.stringify(['page',id,'alive']))!==true||writes.get(JSON.stringify(['shape',id,'root','alive']))!==true)throw Error('Invalid imported page declarations');
+    const canonical=materialize(writes);
+    if(!documentModel.same(canonical.pages,batch.pages))throw Error('Invalid imported page declarations');
+    for(const profile of ['capacity','capacityProfile'])if(owns(before,profile))canonical[profile]=before[profile];
+    const document=mergePageDocuments(before,canonical),validatedAt=performance.now();
+    const scratch=new Y.Doc(),fields=scratch.getMap('fields');
+    try{
+      while(scratch.clientID===this.ydoc.clientID||this.ydoc.store.clients.has(scratch.clientID))scratch.clientID=(scratch.clientID+1)>>>0;
+      scratch.transact(()=>{for(const [key,value] of writes)fields.set(key,value);},'import-pages');
+      const update=Y.encodeStateAsUpdate(scratch),preparedAt=performance.now();
+      const ceiling=safeOrder&&stable?independentMapStateBound(this.ydoc,scratch,this.encodedStateCeiling,update.byteLength):null;
+      const bounded=ceiling!==null&&ceiling<=documentModel.documentLimits(document).stateBytes;
+      if(bounded)this.publishLocal(document,ceiling,undefined,undefined,false,()=>Y.applyUpdate(this.ydoc,update,'remote'));
+      else this.receive(update);
+      try{this.onMetric?.({stage:'replica-append-pages',durationMs:performance.now()-started,documentMs:validatedAt-started,prepareUpdateMs:preparedAt-validatedAt,applyMs:performance.now()-preparedAt,updateBytes:update.byteLength,pages:batch.pages.length,sizeValidation:bounded?'independent-bound':'exact',stateBytesUpperBound:this.encodedStateCeiling});}catch{}
+      return pageProjection(this.document,batch.pages);
+    }finally{scratch.destroy();}
   }
   receive(update) {
     if (!(update instanceof Uint8Array) || update.byteLength > (documentModel.MAX_LARGE_STATE_BYTES??MAX_STATE_BYTES)) throw Error('Update exceeds the storage limit');

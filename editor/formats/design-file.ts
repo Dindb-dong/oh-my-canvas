@@ -45,16 +45,97 @@ function imageMimeType(bytes: Uint8Array) {
 const rgba = (c: Data = {}) => `rgba(${Math.round(finite(c.r ?? c.red) * 255)},${Math.round(finite(c.g ?? c.green) * 255)},${Math.round(finite(c.b ?? c.blue) * 255)},${finite(c.a ?? c.alpha, 1)})`;
 
 export interface DesignImportBlob { hash: string; mimeType: string; bytes: Uint8Array; }
-export function importDesignFile(bytes: Uint8Array, format: string, options: { binaryAssets?: boolean } = {}): { document: CanvasDocument; warnings: string[]; blobs?: DesignImportBlob[]; timings: Record<string, number> } {
+export interface DesignImportResult { document: CanvasDocument; warnings: string[]; blobs?: DesignImportBlob[]; timings: Record<string, number>; }
+export interface DesignImportManifest {
+    format: string;
+    pages: { id: string; name: string; index: number; sourceId?: string }[];
+    pageCount: number;
+    timings: Record<string, number>;
+}
+export interface DesignImportBatch extends DesignImportResult {
+    sequence: number;
+    pageIds: string[];
+    completedPages: number;
+    totalPages: number;
+}
+export interface DesignImportSummary {
+    complete: true;
+    pageCount: number;
+    objectCount: number;
+    assetCount: number;
+    warnings: string[];
+    timings: Record<string, number>;
+}
+interface ImportOptions { binaryAssets?: boolean; batchPages?: number; batchObjects?: number; }
+type ImportEvent = { type: 'manifest'; value: DesignImportManifest } | { type: 'batch'; value: DesignImportBatch };
+interface PageSource { page: Page; sourceId?: string; convert: () => void; }
+
+/** Convert without suspending. Existing callers retain the complete-file API. */
+export function importDesignFile(bytes: Uint8Array, format: string, options: { binaryAssets?: boolean } = {}): DesignImportResult {
+    const step = designImportSteps(bytes, format, options).next();
+    if (!step.done) throw Error('Unexpected progressive design import');
+    return step.value as DesignImportResult;
+}
+
+/** Callbacks consume read-only page batches. Desktop worker messages clone the
+ * document and transfer each blob once, before waiting for durable publication. */
+export async function importDesignFileProgressively(bytes: Uint8Array, format: string, options: ImportOptions & {
+    onManifest?: (value: DesignImportManifest) => void | Promise<void>;
+    onBatch: (value: DesignImportBatch) => void | Promise<void>;
+    signal?: AbortSignal;
+}): Promise<DesignImportSummary> {
+    if (typeof options.onBatch !== 'function') throw Error('Progressive design import requires onBatch');
+    const steps = designImportSteps(bytes, format, options, true);
+    const check = () => { if (options.signal?.aborted) throw options.signal.reason ?? new DOMException('Design import cancelled', 'AbortError'); };
+    const consume = async (run: () => void | Promise<void>) => {
+        if (!options.signal) return run();
+        let abort!: () => void;
+        const aborted = new Promise<never>((_, reject) => {
+            abort = () => { try { check(); } catch (error) { reject(error); } };
+            options.signal!.addEventListener('abort', abort, { once: true });
+        });
+        try { await Promise.race([Promise.resolve().then(() => { check(); return run(); }), aborted]); }
+        finally { options.signal.removeEventListener('abort', abort); }
+    };
+    try {
+        while (true) {
+            check();
+            const step = steps.next();
+            if (step.done) return step.value as DesignImportSummary;
+            const event = step.value;
+            if (event.type === 'manifest') await consume(() => options.onManifest?.(event.value));
+            else await consume(() => options.onBatch(event.value));
+        }
+    } finally { steps.return(undefined as never); }
+}
+
+function* designImportSteps(bytes: Uint8Array, format: string, options: ImportOptions, progressive = false): Generator<ImportEvent, DesignImportResult | DesignImportSummary, void> {
     if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > DESIGN_FILE_LIMIT) throw Error('Design file exceeds 256 MiB or is empty');
     if (!['fig', 'sketch'].includes(format)) throw Error('Unsupported design file format');
+    const batchPages = options.batchPages ?? 4, batchObjects = options.batchObjects ?? 4000;
+    if (!Number.isInteger(batchPages) || batchPages < 1 || batchPages > 4 || !Number.isInteger(batchObjects) || batchObjects < 1 || batchObjects > 4000)
+        throw Error('Invalid design import batch limits');
     const started = performance.now(), timings: Record<string, number> = {};
+    let consumerWait = 0;
+    const activeElapsed = () => performance.now() - started - consumerWait;
     const timed = <T>(name: string, run: () => T): T => { const start = performance.now(); try { return run(); } finally { timings[name] = (timings[name] ?? 0) + performance.now() - start; } };
+    const timingSnapshot = () => {
+        const total = activeElapsed();
+        const measured = ['archive', 'decompressionPreflight', 'decode', 'batchValidation', 'validation'].reduce((sum, key) => sum + (timings[key] ?? 0), 0);
+        return { ...timings, total, conversion: Math.max(0, total - measured), ...(progressive ? { consumerWait } : {}) };
+    };
+    function* emit(event: ImportEvent): Generator<ImportEvent, void, void> {
+        const paused = performance.now();
+        yield event;
+        consumerWait += performance.now() - paused;
+    }
     const warnings = new Set<string>(), document = createDocument();
     document.capacity='large';
     document.pages = []; document.pagesById = {};
     const embedded = new Map<Uint8Array, string>();
     const blobs = new Map<string, DesignImportBlob>();
+    const pageAssets = new Map<string, Set<string>>();
+    let currentAssets = new Set<string>(), sources: PageSource[] = [];
     const imageRef = (bytes: Uint8Array) => {
         let id = embedded.get(bytes);
         if (!id) {
@@ -68,14 +149,11 @@ export function importDesignFile(bytes: Uint8Array, format: string, options: { b
             }
             embedded.set(bytes, id);
         }
+        currentAssets.add(id);
         return {assetId: id};
     };
     let count = 0;
     const warn = (message: string) => { if (warnings.size < 40) warnings.add(message); };
-    const page = (name: string) => {
-        if (document.pages.length >= 100) throw Error('Design file exceeds 100 pages');
-        const p = createPage(name); document.pages.push(p.id); document.pagesById[p.id] = p; return p;
-    };
     const add = (p: Page, parent: string, type: string, values: Data, matrix: Matrix) => {
         if (++count > 100000) throw Error('Design file exceeds 100000 layers');
         if (values.width < 0 || values.height < 0) throw Error('Invalid design-file dimensions');
@@ -165,11 +243,15 @@ export function importDesignFile(bytes: Uint8Array, format: string, options: { b
             for (const child of children) visit(child, p, s.id, matrix, depth + 1);
             active.delete(key);
         };
-        for (const n of fig.nodes.filter(n => n.type === 'CANVAS' && n.phase !== 'REMOVED' && !n.internalOnly).sort(positionOrder)) {
-            const p = page(n.name ?? 'Page');
+        const canvases = fig.nodes.filter(n => n.type === 'CANVAS' && n.phase !== 'REMOVED' && !n.internalOnly).sort(positionOrder);
+        if (canvases.length > 100) throw Error('Design file exceeds 100 pages');
+        sources = canvases.map(n => {
+            const p = createPage(n.name ?? 'Page');
             p.importSource = { format: 'fig', nodeId: nodeId(n), nodeType: 'CANVAS' };
-            for (const child of (fig.childrenMap.get(nodeId(n)!) ?? []).sort(positionOrder)) visit(child, p, 'root', identity(), 0);
-        }
+            return { page: p, sourceId: nodeId(n) ?? undefined, convert: () => {
+                for (const child of (fig.childrenMap.get(nodeId(n)!) ?? []).sort(positionOrder)) visit(child, p, 'root', identity(), 0);
+            } };
+        });
     } else {
         const files = timed('archive', () => archive(bytes));
         if (!files['document.json']) throw Error('Expected a Sketch 43+ ZIP document');
@@ -249,13 +331,55 @@ export function importDesignFile(bytes: Uint8Array, format: string, options: { b
             }
             for (const child of children) visit(child, p, s.id, matrix, depth + 1);
         };
-        for (const raw of pages) { const p = page(raw.name ?? 'Page'); for (const child of raw.layers ?? []) visit(child, p, 'root', identity(), 0); }
+        sources = pages.map((raw: Data) => {
+            const p = createPage(raw.name ?? 'Page');
+            return { page: p, ...(typeof raw.do_objectID === 'string' ? { sourceId: raw.do_objectID } : {}), convert: () => {
+                for (const child of raw.layers ?? []) visit(child, p, 'root', identity(), 0);
+            } };
+        });
     }
-    if (!document.pages.length) throw Error('Design file has no pages');
-    for (const p of Object.values(document.pagesById)) refreshFrames(p);
+    if (!sources.length) throw Error('Design file has no pages');
+    if (progressive) yield* emit({ type: 'manifest', value: {
+        format, pages: sources.map(({ page, sourceId }, index) => ({ id: page.id, name: page.name ?? 'Page', index, ...(sourceId ? { sourceId } : {}) })),
+        pageCount: sources.length, timings: timingSnapshot(),
+    } });
+    const emittedBlobs = new Set<string>();
+    let pendingPages: Page[] = [], pendingObjects = 0, completedPages = 0, sequence = 0;
+    function* publish(): Generator<ImportEvent, void, void> {
+        const ids = pendingPages.map(p => p.id), assets: Data = {};
+        for (const id of ids) for (const assetId of pageAssets.get(id) ?? []) assets[assetId] = document.assets![assetId];
+        const batchDocument = { ...document, pages: ids, pagesById: Object.fromEntries(pendingPages.map(p => [p.id, p])), assets,
+            extra: { ...document.extra, importWarnings: [...warnings], importedFrom: format, importFidelity: 'unverified' } };
+        timed('batchValidation', () => { validateImportedDocument(batchDocument); validateDocument(batchDocument); });
+        const batchBlobs: DesignImportBlob[] = [];
+        if (options.binaryAssets) for (const id of Object.keys(assets)) {
+            const hash = id.slice('design-'.length);
+            if (!emittedBlobs.has(hash)) { batchBlobs.push(blobs.get(hash)!); emittedBlobs.add(hash); }
+        }
+        completedPages += ids.length;
+        if (!sequence) timings.firstPageReady = activeElapsed();
+        yield* emit({ type: 'batch', value: { sequence: ++sequence, document: batchDocument, pageIds: ids,
+            completedPages, totalPages: sources.length, warnings: [...warnings], ...(options.binaryAssets ? { blobs: batchBlobs } : {}), timings: timingSnapshot() } });
+        pendingPages = []; pendingObjects = 0;
+    }
+    for (const source of sources) {
+        currentAssets = new Set();
+        source.convert();
+        const p = source.page;
+        refreshFrames(p);
+        document.pages.push(p.id); document.pagesById[p.id] = p; pageAssets.set(p.id, currentAssets);
+        if (!progressive) continue;
+        const objects = Object.keys(p.objects).length;
+        // The next complete page can reveal that a group would exceed its
+        // object budget. Never split a page or its symbol/image dependencies.
+        if (pendingPages.length && pendingObjects + objects > batchObjects) yield* publish();
+        pendingPages.push(p); pendingObjects += objects;
+        if (!sequence || pendingPages.length >= batchPages || pendingObjects >= batchObjects) yield* publish();
+    }
+    if (pendingPages.length) yield* publish();
     document.extra = { ...document.extra, importWarnings: [...warnings], importedFrom: format, importFidelity: 'unverified' };
     timed('validation', () => { validateImportedDocument(document); validateDocument(document); });
-    timings.total = performance.now() - started;
-    timings.conversion = timings.total - Object.entries(timings).filter(([name]) => name !== 'total').reduce((sum, [, value]) => sum + value, 0);
-    return { document, warnings: [...warnings], ...(options.binaryAssets ? { blobs: [...blobs.values()] } : {}), timings };
+    if (progressive) return { complete: true, pageCount: document.pages.length, objectCount: count + document.pages.length,
+        assetCount: Object.keys(document.assets ?? {}).length, warnings: [...warnings], timings: timingSnapshot() };
+    return { document, warnings: [...warnings], ...(options.binaryAssets ? { blobs: [...blobs.values()] } : {}), timings: timingSnapshot() };
 }

@@ -2,6 +2,7 @@ import {DESIGN_FILE_LIMIT,MAX_PORTABLE_BYTES} from '../core/capacity.mjs';
 import {persistDesignImport,portableAssetDocument} from './document-assets.mjs';
 import {createCanvasProtocolHandler} from './canvas-protocol.mjs';
 import {readDesignFile} from './design-import.mjs';
+import {startProgressiveImport} from './progressive-import.mjs';
 import {readExplicitFile} from './file-transfer.mjs';
 import {createFileDialogs} from './file-dialogs.mjs';
 import {app,BrowserWindow,WebContentsView,ipcMain,dialog,protocol,Menu,clipboard,screen,desktopCapturer,systemPreferences} from 'electron';
@@ -13,7 +14,7 @@ import os from 'node:os';
 import {Store,atomicWrite,decodeFile,validId} from '../core/storage.mjs';
 import {Replica} from '../core/replica.mjs';
 import {exportFileData} from '../core/export-file.mjs';
-import {assertDocument,same} from '../core/document.mjs';
+import {assertDocument} from '../core/document.mjs';
 import {Collaboration,parseInvite} from '../core/collaboration.mjs';
 import {startMcpBridge,MCP_PORT} from './mcp-bridge.mjs';
 import {canvasTitle} from './document-actions.mjs';
@@ -42,7 +43,7 @@ app.whenReady().then(async()=>{
   try{prefs={...prefs,...JSON.parse(await fs.readFile(path.join(dir,'preferences.json'),'utf8'))};}catch{}
   const sendShell=message=>{if(win&&!win.isDestroyed())win.webContents.send('omc:event',message);};
   const sendRuntime=(entry,message)=>{const wc=entry.runtime?.sender;if(wc&&!wc.isDestroyed())wc.send('omc:event',{...message,documentId:entry.record.id,generation:entry.generation});};
-  const metadata=entry=>({id:entry.record.id,title:entry.record.title,generation:entry.generation});
+  const metadata=entry=>({id:entry.record.id,title:entry.record.title,generation:entry.generation,loading:entry.loadingState??null,importStatus:entry.record.importStatus??null});
   function cancelRequests(reason,predicate=()=>true){for(const request of [...pending.values()])if(predicate(request))request.cancel(reason);}
   function layoutViews(){
     if(!win||win.isDestroyed())return;
@@ -71,7 +72,7 @@ app.whenReady().then(async()=>{
     void runtime.sender.loadURL(url).catch(error=>manager.ready(entry,generation,error));
     return runtime;
   }
-  const manager=createDocumentManager({store,createRuntime,disposeRuntime,flushRuntime:(entry,options={})=>runtimeRequest(entry,'flush',{guardBusy:options.guardBusy},options),canDispose:entry=>![...pending.values()].some(request=>request.entry===entry),onChange:state=>{layoutViews();sendShell({type:'workspace',...state});sendShell({type:'library-changed'});},onEvent:(entry,message)=>{sendRuntime(entry,message);if(message.type==='saved'||message.type==='metadata')sendShell({type:'library-changed'});}});
+  const manager=createDocumentManager({store,createRuntime,disposeRuntime,flushRuntime:(entry,options={})=>runtimeRequest(entry,'flush',{guardBusy:options.guardBusy},options),waitForPages:waitForProjection,canDispose:entry=>![...pending.values()].some(request=>request.entry===entry),onChange:state=>{layoutViews();sendShell({type:'workspace',...state});sendShell({type:'library-changed'});},onEvent:(entry,message)=>{sendRuntime(entry,message);if(message.type==='saved'||message.type==='metadata')sendShell({type:'library-changed'});}});
   function source(event){
     if(event.sender===win?.webContents&&event.senderFrame?.url==='omc://canvas/index.html')return {role:'shell'};
     const registered=senders.get(event.sender.id);
@@ -94,6 +95,15 @@ app.whenReady().then(async()=>{
     });
   }
   function runtimeRequest(entry,name,args={},options={}){return requestRuntime(entry,{type:'runtime-request',name,args},options).then(result=>{if(result?.ok===false)throw Object.assign(Error(result.error?.message??'Document operation failed'),{code:result.error?.code??'failed'});return result;});}
+  async function waitForProjection(entry,revision,signal=entry.lifecycle.signal){
+    const generation=entry.generation;
+    signal=entry.importSignal?AbortSignal.any([signal,entry.importSignal]):signal;
+    for(;;){
+      signal.throwIfAborted();manager.confirmGeneration(entry,generation);
+      const result=await runtimeRequest(entry,'page-barrier',{revision},{signal});
+      if(!result.pending)return result;
+    }
+  }
   async function tool(entry,call,signal){
     const generation=entry.generation,{documentId,...args}=call.args;
     const result=await requestRuntime(entry,{type:'tool',call:{...call,args,documentId:entry.record.id,generation}},{signal,agent:call.agent});
@@ -103,7 +113,7 @@ app.whenReady().then(async()=>{
     return {...result,content:[{type:'text',text:JSON.stringify(structuredContent)},...(result.content??[]).filter(content=>content.type!=='text')],structuredContent};
   }
   const response=value=>({content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value});
-  async function library(){const docs=await store.list();return docs.map(doc=>{const entry=manager.entries.get(doc.id);return {...doc,...entry?{title:entry.record.title,open:entry.tabOpen,inUse:!!(entry.agents.size||entry.collab||[...pending.values()].some(request=>request.entry===entry))}:{open:false,inUse:false}};});}
+  async function library(){const docs=await store.list();return docs.map(doc=>{const entry=manager.entries.get(doc.id);return {...doc,...entry?{title:entry.record.title,open:entry.tabOpen,importStatus:entry.record.importStatus??doc.importStatus,inUse:!!(entry.agents.size||entry.collab||[...pending.values()].some(request=>request.entry===entry))}:{open:false,inUse:false}};});}
   async function workspaceTool(call,signal){
     if(DESKTOP_TOOL_NAMES.has(call.name))return replay.run(call.agent,call.context?.idempotencyKey,call.name,call.args,()=>{const work=shellWork.then(()=>desktopTools(call,signal));shellWork=work.catch(()=>{});return work;}).then(response);
     if(call.name==='list_documents'){
@@ -122,6 +132,7 @@ app.whenReady().then(async()=>{
       if(call.name==='open_document')entry=await manager.open(call.args.id,options);
       else if(call.name==='create_document')entry=await manager.create(call.args.title??(call.args.sample?'Studio 01':undefined),call.args.sample?sampleDocument():blankDocument(),options);
       else entry=await manager.duplicate(call.args.id,call.args.title,options);
+      if(entry.loadingState?.state==='loading')await manager.complete(entry);
       signal?.throwIfAborted();const context=await tool(entry,{name:'get_context',args:{},agent:call.agent},signal);
       if(context.isError)return context;
       return response({ok:true,revision:context.structuredContent.revision,document:{id:entry.record.id,title:entry.record.title},documentId:entry.record.id,generation:entry.generation,context:context.structuredContent});
@@ -130,7 +141,7 @@ app.whenReady().then(async()=>{
   async function checkBusy(entry,agent,signal){
     signal?.throwIfAborted();if(entry.runtime){const inspection=await runtimeRequest(entry,'inspect',{}, {signal,agent});if(inspection.busy)throw Object.assign(Error('A user edit is in progress in this canvas'),{code:'busy'});}
   }
-  const desktopTools=createWorkspaceTools({readDesignFile:importDesign,portableDocument,sampleColor:createScreenSampler({screen,desktopCapturer,systemPreferences}),manager,store,profile:dir,sourceRoot:root,importCanvasJson,exportCanvasJson,validateImportedDocument,runtimeRequest,preferences,checkBusy,
+  const desktopTools=createWorkspaceTools({readDesignFile:importDesign,importProgressive:progressiveDesign,portableDocument,sampleColor:createScreenSampler({screen,desktopCapturer,systemPreferences}),manager,store,profile:dir,sourceRoot:root,importCanvasJson,exportCanvasJson,validateImportedDocument,runtimeRequest,preferences,checkBusy,
     notifyPreferences:value=>{sendShell({type:'preferences',preferences:value});for(const entry of manager.entries.values())sendRuntime(entry,{type:'preferences',preferences:value});},
     editorTool:(entry,call,signal)=>mcpDispatch({...call,args:{...call.args,documentId:entry.record.id}},{signal}),capabilities:()=>({tools:TOOLS,explicitDocumentMutations:DOCUMENT_MUTATIONS,protocol:{explicitTargets:true,implicitVisibleTabTarget:false,idempotency:'session-scoped',clipboard:'private-agent'},platform:{os:process.platform,windowControls:true,devTools:process.argv.includes('--debug-ui'),screenSampling:process.platform!=='darwin'||systemPreferences.getMediaAccessStatus('screen')==='granted'}}),requestQuit:()=>{setTimeout(()=>void closeApplication(),250).unref();},
     connection:mcpInfo,about:()=>({name:app.getName(),version:app.getVersion(),platform:process.platform,license:'MIT',notices:'omc://canvas/licenses/index.html',debugUi:process.argv.includes('--debug-ui')}),
@@ -144,6 +155,7 @@ app.whenReady().then(async()=>{
     const id=manager.resolve(call.agent,call.args.documentId,mutations.has(call.name));
     const admitted=manager.entries.get(id),admittedGeneration=admitted?.runtime||admitted?.starting?admitted.generation:null;
     const entry=await manager.load(id);
+    if(entry.loadingState?.state==='loading')await manager.complete(entry);
     signal?.throwIfAborted();
     if(call.name!=='get_context'&&entry.generation>0&&!entry.runtime&&!entry.starting)throw Object.assign(Error('Document runtime restarted; read get_context before retrying'),{code:'runtime_restarted'});
     try{await manager.ensureRuntime(entry);signal?.throwIfAborted();}catch(error){await manager.release(entry);throw error;}
@@ -162,6 +174,7 @@ app.whenReady().then(async()=>{
     const invitation=parseInvite(data.invite);let entry,created=false;
     data.signal?.throwIfAborted();
     try{entry=await manager.load(invitation.room);}catch(error){if(error.code!=='ENOENT')throw error;entry=await manager.load(invitation.room,{id:invitation.room,title:canvasTitle(invitation.title??'Shared canvas'),createdAt:new Date().toISOString(),replica:new Replica()});created=true;}
+    if(!created)await manager.complete(entry);
     entry.holds=(entry.holds??0)+1;let collab,joined=false;
     try{if(data.replace===false){if(entry.collab||[...entry.agents].some(agent=>agent!==data.agent))throw Object.assign(Error('Canvas already has an active session; leave it first'),{code:'busy'});await checkBusy(entry,data.agent,data.signal);}if(entry.runtime)await runtimeRequest(entry,'flush');if(data.replace!==false)await stopSession(entry);collab=new Collaboration({replica:entry.record.replica,id:entry.record.id,title:entry.record.title,name:data.name??prefs.name,assets:store.assets,persist:()=>manager.save(entry)});await collab.join(data.invite);joined=true;data.signal?.throwIfAborted();if(entry.collab||data.replace===false&&[...entry.agents].some(agent=>agent!==data.agent))throw Object.assign(Error('Canvas acquired another active session while connecting; leave it first'),{code:'busy'});bindSession(entry,collab);await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.bind(data.agent,entry);if(data.focus!==false)manager.activate(entry.record.id);else manager.changed();return {documentId:entry.record.id,document:{id:entry.record.id,title:entry.record.title},...collab.status()};}
     catch(error){await collab?.close();if(entry.collab===collab)entry.collab=null;throw error;}
@@ -174,10 +187,14 @@ app.whenReady().then(async()=>{
     return {port:collab.port,addresses:Object.values(os.networkInterfaces()).flat().filter(address=>address?.family==='IPv4'&&!address.internal).map(address=>address.address)};
   }
   async function importDesign(bytes,format){return persistDesignImport(await readDesignFile(bytes,format),store);}
+  async function progressiveDesign(bytes,format,title,options={}){
+    sendShell({type:'import-progress',phase:'decoding',title});
+    return startProgressiveImport(bytes,format,{readDesignFile,store,manager,title,options,onProgress:value=>sendShell({type:'import-progress',title,...value}),afterFirstPaint:entry=>waitForProjection(entry,entry.revision)});
+  }
   async function importFile(){
     const result=await fileDialogs.open({title:'Open canvas',filters:[{name:'Canvas documents',extensions:['omc','json','fig','sketch']}],properties:['openFile']});if(result.canceled)return null;
     const extension=path.extname(result.filePaths[0]).slice(1).toLowerCase();
-    if(['fig','sketch'].includes(extension)){const resultData=await importDesign(await readExplicitFile(result.filePaths[0],{limit:DESIGN_FILE_LIMIT}),extension);await manager.create(path.basename(result.filePaths[0],path.extname(result.filePaths[0])),resultData.document,{focus:true});return {opened:true,warnings:resultData.warnings};}
+    if(['fig','sketch'].includes(extension)){const resultData=await progressiveDesign(await readExplicitFile(result.filePaths[0],{limit:DESIGN_FILE_LIMIT}),extension,path.basename(result.filePaths[0],path.extname(result.filePaths[0])),{focus:true});return {opened:metadata(resultData.entry),warnings:resultData.warnings};}
     const raw=(await readExplicitFile(result.filePaths[0],{limit:MAX_PORTABLE_BYTES})).toString('utf8');
     if(extension!=='omc'){
       const input=JSON.parse(raw);validateImportedDocument(input);
@@ -187,7 +204,7 @@ app.whenReady().then(async()=>{
     }
     const record=decodeFile(raw);let entry;
     try{validateImportedDocument(record.replica.document);await store.prepareRecord(record);}catch(error){record.replica.destroy();throw error;}
-    if(manager.entries.has(record.id)){entry=await manager.load(record.id,record);}
+    if(manager.entries.has(record.id)){try{await manager.complete(manager.entries.get(record.id));}catch(error){record.replica.destroy();throw error;}entry=await manager.load(record.id,record);}
     else {try{const existing=await store.load(record.id);try{record.replica.receive(existing.replica.state);}finally{existing.replica.destroy();}}catch(error){if(error.code!=='ENOENT'){record.replica.destroy();throw error;}}entry=await manager.load(record.id,record);}
     entry.holds=(entry.holds??0)+1;
     try{await manager.save(entry);await manager.ensureRuntime(entry);entry.tabOpen=true;manager.activate(entry.record.id);return {opened:metadata(entry)};}
@@ -202,14 +219,11 @@ app.whenReady().then(async()=>{
     checkIdentity(entry,data);if(manager.deleting.has(entry.record.id)&&!['flush','snapshot','cursor'].includes(action))throw Object.assign(Error('Document is being deleted'),{code:'busy'});const generation=entry.generation;
     switch(action){
       case 'snapshot':return manager.snapshot(entry);
+      case 'continue-loading':void manager.beginLoading(entry).catch(()=>{});return metadata(entry);
+      case 'cancel-loading':entry.cancelImport?.();return metadata(entry);
       case 'runtime-ready':manager.ready(entry,entry.generation,data?.ok===false||data?.error?data.error??Error('Document renderer failed'):null);return metadata(entry);
-      case 'bootstrap':{
-        if(entry.seq!==0||typeof data?.nonce!=='string'||data.nonce!==entry.bootstrapNonce)throw Error('Invalid canvas initialization');
-        if(!same(entry.bootstrapBase,entry.record.replica.document)){entry.bootstrapNonce=randomUUID();entry.bootstrapBase=entry.record.replica.document;return {...manager.snapshot(entry),bootstrapRetry:true};}
-        const changes=await store.prepareChanges(data.changes);manager.confirmGeneration(entry,generation);
-        entry.bootstrapNonce=null;entry.bootstrapBase=null;entry.record.replica.patch(changes,'Initialize canvas',undefined,{recordHistory:false});await manager.save(entry);manager.confirmGeneration(entry,generation);return manager.snapshot(entry);
-      }
-      case 'commit':return commitDocument(entry,data,{store,save:entry=>manager.save(entry),confirmGeneration:(entry,generation)=>manager.confirmGeneration(entry,generation),acknowledgment:entry=>manager.acknowledgment(entry)});
+      case 'bootstrap':return manager.bootstrap(entry,data);
+      case 'commit':return commitDocument(entry,data,{store,validateChanges:changes=>manager.assertChanges(entry,changes),save:entry=>manager.save(entry),confirmGeneration:(entry,generation)=>manager.confirmGeneration(entry,generation),acknowledgment:entry=>manager.acknowledgment(entry)});
       case 'undo':
       case 'redo':{
         if(data?.requestId){const request=pending.get(data.requestId);if(!request||request.agent!==data.agent||request.entry!==entry)throw Error('MCP history request cancelled');}
@@ -234,7 +248,7 @@ app.whenReady().then(async()=>{
       default:throw Error('Unknown document action');
     }
   }
-  const runtimeActions=new Set(['snapshot','runtime-ready','bootstrap','commit','undo','redo','flush','rename','thumbnail','host','invite','leave','cursor','export','export-file']);
+  const runtimeActions=new Set(['snapshot','runtime-ready','continue-loading','cancel-loading','bootstrap','commit','undo','redo','flush','rename','thumbnail','host','invite','leave','cursor','export','export-file']);
   ipcMain.handle('omc:invoke',async(event,action,data)=>{
     const sender=source(event);
     if(action==='preferences')return preferences(data);
@@ -245,7 +259,8 @@ app.whenReady().then(async()=>{
     if(action==='show-library')return manager.showLibrary();
     if(sender.role==='document'){
       if(!runtimeActions.has(action))throw Error('Action is unavailable to a document renderer');
-      if(action==='cursor'||action==='runtime-ready'||action==='snapshot')return documentAction(sender.entry,action,data);
+      if(['cursor','runtime-ready','snapshot','continue-loading','cancel-loading'].includes(action)||action==='bootstrap'&&!sender.entry.record.replica)return documentAction(sender.entry,action,data);
+      if(['host','export','export-file'].includes(action))await manager.complete(sender.entry);
       return manager.enqueue(sender.entry,()=>{manager.confirmGeneration(sender.entry,sender.generation);if(sender.entry.runtime?.sender!==sender.sender)throw Object.assign(Error('Document renderer sender changed before this operation could run'),{code:'runtime_restarted'});return documentAction(sender.entry,action,data);});
     }
     if(action==='workspace')return manager.state();

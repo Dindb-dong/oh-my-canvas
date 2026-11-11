@@ -118,7 +118,10 @@ export function createCanvasInteraction(stage: HTMLElement, overlay: HTMLElement
         x: (p.x - editor.viewport.vbox.x) * editor.viewport.zoom,
         y: (p.y - editor.viewport.vbox.y) * editor.viewport.zoom
     });
-    const editable = () => topLevelIds(editor.page, editor.selection).map(id => editor.page.objects[id]).filter(s => s && isEditable(editor.page, s.id));
+    // A single selection is already top-level within itself and needs no paint
+    // order sort. Avoid walking a large page for every handle/overlay refresh.
+    const editable = () => (editor.selection.length <= 1 ? editor.selection : topLevelIds(editor.page, editor.selection))
+        .map(id => editor.page.objects[id]).filter(s => s && isEditable(editor.page, s.id));
     const bounds = (shapes: Shape[]) => {
         const points = shapes.flatMap(s => s.corners?.length ? s.corners : [{
                 x: s.x,

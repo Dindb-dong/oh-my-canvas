@@ -1,8 +1,8 @@
 # Design-file import and large-document boundaries
 
-Status: **incremental architecture implemented; performance and source fidelity remain separately qualified**. Updated 2026-11-10 UTC.
+Status: **incremental architecture and progressive loading implemented; native performance and source fidelity are qualified separately**. Updated 2026-11-11.
 
-PR #12 continues the import work with a different storage, editing and rendering boundary. PR #11 is a reference checkpoint; its successful structure import is not proof of acceptable performance or source fidelity. The [full original fixture](../fixtures/design-files/README.md) is available through Git LFS and its byte count and SHA-256 were verified during this work.
+PR #12 established new storage, editing and rendering boundaries. PR #13 adds progressive first-page import/reopen and a translated SVG pan surface. PR #11 is a historical reference checkpoint; its successful structure import is not proof of acceptable performance or source fidelity. The [full original fixture](../fixtures/design-files/README.md) is available through Git LFS and its byte count and SHA-256 were verified during this work.
 
 ## Implemented boundaries
 
@@ -16,6 +16,27 @@ PR #12 continues the import work with a different storage, editing and rendering
 
 These are implemented contracts, not a claim that all acceptance targets below have been met. The immutable plain-object shape index still imposes some work proportional to the edited page size. Full initial validation/materialization, text layout, large root subtrees and export can remain expensive. No decoded-pixel memory ceiling, packaged cross-platform qualification, or perfect source reproduction is claimed.
 
+## Progressive opening and import
+
+PR #13 changes when a document becomes available. A native FIG/Sketch import publishes its first **complete, editable, durably saved page** before conversion and publication of the remaining pages. The worker first decodes the shared source graph, so this is progressive page conversion and publication, not streaming decompression of the original file. Later delivery groups contain at most four pages and approximately 4,000 objects; a larger page is kept complete in its own group. Required bitmap bytes are verified and saved before their page is published. Awaited consumer backpressure is separate from the unchanged 30-second active conversion limit, with a bounded ten-minute overall job lifetime.
+
+Working-document saves also maintain an optional, derived first-page cache. Reopening can mount that page before the full Yjs authority is restored. The cache is checked against its manifest, checkpoint and journal identities; the first page must be self-contained with respect to component dependencies. Missing, stale, oversized or unsuitable caches take the existing full-open path. Older documents receive the cache on a subsequent successful save. The cache is never accepted as a replacement for the complete document.
+
+The following rules apply while loading:
+
+- Loaded pages can be edited. Unloaded pages are listed separately as unavailable, without fake empty pages in the editable document.
+- New page messages carry revisions and merge into the normal pending-edit/ACK projection. Already loaded pages and their user edits are not replaced by later source batches. Background import is excluded from user Undo history.
+- Early edits after cached reopen remain pending until the full authority has been verified, the edit accepted, and its durable save completed. They cannot display a durable save acknowledgment merely because the cached page rendered.
+- Page delivery waits for active gestures and text composition to finish. That renderer wait does not hold the authority mutation queue, so a title save or a pending edit can complete.
+- A stopped or failed import retains its actual saved page count and an explicit incomplete status. A process restart changes a persisted active import to interrupted; it does not silently treat those pages as a complete import or restart conversion without the source. Reimport creates a new canvas; it does not resume or overwrite the saved partial canvas and its edits.
+- Whole-document export, duplication and collaboration require complete content. An incomplete source import cannot be exported as though every source page had arrived.
+
+The first-page cache is bounded and disposable. It does not add an alternative edit authority or split the document into multiple CRDTs. Full Yjs restoration still runs on the main process after the first renderer becomes available, so IPC and durable acknowledgment can wait during hydration even though the cached page is editable. A first-page measurement must be reported separately from all-pages completion and early-edit durability. This cache does not establish a bound on total application RAM.
+
+Large-scene panning uses a bounded, overscanned SVG surface moved by CSS translation. Zoom, viewport resize and overscan exit reanchor that surface. Backdrop-dependent scenes and top-level non-normal blend modes use the existing direct viewport path. Screen surface transforms are removed from thumbnails, and exports retain their own logical viewport. The native viewport oracle compares pixels, hit testing and world coordinates against the direct renderer; it is not an original-Figma fidelity oracle.
+
+The progressive native journey records first-editable and first-paint milestones, editing while background work is active, all-pages completion, and the corresponding cached-reopen phases. The native results below demonstrate those boundaries on the real fixture and identify the exact tested runtime revision.
+
 ## Current conversion limits
 
 The current converter still has known losses, beyond the need for visual comparison:
@@ -26,9 +47,48 @@ The current converter still has known losses, beyond the need for visual compari
 
 The document retains `importFidelity: 'unverified'` and conversion warnings. The native round trips check page IDs and order, per-page object counts, page names, original bitmap hash sets, and the dragged shape's coordinates. These checks do not establish complete field-by-field or visual fidelity to the source. Representative original Figma frames with matching fonts are still required to assess source reproduction. Existing editor component and effect features do not establish their mapping from imported design files.
 
+## Progressive native validation
+
+The [2026-11-11 workflow](https://github.com/Dindb-dong/oh-my-canvas/actions/runs/42949164362) tested runtime commit `cf9f18433924a7d581c815be5df9bfb96505cd75`. Syntax/type checks, documentation checks, 257 Node tests, 843 editor tests and the production build passed. All 17 native large-document checks and all seven viewport pixel/coordinate cases passed, with zero renderer exceptions. The [sanitized PR #13 evaluation record](qa/pr13-large-document-evaluation.json) preserves the tested runtime, source, environment and measurement scopes. The later documentation commit only records this runtime's evidence.
+
+The verified original file was 160,627,671 bytes with SHA-256 `c7c4fdbe469ae451c9a3d3d384a2102fa08dfaa220a1277e2df17fc2146c5ee7`. Complete import, working-document reopen and fresh-profile OMC/JSON round trips retained 46 pages, 39,363 objects and the same 160 original bitmap hashes. The journey checked page IDs/order/names, per-page object counts and the dragged shape's coordinates. JSON and SVG exports embedded their images without local or remote image references. The deliberate missing-asset request returned 404; 11 aborted image requests were recorded separately from renderer exceptions.
+
+This was one Linux x64/Xvfb journey on an AMD EPYC 7763 64-Core Processor runner with two logical CPUs and 7.75 GiB RAM, Electron 45.2.1 and software rendering. Harness Node was 22.23.4 and Electron Node was 24.22.1. PR #12 used a separate CI instance. These are not paired same-machine measurements or a latency guarantee. Progressive completion also includes an early page-name edit and cooperative pauses for that interaction, which the historical PR #12 journey did not perform.
+
+The first-paint milestone follows the application’s `afterPaint()` wait: two animation frames, with a one-second fallback. It does not establish that every image/font has finished decoding or give a hardware presentation timestamp. First-editable, this paint milestone, complete loading and durable saving are separate boundaries.
+
+| Operation | Final observation | Measurement scope |
+| --- | --- | --- |
+| Source import, first page editable | 7.169 s | One real page loaded; remaining 45 pages still loading |
+| Source import, first-paint milestone | 7.346 s | Application paint milestone, before the early inspector edit |
+| Source import, all pages complete | 41.370 s | Complete 46-page publication, including the early edit and cooperative pauses |
+| Cached reopen, first page editable | 0.572 s | Fresh process after app launch; valid first-page cache |
+| Cached reopen, first-paint milestone | 0.773 s | Before full Yjs hydration and remaining-page delivery completed |
+| Cached reopen, all pages complete | 13.380 s | Includes the early edit; excludes process launch and is not a cold-disk result |
+| Page rename after full loading | 520.1 ms paint; 497.2 ms acceptance notification; 501.2 ms durable notification | End-to-end observations from one UI edit; not isolated host or fsync service time |
+| Complete MCP page rename | 68.6 ms | Separate native MCP operation |
+| Enter Examples | 773.2 ms paint; 98.8 ms additional settling | First measured entry into the 18,380-object page |
+| Pan, 90 wheel events | 16.7 ms frame-interval p95; 16.8 ms maximum | Input-handler p95 0.1 ms; 0 long tasks; no document writes |
+| Hover, 90 pointer events | 16.8 ms frame-interval p95; 16.8 ms maximum | Input-handler p95 0.3 ms; 0 long tasks; no document writes |
+| Leaf drag, 24 movement steps | 83.4 ms frame-interval p95; 183.4 ms maximum | Input-handler p95 57.7 ms, maximum 104.0 ms; release-to-durable save 113.3 ms |
+| Fresh-profile portable OMC import | 29.819 s | Complete image package and retained edits |
+| Fresh-profile portable JSON import | 37.400 s | Embedded images re-enter the external blob store |
+
+The harness renamed the first page through the inspector while only one page was loaded, both during source import and cached reopen. Each edit immediately showed `Saving…`. After the first subsequent `Stored on this computer` observation, a follow-up host snapshot separately verified durable ACK 1 and the edited name. The observed Saving-to-Stored indicator intervals were 19.0 ms for import and 5.504 s for cached reopen. These are UI observation intervals recorded before that follow-up verification, not isolated fsync timings. Early edits survived remaining-page delivery. The reopen acknowledgment delay exposes remaining authority restoration work instead of falsely acknowledging an edit to the cache.
+
+The first-page result improves availability, but complete import still took **41.37 s**; the historical PR #12 observation was **38.89 s**. Different CI instances and the added early-edit workload prevent attributing that difference to one implementation change. Neither first paint nor a passing preservation test establishes uninterrupted responsiveness throughout background loading. Missing, stale, oversized or cross-page-dependent caches still require the full-open path.
+
+The final candidate also closes a validation-cache gap exposed by progressive import. A terminal metadata update previously published a renderer baseline without invoking the host validation hook, causing the next small edit to perform full-document validation. Incoming normalized projections now pass that hook before publication or gesture rebasing, preserving validation of the actual shared baseline. Invalid host-constrained geometry is rejected without changing the document, selection or active gesture; unchanged pages remain outside a subsequent page-name edit's validation traversal. External snapshots retain the full host validation boundary.
+
+The native page-rename sample still took 520.1 ms to its paint milestone and 501.2 ms to the durable notification, with 0 recorded renderer long tasks. The fixed validation gap does not explain or eliminate every remaining UI/IPC delay; this sample is still slower than the separate historical PR #12 rename observation.
+
+At the fixed Examples viewport, 6,245 shape elements and 25,351 scene nodes were mounted, with 40 layer rows. The pan sample has 0 long tasks, while the drag sample still contains 24 long tasks and a 183.4 ms maximum frame. Automated intervals include Playwright scheduling and software rendering; their reciprocals are not hardware FPS. Aggregate process working-set snapshots were 2,871.1 MiB after import and 2,987.7 MiB after the gestures. These are separate snapshots, not a combined peak, and do not establish bounded decoded-image memory or total RAM.
+
+Explicit exports took 10.872 s for JSON, 0.352 s for SVG and 6.042 s for portable OMC. Full exports remain separate from ordinary edit persistence. The viewport oracle permits documented edge-antialiasing tolerances; it compares the translated surface with the existing direct renderer. These results do not establish perfect Figma reproduction, four-peer qualification of this full fixture, or packaged macOS/Windows performance.
+
 ## Native validation: `cfa052c8`
 
-The [2026-11-10 native run](https://github.com/Dindb-dong/oh-my-canvas/actions/runs/42869423111) tested runtime commit `cfa052c8d08aa368017314f3ba08f50a36fd2e47`. Syntax/type checks, documentation checks, 189 Node tests, 823 editor tests and the production build passed. All 17 native checks passed with zero renderer exceptions. The [sanitized evaluation record](qa/pr12-large-document-evaluation.json) retains the measured values and their scope after the workflow artifacts expire.
+This is the **historical PR #12 desktop checkpoint**, measured in a separate CI instance from the progressive results above. The [2026-11-10 native run](https://github.com/Dindb-dong/oh-my-canvas/actions/runs/42869423111) tested runtime commit `cfa052c8d08aa368017314f3ba08f50a36fd2e47`. Syntax/type checks, documentation checks, 189 Node tests, 823 editor tests and the production build passed. All 17 native checks passed with zero renderer exceptions. The [sanitized evaluation record](qa/pr12-large-document-evaluation.json) retains the measured values and their scope after the workflow artifacts expire.
 
 The full original source was 160,627,671 bytes with SHA-256 `c7c4fdbe469ae451c9a3d3d384a2102fa08dfaa220a1277e2df17fc2146c5ee7`. Import, working-storage reopen, portable OMC import and portable JSON import retained 46 pages, 39,363 objects and the same 160 original bitmap hashes. Round trips also retained page IDs/order/names and the dragged shape's coordinates. JSON and SVG exports contained embedded image data without local or remote image references. The valid-asset route returned 200 and the deliberately missing hash returned 404; three cancelled image fetches on page departure were recorded separately from renderer exceptions.
 
@@ -55,7 +115,7 @@ The final Examples screenshot is byte-identical to the preceding `75c9dcb2` run:
 
 A separate six-wheel diagnostic trace completed without reported data loss. In its 651.034 ms marked window, exclusive main-thread attribution recorded 229.881 ms in style/layout/hit-testing, 157.161 ms in paint/compositing, 8.204 ms in script/callbacks, 11.159 ms in other observed work and 244.629 ms idle or unobserved. Six main-thread tasks exceeded 50 ms. Four unpaired synchronous begin events were excluded from attribution. This points to retained SVG layout and paint as the remaining pan bottleneck in this environment; it does not attribute GPU-process work, generalize to hardware rendering, or diagnose the separate drag spike. The original 90-event pan sample excludes tracing overhead.
 
-These results close the observed persistence/export correctness failures and demonstrate the new boundaries on the real fixture. They do **not** meet all responsiveness, memory, collaboration or fidelity targets below: drag still has a 1.4-second frame, import/reopen remain long, and the full fixture has not been qualified across four native collaboration peers or current packaged macOS/Windows builds.
+These results close the observed persistence/export correctness failures and demonstrate the new boundaries on the real fixture. At that historical checkpoint they did **not** meet all responsiveness, memory, collaboration or fidelity targets below: drag had a 1.4-second frame and import/reopen remained long. The full fixture still has not been qualified across four native collaboration peers or current packaged macOS/Windows builds.
 
 ## Intermediate core checkpoint: `37fec915`
 

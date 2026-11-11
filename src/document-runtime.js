@@ -12,9 +12,12 @@ import {createThumbnailScheduler} from './document-thumbnail.mjs';
 const $=s=>document.querySelector(s), api=window.omc;
 const resolveImageSource=src=>/^omc-asset:sha256:[a-f0-9]{64}$/.test(src)?`omc://canvas/assets/${src.slice(-64)}`:src;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let handle,mcp,active,lastDoc,nextSeq=0,mounting=false,unsubscribe;
+let handle,mcp,active,lastDoc,nextSeq=0,mounting=false,unsubscribe,loadingState=null,importStatus=null;
+let projectionWork=Promise.resolve();
+let lastInteractionAt=-Infinity;
+for(const type of ['pointerdown','wheel','keydown','input'])document.addEventListener(type,()=>{lastInteractionAt=performance.now();},{capture:true,passive:true});
 let session={mode:'offline',peers:[]},prefs={},toastTimer,dialogFocus,hosting,sessionTab='host';
-let lastRejected,closing=false,titleEdit=null,ready=false,saveFailed=false;
+let lastRejected,closing=false,titleEdit=null,ready=false,saveFailed=false,hostSaveError=null;
 let projection;
 const params=new URLSearchParams(location.search),documentId=params.get('documentId'),generation=Number(params.get('generation'));
 if(!documentId||!Number.isSafeInteger(generation)||generation<1)throw Error('Invalid document runtime identity');
@@ -61,8 +64,48 @@ function setTitle(){
   updateSaveState();document.title=(active?.title||'Oh My Canvas')+' — Oh My Canvas';
 }
 function updateSaveState(){
-  const stored=!!projection&&projection.ack>=nextSeq&&!projection.pending.length;
-  $('#save-state').textContent=stored?'Stored on this computer':saveFailed?'Save failed':'Saving…';
+  const stored=!!projection&&projection.ack>=nextSeq&&!projection.pending.length&&loadingState?.phase!=='saving'&&!saveFailed&&!hostSaveError;
+  $('#save-state').textContent=stored?'Stored on this computer':saveFailed||hostSaveError?'Save failed':'Saving…';
+}
+function renderLoading(){
+  const loading=loadingState?.state==='loading',incomplete=importStatus&&importStatus.state!=='complete',failed=loadingState?.state==='failed';
+  const status=loading?loadingState:incomplete?importStatus:failed?loadingState:null,notice=$('#loading-notice');
+  const notes=Array.isArray(handle?.editor.doc.extra?.importWarnings)?handle.editor.doc.extra.importWarnings.filter(value=>typeof value==='string').slice(0,40):[];
+  notice.hidden=!status&&!notes.length;document.body.dataset.loadingState=loading?'loading':status?'incomplete':'complete';
+  $('#export').disabled=!!status;$('#collaborate').disabled=!!status;
+  $('#loading-progress').hidden=!status;
+  if(!status){
+    if(notes.length){
+      $('#loading-label').textContent=`Import notes (${notes.length})`;
+      $('#loading-description').textContent='Conversion finished. These features need review against the original design.';
+      $('#loading-pages').setAttribute('aria-label','Import notes');
+      $('#loading-pages').replaceChildren(...notes.map(text=>{const note=document.createElement('p');note.textContent=text.slice(0,1024);return note;}));
+    }
+    $('#stop-loading').hidden=true;updateSaveState();return;
+  }
+  const count=status.loadedPages??0,total=status.totalPages??0;
+  $('#loading-label').textContent=loading?`Loading ${count} of ${total} pages…`:failed?'Opening failed':`Import incomplete (${count}/${total})`;
+  $('#loading-progress').max=Math.max(1,total);$('#loading-progress').value=count;
+  $('#loading-description').textContent=loading?'You can edit loaded pages. The remaining pages are loading in the background.':incomplete?`${status.error?status.error+' ':''}The pages already saved are kept. Reimport the original file as a new canvas to load every page.`:status.error??'Could not finish opening. Keep this tab open while changes are unsaved.';
+  const ids=new Set(handle?.editor.doc.pages??[]);
+  $('#loading-pages').setAttribute('aria-label','Loading page list');
+  $('#loading-pages').replaceChildren(...(status.pages??[]).map(item=>{
+    const button=document.createElement('button');button.type='button';button.textContent=item.name??'Untitled page';button.disabled=!ids.has(item.id);button.dataset.loadingPage=item.id;
+    if(button.disabled)button.title='This page is still loading';
+    button.onclick=run(async()=>{await handle?.flush();handle?.editor.setPage(item.id);notice.open=false;});return button;
+  }));
+  $('#stop-loading').hidden=!(loading&&loadingState.kind==='import');
+  updateSaveState();
+}
+function acceptLoading(value){
+  if(Object.hasOwn(value,'loading'))loadingState=value.loading;
+  if(Object.hasOwn(value,'importStatus'))importStatus=value.importStatus;
+  if(Object.hasOwn(value,'saveError'))hostSaveError=value.saveError;
+  renderLoading();
+}
+async function afterPaint(){
+  if(document.hidden)return;
+  await new Promise(resolve=>{const timer=setTimeout(resolve,1000);requestAnimationFrame(()=>requestAnimationFrame(()=>{clearTimeout(timer);resolve();}));});
 }
 const resync=createSnapshotResync({
   snapshot:()=>api.invoke('snapshot'),getRevision:()=>projection?.revision??0,
@@ -94,20 +137,27 @@ function acceptProjection(snap){
   lastDoc=doc;
   if(result.redundant||doc===handle.editor.doc)return result;
   handle.editor.receiveDocument(doc,{incremental:!snap.document});
+  renderLoading();
   paintCursors();
   return result;
 }
-function project(snap){
+async function applyProjection(snap){
   if(snap.id!==documentId||snap.generation!==generation)return;
   if(!handle||mounting){resync.note(snap.revision??0);return;}
+  if(snap.type==='document-pages'){
+    // Background page preparation must not interrupt an active drag or text
+    // composition. The host awaits this delivery before sending another batch.
+    while(!closing&&(handle.editor.activeSession||handle.editingText()||titleEdit||performance.now()-lastInteractionAt<120))await new Promise(resolve=>setTimeout(resolve,50));
+  }
   const result=acceptProjection(snap);
   if(result.resync)return resync.request(snap.revision);
 }
+function project(snap){const task=projectionWork.then(()=>applyProjection(snap));projectionWork=task.catch(()=>{});return task;}
 async function openSnapshot(snap){
   assertIdentity(snap);
   mounting=true;$('#editor').inert=true;
   try {thumbnails.reset();mcp?.dispose?.();unsubscribe?.();await handle?.destroy();handle=null;cursors.clear();$('#remote-cursors').replaceChildren();
-  projection=startupSync('startup.projection',()=>new DocumentProjection(snap));nextSeq=0;lastRejected=null;saveFailed=false;active={id:snap.id,title:snap.title};setTitle();
+  projection=startupSync('startup.projection',()=>new DocumentProjection(snap));nextSeq=0;lastRejected=null;saveFailed=false;hostSaveError=null;active={id:snap.id,title:snap.title};acceptLoading(snap);setTitle();
   let candidate=snap;
   for(let attempt=0;attempt<8;attempt++){
     handle=await startupStep('startup.mount',()=>mountEditor($('#editor'),{
@@ -152,7 +202,7 @@ async function openSnapshot(snap){
   $('#editor button[aria-label="Comment (not available)"]')?.remove();
   $('#toggle-layers').setAttribute('aria-expanded','true');
   const latest=await startupStep('startup.finalSnapshot',()=>api.invoke('snapshot'));assertIdentity(latest);
-  active.title=latest.title;projection=startupSync('startup.finalProjection',()=>new DocumentProjection(latest));lastDoc=latest.document;startupSync('startup.finalReceive',()=>handle.editor.receiveDocument(latest.document));
+  active.title=latest.title;projection=startupSync('startup.finalProjection',()=>new DocumentProjection(latest));lastDoc=latest.document;startupSync('startup.finalReceive',()=>handle.editor.receiveDocument(latest.document));acceptLoading(latest);
   setTitle();
   thumbnails.schedule();if(snap.recovered)toast('Recovered the last valid backup. Save a portable copy.',true);
   }catch(error){mcp?.dispose?.();unsubscribe?.();await handle?.destroy().catch(()=>{});handle=null;throw error;}finally{mounting=false;$('#editor').inert=false;}
@@ -260,8 +310,9 @@ function nativeHistory(redo){
 }
 api.on(message=>{
   if(message.documentId!==undefined&&(message.documentId!==documentId||message.generation!==generation))return;
-  if(message.type==='document'||message.type==='document-delta')void Promise.resolve().then(()=>project(message)).catch(error=>toast('Could not synchronize canvas: '+error.message,true));
-  else if(message.type==='saved'){if(message.id===active?.id)updateSaveState();}
+  if(message.type==='document'||message.type==='document-delta'||message.type==='document-pages')void project(message).catch(error=>toast('Could not synchronize canvas: '+error.message,true));
+  else if(message.type==='document-loading')acceptLoading(message);
+  else if(message.type==='saved'){if(message.id===active?.id){hostSaveError=null;updateSaveState();}}
   else if(message.type==='error')toast(message.message,true);
   else if(message.type==='session'){session=message.status;renderPeers();}
   else if(message.type==='cursor'){
@@ -312,7 +363,17 @@ async function runtimeRequest(message){
     assertIdentity(message);
     if(!ready||mounting)throw Error('Canvas is busy opening');
     let result={};
-    if(message.name==='inspect')result={busy:!!(closing||titleEdit||handle.editor.undo.blocked||handle.editor.activeSession||handle.editingText())};
+    if(message.name==='page-barrier'){
+      // A user can keep an editing session open for longer than an IPC timeout.
+      // Report bounded backpressure while it is active; the host asks again.
+      let timer;
+      const waiting=await Promise.race([projectionWork.then(()=>false),new Promise(resolve=>{timer=setTimeout(()=>resolve(true),2000);})]);
+      clearTimeout(timer);
+      if(waiting){api.toolResult(message.id,{ok:true,pending:true,revision:projection.revision,documentId,generation});return;}
+      if(projection.revision<(message.args?.revision??0))await resync.request(message.args.revision);
+      await afterPaint();result={revision:projection.revision,loadedPages:handle.editor.doc.pages.length};
+    }
+    else if(message.name==='inspect')result={busy:!!(closing||titleEdit||handle.editor.undo.blocked||handle.editor.activeSession||handle.editingText())};
     else if(message.name==='prepare-delete'){
       if(closing||titleEdit||handle.editor.undo.blocked||handle.editor.activeSession||handle.editingText()||toolTasks.size)throw Error('Canvas is busy editing');
       closing=true;$('#editor').inert=true;await settle();
@@ -336,6 +397,7 @@ async function runtimeRequest(message){
   }
 }
 $('#toggle-layers').onclick=()=>{$('#editor').classList.toggle('collapsed');$('#toggle-layers').setAttribute('aria-expanded',String(!$('#editor').classList.contains('collapsed')));};
+$('#stop-loading').onclick=run(()=>api.invoke('cancel-loading'));
 $('#components').onclick=()=>{$('#editor').classList.remove('collapsed');$('#toggle-layers').setAttribute('aria-expanded','true');[...document.querySelectorAll('#editor .ltabs button')].find(b=>b.textContent==='Assets')?.click();};
 $('#home').onclick=run(async()=>{await saveTitleEdit();await settle();await api.invoke('show-library');});$('#document-title').onclick=editTitle;$('#export').onclick=exportDialog;$('#mcp').onclick=run(mcpDialog);$('#collaborate').onclick=run(collaborationDialog);
 $('#title-form').noValidate=true;
@@ -350,7 +412,9 @@ try{
   prefs=await startupStep('startup.preferences',()=>api.invoke('preferences'));
   await openSnapshot(await startupStep('startup.snapshot',()=>api.invoke('snapshot')));
   // The host only dispatches document calls after this mount and bootstrap have completed.
-  ready=true;assertIdentity(await startupStep('startup.ready',()=>api.invoke('runtime-ready')));startupComplete=true;thumbnails.schedule();
+  ready=true;assertIdentity(await startupStep('startup.ready',()=>api.invoke('runtime-ready')));startupComplete=true;document.body.dataset.documentReady='true';performance.mark('omc-first-editable',{detail:{loadedPages:handle.editor.doc.pages.length,totalPages:loadingState?.totalPages??handle.editor.doc.pages.length,loadingState:loadingState?.state??'complete'}});renderLoading();thumbnails.schedule();
+  await afterPaint();performance.mark('omc-first-paint',{detail:{loadedPages:handle.editor.doc.pages.length,totalPages:loadingState?.totalPages??handle.editor.doc.pages.length,loadingState:loadingState?.state??'complete'}});
+  if(loadingState?.kind==='reopen'&&loadingState.state==='loading')await api.invoke('continue-loading');
 }catch(error){
   startupTiming('startup.failure',performance.now()-startupAt);startupComplete=true;
   ready=false;toast('Could not open canvas: '+error.message,true);

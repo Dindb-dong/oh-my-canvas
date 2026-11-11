@@ -16,15 +16,17 @@ import { changesBetween, MAX_ENVELOPE_BYTES } from '../core/document.mjs';
 import { documentFixture, waitFor } from './helpers.mjs';
 
 async function context(t) {
-  const entries = [], directories = [];
+  const entries = [], directories = [], stores = [];
   t.after(async () => {
     await Promise.all(entries.map(entry => entry.session.close()));
+    await Promise.all(stores.map(store => store.flushPreviews()));
     entries.forEach(entry => entry.record.replica.destroy());
     await Promise.all(directories.map(directory => fs.rm(directory, { recursive: true, force: true })));
   });
   async function create(document, id = randomUUID(), name = 'Peer') {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'omc-transfer-')); directories.push(directory);
-    const store = new Store(directory), record = { id, title: 'Shared', replica: new Replica(document ? { document: await store.prepareDocument(document) } : {}) }, events = [];
+    const store = new Store(directory); stores.push(store);
+    const record = { id, title: 'Shared', replica: new Replica(document ? { document: await store.prepareDocument(document) } : {}) }, events = [];
     if (document) await store.save(record);
     const session = new Collaboration({ replica: record.replica, id, title: record.title, name, assets: store.assets, persist: () => store.save(record), onMetric: event => events.push(event) });
     const entry = { store, record, session, events }; entries.push(entry); return entry;

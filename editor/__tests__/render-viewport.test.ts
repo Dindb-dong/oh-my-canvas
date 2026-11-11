@@ -41,6 +41,34 @@ it('mounts an overscanned root window while offscreen measurement, styling and e
     t.editor.setViewport({ ...t.editor.viewport, vbox: { x: 0, y: 0, width: 800, height: 600 } });
     expect(t.view.element('r0')!.querySelector('path')!.getAttribute('fill')).toBe('#123456');
 });
+it('pans a bounded scene without relaying out SVG coordinates and keeps exports in world space', () => {
+    const t = fixture([
+        createShape('frame', { id: 'masked-frame', x: 40, y: 40, width: 100, height: 100, isMaskGroup: true, maskType: 'alpha', clipContent: true }),
+        createShape('ellipse', { id: 'mask', parentId: 'masked-frame', x: 40, y: 40 }),
+        createShape('rect', { id: 'masked', parentId: 'masked-frame', x: 40, y: 40, blur: 8 })
+    ]);
+    const svg = t.stage.querySelector('svg')!, root = t.view.element('r0'), masked = t.view.element('masked'), mask = t.stage.querySelector('mask');
+    const anchor = svg.getAttribute('viewBox'), exported = t.view.sceneSvg();
+    expect(t.view.renderDiagnostics().translatedViewport).toBe(true);
+    expect(svg.style.width).toBe('1600px'); expect(svg.style.height).toBe('1200px');
+    const attributes = new MutationObserver(() => {}); attributes.observe(svg, { attributes: true });
+    t.editor.setViewport({ ...t.editor.viewport, vbox: { x: 100, y: 50, width: 800, height: 600 } });
+    expect(attributes.takeRecords().every(record => record.attributeName === 'style')).toBe(true); attributes.disconnect();
+    expect(svg.getAttribute('viewBox')).toBe(anchor); expect(svg.style.transform).toBe('translate(-500px, -350px)');
+    expect(t.view.element('r0')).toBe(root); expect(t.view.element('masked')).toBe(masked); expect(t.stage.querySelector('mask')).toBe(mask);
+    expect(t.view.sceneSvg()).toBe(exported); expect(t.view.sceneSvg()).not.toContain('will-change');
+    const anchors = t.view.renderDiagnostics().surfaceReanchors;
+    t.editor.setViewport({ ...t.editor.viewport, zoom: 2, vbox: { x: 100, y: 50, width: 400, height: 300 } });
+    expect(t.view.renderDiagnostics().surfaceReanchors).toBe(anchors + 1);
+    expect(svg.style.width).toBe('1600px'); expect(svg.getAttribute('viewBox')).toBe('-100 -100 800 600');
+    t.editor.transact('Enable backdrop dependency', doc => { doc.pagesById[t.editor.pageId].objects.r0.backgroundBlur = 4; });
+    expect(t.view.renderDiagnostics().translatedViewport).toBe(false); expect(svg.style.transform).toBe('');
+    expect(svg.getAttribute('viewBox')).toBe('100 50 400 300');
+    t.editor.undoStep(); expect(t.view.renderDiagnostics().translatedViewport).toBe(true);
+    t.editor.transact('Blend against stage', doc => { doc.pagesById[t.editor.pageId].objects.r0.blendMode = 'multiply'; });
+    expect(t.view.renderDiagnostics().translatedViewport).toBe(false); expect(svg.style.transform).toBe('');
+    t.editor.undoStep(); expect(t.view.renderDiagnostics().translatedViewport).toBe(true);
+});
 it('retains overflowing children and unknown effects, keeps complete mask siblings, and disables culling for backdrop dependencies', () => {
     const t = fixture([
         createShape('group', { id: 'overflow', x: 10000, width: 100, height: 100 }),

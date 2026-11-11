@@ -9,7 +9,7 @@ import {readExplicitFile,writeExplicitFile,MAX_INLINE_BYTES,MAX_EXPORT_BYTES} fr
 
 export const DESKTOP_TOOL_NAMES=new Set(['workspace','preferences','save_document','delete_document','import_document','export_document','import_resource','collaboration']);
 const error=(code,message)=>Object.assign(Error(message),{code});
-export function createWorkspaceTools({readDesignFile,manager,store,profile,sourceRoot,importCanvasJson,exportCanvasJson,portableDocument,validateImportedDocument,runtimeRequest,preferences,notifyPreferences,connection,about,windowState,capabilities,sampleColor,requestQuit,editorTool,join,host,stopSession,checkBusy,context}){
+export function createWorkspaceTools({readDesignFile,importProgressive,manager,store,profile,sourceRoot,importCanvasJson,exportCanvasJson,portableDocument,validateImportedDocument,runtimeRequest,preferences,notifyPreferences,connection,about,windowState,capabilities,sampleColor,requestQuit,editorTool,join,host,stopSession,checkBusy,context}){
   async function targeted(id,signal){
     if(!id)throw error('document_required','An explicit documentId is required');
     const entry=await manager.load(id);signal?.throwIfAborted();return entry;
@@ -65,8 +65,8 @@ export function createWorkspaceTools({readDesignFile,manager,store,profile,sourc
       if(bytes.length>(design?DESIGN_FILE_LIMIT:MAX_PORTABLE_BYTES))throw error('bad_args',`Document file exceeds ${(design?DESIGN_FILE_LIMIT:MAX_PORTABLE_BYTES)/1024/1024} MiB`);
       const raw=design?'':bytes.toString('utf8'),options={agent,focus:args.focus??false,signal};let entry,warnings=[];
       if(design){
-        const result=await readDesignFile(bytes,args.format);warnings=result.warnings;validateImportedDocument(result.document);
-        entry=await manager.create(args.title??path.basename(args.filePath,path.extname(args.filePath)),assertDocument(result.document),options);
+        if(importProgressive){const progress=await importProgressive(bytes,args.format,args.title??path.basename(args.filePath,path.extname(args.filePath)),options);entry=progress.entry;const result=await progress.completion;warnings=result.warnings;}
+        else {const result=await readDesignFile(bytes,args.format);warnings=result.warnings;validateImportedDocument(result.document);entry=await manager.create(args.title??path.basename(args.filePath,path.extname(args.filePath)),assertDocument(result.document),options);}
       }else if(args.format==='json'){
         const input=JSON.parse(raw);validateImportedDocument(input);const document=assertDocument(importCanvasJson(input));validateImportedDocument(document);
         entry=await manager.create(args.title??(args.filePath?path.basename(args.filePath,path.extname(args.filePath)):'Imported canvas'),document,options);
@@ -79,6 +79,7 @@ export function createWorkspaceTools({readDesignFile,manager,store,profile,sourc
           if(args.title!==undefined)record.title=canvasTitle(args.title);
           const existing=manager.entries.get(record.id);
           if(existing){
+            await manager.complete?.(existing);
             if(existing.agents.size||existing.collab||existing.holds||manager.deleting.has(record.id))throw error('busy','Imported canvas is in use. Release its agent bindings and collaboration first');
             await checkBusy(existing,agent,signal);record.replica.receive(existing.record.replica.state);
           }
@@ -92,6 +93,7 @@ export function createWorkspaceTools({readDesignFile,manager,store,profile,sourc
       return {ok:true,documentId:entry.record.id,document:{id:entry.record.id,title:entry.record.title},...(warnings.length?{warnings}:{}),context:await context(entry,agent,signal)};
     }
     if(call.name==='export_document')return withEntry(args.id,signal,async entry=>{
+      await manager.complete?.(entry);
       await checkBusy(entry,agent,signal);if(entry.runtime)await request(entry,'flush',{guardBusy:true});signal?.throwIfAborted();await manager.save(entry);
       let bytes,mimeType;
       if(args.format==='omc'){bytes=Buffer.from(await store.export(entry.record));mimeType='application/vnd.ohmycanvas+json';}
@@ -136,6 +138,7 @@ export function createWorkspaceTools({readDesignFile,manager,store,profile,sourc
         }
         await checkBusy(entry,agent,signal);signal?.throwIfAborted();
         if(args.action==='host'){
+          await manager.complete?.(entry);
           if(entry.collab)throw error('busy','Leave the existing collaboration session before hosting');
           if(entry.runtime)await request(entry,'flush',{guardBusy:true});
           const result=await host(entry,args);return {ok:true,documentId:entry.record.id,...result};

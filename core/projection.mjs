@@ -1,4 +1,5 @@
 import {applyPending,projectChanges,same} from './document.mjs';
+import {mergePageDocuments} from './page-projection.mjs';
 
 /** Renderer-side revision contract. Accepted writes are already in the server
  * projection; durable ACKs retire them only after fsync. Missing revisions
@@ -26,6 +27,11 @@ export class DocumentProjection {
     if(message.document){
       if(revision<this.revision)return {ignored:true};
       document=message.document;nextRevision=revision;
+    }else if(message.type==='document-pages'){
+      if(revision>this.revision){
+        if(message.fromRevision!==this.revision)return {resync:true};
+        document=mergePageDocuments(this.document,message.pageDocument,{order:message.pageOrder});nextRevision=revision;
+      }else redundant=true;
     }else if(message.type==='document-delta'){
       if(revision>this.revision){
         if(message.fromRevision!==this.revision)return {resync:true};

@@ -9,6 +9,7 @@ import { measureTextScene } from './text';
 import { textMetricRevision } from './metric-cache';
 import { SceneNodeCache, sceneChanges, parseScene, reconcileScene, resourceScope } from './retained';
 import { hasBackdropDependency, ViewportPreparation, type ViewportChanges } from './viewport';
+import { PanSurface } from './pan-surface';
 export { measureTextScene } from './text';
 export { combinePaths } from './vector';
 let thumbnailNamespace = 0;
@@ -39,6 +40,8 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
     let visualRevision = 0, booleanRevision = 0, pendingRender = false, cancelScheduled: (() => void) | undefined;
     const nodeCache = new SceneNodeCache(), scenePrefix = 'omc-view-' + (++sceneNamespace);
     const preparation = new ViewportPreparation();
+    const panSurface = new PanSurface();
+    let translateScene = false;
     let preparedPage = '', preparedSource: Record<string, Shape> | undefined;
     let observedPage = editor.pageId, observedSource = editor.page.objects;
     let pendingShapeIds: Set<string> | undefined = new Set();
@@ -259,12 +262,20 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         const svg = scene.firstElementChild as SVGSVGElement | null;
         if (!svg)
             return;
-        const vp = editor.viewport;
-        svg.setAttribute('viewBox', `${vp.vbox.x} ${vp.vbox.y} ${vp.vport.width / vp.zoom} ${vp.vport.height / vp.zoom}`);
-        svg.style.width = '100%';
-        svg.style.height = '100%';
-        svg.style.overflow = 'visible';
-        svg.setAttribute('preserveAspectRatio', 'none');
+        const vp = editor.viewport, surface = panSurface.update(vp, translateScene), b = surface.bounds;
+        const viewBox = `${b.x} ${b.y} ${b.width} ${b.height}`;
+        if (svg.getAttribute('viewBox') !== viewBox) svg.setAttribute('viewBox', viewBox);
+        // A pan only changes this compositor transform. Updating SVG viewBox on
+        // every wheel event otherwise invalidates layout across the whole scene.
+        svg.style.width = surface.translated ? `${surface.width}px` : '100%';
+        svg.style.height = surface.translated ? `${surface.height}px` : '100%';
+        svg.style.overflow = surface.translated ? 'hidden' : 'visible';
+        svg.style.transformOrigin = surface.translated ? '0 0' : '';
+        svg.style.transform = surface.translated ? `translate(${surface.x}px, ${surface.y}px)` : '';
+        svg.style.willChange = surface.translated ? 'transform' : '';
+        scene.style.overflow = surface.translated ? 'hidden' : 'visible';
+        scene.style.contain = surface.translated ? 'layout paint' : '';
+        if (svg.getAttribute('preserveAspectRatio') !== 'none') svg.setAttribute('preserveAspectRatio', 'none');
         if (editor.showOutlines && lastZoom !== vp.zoom)
             for (const path of svg.querySelectorAll('[stroke="#6366f1"]'))
                 path.setAttribute('stroke-width', String(1 / vp.zoom));
@@ -285,12 +296,21 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         measureText();
         options.onTiming?.({ phase: 'render.measureText', ms: performance.now() - phaseStart });
         renderedOutlines = !!editor.showOutlines;
-        const vp = editor.viewport, bounds = { x: vp.vbox.x, y: vp.vbox.y, width: vp.vport.width / vp.zoom, height: vp.vport.height / vp.zoom };
+        const vp = editor.viewport;
         const svgStart = performance.now();
         const projected = resolvedObjects(), objects = preparation.objects === editor.page.objects ? projected : Object.fromEntries(Object.keys(preparation.objects).map(id => [id, projected[id]])), key = `${editor.pageId}:${assetRevision}:${fontRevision}:${measuredMetricRevision}:${renderedOutlines}:${renderedOutlines ? 1 / vp.zoom : ''}`;
         // Backdrop blur reads earlier siblings, so its invalidation is deliberately
         // scene-wide until dependency-aware compositing has its own parity coverage.
         const backdrop = Object.values(objects).some(hasBackdropDependency);
+        // A translated SVG is a stacking context. Top-level blends can sample
+        // the stage background; keep their existing direct viewport semantics.
+        // Nested groups already isolate their own children in SceneWriter.
+        const stageBlend = preparation.roots.some(id => {
+            const shape = objects[id];
+            return shape && !shape.hidden && shape.visible !== false && String(shape.blendMode ?? 'normal').toLowerCase() !== 'normal';
+        });
+        translateScene = preparation.enabled && !backdrop && !stageBlend;
+        const bounds = panSurface.update(vp, translateScene).bounds;
         const reset = key !== renderedKey || renderedPage !== editor.pageId || backdrop;
         const changes = sceneChanges(renderedObjects, objects);
         if (!reset && !changes.changed.size && scene.firstElementChild) {
@@ -558,7 +578,8 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             const b = viewportBounds();
             if (![b.x, b.y, b.width, b.height].every(Number.isFinite) || b.width <= 0 || b.height <= 0) return null;
             const version = visualRevision, snapshot = svg.cloneNode(true) as SVGSVGElement;
-            snapshot.style.removeProperty('width'); snapshot.style.removeProperty('height'); snapshot.style.overflow = 'hidden';
+            snapshot.removeAttribute('style'); snapshot.style.overflow = 'hidden';
+            snapshot.setAttribute('viewBox', `${b.x} ${b.y} ${b.width} ${b.height}`);
             snapshot.setAttribute('width', String(b.width)); snapshot.setAttribute('height', String(b.height));
             const source = new XMLSerializer().serializeToString(snapshot);
             const { inlineSVGImages, rasterizeSVG } = await import('../export/raster');
@@ -575,7 +596,7 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
         },
         get renderRevision() { return visualRevision; },
         get geometryRevision() { return booleanRevision; },
-        renderDiagnostics() { return { ...lastRender, ...nodeCache.diagnostics(), pending: pendingRender, viewportCulling: preparation.enabled, preparedObjects: Object.keys(preparation.objects).length, preparedRoots: preparation.roots.length }; },
+        renderDiagnostics() { return { ...lastRender, ...nodeCache.diagnostics(), pending: pendingRender, viewportCulling: preparation.enabled, preparedObjects: Object.keys(preparation.objects).length, preparedRoots: preparation.roots.length, translatedViewport: panSurface.translated, surfaceReanchors: panSurface.reanchors }; },
         flush: flushPending,
         onRender(listener: () => void) {
             renderListeners.add(listener);
@@ -679,12 +700,13 @@ export function createRenderer(editor: EditorStore, stage: HTMLElement, options:
             textSizes.clear();
             measuredText.clear(); nodeCache.clear(); renderedObjects = undefined; resolvedSource = undefined;
             preparation.clear();
+            panSurface.clear();
         }
     };
     const off = editor.on(event => {
         const source = editor.page.objects;
         if (event.page || observedPage !== editor.pageId) {
-            preparation.clear(); pendingShapeIds = undefined;
+            preparation.clear(); panSurface.clear(); pendingShapeIds = undefined;
         } else if (source !== observedSource) {
             // Absence means unknown, whereas an explicit empty scope means no
             // shape changed. Union every skipped preview up to the next render.
