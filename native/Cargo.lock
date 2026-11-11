@@ -621,6 +621,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "omc-export"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "omc-import",
+ "omc-model",
+ "omc-render",
+ "omc-scene",
+ "omc-style",
+ "serde",
+ "serde_jcs",
+ "serde_json",
+ "sha2",
+ "skia-safe",
+ "thiserror",
+]
+
+[[package]]
 name = "omc-import"
 version = "0.1.0"
 dependencies = [
