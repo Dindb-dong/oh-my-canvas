@@ -482,6 +482,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "omc-render"
+version = "0.1.0"
+dependencies = [
+ "omc-layout",
+ "omc-model",
+ "omc-scene",
+ "omc-style",
+ "serde",
+ "serde_json",
+ "sha2",
+ "skia-safe",
+ "thiserror",
+]
+
+[[package]]
 name = "omc-scene"
 version = "0.1.0"
 dependencies = [

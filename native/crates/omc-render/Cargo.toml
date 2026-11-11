@@ -1,0 +1,22 @@
+[package]
+name = "omc-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+omc-model = { path = "../omc-model" }
+omc-scene = { path = "../omc-scene" }
+omc-style = { path = "../omc-style" }
+skia-safe.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+omc-layout = { path = "../omc-layout" }
+
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+skia-safe = { workspace = true, features = ["vulkan"] }
