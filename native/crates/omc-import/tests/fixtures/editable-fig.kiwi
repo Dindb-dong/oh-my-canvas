@@ -1,0 +1,11 @@
+enum NodeType { CANVAS = 1; RECTANGLE = 2; TEXT = 3; }
+enum PaintType { SOLID = 1; }
+struct GUID { uint sessionID; uint localID; }
+struct ParentIndex { GUID guid; string position; }
+struct Vector { float x; float y; }
+struct Matrix { float m00; float m10; float m01; float m11; float m02; float m12; }
+struct Color { float r; float g; float b; float a; }
+message Paint { PaintType type = 1; Color color = 2; float opacity = 3; }
+message TextData { string characters = 1; }
+message NodeChange { GUID guid = 1; ParentIndex parentIndex = 2; NodeType type = 3; string name = 4; Vector size = 5; Matrix transform = 6; Paint[] fillPaints = 7; TextData textData = 8; float fontSize = 9; }
+message Message { NodeChange[] nodeChanges = 1; }
