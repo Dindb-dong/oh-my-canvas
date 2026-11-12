@@ -98,3 +98,7 @@ Keep Layers/Assets tabs, Pages and the layer filter fixed above an independently
 Canvas selection outside frames reveals that layer. Inside a frame, reveal the nearest containing frame; selecting a frame reveals the frame itself. Expand only the target's ancestors, preserving the target frame's collapsed state and the actual selected shapes. For multiple selection, use the last selected member as the reveal target. Clear a layer filter only when it hides that target. Scroll only the layer tree and only when the target is outside its visible bounds. Repeated canvas clicks reveal an already selected target; direct layer clicks, range selection, context menus, drag/drop and ordinary property changes preserve scroll. Do not switch away from Assets automatically.
 
 The implementation maps to `editor/ui/index.ts` and `editor/ui/style.ts`. Compare at 1500 × 980 and the supported 960 × 640 minimum with long layers and page names. Real Electron checks cover fixed controls, two/three-page transitions, direct and nested canvas selection, repeated selection, filter reveal, page actions and Assets scrolling. Platform and hardware limits are reported with delivery evidence.
+
+### Rust native editor shell (2026-11-12)
+
+See the [native editor shell and retained canvas contract](docs/native-engine/EDITOR_SHELL.md) for the Rust preview composition, responsive rules and interaction acceptance.
