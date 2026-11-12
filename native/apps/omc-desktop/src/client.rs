@@ -84,12 +84,20 @@ pub enum Request {
     Close {
         id: String,
     },
+    Collaboration {
+        action: &'static str,
+        args: Value,
+    },
     Shutdown,
 }
 
 #[derive(Debug)]
 pub enum Response {
     Connected,
+    Collaboration {
+        action: &'static str,
+        result: Result<(Value, Option<DocumentSnapshot>), String>,
+    },
     Documents(Vec<DocumentEntry>),
     Snapshot {
         document: DocumentSnapshot,
@@ -438,6 +446,43 @@ impl Client {
         leases: &mut BTreeSet<String>,
     ) -> Result<Response, String> {
         match request {
+            Request::Collaboration { action, mut args } => {
+                args["action"] = if action == "host-lan" { "host" } else { action }.into();
+                let result = (|| {
+                    if action == "host-lan" {
+                        // A UDP connect queries the route without sending a packet.
+                        let socket =
+                            std::net::UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
+                        socket
+                            .connect("192.0.2.1:9")
+                            .map_err(|e| format!("No LAN route: {e}"))?;
+                        let address = socket.local_addr().map_err(|e| e.to_string())?.ip();
+                        if address.is_loopback() || address.is_unspecified() {
+                            return Err("No usable LAN interface was found.".into());
+                        }
+                        args["address"] = address.to_string().into();
+                    }
+                    let state = self.call("collaboration", args)?;
+                    let document = if action == "join" {
+                        let id = state["documentId"]
+                            .as_str()
+                            .ok_or("Joined room returned no document ID.")?;
+                        let id = format!(
+                            "doc_{}",
+                            Uuid::parse_str(id).map_err(|e| e.to_string())?.simple()
+                        );
+                        let snapshot = self.call("document.snapshot", json!({"documentId":id}))?;
+                        let document: DocumentSnapshot =
+                            serde_json::from_value(snapshot).map_err(|e| e.to_string())?;
+                        leases.insert(document.id.clone());
+                        Some(document)
+                    } else {
+                        None
+                    };
+                    Ok((state, document))
+                })();
+                Ok(Response::Collaboration { action, result })
+            }
             Request::Refresh => {
                 let value = self.call("workspace.list", json!({}))?;
                 let documents = serde_json::from_value(

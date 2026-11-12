@@ -43,6 +43,9 @@ const TAB_LABEL_X: f64 = 35.;
 const TAB_LABEL_RIGHT_PAD: f64 = 2.;
 const LAYER_FIRST: u64 = 1 << 32;
 const LAYER_CONTROLS: u64 = 4;
+const MCP_BUTTON_WIDTH: f64 = 62.;
+const MCP_HEADER_SPACE: f64 = 198.;
+const COLLABORATE_BLUE: Color = Color::from_rgb(37, 99, 235);
 const POPUP_FIRST: u64 = 1 << 48;
 
 fn sidebar_top() -> f64 {
@@ -65,7 +68,7 @@ fn tabs(app: &App) -> (tab_strip::TabLayout, f64) {
         })
         .collect();
     let x = tab_strip::HOME_X + tab_strip::HOME_WIDTH;
-    let room = (app.width - x - tab_strip::BUTTON_WIDTH - 70.).max(0.);
+    let room = (app.width - x - tab_strip::BUTTON_WIDTH - MCP_HEADER_SPACE).max(0.);
     let active = app
         .tabs
         .iter()
@@ -76,6 +79,8 @@ fn tabs(app: &App) -> (tab_strip::TabLayout, f64) {
 fn popup_rect(app: &App) -> Option<Rect> {
     match app.popup? {
         Popup::Files => Some(FILE_MENU),
+        Popup::Mcp => Some(Rect::new(app.width - 322., HEADER + 8., 310., 119.)),
+        Popup::Collaboration => Some(Rect::new(app.width - 342., HEADER + 8., 330., 254.)),
         Popup::InspectorZoom | Popup::InspectorLayer | Popup::InspectorBlend => {
             crate::inspector::popup_rect(app)
         }
@@ -239,6 +244,22 @@ pub fn controls(app: &App) -> Vec<Control> {
         "Home".into(),
         Action::Library,
         app.library_open || app.active.is_none(),
+        None,
+    );
+    add(
+        49,
+        Rect::new(app.width - MCP_HEADER_SPACE + 4., 5., MCP_BUTTON_WIDTH, 30.),
+        "MCP".into(),
+        Action::Mcp,
+        app.popup == Some(Popup::Mcp),
+        None,
+    );
+    add(
+        50,
+        Rect::new(app.width - 122., 5., 110., 30.),
+        "Collaborate".into(),
+        Action::Collaborate,
+        app.popup == Some(Popup::Collaboration),
         None,
     );
     let (layout, mut tab_x) = tabs(app);
@@ -551,6 +572,55 @@ pub fn controls(app: &App) -> Vec<Control> {
                         control.field_value,
                     );
                 }
+            }
+            Some(Popup::Collaboration) => {
+                let mode = app.collaboration["mode"].as_str().unwrap_or("offline");
+                let actions = match mode {
+                    "hosting" => [
+                        ("Copy invitation", "invite"),
+                        ("Refresh participants", "status"),
+                        ("Stop hosting", "leave"),
+                    ],
+                    "connected" | "reconnecting" => [
+                        ("Refresh participants", "status"),
+                        ("Leave session", "leave"),
+                        ("", ""),
+                    ],
+                    _ => [
+                        ("Host on local network", "host-lan"),
+                        ("Host on this device", "host"),
+                        ("Join from clipboard", "join"),
+                    ],
+                };
+                for (index, (label, action)) in actions
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, (_, action))| !action.is_empty())
+                {
+                    add(
+                        POPUP_FIRST + index as u64,
+                        Rect::new(
+                            menu.x + 12.,
+                            menu.y + 134. + index as f64 * 36.,
+                            menu.width - 24.,
+                            32.,
+                        ),
+                        label.into(),
+                        Action::Collaboration(action),
+                        false,
+                        None,
+                    );
+                }
+            }
+            Some(Popup::Mcp) => {
+                add(
+                    POPUP_FIRST,
+                    Rect::new(menu.x + 12., menu.y + 72., menu.width - 24., 34.),
+                    "Copy MCP configuration".into(),
+                    Action::CopyMcpConfiguration,
+                    false,
+                    None,
+                );
             }
             Some(Popup::Files) => {
                 for (index, (_, label, action)) in FILE_ACTIONS.into_iter().enumerate() {
@@ -894,6 +964,56 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
     use omc_model::NodeKind;
     let r = control.rect;
     let hovered = app.action_available(&control.action) && r.contains(app.cursor.0, app.cursor.1);
+    if matches!(
+        control.action,
+        Action::Mcp | Action::CopyMcpConfiguration | Action::Collaborate | Action::Collaboration(_)
+    ) {
+        let primary = matches!(control.action, Action::Collaborate);
+        round(
+            canvas,
+            r,
+            if primary {
+                COLLABORATE_BLUE
+            } else {
+                Color::from_rgb(227, 228, 231)
+            },
+            15.,
+        );
+        if !primary {
+            round(
+                canvas,
+                Rect::new(r.x + 1., r.y + 1., r.width - 2., r.height - 2.),
+                if control.selected || hovered {
+                    Color::WHITE
+                } else {
+                    WORKSPACE
+                },
+                14.,
+            );
+        }
+        let mut label_font = font.clone();
+        label_font.set_size(12.);
+        let width = f64::from(label_font.measure_str(&control.label, None).0);
+        text(
+            canvas,
+            &control.label,
+            r.x + (r.width - width) / 2.,
+            r.y + r.height / 2. + 4.,
+            12.,
+            if primary {
+                Color::WHITE
+            } else if app.action_available(&control.action) {
+                INK
+            } else {
+                MUTED
+            },
+            font,
+        );
+        if app.focus == control.id && app.keyboard_focus_visible {
+            stroke(canvas, r, SELECTED_INK, 1.35);
+        }
+        return;
+    }
     if r.y < HEADER {
         if control.selected {
             fill(canvas, r, Color::WHITE);
@@ -1906,6 +2026,47 @@ fn render_to_canvas(
             &font,
         );
     }
+    if app.active.is_some()
+        && app.active == app.collaboration_document
+        && let Some(peers) = app.collaboration["participants"].as_array()
+    {
+        for peer in peers {
+            let cursor = &peer["cursor"];
+            if peer["isSelf"] == true || cursor["page"].as_str() != app.page.as_deref() {
+                continue;
+            }
+            let (Some(x), Some(y)) = (cursor["x"].as_f64(), cursor["y"].as_f64()) else {
+                continue;
+            };
+            let x = viewport.x + app.camera.x + x * app.camera.zoom;
+            let y = viewport.y + app.camera.y + y * app.camera.zoom;
+            if !viewport.contains(x, y) {
+                continue;
+            }
+            draw_mark(
+                canvas,
+                Rect::new(x - 2., y - 1., 16., 16.),
+                "M2 1l11 9-5 .4-2 4z",
+                COLLABORATE_BLUE,
+                PaintStyle::Fill,
+                1.,
+            );
+            let label = peer["name"].as_str().unwrap_or("Designer");
+            let width = (label.chars().count() as f64 * 8. + 14.).min(150.);
+            let badge = Rect::new(x + 8., y + 13., width, 19.);
+            round(canvas, badge, COLLABORATE_BLUE, 4.);
+            control_text(
+                canvas,
+                badge,
+                label,
+                6.,
+                badge.y + 13.,
+                11.,
+                Color::WHITE,
+                &font,
+            );
+        }
+    }
     canvas.restore();
     selection_dimensions(canvas, app, viewport, &font);
     if let Some(r) = palette_rect(app) {
@@ -1943,6 +2104,105 @@ fn render_to_canvas(
             13.,
         );
         round(canvas, menu, if tools { INK } else { Color::WHITE }, 13.);
+        if app.popup == Some(Popup::Collaboration) {
+            text(
+                canvas,
+                "Collaborate",
+                menu.x + 14.,
+                menu.y + 25.,
+                15.,
+                INK,
+                &font,
+            );
+            let title = app
+                .collaboration_document
+                .as_ref()
+                .and_then(|id| app.snapshots.get(id))
+                .map_or("Join a native OMC document", |doc| doc.title.as_str());
+            control_text(
+                canvas,
+                Rect::new(menu.x + 14., menu.y + 33., menu.width - 28., 20.),
+                title,
+                0.,
+                menu.y + 48.,
+                12.,
+                INK,
+                &font,
+            );
+            let mode = if app.collaboration_pending {
+                "Working…"
+            } else {
+                match app.collaboration["mode"].as_str() {
+                    Some("hosting") => "Hosting · native OMC room",
+                    Some("connected") => "Connected · native OMC room",
+                    Some("reconnecting") => "Reconnecting…",
+                    _ => "Offline · up to four participants",
+                }
+            };
+            text(canvas, mode, menu.x + 14., menu.y + 70., 12., MUTED, &font);
+            if let Some(people) = app.collaboration["participants"].as_array()
+                && !people.is_empty()
+            {
+                let names = people
+                    .iter()
+                    .filter_map(|person| person["name"].as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                control_text(
+                    canvas,
+                    Rect::new(menu.x + 14., menu.y + 76., menu.width - 28., 24.),
+                    &names,
+                    0.,
+                    menu.y + 92.,
+                    12.,
+                    INK,
+                    &font,
+                );
+            }
+            if let Some(error) = app
+                .error
+                .as_deref()
+                .or(app.collaboration["message"].as_str())
+            {
+                control_text(
+                    canvas,
+                    Rect::new(menu.x + 14., menu.y + 101., menu.width - 28., 22.),
+                    error,
+                    0.,
+                    menu.y + 117.,
+                    11.,
+                    INK,
+                    &font,
+                );
+            }
+        }
+        if app.popup == Some(Popup::Mcp) {
+            text(
+                canvas,
+                "Connect your agent",
+                menu.x + 14.,
+                menu.y + 25.,
+                15.,
+                INK,
+                &font,
+            );
+            let status = if !app.service_connected {
+                "Connecting to the workspace service…"
+            } else if app.mcp_configuration().is_err() {
+                "MCP CLI missing from this build"
+            } else {
+                "Local stdio connection · current profile"
+            };
+            text(
+                canvas,
+                status,
+                menu.x + 14.,
+                menu.y + 51.,
+                12.,
+                MUTED,
+                &font,
+            );
+        }
         for control in app
             .controls
             .iter()

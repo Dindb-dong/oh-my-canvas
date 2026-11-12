@@ -1,17 +1,25 @@
 //! Native stdio MCP bridge. No Node or browser runtime is needed.
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, Read, Write},
     path::PathBuf,
     time::{Duration, Instant},
 };
+#[derive(Clone, Copy, ValueEnum)]
+enum Dialect {
+    Omc,
+    Figcraft,
+}
+
 #[derive(Parser)]
 struct Args {
     #[arg(long)]
     profile: PathBuf,
     #[arg(long)]
     connect_only: bool,
+    #[arg(long, value_enum, default_value = "omc")]
+    dialect: Dialect,
 }
 fn main() {
     if let Err(error) = run() {
@@ -60,6 +68,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let descriptor = descriptor.ok_or("service startup deadline")?;
     let endpoint = descriptor["endpoint"].as_str().ok_or("endpoint missing")?;
     let token = descriptor["token"].as_str().ok_or("credential missing")?;
+    let url = match args.dialect {
+        Dialect::Omc => format!("{endpoint}/mcp"),
+        Dialect::Figcraft => format!("{endpoint}/mcp/figcraft"),
+    };
     let mut session = None::<String>;
     let input = std::io::stdin();
     let mut reader = input.lock();
@@ -79,7 +91,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         let request: Value = serde_json::from_slice(&line)?;
         let mut outgoing = http
-            .post(format!("{endpoint}/mcp"))
+            .post(&url)
             .bearer_auth(token)
             .header("Accept", "application/json, text/event-stream")
             .header("Content-Type", "application/json")
@@ -107,7 +119,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(session) = session {
         let _ = http
-            .delete(format!("{endpoint}/mcp"))
+            .delete(&url)
             .bearer_auth(token)
             .header("Mcp-Session-Id", session)
             .send();

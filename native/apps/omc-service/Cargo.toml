@@ -18,3 +18,11 @@ axum.workspace = true
 clap.workspace = true
 uuid.workspace = true
 
+omc-sync = { path = "../../crates/omc-sync" }
+serde.workspace = true
+reqwest.workspace = true
+rcgen = { version = "=0.14.7", default-features = false, features = ["aws_lc_rs"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }
+sha2.workspace = true
+hex.workspace = true

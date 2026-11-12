@@ -1,7 +1,9 @@
 //! Compatibility adapters: every semantic write crosses the document authority.
 mod extensions;
 pub use extensions::capabilities as native_capabilities;
+mod figcraft;
 mod interchange;
+pub use figcraft::tools as figcraft_tools;
 mod libraries;
 mod mutations;
 mod resources;

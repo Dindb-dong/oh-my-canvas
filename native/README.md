@@ -33,6 +33,14 @@ Bundled SQLite WAL/FULL storage, transactional receipts, retained entity version
 
 Validated atomic commands, durable idempotency, scoped Undo, immutable query cuts and independent replica delivery.
 
+## MCP connection and collaboration preview
+
+Build or bundle `omc-cli` and `omc-service` beside `omc-desktop`. In the desktop app, **MCP → Copy MCP configuration** produces two stdio entries for the current native profile. The OMC entry uses the existing tool schemas. The FigCraft entry selects the separate `--dialect figcraft` route, whose `list_commands` reports the implemented commands. It currently covers document listing and creation, core editable layer creation and properties, session selection, atomic referenced node batches, inspection, raster/vector output, and author undo/redo. Desktop automation, file and plugin compatibility, and the complete FigCraft registry still require implementation. The copied config contains executable and profile paths only.
+
+**Collaborate** hosts an opt-in native room on a specific interface. The local-device option is useful for testing with a separate profile. Copy the room invitation and choose **Join from clipboard** in the second app. The link grants edit access until hosting stops. The room uses its own TLS identity and credentials, separate from local MCP. Hosts and guests retain their own durable native replicas after leaving. The preview supports up to four participants, a bounded 8 MiB room message, and up to 3 MiB of referenced assets per message. Rejoining a live room within the same service process can exchange offline edits. Older Electron and FigCraft invite formats are incompatible with native rooms.
+
+The native MCP end-to-end suite exercises both stdio dialects, batch rollback, shared document readback, and a real TLS room between independent service profiles. Preview status still applies to cross-machine qualification, transport restart/resume, and legacy action coverage.
+
 ## MCP masks
 
 `edit_shapes` with `action: "mask"` groups fixed-position native siblings and uses `maskId` as the source, or the first requested layer if omitted. Alpha is the default. Luminance and vector modes are available, with vector coverage limited to rectangles, ellipses, and paths without children. Mask creation rejects layout-driven reparenting and selections under locked or hidden layers. `action: "unmask"` releases the mask while preserving the group and its children. Both actions use the native Undo history.

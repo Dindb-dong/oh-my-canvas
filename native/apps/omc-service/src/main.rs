@@ -1,4 +1,5 @@
 //! Authenticated loopback service. Document authority lives in isolated workers.
+mod collaboration;
 use axum::{
     Json, Router,
     body::Bytes,
@@ -29,6 +30,7 @@ struct Options {
 struct App {
     workspace: Arc<Workspace>,
     router: Arc<ToolRouter>,
+    collaboration: Arc<collaboration::Collaboration>,
     token: String,
     admission: Arc<tokio::sync::Semaphore>,
 }
@@ -56,12 +58,17 @@ async fn run() -> Result<()> {
     let token = omc_workspace::random_secret();
     let app = App {
         router: Arc::new(ToolRouter::new(workspace.clone())),
+        collaboration: Arc::new(collaboration::Collaboration::new(workspace.clone())),
         workspace,
         token: token.clone(),
         admission: Arc::new(tokio::sync::Semaphore::new(32)),
     };
     let service = Router::new()
         .route("/mcp", post(mcp).delete(close_mcp).get(no_event_stream))
+        .route(
+            "/mcp/figcraft",
+            post(figcraft_mcp).delete(close_mcp).get(no_event_stream),
+        )
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .merge(
             Router::new()
@@ -162,11 +169,25 @@ async fn rpc(State(app): State<App>, headers: HeaderMap, body: Bytes) -> Respons
         return(StatusCode::PAYLOAD_TOO_LARGE,Json(json!({"id":id,"error":{"code":"resource_limit","message":"ordinary RPC body exceeds 1 MiB"}}))).into_response();
     }
     let session = header(&headers, "x-omc-session").ok().map(str::to_owned);
-    let result = tokio::task::spawn_blocking(move || {
-        dispatch_rpc(&app, session.as_deref(), &method, request["params"].clone())
-    })
-    .await
-    .unwrap_or_else(|_| Err(EngineError::new("internal_error", "request worker stopped")));
+    let result = if method == "collaboration" {
+        match session {
+            Some(session) => {
+                app.collaboration
+                    .call(&session, request["params"].clone())
+                    .await
+            }
+            None => Err(EngineError::new(
+                "authentication_failed",
+                "session required",
+            )),
+        }
+    } else {
+        tokio::task::spawn_blocking(move || {
+            dispatch_rpc(&app, session.as_deref(), &method, request["params"].clone())
+        })
+        .await
+        .unwrap_or_else(|_| Err(EngineError::new("internal_error", "request worker stopped")))
+    };
     Json(match result {
         Ok(result) => json!({"id":id,"result":result}),
         Err(error) => json!({"id":id,"error":error}),
@@ -291,6 +312,12 @@ fn dispatch_rpc(app: &App, session: Option<&str>, method: &str, args: Value) -> 
     }
 }
 async fn mcp(State(app): State<App>, headers: HeaderMap, body: Bytes) -> Response {
+    mcp_request(app, headers, body, false).await
+}
+async fn figcraft_mcp(State(app): State<App>, headers: HeaderMap, body: Bytes) -> Response {
+    mcp_request(app, headers, body, true).await
+}
+async fn mcp_request(app: App, headers: HeaderMap, body: Bytes, figcraft: bool) -> Response {
     let request = match omc_protocol::decode_json(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -330,7 +357,18 @@ async fn mcp(State(app): State<App>, headers: HeaderMap, body: Bytes) -> Respons
                 .await;
         return match registered {
             Ok(Ok(session)) => {
-                let mut response=Json(json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":version,"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"oh-my-canvas-native","version":"0.1.0"},"instructions":"Native incomplete preview. Inspect native_capabilities before depending on extensions or unqualified tool branches.","_meta":{"oh-my-canvas/identity":session}}})).into_response();
+                let (name, instructions) = if figcraft {
+                    (
+                        "oh-my-canvas-figcraft-compatibility",
+                        "Partial FigCraft compatibility. Use list_commands to discover implemented commands; run file.new to create a session document or name a native document explicitly.",
+                    )
+                } else {
+                    (
+                        "oh-my-canvas-native",
+                        "Native incomplete preview. Inspect native_capabilities before depending on extensions or unqualified tool branches.",
+                    )
+                };
+                let mut response=Json(json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":version,"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":name,"version":"0.1.0"},"instructions":instructions,"_meta":{"oh-my-canvas/identity":session}}})).into_response();
                 response.headers_mut().insert(
                     "mcp-session-id",
                     HeaderValue::from_str(session["sessionId"].as_str().unwrap()).unwrap(),
@@ -359,33 +397,54 @@ async fn mcp(State(app): State<App>, headers: HeaderMap, body: Bytes) -> Respons
     }
     let result = match method.as_str() {
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({"tools":app.router.tools()})),
+        "tools/list" => Ok(
+            json!({"tools":if figcraft { json!(omc_mcp::figcraft_tools()) } else { app.router.tools() }}),
+        ),
         "tools/call" => {
             let params = request["params"].clone();
-            let result = tokio::task::spawn_blocking(move || {
-                app.router.call(
-                    &session,
-                    string(&params, "name")?,
-                    params
+            let result = if !figcraft && params["name"] == "collaboration" {
+                let args = params["arguments"].clone();
+                match omc_mcp::schema::validate("collaboration", &args) {
+                    Ok(()) => app.collaboration.call(&session, args).await,
+                    Err(error) => Err(error),
+                }
+            } else {
+                tokio::task::spawn_blocking(move || {
+                    let name = string(&params, "name")?;
+                    let arguments = params
                         .get("arguments")
                         .cloned()
-                        .unwrap_or_else(|| json!({})),
-                    params.get("_meta").cloned().unwrap_or(Value::Null),
-                )
-            })
-            .await
-            .unwrap_or_else(|_| Err(EngineError::new("internal_error", "tool worker stopped")));
+                        .unwrap_or_else(|| json!({}));
+                    if figcraft {
+                        app.router.call_figcraft(&session, name, arguments)
+                    } else {
+                        app.router.call(
+                            &session,
+                            name,
+                            arguments,
+                            params.get("_meta").cloned().unwrap_or(Value::Null),
+                        )
+                    }
+                })
+                .await
+                .unwrap_or_else(|_| Err(EngineError::new("internal_error", "tool worker stopped")))
+            };
             Ok(match result {
                 Ok(value) => {
                     let mut content =
                         vec![json!({"type":"text","text":serde_json::to_string(&value).unwrap()})];
-                    if value["mimeType"] == "image/png" {
-                        if let Some(data) = value["base64"].as_str() {
-                            content
-                                .push(json!({"type":"image","mimeType":"image/png","data":data}));
-                        }
+                    if let Some(mime) = value["mimeType"].as_str()
+                        && (mime == "image/png"
+                            || figcraft && matches!(mime, "image/jpeg" | "image/webp"))
+                        && let Some(data) = value["base64"].as_str()
+                    {
+                        content.push(json!({"type":"image","mimeType":mime,"data":data}));
                     }
-                    json!({"content":content,"structuredContent":value,"isError":false})
+                    let mut result = json!({"content":content,"isError":false});
+                    if value.is_object() || !figcraft {
+                        result["structuredContent"] = value;
+                    }
+                    result
                 }
                 Err(error) => {
                     json!({"content":[{"type":"text","text":serde_json::to_string(&error).unwrap()}],"isError":true})

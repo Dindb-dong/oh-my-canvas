@@ -111,6 +111,106 @@ try{
    const stdio=new Client({name:'stdio-contracts',version:'1.0.0'});
    try{await stdio.connect(transport);const listed=await stdio.listTools();assert.equal(listed.tools.filter(t=>!t.name.startsWith('native_')).length,50);const result=await stdio.callTool({name:'create_document',arguments:{title:'Rust stdio document'}});assert.notEqual(result.isError,true);assert.ok(result.structuredContent.documentId);}finally{await stdio.close();}
   });
+  await t.test('FigCraft-compatible stdio works on the same native document',async()=>{
+   const cli=process.env.OMC_CLI_BINARY??join(root,'native/target/debug',process.platform==='win32'?'omc-cli.exe':'omc-cli');
+   const transport=new StdioClientTransport({command:cli,args:['--profile',service.profile,'--connect-only','--dialect','figcraft'],stderr:'pipe'});
+   const fig=new Client({name:'figcraft-compatibility-contracts',version:'1.0.0'});
+   async function call(name,args={}) {
+    const result=await fig.callTool({name,arguments:args});
+    const value=result.structuredContent??JSON.parse(result.content.find(item=>item.type==='text').text);
+    if(result.isError)throw Object.assign(Error(value.message??JSON.stringify(value)),value);
+    return value;
+   }
+   try {
+    await fig.connect(transport);
+    const {tools}=await fig.listTools();
+    assert.ok(tools.find(tool=>tool.name==='batch').inputSchema.properties.commands);
+    assert.ok((await client.client.listTools()).tools.find(tool=>tool.name==='batch').inputSchema.properties.ops);
+    const doc=await call('run_command',{command:'file.new',params:{name:'FigCraft dialect'}});
+    const created=await call('batch',{commands:[
+     {command:'node.create',as:'card',params:{type:'frame',name:'Card'}},
+     {command:'node.create',params:{type:'text',parent:{$ref:'card'},name:'Korean label',text:'한글 편집'}},
+     {command:'node.set',params:{ids:[{$step:1}],props:{fontSize:18,fill:'#312e81'}}},
+    ]});
+    assert.equal(created[2].nodes[0].fontSize,18);
+    assert.equal((await call('get_node',{id:created[0].id})).children[0].characters,'한글 편집');
+    await assert.rejects(call('batch',{commands:[
+     {command:'node.create',params:{type:'rectangle',name:'Rolled back'}},
+     {command:'node.set',params:{ids:[99999],props:{opacity:0.5}}},
+    ]}),/Step 1/);
+    assert.equal((await call('inspect_document')).layers.length,1);
+    await call('undo');
+    assert.equal((await call('inspect_document')).layers.length,0);
+    await call('redo');
+    assert.equal((await client.call('get_tree',{documentId:doc.id,detail:'detailed'})).nodes.find(n=>n.name==='Korean label').text,'한글 편집');
+    const image=await fig.callTool({name:'screenshot',arguments:{ids:[created[0].id]}});
+    assert.ok(image.content.some(item=>item.type==='image'&&item.mimeType==='image/png'));
+   } finally {await fig.close();}
+  });
+  await t.test('native collaboration exchanges durable edits over a dedicated pinned TLS room',async()=>{
+   const peer=await start(join(temporary,'room-guest'));
+   const guest=await connect(peer);
+   try {
+    const hostDocument=await client.call('create_document',{title:'Collaborate TLS fixture'});
+    const documentId=hostDocument.documentId;
+    const host=action=>client.call('collaboration',{action,documentId});
+    const guestAction=action=>guest.call('collaboration',{action,documentId});
+    const layer=await client.call('create_shape',{documentId,type:'rect',properties:{name:'Before join'}});
+    const pixel='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS9sAAAAASUVORK5CYII=';
+    await client.call('document_assets',{action:'add',documentId,kind:'image',name:'Room image',dataUrl:'data:image/png;base64,'+pixel});
+    const {assets}=await client.call('document_assets',{action:'list',documentId});
+    const hash=assets.find(a=>a.name==='Room image').hash;
+    const hosting=await host('host');
+    assert.equal(hosting.mode,'hosting');
+    const {invite}=await client.call('collaboration',{action:'invite',documentId,address:hosting.address});
+    const invitation=JSON.parse(Buffer.from(invite.split('/').at(-1),'base64url'));
+    await assert.rejects(guest.call('collaboration',{action:'join',documentId,invite:'omc-native://join/invalid'}));
+    assert.equal((await guest.call('collaboration',{action:'join',documentId,invite,name:'Guest'})).mode,'connected');
+    assert.equal((await host('status')).participants.length,2);
+    await client.call('collaboration',{action:'cursor',documentId,cursor:{x:17,y:30,page:hostDocument.page.id}});
+    let remoteCursor;
+    for(let i=0;i<20;i++){
+     const {participants}=await guestAction('status');
+     remoteCursor=participants.find(person=>person.host&&person.isSelf===false)?.cursor;
+     if(remoteCursor?.x===17)break;
+     await delay(150);
+    }
+    assert.equal(remoteCursor?.x,17);
+    assert.deepEqual(await readFile(join(peer.profile,'native-v1/assets/sha256',hash.slice(0,2),hash)),Buffer.from(pixel,'base64'));
+    assert.ok((await guest.call('get_tree',{documentId})).nodes.some(n=>n.rawId===layer.rawIds[0]));
+    await client.call('update',{documentId,id:layer.rawIds[0],attrs:{name:'Edited by host'}});
+    await guest.call('create_shape',{documentId,type:'ellipse',properties:{name:'Edited by guest'}});
+    async function converge(connection,name) {
+     for(let i=0;i<40;i++){
+      const {nodes}=await connection.call('get_tree',{documentId});
+      if(nodes.some(n=>n.name===name))return;
+      await delay(150);
+     }
+     assert.fail('a remote edit did not become visible');
+    }
+    await converge(client,'Edited by guest');
+    await converge(guest,'Edited by host');
+    await guest.call('undo',{documentId});
+    for(let i=0;i<40;i++){
+     if(!(await client.call('get_tree',{documentId})).nodes.some(n=>n.name==='Edited by guest'))break;
+     await delay(150);
+    }
+    const final=(await client.call('get_tree',{documentId})).nodes;
+    assert.ok(final.some(n=>n.name==='Edited by host'));
+    assert.ok(!final.some(n=>n.name==='Edited by guest'));
+    assert.equal((await guestAction('leave')).mode,'offline');
+    assert.equal((await host('status')).participants.length,1);
+    await guest.call('create_shape',{documentId,type:'rect',properties:{name:'Edited while offline'}});
+    await client.call('create_shape',{documentId,type:'rect',properties:{name:'Edited while guest away'}});
+    assert.equal((await guest.call('collaboration',{action:'join',documentId,invite,name:'Guest'})).mode,'connected');
+    await converge(client,'Edited while offline');
+    await converge(guest,'Edited while guest away');
+    await guestAction('leave');
+    assert.equal((await host('leave')).mode,'offline');
+    assert.ok((await guest.call('get_tree',{documentId})).nodes.some(n=>n.name==='Edited by host'));
+    assert.ok(invitation.address.startsWith('127.0.0.1:'));
+   } finally {await guest.client.close();await stop(peer);}
+  });
   await t.test('single-step layer order preserves blocks, parents, and Undo',async()=>{
    const {documentId}=await client.call('create_document',{title:'Layer order'});
    const add=async(name,type='rect',parentId)=>{

@@ -92,6 +92,10 @@ impl Tool {
 pub enum Action {
     New,
     Files,
+    Mcp,
+    CopyMcpConfiguration,
+    Collaborate,
+    Collaboration(&'static str),
     Library,
     TabOverflow,
     ToolMenu(crate::figcraft_chrome::DockGroup),
@@ -156,6 +160,8 @@ pub enum Inspector {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Popup {
     Files,
+    Mcp,
+    Collaboration,
     Tabs,
     InspectorZoom,
     InspectorLayer,
@@ -321,6 +327,12 @@ pub struct App {
     pub access: Option<accesskit_winit::Adapter>,
     pub proxy: EventLoopProxy<Event>,
     pub bridge: Bridge,
+    profile: PathBuf,
+    pub service_connected: bool,
+    pub collaboration_document: Option<String>,
+    pub collaboration: Value,
+    pub collaboration_pending: bool,
+    last_presence: Instant,
     scene_sender: SyncSender<SceneRequest>,
     scene_pending: bool,
     pub documents: Vec<DocumentEntry>,
@@ -400,7 +412,7 @@ impl App {
         smoke_size: Option<(u32, u32)>,
     ) -> Self {
         let resource_profile = profile.clone();
-        let bridge = Bridge::start(profile, proxy.clone());
+        let bridge = Bridge::start(profile.clone(), proxy.clone());
         let (scene_sender, receiver) = mpsc::sync_channel::<SceneRequest>(1);
         let scene_proxy = proxy.clone();
         thread::spawn(move || {
@@ -497,6 +509,12 @@ impl App {
             access: None,
             proxy,
             bridge,
+            profile,
+            service_connected: false,
+            collaboration_document: None,
+            collaboration: Value::Null,
+            collaboration_pending: false,
+            last_presence: Instant::now(),
             scene_sender,
             scene_pending: false,
             documents: vec![],
@@ -563,6 +581,49 @@ impl App {
             clipboard: arboard::Clipboard::new().ok(),
         }
     }
+    fn collaboration_request(&mut self, action: &'static str, args: Value) {
+        match self.bridge.send(Request::Collaboration { action, args }) {
+            Ok(()) => {
+                self.collaboration_pending = true;
+                self.error = None;
+            }
+            Err(error) => self.error = Some(error),
+        }
+    }
+
+    pub fn mcp_configuration(&self) -> Result<String, String> {
+        let cli = std::env::current_exe()
+            .map_err(|e| e.to_string())?
+            .with_file_name(if cfg!(windows) {
+                "omc-cli.exe"
+            } else {
+                "omc-cli"
+            });
+        if !cli.is_file() {
+            return Err("The MCP CLI is missing from this build.".into());
+        }
+        let profile = std::path::absolute(&self.profile).map_err(|e| e.to_string())?;
+        let cli = cli
+            .to_str()
+            .ok_or("The MCP executable path is not valid Unicode.")?;
+        let profile = profile
+            .to_str()
+            .ok_or("The MCP profile path is not valid Unicode.")?;
+        serde_json::to_string_pretty(&json!({
+            "mcpServers": {
+                "oh-my-canvas": {
+                    "command": cli,
+                    "args": ["--profile", profile]
+                },
+                "oh-my-canvas-figcraft": {
+                    "command": cli,
+                    "args": ["--profile", profile, "--dialect", "figcraft"]
+                }
+            }
+        }))
+        .map_err(|e| e.to_string())
+    }
+
     pub fn drag_translations(&self) -> BTreeMap<String, (f64, f64)> {
         if let Some(Drag::Move {
             positions, delta, ..
@@ -770,6 +831,9 @@ impl App {
     }
     pub fn action_available(&self, action: &Action) -> bool {
         if self.closing
+            || matches!(action, Action::Collaboration(_)) && self.collaboration_pending
+            || matches!(action, Action::Collaboration(action) if *action != "join")
+                && self.collaboration_document.is_none()
             || matches!(
                 action,
                 Action::InspectorIcon(_, crate::inspector_design::Command::Disabled)
@@ -832,6 +896,59 @@ impl App {
             return;
         }
         match action {
+            Action::Collaborate => {
+                if previous_popup != Some(Popup::Collaboration) {
+                    self.popup = Some(Popup::Collaboration);
+                    self.collaboration_document = self.active.clone();
+                    self.collaboration = Value::Null;
+                    if self.collaboration_document.is_some() && !self.collaboration_pending {
+                        self.collaboration_request(
+                            "status",
+                            json!({"documentId":self.collaboration_document}),
+                        );
+                    }
+                }
+            }
+            Action::Collaboration(action) => {
+                self.popup = previous_popup;
+                let args = if action == "join" {
+                    let link = self
+                        .clipboard
+                        .as_mut()
+                        .and_then(|clip| clip.get_text().ok());
+                    match link {
+                        Some(link) if !link.trim().is_empty() => {
+                            json!({"invite":link.trim(),"name":"Guest"})
+                        }
+                        _ => {
+                            self.error = Some("Copy a native OMC invitation first.".into());
+                            return;
+                        }
+                    }
+                } else {
+                    json!({"documentId":self.collaboration_document,"name":"Host"})
+                };
+                self.collaboration_request(action, args);
+            }
+            Action::Mcp => {
+                self.popup = (previous_popup != Some(Popup::Mcp)).then_some(Popup::Mcp);
+            }
+            Action::CopyMcpConfiguration => {
+                self.popup = previous_popup;
+                match self.mcp_configuration().and_then(|config| {
+                    self.clipboard
+                        .as_mut()
+                        .ok_or("The system clipboard is unavailable.".to_string())?
+                        .set_text(config)
+                        .map_err(|error| error.to_string())
+                }) {
+                    Ok(()) => {
+                        self.error = None;
+                        self.status = "MCP configuration copied.".into();
+                    }
+                    Err(error) => self.error = Some(error),
+                }
+            }
             Action::Files => {
                 if matches!(self.inspector, Inspector::Assets | Inspector::Tokens) {
                     self.inspector = Inspector::Design;
@@ -2291,7 +2408,50 @@ impl App {
     }
     fn handle_response(&mut self, response: Response) {
         match response {
+            Response::Collaboration { action, result } => {
+                if action != "cursor" {
+                    self.collaboration_pending = false;
+                }
+                match result {
+                    Ok((state, document)) => {
+                        if action != "join"
+                            && state["documentId"]
+                                .as_str()
+                                .and_then(|id| uuid::Uuid::parse_str(id).ok())
+                                .map(|id| format!("doc_{}", id.simple()))
+                                != self.collaboration_document
+                        {
+                            return;
+                        }
+                        if let Some(document) = document {
+                            self.collaboration_document = Some(document.id.clone());
+                            self.handle_response(Response::Snapshot {
+                                document,
+                                mutation: false,
+                                activate: true,
+                            });
+                        }
+                        if action == "invite" {
+                            let copied = state["invite"].as_str().and_then(|link| {
+                                self.clipboard.as_mut().map(|clip| clip.set_text(link))
+                            });
+                            match copied {
+                                Some(Ok(())) => {
+                                    self.status =
+                                        "Invitation copied. Anyone with it can edit.".into()
+                                }
+                                _ => self.error = Some("Could not copy the invitation.".into()),
+                            }
+                        } else {
+                            self.collaboration = state;
+                        }
+                    }
+                    Err(error) if action != "cursor" => self.error = Some(error),
+                    Err(_) => {}
+                }
+            }
             Response::Connected => {
+                self.service_connected = true;
                 self.error = None;
                 self.status = "Ready".into();
                 self.send(Request::Refresh);
@@ -2836,6 +2996,34 @@ impl ApplicationHandler<Event> for App {
                 Instant::now() + Duration::from_millis(100),
             ));
             return;
+        }
+        if !self.collaboration_pending
+            && !self.pending
+            && self.last_presence.elapsed() >= Duration::from_millis(500)
+            && matches!(
+                self.collaboration["mode"].as_str(),
+                Some("hosting" | "connected" | "reconnecting")
+            )
+            && let Some(id) = self.collaboration_document.as_ref()
+        {
+            self.last_presence = Instant::now();
+            let cursor = if self.active.as_ref() == Some(id)
+                && self
+                    .window
+                    .as_ref()
+                    .is_some_and(|window| window.has_focus())
+                && self.canvas_rect().contains(self.cursor.0, self.cursor.1)
+                && let Some(page) = self.page.as_ref()
+            {
+                let (x, y) = self.world(self.cursor.0, self.cursor.1);
+                json!({"x":x,"y":y,"page":page,"selection":self.selected.iter().take(16).collect::<Vec<_>>()})
+            } else {
+                Value::Null
+            };
+            let _ = self.bridge.send(Request::Collaboration {
+                action: "cursor",
+                args: json!({"documentId":id,"cursor":cursor}),
+            });
         }
         if !self.poll_pending
             && !self.pending
