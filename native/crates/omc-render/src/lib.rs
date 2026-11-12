@@ -1,4 +1,4 @@
-//! Browser-free CPU Skia rendering shared by desktop, screenshots and PDF exports.
+//! Browser-free Skia rendering shared by desktop, screenshots and PDF exports.
 mod paints;
 mod resources;
 
@@ -12,6 +12,7 @@ use skia_safe::{
     ImageInfo, Matrix, Paint, Path, RRect, Rect, Shader, Surface, TileMode, canvas::SaveLayerRec,
     paint::Style,
 };
+use std::collections::BTreeMap;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RenderError {
@@ -234,7 +235,7 @@ pub fn paint_scene(
     scene: &Scene,
     resources: &dyn ResourceProvider,
 ) -> Result<Vec<Diagnostic>, RenderError> {
-    paint_scene_preview(canvas, scene, resources, &std::collections::BTreeMap::new())
+    paint_scene_preview(canvas, scene, resources, &BTreeMap::new())
 }
 
 /// Non-authoritative gesture preview. Offscreen/export callers use paint_scene
@@ -243,7 +244,7 @@ pub fn paint_scene_preview(
     canvas: &Canvas,
     scene: &Scene,
     resources: &dyn ResourceProvider,
-    translations: &std::collections::BTreeMap<String, (f64, f64)>,
+    translations: &BTreeMap<String, (f64, f64)>,
 ) -> Result<Vec<Diagnostic>, RenderError> {
     if translations
         .values()
@@ -260,9 +261,118 @@ pub fn paint_scene_preview(
             resources,
             &mut diagnostics,
             translations,
+            None,
         )?;
     }
     Ok(diagnostics)
+}
+
+/// Splits the painter's order into stationary and moving runs. The desktop
+/// caches stationary runs independently so moving layers retain their z-order.
+pub struct MovePaintPlan {
+    spans: Vec<(usize, usize)>,
+    moving: Vec<bool>,
+}
+
+impl MovePaintPlan {
+    pub fn new(scene: &Scene, translations: &BTreeMap<String, (f64, f64)>) -> Option<Self> {
+        if translations.is_empty() || scene.items.is_empty() {
+            return None;
+        }
+        let mut plan = Self {
+            spans: vec![(0, 0); scene.items.len()],
+            moving: Vec::new(),
+        };
+        plan.assign(scene, scene.root, translations, false)?;
+        plan.moving.contains(&true).then_some(plan)
+    }
+
+    fn assign(
+        &mut self,
+        scene: &Scene,
+        index: usize,
+        translations: &BTreeMap<String, (f64, f64)>,
+        inherited_motion: bool,
+    ) -> Option<()> {
+        let item = &scene.items[index];
+        if item.hidden {
+            let current = self.moving.len().saturating_sub(1);
+            self.spans[index] = (current, current);
+            return Some(());
+        }
+        let moving = inherited_motion || translations.contains_key(&item.id);
+        if self.moving.last() != Some(&moving) {
+            // shortcut: unusually fragmented selections use the direct painter to bound retained layers.
+            if self.moving.len() == 12 {
+                return None;
+            }
+            self.moving.push(moving);
+        }
+        let first = self.moving.len() - 1;
+        for &child in &item.children {
+            self.assign(scene, child, translations, moving)?;
+        }
+        let last = self.moving.len() - 1;
+        let uses_backdrop = |blend: &str| !matches!(blend, "normal" | "pass-through");
+        if item
+            .style
+            .get("mix-blend-mode")
+            .or_else(|| item.properties.get("blendMode").and_then(Value::as_str))
+            .is_some_and(uses_backdrop)
+            || ["fills", "strokes"].iter().any(|key| {
+                item.properties
+                    .get(*key)
+                    .and_then(Value::as_array)
+                    .is_some_and(|paints| {
+                        paints.iter().any(|paint| {
+                            paint
+                                .get("blendMode")
+                                .and_then(Value::as_str)
+                                .is_some_and(uses_backdrop)
+                        })
+                    })
+            })
+        {
+            return None;
+        }
+        if first != last
+            && (item.style.number("opacity", 1.) < 1.
+                || item
+                    .style
+                    .get("filter")
+                    .is_some_and(|filter| filter != "none")
+                || ["maskType", "maskMode", "mask", "isMaskGroup"]
+                    .iter()
+                    .any(|key| item.properties.contains_key(*key)))
+        {
+            return None;
+        }
+        self.spans[index] = (first, last);
+        Some(())
+    }
+
+    pub fn passes(&self) -> impl Iterator<Item = (usize, bool)> + '_ {
+        self.moving.iter().copied().enumerate()
+    }
+
+    pub fn paint(
+        &self,
+        pass: usize,
+        canvas: &Canvas,
+        scene: &Scene,
+        resources: &dyn ResourceProvider,
+        translations: &BTreeMap<String, (f64, f64)>,
+    ) -> Result<(), RenderError> {
+        paint_item(
+            canvas,
+            scene,
+            scene.root,
+            resources,
+            &mut Vec::new(),
+            translations,
+            Some((self, pass)),
+        )
+    }
 }
 
 fn paint_item(
@@ -271,12 +381,23 @@ fn paint_item(
     index: usize,
     resources: &dyn ResourceProvider,
     diagnostics: &mut Vec<Diagnostic>,
-    translations: &std::collections::BTreeMap<String, (f64, f64)>,
+    translations: &BTreeMap<String, (f64, f64)>,
+    pass: Option<(&MovePaintPlan, usize)>,
 ) -> Result<(), RenderError> {
     let item = &scene.items[index];
     if item.hidden {
         return Ok(());
     }
+    let own = match pass {
+        Some((plan, pass)) => {
+            let (first, last) = plan.spans[index];
+            if !(first..=last).contains(&pass) {
+                return Ok(());
+            }
+            first == pass
+        }
+        None => true,
+    };
     let saved = canvas.save();
     let result = (|| {
         if let Some((x, y)) = translations.get(&item.id) {
@@ -331,92 +452,94 @@ fn paint_item(
         if grouped {
             canvas.save_layer(&SaveLayerRec::default().paint(&layer));
         }
-        for key in ["shader", "effect", "shaderEffect"] {
-            if let Some(value) = item.properties.get(key) {
-                diagnose(
-                    scene,
-                    item,
-                    key,
-                    &format!("Native shader registry port is pending: {value}"),
-                    diagnostics,
-                )?;
-            }
-        }
         let shape = shape_path(item)?;
-        paints::shadows(canvas, scene, item, &shape, diagnostics)?;
-        let mut fill = Paint::default();
-        fill.set_anti_alias(true);
-        let has_fills = if item.kind == NodeKind::Text {
-            if let Some(fills) = item.properties.get("fills").and_then(Value::as_array) {
-                if fills.len() > 1
-                    || fills
-                        .iter()
-                        .any(|p| p.get("gradient").is_some() || p.get("image").is_some())
-                {
+        if own {
+            for key in ["shader", "effect", "shaderEffect"] {
+                if let Some(value) = item.properties.get(key) {
                     diagnose(
                         scene,
                         item,
-                        "text.fills",
-                        "Multiple/gradient text paints require glyph-mask painting",
+                        key,
+                        &format!("Native shader registry port is pending: {value}"),
                         diagnostics,
                     )?;
                 }
             }
-            false
-        } else {
-            paints::stack(canvas, scene, item, &shape, "fills", diagnostics)?
-        };
-        if let Some(background) = item
-            .style
-            .get("background-color")
-            .or_else(|| item.style.get("background"))
-            .filter(|v| *v != "none" && !has_fills)
-        {
-            if let Some(color) = parse_color(background) {
-                fill.set_color4f(Color4f::new(color.r, color.g, color.b, color.a), None);
-                canvas.draw_path(&shape, &fill);
-            } else if background.starts_with("linear-gradient(")
-                || background.starts_with("radial-gradient(")
+            paints::shadows(canvas, scene, item, &shape, diagnostics)?;
+            let mut fill = Paint::default();
+            fill.set_anti_alias(true);
+            let has_fills = if item.kind == NodeKind::Text {
+                if let Some(fills) = item.properties.get("fills").and_then(Value::as_array) {
+                    if fills.len() > 1
+                        || fills
+                            .iter()
+                            .any(|p| p.get("gradient").is_some() || p.get("image").is_some())
+                    {
+                        diagnose(
+                            scene,
+                            item,
+                            "text.fills",
+                            "Multiple/gradient text paints require glyph-mask painting",
+                            diagnostics,
+                        )?;
+                    }
+                }
+                false
+            } else {
+                paints::stack(canvas, scene, item, &shape, "fills", diagnostics)?
+            };
+            if let Some(background) = item
+                .style
+                .get("background-color")
+                .or_else(|| item.style.get("background"))
+                .filter(|v| *v != "none" && !has_fills)
             {
+                if let Some(color) = parse_color(background) {
+                    fill.set_color4f(Color4f::new(color.r, color.g, color.b, color.a), None);
+                    canvas.draw_path(&shape, &fill);
+                } else if background.starts_with("linear-gradient(")
+                    || background.starts_with("radial-gradient(")
+                {
+                    if let Some(shader) = gradient(background, item.width, item.height) {
+                        fill.set_shader(shader);
+                        canvas.draw_path(&shape, &fill);
+                    } else {
+                        diagnose(scene, item, "background", background, diagnostics)?;
+                    }
+                } else {
+                    diagnose(scene, item, "background-color", background, diagnostics)?;
+                }
+            }
+            if let Some(background) = item.style.get("background-image") {
                 if let Some(shader) = gradient(background, item.width, item.height) {
                     fill.set_shader(shader);
                     canvas.draw_path(&shape, &fill);
-                } else {
-                    diagnose(scene, item, "background", background, diagnostics)?;
+                } else if background != "none" {
+                    diagnose(scene, item, "background-image", background, diagnostics)?;
                 }
-            } else {
-                diagnose(scene, item, "background-color", background, diagnostics)?;
             }
-        }
-        if let Some(background) = item.style.get("background-image") {
-            if let Some(shader) = gradient(background, item.width, item.height) {
-                fill.set_shader(shader);
-                canvas.draw_path(&shape, &fill);
-            } else if background != "none" {
-                diagnose(scene, item, "background-image", background, diagnostics)?;
+            if item.kind == NodeKind::Image {
+                draw_image(canvas, item, resources, scene.strict, diagnostics)?;
             }
-        }
-        if item.kind == NodeKind::Image {
-            draw_image(canvas, item, resources, scene.strict, diagnostics)?;
-        }
-        if let Some(text) = &item.text {
-            text.paint(canvas, item.text_offset.0, item.text_offset.1);
-        }
-        let has_strokes = paints::stack(canvas, scene, item, &shape, "strokes", diagnostics)?;
-        if let Some(stroke) = item.style.color("border-color").filter(|_| !has_strokes) {
-            let width = item
-                .style
-                .get("border-width")
-                .and_then(|v| resolve_length(v, LengthContext::default()))
-                .unwrap_or(1.);
-            if width > 0. {
-                let mut paint = Paint::default();
-                paint
-                    .set_anti_alias(true)
-                    .set_style(Style::Stroke)
-                    .set_stroke_width(width as f32)
-                    .set_color4f(Color4f::new(stroke.r, stroke.g, stroke.b, stroke.a), None);
-                canvas.draw_path(&shape, &paint);
+            if let Some(text) = &item.text {
+                text.paint(canvas, item.text_offset.0, item.text_offset.1);
+            }
+            let has_strokes = paints::stack(canvas, scene, item, &shape, "strokes", diagnostics)?;
+            if let Some(stroke) = item.style.color("border-color").filter(|_| !has_strokes) {
+                let width = item
+                    .style
+                    .get("border-width")
+                    .and_then(|v| resolve_length(v, LengthContext::default()))
+                    .unwrap_or(1.);
+                if width > 0. {
+                    let mut paint = Paint::default();
+                    paint
+                        .set_anti_alias(true)
+                        .set_style(Style::Stroke)
+                        .set_stroke_width(width as f32)
+                        .set_color4f(Color4f::new(stroke.r, stroke.g, stroke.b, stroke.a), None);
+                    canvas.draw_path(&shape, &paint);
+                }
             }
         }
         if item.clip {
@@ -467,7 +590,15 @@ fn paint_item(
                 "alpha" | "luminance" => {
                     canvas.save_layer(&SaveLayerRec::default());
                     for child in content {
-                        paint_item(canvas, scene, child, resources, diagnostics, translations)?;
+                        paint_item(
+                            canvas,
+                            scene,
+                            child,
+                            resources,
+                            diagnostics,
+                            translations,
+                            pass,
+                        )?;
                     }
                     let mut mask_paint = Paint::default();
                     mask_paint.set_blend_mode(BlendMode::DstIn);
@@ -475,7 +606,15 @@ fn paint_item(
                         mask_paint.set_color_filter(skia_safe::ColorFilter::luma());
                     }
                     canvas.save_layer(&SaveLayerRec::default().paint(&mask_paint));
-                    paint_item(canvas, scene, mask, resources, diagnostics, translations)?;
+                    paint_item(
+                        canvas,
+                        scene,
+                        mask,
+                        resources,
+                        diagnostics,
+                        translations,
+                        pass,
+                    )?;
                     canvas.restore();
                     canvas.restore();
                 }
@@ -504,19 +643,50 @@ fn paint_item(
                     }
                     canvas.clip_path(&path, None, true);
                     for child in content {
-                        paint_item(canvas, scene, child, resources, diagnostics, translations)?;
+                        paint_item(
+                            canvas,
+                            scene,
+                            child,
+                            resources,
+                            diagnostics,
+                            translations,
+                            pass,
+                        )?;
                     }
                 }
                 other => {
                     diagnose(scene, item, "maskMode", other, diagnostics)?;
                     for child in &item.children {
-                        paint_item(canvas, scene, *child, resources, diagnostics, translations)?;
+                        paint_item(
+                            canvas,
+                            scene,
+                            *child,
+                            resources,
+                            diagnostics,
+                            translations,
+                            pass,
+                        )?;
                     }
                 }
             }
         } else if mask_mode.is_none() {
-            for child in &item.children {
-                paint_item(canvas, scene, *child, resources, diagnostics, translations)?;
+            let mut children = item.children.as_slice();
+            if let Some((plan, pass)) = pass {
+                // Sibling spans follow painter order. Skip entire stationary subtrees on move.
+                let first = children.partition_point(|child| plan.spans[*child].1 < pass);
+                let last = children.partition_point(|child| plan.spans[*child].0 <= pass);
+                children = &children[first..last];
+            }
+            for child in children {
+                paint_item(
+                    canvas,
+                    scene,
+                    *child,
+                    resources,
+                    diagnostics,
+                    translations,
+                    pass,
+                )?;
             }
         }
         if grouped {

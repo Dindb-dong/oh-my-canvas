@@ -2,11 +2,16 @@ mod accessibility;
 mod app;
 mod client;
 mod commands;
+mod figcraft_chrome;
 mod geometry;
+#[cfg(target_os = "macos")]
+mod gpu_presenter;
 mod inspector;
+mod move_cache;
 mod paint;
 mod pan_cache;
 mod scene_cache;
+mod tab_strip;
 mod text;
 mod text_ui;
 

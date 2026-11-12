@@ -10,6 +10,8 @@ Electron's MIT notice and complete `LICENSES.chromium.html` are copied unchanged
 
 Tabler Icons v3.50.0 (MIT), pinned to commit `6904efd245391ad396df17654738f52f6da8c40e`, supplies the editor and app interface icons. The [vendored subset](editor/ui/icons/tabler/README.md) preserves unmodified upstream SVGs, full copyright/license text, source URLs and SHA-256 hashes. The distribution includes its license and manifest in `dist/licenses/tabler-icons/`. This replaces the former Lucide dependency; the app brand logo is unchanged.
 
+The native editor adapts code from [FigCraft v0.17.0](https://github.com/storytold/figcraft/tree/5bc71c1a2c860adc106801751faf45920e2e46c9/crates/ui-egui/src) under the [upstream MIT license](docs/licensing/figcraft-LICENSE-MIT.txt). Sources include `canvas/render.rs` for overscan, `tabs.rs` for tab sizing and overflow, `toolbar.rs`, `panels/layers.rs` and `icons/draw.rs` for the dock, rail and glyphs, and `widgets.rs`, `panels/right.rs` and `panels/typography/fields.rs` for the inspector.
+
 ## Fonts and assets
 
 Runtime IBM Plex Sans and Noto Sans KR remain OFL-1.1 with license copies in `public/fonts/`. The five unchanged Pretendard/Noto Sans KR test-fixture files retain [their notices](fixtures/fonts/THIRD_PARTY_FONT_NOTICES.md), full OFL text, source URLs and hashes. Noto Color Emoji comes from its OFL-licensed development package. Font rights are not replaced by the project MIT grant.

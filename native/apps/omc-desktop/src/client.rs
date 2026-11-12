@@ -124,6 +124,92 @@ struct Descriptor {
     token: String,
 }
 
+impl Descriptor {
+    fn ready(path: &Path, http: &reqwest::blocking::Client) -> Result<Option<Self>, String> {
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(format!("Could not read the service endpoint: {error}")),
+        };
+        if bytes.len() > 16 * 1024 {
+            return Err("The service descriptor is too large.".into());
+        }
+        let mut descriptor: Self = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("Invalid service descriptor: {e}"))?;
+        if descriptor.protocol != "omc.service/1" {
+            return Err("This service uses an incompatible protocol.".into());
+        }
+        let url = reqwest::Url::parse(&descriptor.endpoint)
+            .map_err(|_| "Invalid service endpoint.".to_string())?;
+        if url.scheme() != "http"
+            || !matches!(
+                url.host_str(),
+                Some("127.0.0.1") | Some("[::1]") | Some("::1")
+            )
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return Err(
+                "The service endpoint must use an authenticated loopback connection.".into(),
+            );
+        }
+        descriptor.endpoint = descriptor.endpoint.trim_end_matches('/').to_string();
+        let healthy = http
+            .get(format!("{}/health", descriptor.endpoint))
+            .bearer_auth(&descriptor.token)
+            .timeout(Duration::from_millis(200))
+            .send()
+            .is_ok_and(|response| response.status().is_success());
+        Ok(healthy.then_some(descriptor))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+
+    #[test]
+    fn stale_descriptor_stops_being_ready_when_its_service_exits() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            let mut request = BufReader::new(&stream);
+            let mut line = String::new();
+            request.read_line(&mut line).unwrap();
+            assert_eq!(line.trim_end(), "GET /health HTTP/1.1");
+            let authenticated = request
+                .lines()
+                .map_while(Result::ok)
+                .take_while(|line| !line.is_empty())
+                .any(|line| line.eq_ignore_ascii_case("authorization: Bearer test-token"));
+            assert!(authenticated);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
+        });
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let descriptor = serde_json::to_vec(
+            &json!({"protocol":"omc.service/1","endpoint":endpoint,"token":"test-token"}),
+        )
+        .unwrap();
+        fs::write(file.path(), &descriptor).unwrap();
+        let http = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap();
+        assert!(Descriptor::ready(file.path(), &http).unwrap().is_some());
+        server.join().unwrap();
+        assert!(Descriptor::ready(file.path(), &http).unwrap().is_none());
+        assert_eq!(fs::read(file.path()).unwrap(), descriptor);
+    }
+}
+
 pub struct Bridge {
     pub sender: SyncSender<Request>,
 }
@@ -196,7 +282,15 @@ struct Client {
 impl Client {
     fn connect(profile: &Path) -> Result<Self, String> {
         let path = profile.join("native-v1/service.json");
-        if !path.exists() {
+        let http = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .build()
+            .map_err(|e| e.to_string())?;
+        let descriptor = if let Some(descriptor) = Descriptor::ready(&path, &http)? {
+            descriptor
+        } else {
             let executable = std::env::current_exe().map_err(|e| e.to_string())?;
             let name = if cfg!(windows) {
                 "omc-service.exe"
@@ -218,42 +312,21 @@ impl Client {
                 .spawn()
                 .map_err(|e| format!("Could not start the document service: {e}"))?;
             let until = Instant::now() + Duration::from_secs(10);
-            while !path.exists() && Instant::now() < until {
+            loop {
+                if let Some(descriptor) = Descriptor::ready(&path, &http)? {
+                    break descriptor;
+                }
+                if Instant::now() >= until {
+                    return Err(
+                        "The document service did not become ready for this profile.".into(),
+                    );
+                }
                 thread::sleep(Duration::from_millis(100));
             }
-        }
-        let bytes =
-            fs::read(&path).map_err(|e| format!("Could not read the service endpoint: {e}"))?;
-        if bytes.len() > 16 * 1024 {
-            return Err("The service descriptor is too large.".into());
-        }
-        let descriptor: Descriptor = serde_json::from_slice(&bytes)
-            .map_err(|e| format!("Invalid service descriptor: {e}"))?;
-        if descriptor.protocol != "omc.service/1" {
-            return Err("This service uses an incompatible protocol.".into());
-        }
-        let url = reqwest::Url::parse(&descriptor.endpoint)
-            .map_err(|_| "Invalid service endpoint.".to_string())?;
-        if url.scheme() != "http"
-            || !matches!(
-                url.host_str(),
-                Some("127.0.0.1") | Some("[::1]") | Some("::1")
-            )
-            || !url.username().is_empty()
-            || url.password().is_some()
-        {
-            return Err(
-                "The service endpoint must use an authenticated loopback connection.".into(),
-            );
-        }
-        let http = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|e| e.to_string())?;
+        };
         let mut client = Self {
             http,
-            endpoint: descriptor.endpoint.trim_end_matches('/').to_string(),
+            endpoint: descriptor.endpoint,
             token: descriptor.token,
             session: None,
         };

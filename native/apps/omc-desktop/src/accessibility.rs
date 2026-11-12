@@ -1,7 +1,7 @@
 //! A real native accessibility tree for controls and the active text buffer.
 //! OS screen-reader journeys remain separate platform qualification gates.
 use crate::{
-    app::{Action, App, EditTarget, FOOTER},
+    app::{Action, App, EditTarget, FOOTER, HEADER},
     geometry::Rect,
 };
 use accesskit::{
@@ -35,6 +35,8 @@ pub fn tree(app: &App) -> TreeUpdate {
         children.push(id);
         let mut node = Node::new(if control.field_value.is_some() {
             Role::TextInput
+        } else if control.rect.y < HEADER && matches!(control.action, Action::Open(_)) {
+            Role::Tab
         } else {
             Role::Button
         });
@@ -190,7 +192,10 @@ pub fn handle(app: &mut App, event: accesskit_winit::Event) {
                 .cloned()
             {
                 match (request.action, request.data) {
-                    (AxAction::Focus, _) => app.focus = control.id,
+                    (AxAction::Focus, _) => {
+                        app.focus = control.id;
+                        app.keyboard_focus_visible = true;
+                    }
                     (AxAction::Click, _) => app.action(control.action),
                     (AxAction::SetValue, Some(ActionData::Value(value))) => {
                         if matches!(control.action, Action::Field(_)) {

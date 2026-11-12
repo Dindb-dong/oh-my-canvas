@@ -25,16 +25,47 @@ use uuid::Uuid;
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
-    event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent},
+    event::{ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy},
     keyboard::{Key, ModifiersState, NamedKey},
-    window::{Window, WindowId},
+    window::{CursorIcon, Window, WindowId},
 };
 
-pub const HEADER: f64 = 52.0;
-pub const LEFT: f64 = 228.0;
-pub const RIGHT: f64 = 240.0;
-pub const FOOTER: f64 = 30.0;
+pub const HEADER: f64 = crate::tab_strip::HEIGHT;
+pub const LEFT: f64 = crate::figcraft_chrome::RAIL_WIDTH + crate::figcraft_chrome::SIDEBAR_WIDTH;
+pub const RIGHT: f64 = crate::figcraft_chrome::INSPECTOR_WIDTH;
+pub const FOOTER: f64 = 20.;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScrollTarget {
+    Layers,
+    Canvas,
+    Inspector,
+    Outside,
+}
+
+fn scroll_target_at(canvas: Rect, inspector_visible: bool, cursor: (f64, f64)) -> ScrollTarget {
+    let (x, y) = cursor;
+    if y < canvas.y || y >= canvas.y + canvas.height {
+        ScrollTarget::Outside
+    } else if canvas.contains(x, y) {
+        ScrollTarget::Canvas
+    } else if x < canvas.x {
+        ScrollTarget::Layers
+    } else if inspector_visible {
+        ScrollTarget::Inspector
+    } else {
+        ScrollTarget::Outside
+    }
+}
+
+fn scroll_delta(delta: MouseScrollDelta, scale: f64, shift: bool) -> (f64, f64) {
+    match delta {
+        MouseScrollDelta::LineDelta(x, y) if shift && x == 0. => (f64::from(y) * 30., 0.),
+        MouseScrollDelta::LineDelta(x, y) => (f64::from(x) * 30., f64::from(y) * 30.),
+        MouseScrollDelta::PixelDelta(p) => (p.x / scale, p.y / scale),
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
@@ -53,14 +84,19 @@ impl Tool {
             Self::Rect => "Rectangle",
             Self::Ellipse => "Ellipse",
             Self::Text => "Text",
-            Self::Pan => "Pan",
+            Self::Pan => "Pan canvas (H)",
         }
     }
 }
 #[derive(Clone, Debug)]
 pub enum Action {
     New,
+    Files,
+    Library,
+    TabOverflow,
+    ToolMenu(crate::figcraft_chrome::DockGroup),
     Import,
+    ImportHtml,
     Export,
     Open(String),
     Close(String),
@@ -102,6 +138,14 @@ pub enum Inspector {
     Design,
     Text,
     Assets,
+    Tokens,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Popup {
+    Files,
+    Tabs,
+    Tools(crate::figcraft_chrome::DockGroup),
 }
 #[derive(Clone, Debug)]
 pub struct Control {
@@ -171,11 +215,18 @@ pub enum Drag {
     },
 }
 
+struct PendingMove {
+    sequence: u64,
+    translations: BTreeMap<String, (f64, f64)>,
+    delta: (f64, f64),
+}
+
 pub struct LayerRow {
     pub id: String,
     pub name: String,
     pub depth: usize,
     pub has_children: bool,
+    pub auto_layout: bool,
 }
 pub struct SceneReply {
     id: String,
@@ -225,6 +276,7 @@ fn layer_index(document: &DocumentSnapshot, page: Option<&str>) -> Vec<LayerRow>
             name: node_name(node),
             depth,
             has_children: kids.is_some_and(|k| !k.is_empty()),
+            auto_layout: false,
         });
         if let Some(kids) = kids {
             stack.extend(kids.iter().rev().map(|child| (*child, depth + 1)));
@@ -240,7 +292,6 @@ struct SceneRequest {
 }
 
 pub struct App {
-    pub window: Option<Rc<Window>>,
     pub surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
     pub access: Option<accesskit_winit::Adapter>,
     pub proxy: EventLoopProxy<Event>,
@@ -256,14 +307,23 @@ pub struct App {
     pub scene_generation: u64,
     pub scene_cache: RefCell<SceneCache>,
     pub pan_cache: RefCell<PanCache>,
+    pub move_cache: RefCell<crate::move_cache::MoveCache>,
+    #[cfg(target_os = "macos")]
+    pub gpu_presenter: Option<crate::gpu_presenter::MetalPresenter>,
+    pub window: Option<Rc<Window>>,
+    occluded: bool,
     pan_view: bool,
+    scroll_target: Option<ScrollTarget>,
     pub resources: Arc<BTreeMap<String, Vec<u8>>>,
     pub camera: Camera,
     pub cameras: BTreeMap<(String, String), Camera>,
     pub selected: BTreeSet<String>,
     pub tool: Tool,
     pub cursor: (f64, f64),
+    cursor_icon: CursorIcon,
     pub drag: Option<Drag>,
+    drag_button: Option<MouseButton>,
+    pending_move: Option<PendingMove>,
     pub editing: Option<Editing>,
     ime_selection: Option<Value>,
     ime_capture_pending: bool,
@@ -272,6 +332,9 @@ pub struct App {
     pub recovery_text: Option<String>,
     pub controls: Vec<Control>,
     pub focus: u64,
+    pub keyboard_focus_visible: bool,
+    pub popup: Option<Popup>,
+    pub library_open: bool,
     pub modifiers: ModifiersState,
     pub space_pan: bool,
     pub pending: bool,
@@ -281,7 +344,7 @@ pub struct App {
     pub height: f64,
     pub layer_scroll: usize,
     pub inspector: Inspector,
-    pub inspector_scroll: usize,
+    pub inspector_scroll: f64,
     pub layers: Vec<LayerRow>,
     pub visible_layers: Vec<usize>,
     pub collapsed: BTreeSet<String>,
@@ -295,6 +358,8 @@ pub struct App {
     smoke_size: Option<(u32, u32)>,
     pub smoke_failed: bool,
     pub presented: bool,
+    trace_frames: bool,
+    input_frame: Option<(&'static str, Instant)>,
     screenshot: Option<PathBuf>,
     pub clipboard: Option<arboard::Clipboard>,
 }
@@ -321,12 +386,26 @@ impl App {
                     time_ms: 0.0,
                     strict: false,
                 };
-                let layers = layer_index(&request.document, request.page.as_deref());
+                let mut layers = layer_index(&request.document, request.page.as_deref());
                 let result = build_scene(&request.document, &options).map_err(|e| e.to_string());
                 let mut resources = BTreeMap::new();
                 let mut resource_errors = vec![];
                 let mut reserved = 0usize;
                 if let Ok(scene) = &result {
+                    let automatic: BTreeSet<_> = scene
+                        .items
+                        .iter()
+                        .filter(|item| {
+                            matches!(
+                                item.style.get("display"),
+                                Some("flex" | "inline-flex" | "grid")
+                            )
+                        })
+                        .map(|item| item.id.as_str())
+                        .collect();
+                    for layer in &mut layers {
+                        layer.auto_layout = automatic.contains(layer.id.as_str());
+                    }
                     for item in &scene.items {
                         let hash = item
                             .properties
@@ -384,7 +463,10 @@ impl App {
         });
         Self {
             window: None,
+            occluded: false,
             surface: None,
+            #[cfg(target_os = "macos")]
+            gpu_presenter: None,
             access: None,
             proxy,
             bridge,
@@ -399,14 +481,19 @@ impl App {
             scene_generation: 0,
             scene_cache: RefCell::default(),
             pan_cache: RefCell::new(pan_cache),
+            move_cache: RefCell::default(),
             pan_view: false,
+            scroll_target: None,
             resources: Arc::default(),
             camera: Camera::default(),
             cameras: BTreeMap::new(),
             selected: BTreeSet::new(),
             tool: Tool::Select,
             cursor: (0., 0.),
+            cursor_icon: CursorIcon::Default,
             drag: None,
+            drag_button: None,
+            pending_move: None,
             editing: None,
             ime_selection: None,
             ime_capture_pending: false,
@@ -415,6 +502,9 @@ impl App {
             recovery_text: None,
             controls: vec![],
             focus: 1,
+            keyboard_focus_visible: false,
+            popup: None,
+            library_open: false,
             modifiers: ModifiersState::empty(),
             space_pan: false,
             pending: false,
@@ -424,7 +514,7 @@ impl App {
             height: 900.,
             layer_scroll: 0,
             inspector: Inspector::Design,
-            inspector_scroll: 0,
+            inspector_scroll: 0.,
             layers: vec![],
             visible_layers: vec![],
             collapsed: BTreeSet::new(),
@@ -438,21 +528,44 @@ impl App {
             smoke_size,
             smoke_failed: false,
             presented: false,
+            trace_frames: std::env::var_os("OMC_NATIVE_FRAME_TRACE").is_some(),
+            input_frame: None,
             screenshot,
             clipboard: arboard::Clipboard::new().ok(),
         }
     }
     pub fn drag_translations(&self) -> BTreeMap<String, (f64, f64)> {
-        let Some(Drag::Move {
+        if let Some(Drag::Move {
             positions, delta, ..
         }) = &self.drag
-        else {
-            return BTreeMap::new();
-        };
+        {
+            self.move_translations(positions, *delta)
+        } else {
+            self.pending_move
+                .as_ref()
+                .map(|preview| preview.translations.clone())
+                .unwrap_or_default()
+        }
+    }
+    pub fn move_delta(&self) -> Option<(f64, f64)> {
+        if let Some(Drag::Move { delta, .. }) = &self.drag {
+            Some(*delta)
+        } else {
+            self.pending_move.as_ref().map(|preview| preview.delta)
+        }
+    }
+    fn move_translations(
+        &self,
+        positions: &[(String, f64, f64)],
+        delta: (f64, f64),
+    ) -> BTreeMap<String, (f64, f64)> {
         positions
             .iter()
             .filter_map(|(id, _, _)| {
                 let doc = self.document()?;
+                if self.scene.as_ref()?.item(id)?.locked {
+                    return None;
+                }
                 let mut parent = doc.nodes.get(id).and_then(|n| n.parent_id.as_ref());
                 while let Some(p) = parent {
                     if self.selected.contains(p) {
@@ -474,7 +587,7 @@ impl App {
                     let zero = inverse.point(0., 0.);
                     (p.0 - zero.0, p.1 - zero.1)
                 } else {
-                    *delta
+                    delta
                 };
                 Some((id.clone(), local))
             })
@@ -491,7 +604,7 @@ impl App {
         self.document()?.nodes.get(id)
     }
     pub fn inspector_visible(&self) -> bool {
-        self.width >= 960.
+        self.width >= 960. || matches!(self.inspector, Inspector::Assets | Inspector::Tokens)
     }
     pub fn uses_pan_raster(&self) -> bool {
         self.pan_view
@@ -502,7 +615,7 @@ impl App {
             LEFT,
             HEADER,
             (self.width - LEFT - right).max(1.),
-            (self.height - HEADER - FOOTER).max(1.),
+            (self.height - HEADER).max(1.),
         )
     }
     pub fn world(&self, x: f64, y: f64) -> (f64, f64) {
@@ -518,6 +631,11 @@ impl App {
     fn redraw(&self) {
         if let Some(window) = &self.window {
             window.request_redraw();
+        }
+    }
+    fn trace_input(&mut self, kind: &'static str) {
+        if self.trace_frames && self.input_frame.is_none() {
+            self.input_frame = Some((kind, Instant::now()));
         }
     }
     fn schedule_scene(&mut self) {
@@ -572,6 +690,9 @@ impl App {
             return;
         }
         self.remember_camera();
+        self.pending_move = None;
+        self.move_cache.get_mut().clear();
+        self.library_open = false;
         self.active = Some(id.clone());
         self.selected.clear();
         self.page = self
@@ -619,6 +740,7 @@ impl App {
         if self.closing {
             return;
         }
+        let previous_popup = self.popup.take();
         if (self.pending || self.editing.is_some())
             && matches!(
                 action,
@@ -638,10 +760,41 @@ impl App {
             return;
         }
         match action {
+            Action::Files => {
+                if matches!(self.inspector, Inspector::Assets | Inspector::Tokens) {
+                    self.inspector = Inspector::Design;
+                    self.inspector_scroll = 0.;
+                } else {
+                    self.popup = (previous_popup != Some(Popup::Files)).then_some(Popup::Files);
+                }
+            }
+            Action::Library => {
+                if self.pending || self.editing.is_some() {
+                    self.error = Some("Finish the current edit before opening the library.".into());
+                    return;
+                }
+                self.remember_camera();
+                self.library_open = true;
+                self.active = None;
+                self.page = None;
+                self.scene = None;
+                self.selected.clear();
+                self.scene_cache.get_mut().clear();
+                self.pan_cache.get_mut().clear();
+                self.move_cache.get_mut().clear();
+                self.pending_move = None;
+            }
+            Action::TabOverflow => {
+                self.popup = (previous_popup != Some(Popup::Tabs)).then_some(Popup::Tabs);
+            }
+            Action::ToolMenu(group) => {
+                let popup = Popup::Tools(group);
+                self.popup = (previous_popup != Some(popup)).then_some(popup);
+            }
             Action::Inspector(tab) => {
                 self.commit_edit();
                 self.inspector = tab;
-                self.inspector_scroll = 0;
+                self.inspector_scroll = 0.;
             }
             Action::Reorder(forward) => {
                 if let (Some(doc), Some(node)) = (self.document(), self.node()) {
@@ -767,6 +920,23 @@ impl App {
                     }
                 }
             }
+            Action::ImportHtml => {
+                if self.pending || self.editing.is_some() {
+                    self.error = Some("Finish the current edit before importing HTML.".into());
+                    return;
+                }
+                let html = match self.clipboard.as_mut().map(|clip| clip.get_text()) {
+                    Some(Ok(html)) if !html.trim().is_empty() => html,
+                    _ => {
+                        self.error = Some("Copy HTML markup, then choose Paste HTML.".into());
+                        return;
+                    }
+                };
+                self.pending = true;
+                self.error = None;
+                self.status = "Importing editable layers…".into();
+                self.send(Request::ImportHtml { html });
+            }
             Action::Import | Action::Export => {
                 if self.pending || self.editing.is_some() {
                     self.error =
@@ -833,6 +1003,7 @@ impl App {
                     };
                     if !self.pending {
                         self.pending = true;
+                        self.error = None;
                         self.send(req);
                     }
                 }
@@ -871,6 +1042,9 @@ impl App {
             }
             Action::Layer(id) => {
                 self.commit_edit();
+                if !self.selected.contains(&id) {
+                    self.inspector_scroll = 0.;
+                }
                 if !self.modifiers.shift_key() {
                     self.selected.clear();
                 }
@@ -1292,6 +1466,7 @@ impl App {
     fn pointer_down(&mut self, button: MouseButton) {
         let (x, y) = self.cursor;
         if button == MouseButton::Left {
+            self.keyboard_focus_visible = false;
             if crate::text_ui::editor_rect(self).is_some_and(|area| area.contains(x, y)) {
                 crate::text_ui::pointer(self, x, y, self.modifiers.shift_key());
                 self.drag = Some(Drag::TextSelection);
@@ -1308,6 +1483,13 @@ impl App {
                 self.action(control.action);
                 return;
             }
+            self.popup = None;
+            if y < HEADER {
+                if let Some(window) = &self.window {
+                    let _ = window.drag_window();
+                }
+                return;
+            }
         }
         if crate::paint::palette_rect(self).is_some_and(|area| area.contains(x, y)) {
             return;
@@ -1317,7 +1499,11 @@ impl App {
             return;
         }
         let world = self.world(x, y);
-        if button == MouseButton::Middle || self.space_pan || self.tool == Tool::Pan {
+        if matches!(
+            button,
+            MouseButton::Middle | MouseButton::Back | MouseButton::Forward
+        ) || button == MouseButton::Left && (self.space_pan || self.tool == Tool::Pan)
+        {
             self.drag = Some(Drag::Pan {
                 origin: (x, y),
                 camera: self.camera,
@@ -1328,7 +1514,7 @@ impl App {
             return;
         }
         self.commit_edit();
-        if self.pending {
+        if self.pending || self.pending_move.is_some() {
             return;
         }
         if self.tool == Tool::Select && self.selected.len() == 1 && self.begin_resize(world) {
@@ -1511,16 +1697,27 @@ impl App {
                 positions, delta, ..
             } => {
                 if delta.0.abs() + delta.1.abs() > 0.1 {
-                    let commands:Vec<_>=positions.into_iter().filter(|(id,_,_)|{
-          // Moving both a selected parent and its child must not double the child's displacement.
-          let Some(doc)=self.document()else{return false;};let mut parent=doc.nodes.get(id).and_then(|n|n.parent_id.as_ref());while let Some(p)=parent{if self.selected.contains(p){return false;}parent=doc.nodes.get(p).and_then(|n|n.parent_id.as_ref());}true
-        }).map(|(id,x,y)|{
-          let inverse=self.scene.as_ref().and_then(|scene|scene.item(&id).and_then(|item|item.parent.map(|p|scene.items[p].world))).and_then(|world|world.inverse());
-          let delta=if let Some(inverse)=inverse{let p=inverse.point(delta.0,delta.1);let zero=inverse.point(0.,0.);(p.0-zero.0,p.1-zero.1)}else{delta};
-          json!({"type":"node.set","nodeId":id,"properties":{"x":x+delta.0,"y":y+delta.1}})
-        }).collect();
-                    self.mutate(json!({"type":"batch","commands":commands}), "drag");
+                    let translations = self.move_translations(&positions, delta);
+                    let commands: Vec<_> = positions.into_iter().filter_map(|(id, x, y)| {
+                        let (dx, dy) = translations.get(&id)?;
+                        Some(json!({"type":"node.set","nodeId":id,"properties":{"x":x+dx,"y":y+dy}}))
+                    }).collect();
+                    if !commands.is_empty()
+                        && !self.pending
+                        && let Some(sequence) = self.document().map(|doc| doc.sequence)
+                    {
+                        self.mutate(json!({"type":"batch","commands":commands}), "drag");
+                        if self.pending {
+                            self.pending_move = Some(PendingMove {
+                                sequence,
+                                translations,
+                                delta,
+                            });
+                            return;
+                        }
+                    }
                 }
+                self.move_cache.get_mut().clear();
             }
             Drag::Marquee { origin, end } => {
                 let (x0, y0, x1, y1) = (
@@ -1539,6 +1736,62 @@ impl App {
                 }
             }
         }
+    }
+
+    fn wheel(&mut self, delta: MouseScrollDelta, scale: f64, phase: TouchPhase) -> bool {
+        let (dx, dy) = scroll_delta(delta, scale, self.modifiers.shift_key());
+        let canvas = self.canvas_rect();
+        let under_cursor = scroll_target_at(canvas, self.inspector_visible(), self.cursor);
+        let target = if matches!(delta, MouseScrollDelta::PixelDelta(_)) {
+            if phase == TouchPhase::Started || self.scroll_target.is_none() {
+                self.scroll_target = Some(under_cursor);
+            }
+            let target = self.scroll_target.unwrap_or(under_cursor);
+            if matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                self.scroll_target = None;
+            }
+            target
+        } else {
+            self.scroll_target = None;
+            under_cursor
+        };
+        if !dx.is_finite() || !dy.is_finite() || (dx == 0. && dy == 0.) {
+            return false;
+        }
+        match target {
+            ScrollTarget::Layers if dy != 0. => {
+                let max_scroll = self.visible_layers.len().saturating_sub(1);
+                self.layer_scroll = if dy < 0. {
+                    (self.layer_scroll + 3).min(max_scroll)
+                } else {
+                    self.layer_scroll.saturating_sub(3)
+                };
+            }
+            ScrollTarget::Inspector if dy != 0. => {
+                let max = crate::inspector::max_scroll(self);
+                let current = self.inspector_scroll.min(max);
+                let next = (current - dy).clamp(0., max);
+                self.inspector_scroll = next;
+                return next != current;
+            }
+            ScrollTarget::Canvas if self.drag.is_none() => {
+                if self.modifiers.control_key() || self.modifiers.super_key() {
+                    self.pan_view = false;
+                    self.camera.zoom_at(
+                        (dy * 0.005).exp(),
+                        self.cursor.0 - canvas.x,
+                        self.cursor.1 - canvas.y,
+                    );
+                } else {
+                    self.camera.x += dx;
+                    self.camera.y += dy;
+                    self.pan_view = true;
+                }
+                self.remember_camera();
+            }
+            _ => return false,
+        }
+        true
     }
     fn keyboard(&mut self, event: &winit::event::KeyEvent) {
         let down = event.state == ElementState::Pressed;
@@ -1605,6 +1858,23 @@ impl App {
             }
             return;
         }
+        if self.modifiers.control_key()
+            && event.logical_key == Key::Named(NamedKey::Tab)
+            && !self.tabs.is_empty()
+        {
+            let offset = if self.modifiers.shift_key() {
+                self.tabs.len() - 1
+            } else {
+                1
+            };
+            let index = self
+                .tabs
+                .iter()
+                .position(|id| Some(id) == self.active.as_ref())
+                .map_or(0, |index| (index + offset) % self.tabs.len());
+            self.action(Action::Open(self.tabs[index].clone()));
+            return;
+        }
         if command {
             if let Key::Character(key) = &event.logical_key {
                 match key.to_lowercase().as_str() {
@@ -1619,6 +1889,7 @@ impl App {
                     "a" => self.action(Action::SelectAll),
                     "c" => self.copy_selection(false),
                     "x" => self.copy_selection(true),
+                    "v" if self.modifiers.shift_key() => self.action(Action::ImportHtml),
                     "v" => self.paste(),
                     "0" => self.action(Action::Fit),
                     _ => {}
@@ -1628,7 +1899,10 @@ impl App {
         }
         match &event.logical_key {
             Key::Named(NamedKey::Escape) => {
+                self.popup = None;
                 self.drag = None;
+                self.drag_button = None;
+                self.move_cache.get_mut().clear();
                 self.selected.clear();
                 self.tool = Tool::Select;
             }
@@ -1636,6 +1910,7 @@ impl App {
                 self.action(Action::Delete)
             }
             Key::Named(NamedKey::Tab) => {
+                self.keyboard_focus_visible = true;
                 let current = self
                     .controls
                     .iter()
@@ -1671,12 +1946,14 @@ impl App {
     fn handle_response(&mut self, response: Response) {
         match response {
             Response::Connected => {
+                self.error = None;
                 self.status = "Ready".into();
                 self.send(Request::Refresh);
             }
             Response::Documents(documents) => {
                 self.documents = documents;
                 if self.active.is_none()
+                    && !self.library_open
                     && let Some(doc) = self.documents.iter().find(|d| !d.archived)
                 {
                     self.send(Request::Open { id: doc.id.clone() });
@@ -1727,7 +2004,7 @@ impl App {
                     });
                 }
                 self.snapshots.insert(id.clone(), Arc::new(document));
-                if self.active.is_none() || activate {
+                if (self.active.is_none() && !self.library_open) || activate {
                     self.switch(id.clone());
                 }
                 if self.active.as_ref() == Some(&id) && changed {
@@ -1776,6 +2053,8 @@ impl App {
                     self.pending = false;
                     self.text_splice_inflight = false;
                     self.status = "Edit not saved".into();
+                    self.pending_move = None;
+                    self.move_cache.get_mut().clear();
                 }
                 self.error = Some(message);
             }
@@ -1845,6 +2124,14 @@ impl ApplicationHandler<Event> for App {
             .with_visible(false)
             .with_inner_size(LogicalSize::new(size.0, size.1))
             .with_min_inner_size(LogicalSize::new(760., 520.));
+        #[cfg(target_os = "macos")]
+        let attrs = {
+            use winit::platform::macos::WindowAttributesExtMacOS;
+            attrs
+                .with_titlebar_transparent(true)
+                .with_title_hidden(true)
+                .with_fullsize_content_view(true)
+        };
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Rc::new(w),
             Err(e) => {
@@ -1854,24 +2141,41 @@ impl ApplicationHandler<Event> for App {
                 return;
             }
         };
-        let context = match softbuffer::Context::new(window.clone()) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Native surface context failed: {e}");
-                self.smoke_failed = true;
-                event_loop.exit();
-                return;
+        #[cfg(target_os = "macos")]
+        let use_gpu = match crate::gpu_presenter::MetalPresenter::new(&window) {
+            Ok(presenter) => {
+                self.gpu_presenter = Some(presenter);
+                window.set_title("Oh My Canvas — Metal preview");
+                eprintln!("Native presentation: Metal");
+                true
+            }
+            Err(error) => {
+                eprintln!("Metal unavailable, using software presentation: {error}");
+                false
             }
         };
-        self.surface = match softbuffer::Surface::new(&context, window.clone()) {
-            Ok(s) => Some(s),
-            Err(e) => {
-                eprintln!("Native surface failed: {e}");
-                self.smoke_failed = true;
-                event_loop.exit();
-                return;
-            }
-        };
+        #[cfg(not(target_os = "macos"))]
+        let use_gpu = false;
+        if !use_gpu {
+            let context = match softbuffer::Context::new(window.clone()) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Native surface context failed: {e}");
+                    self.smoke_failed = true;
+                    event_loop.exit();
+                    return;
+                }
+            };
+            self.surface = match softbuffer::Surface::new(&context, window.clone()) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    eprintln!("Native surface failed: {e}");
+                    self.smoke_failed = true;
+                    event_loop.exit();
+                    return;
+                }
+            };
+        }
         self.access = Some(accesskit_winit::Adapter::with_event_loop_proxy(
             event_loop,
             &window,
@@ -1898,6 +2202,14 @@ impl ApplicationHandler<Event> for App {
                         Ok(scene) => {
                             self.scene_cache.get_mut().clear();
                             self.pan_cache.get_mut().clear();
+                            self.move_cache.get_mut().clear();
+                            if self
+                                .pending_move
+                                .as_ref()
+                                .is_some_and(|preview| preview.sequence != reply.sequence)
+                            {
+                                self.pending_move = None;
+                            }
                             self.pan_view = false;
                             self.scene_generation = self.scene_generation.wrapping_add(1);
                             self.scene = Some(Arc::new(scene));
@@ -1908,7 +2220,11 @@ impl ApplicationHandler<Event> for App {
                             self.layers = reply.layers;
                             self.refresh_visible_layers();
                         }
-                        Err(error) => self.error = Some(error),
+                        Err(error) => {
+                            self.pending_move = None;
+                            self.move_cache.get_mut().clear();
+                            self.error = Some(error);
+                        }
                     }
                 } else {
                     self.schedule_scene();
@@ -1937,6 +2253,13 @@ impl ApplicationHandler<Event> for App {
         let mut needs_redraw = !matches!(event, WindowEvent::RedrawRequested);
         match event {
             WindowEvent::CloseRequested => self.shutdown(),
+            WindowEvent::Occluded(occluded) => {
+                self.occluded = occluded;
+                needs_redraw = !occluded;
+                if occluded {
+                    self.input_frame = None;
+                }
+            }
             WindowEvent::Resized(size) => {
                 let scale = window.scale_factor();
                 self.width = size.width as f64 / scale;
@@ -1954,6 +2277,11 @@ impl ApplicationHandler<Event> for App {
                 let scale = window.scale_factor();
                 let previous = self.cursor;
                 self.pointer_move(position.x / scale, position.y / scale);
+                match self.drag {
+                    Some(Drag::Pan { .. }) => self.trace_input("pan-drag"),
+                    Some(Drag::Move { .. }) => self.trace_input("layer-drag"),
+                    _ => {}
+                }
                 needs_redraw = self.drag.is_some()
                     || self.controls.iter().any(|control| {
                         control.rect.contains(previous.0, previous.1)
@@ -1962,44 +2290,42 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
-                    self.pointer_down(button);
-                } else {
+                    if self.drag_button.is_none() {
+                        self.pointer_down(button);
+                        if self.drag.is_some() {
+                            self.drag_button = Some(button);
+                        }
+                    }
+                } else if self.drag_button == Some(button) {
+                    self.drag_button = None;
                     self.pointer_up();
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                let (dx, dy) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => (x as f64 * 30., y as f64 * 30.),
-                    MouseScrollDelta::PixelDelta(p) => {
-                        (p.x / window.scale_factor(), p.y / window.scale_factor())
-                    }
-                };
-                if self.cursor.0 < LEFT {
-                    if dy < 0. {
-                        self.layer_scroll = self.layer_scroll.saturating_add(3);
+            WindowEvent::MouseWheel { delta, phase, .. } => {
+                needs_redraw = self.wheel(delta, window.scale_factor(), phase);
+                if needs_redraw && self.canvas_rect().contains(self.cursor.0, self.cursor.1) {
+                    self.trace_input(if matches!(delta, MouseScrollDelta::PixelDelta(_)) {
+                        "precise-scroll"
                     } else {
-                        self.layer_scroll = self.layer_scroll.saturating_sub(3);
-                    }
-                } else if self.inspector_visible() && self.cursor.0 >= self.width - RIGHT {
-                    if dy < 0. {
-                        self.inspector_scroll = (self.inspector_scroll + 1).min(200);
-                    } else {
-                        self.inspector_scroll = self.inspector_scroll.saturating_sub(1);
-                    }
-                } else if self.modifiers.control_key() || self.modifiers.super_key() {
+                        "wheel"
+                    });
+                }
+            }
+            WindowEvent::PinchGesture { delta, .. } => {
+                let r = self.canvas_rect();
+                needs_redraw = delta.is_finite()
+                    && delta != 0.
+                    && self.drag.is_none()
+                    && r.contains(self.cursor.0, self.cursor.1);
+                if needs_redraw {
                     self.pan_view = false;
-                    let r = self.canvas_rect();
                     self.camera.zoom_at(
-                        (-dy * 0.005).exp(),
+                        (1. + delta).max(0.01),
                         self.cursor.0 - r.x,
                         self.cursor.1 - r.y,
                     );
-                } else if (dx != 0. || dy != 0.)
-                    && self.canvas_rect().contains(self.cursor.0, self.cursor.1)
-                {
-                    self.camera.x += dx;
-                    self.camera.y += dy;
-                    self.pan_view = true;
+                    self.remember_camera();
+                    self.trace_input("pinch");
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => self.keyboard(&event),
@@ -2029,13 +2355,34 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::Focused(false) => {
                 self.drag = None;
+                self.drag_button = None;
+                self.scroll_target = None;
+                self.move_cache.get_mut().clear();
                 self.space_pan = false;
             }
-            WindowEvent::RedrawRequested => {
-                if let Err(error) = crate::paint::draw(self) {
-                    eprintln!("Native presentation failed: {error}");
-                    self.error = Some(error);
-                    self.smoke_failed = true;
+            WindowEvent::RedrawRequested if !self.occluded => {
+                let trace = self.input_frame.take();
+                let draw_start = trace.map(|_| Instant::now());
+                match crate::paint::draw(self) {
+                    Ok(true) => {
+                        self.presented = true;
+                        if let Some(((kind, start), draw_start)) = trace.zip(draw_start) {
+                            eprintln!(
+                                "Native frame {kind} input_to_submit_ms={:.3} draw_ms={:.3} camera={:.2},{:.2},{:.3}",
+                                start.elapsed().as_secs_f64() * 1000.,
+                                draw_start.elapsed().as_secs_f64() * 1000.,
+                                self.camera.x,
+                                self.camera.y,
+                                self.camera.zoom,
+                            );
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        eprintln!("Native presentation failed: {error}");
+                        self.error = Some(error);
+                        self.smoke_failed = true;
+                    }
                 }
                 if let Some(mut access) = self.access.take() {
                     access.update_if_active(|| crate::accessibility::tree(self));
@@ -2070,6 +2417,31 @@ impl ApplicationHandler<Event> for App {
                 .is_some_and(|at| at.elapsed() > Duration::from_secs(5))
         {
             event_loop.exit();
+        }
+        if matches!(self.drag, Some(Drag::Pan { .. }))
+            || self.tool == Tool::Pan
+            || self.space_pan
+            || self.cursor_icon != CursorIcon::Default
+        {
+            let cursor = if matches!(self.drag, Some(Drag::Pan { .. })) {
+                CursorIcon::Grabbing
+            } else if (self.tool == Tool::Pan || self.space_pan)
+                && self.canvas_rect().contains(self.cursor.0, self.cursor.1)
+                && !self
+                    .controls
+                    .iter()
+                    .any(|control| control.rect.contains(self.cursor.0, self.cursor.1))
+                && !crate::paint::palette_rect(self)
+                    .is_some_and(|area| area.contains(self.cursor.0, self.cursor.1))
+            {
+                CursorIcon::Grab
+            } else {
+                CursorIcon::Default
+            };
+            if cursor != self.cursor_icon {
+                window.set_cursor(cursor);
+                self.cursor_icon = cursor;
+            }
         }
         if needs_redraw {
             self.redraw();
@@ -2120,5 +2492,51 @@ impl ApplicationHandler<Event> for App {
         event_loop.set_control_flow(ControlFlow::WaitUntil(
             Instant::now() + Duration::from_millis(100),
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use winit::dpi::PhysicalPosition;
+
+    #[test]
+    fn precise_scroll_keeps_both_fractional_axes_at_retina_scale() {
+        let delta = MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.5, -7.5));
+        assert_eq!(scroll_delta(delta, 2., false), (0.25, -3.75));
+        assert_eq!(scroll_delta(delta, 2., true), (0.25, -3.75));
+        assert_eq!(
+            scroll_delta(MouseScrollDelta::LineDelta(0., 2.), 2., true),
+            (60., 0.)
+        );
+    }
+
+    #[test]
+    fn scroll_routing_respects_the_canvas_chrome_and_sidebar_boundaries() {
+        let canvas = Rect::new(222., 48., 478., 568.);
+        assert_eq!(
+            scroll_target_at(canvas, true, (222., 48.)),
+            ScrollTarget::Canvas
+        );
+        assert_eq!(
+            scroll_target_at(canvas, true, (221., 48.)),
+            ScrollTarget::Layers
+        );
+        assert_eq!(
+            scroll_target_at(canvas, true, (700., 48.)),
+            ScrollTarget::Inspector
+        );
+        assert_eq!(
+            scroll_target_at(canvas, false, (700., 48.)),
+            ScrollTarget::Outside
+        );
+        assert_eq!(
+            scroll_target_at(canvas, true, (400., 47.)),
+            ScrollTarget::Outside
+        );
+        assert_eq!(
+            scroll_target_at(canvas, true, (400., 616.)),
+            ScrollTarget::Outside
+        );
     }
 }

@@ -1,5 +1,5 @@
 use crate::geometry::{Camera, Rect};
-use skia_safe::{Bitmap, Canvas, Color, Image, ImageInfo, Rect as SkRect, images};
+use skia_safe::{Bitmap, Canvas, Color, Image, ImageInfo, Rect as SkRect, Surface, images};
 
 const MAX_RETAINED_BYTES: u64 = 32 * 1024 * 1024;
 
@@ -53,6 +53,15 @@ impl SceneCacheKey {
             origin: (left, top),
             size,
         })
+    }
+}
+
+pub(crate) fn matching_surface(canvas: &Canvas, width: i32, height: i32) -> Option<Surface> {
+    let info = ImageInfo::new_n32_premul((width, height), None);
+    if canvas.recording_context().is_some() {
+        canvas.new_surface(&info, None)
+    } else {
+        skia_safe::surfaces::raster_n32_premul((width, height))
     }
 }
 
@@ -125,13 +134,31 @@ impl SceneCache {
         self.clear();
         let [x, y, _, _] = key.viewport.map(|bits| f64::from_bits(bits) as f32);
         let [camera_x, camera_y, zoom] = key.camera.map(|bits| f64::from_bits(bits) as f32);
+        let gpu = canvas.recording_context().is_some();
+        if gpu && let Some(mut surface) = matching_surface(canvas, key.size.0, key.size.1) {
+            let retained = surface.canvas();
+            retained.clear(background);
+            let scale = f64::from_bits(key.scale) as f32;
+            retained.scale((scale, scale));
+            retained.translate((camera_x, camera_y));
+            retained.scale((zoom, zoom));
+            draw(retained)?;
+            let image = surface.image_snapshot();
+            debug_assert!(image.is_texture_backed());
+            let saved = canvas.save();
+            canvas.reset_matrix();
+            canvas.draw_image(&image, (key.origin.0 as f32, key.origin.1 as f32), None);
+            canvas.restore_to_count(saved);
+            self.entry = Some((key, background, image));
+            return Ok(());
+        }
         let saved = canvas.save();
         canvas.translate((x, y));
         canvas.translate((camera_x, camera_y));
         canvas.scale((zoom, zoom));
         let result = draw(canvas);
         canvas.restore_to_count(saved);
-        if result.is_ok() {
+        if !gpu && result.is_ok() {
             let info = canvas.image_info();
             if key.origin.0 + key.size.0 <= info.width()
                 && key.origin.1 + key.size.1 <= info.height()
@@ -149,6 +176,13 @@ impl SceneCache {
             }
         }
         result
+    }
+
+    #[cfg(all(test, target_os = "macos"))]
+    pub(crate) fn is_texture_backed(&self) -> bool {
+        self.entry
+            .as_ref()
+            .is_some_and(|(_, _, image)| image.is_texture_backed())
     }
 
     #[cfg(test)]

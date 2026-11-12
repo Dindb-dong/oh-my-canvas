@@ -1,7 +1,7 @@
 use crate::geometry::{Camera, Rect};
 use omc_render::paint_scene_preview;
 use omc_scene::Scene;
-use skia_safe::{Canvas, Color, Image, Rect as SkRect, surfaces};
+use skia_safe::{Canvas, Color, Image, Rect as SkRect, gpu, surfaces};
 use std::{
     collections::BTreeMap,
     sync::{
@@ -12,7 +12,8 @@ use std::{
 };
 
 const MAX_RASTER_BYTES: u64 = 24 * 1024 * 1024;
-const MAX_MARGIN: i32 = 256;
+const MAX_MARGIN: i32 = 128;
+const MAX_TEXTURE_SIDE: i32 = 16_384;
 const MAX_TRANSLATION: f64 = 16_777_216.;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -78,10 +79,7 @@ impl View {
         {
             return None;
         }
-        let mut margin = (size.0.min(size.1) / 4).min(MAX_MARGIN);
-        while !within_budget(size, margin) {
-            margin /= 2;
-        }
+        let margin = overscan_margin(size);
         Some(Self {
             key: ViewKey {
                 generation,
@@ -106,6 +104,13 @@ impl View {
         (self.pan.0 - other.pan.0, self.pan.1 - other.pan.1)
     }
 
+    // Adapted from FigCraft v0.17.0's cached_render_covers. Snapped device pixels
+    // and a symmetric margin reduce the two bounds checks to a distance test.
+    fn cached_render_covers(self, cached: Self) -> bool {
+        let guard = (cached.margin / 2).min(96);
+        self.key == cached.key && self.distance(cached) <= cached.margin - guard
+    }
+
     fn blit_origin(self, cached: Self) -> Option<(f32, f32)> {
         if self.key != cached.key {
             return None;
@@ -121,9 +126,23 @@ impl View {
     }
 }
 
+// Adapted from FigCraft v0.17.0's overscan_margin with OMC's tighter byte budget.
+fn overscan_margin(size: (i32, i32)) -> i32 {
+    let (width, height) = size;
+    let mut margin = (width.min(height) / 8)
+        .min(MAX_MARGIN)
+        .min((MAX_TEXTURE_SIDE - width.max(height)).max(0) / 2);
+    while margin > 0 && !within_budget(size, margin) {
+        margin /= 2;
+    }
+    margin
+}
+
 fn within_budget((width, height): (i32, i32), margin: i32) -> bool {
     width > 0
         && height > 0
+        && width + 2 * margin <= MAX_TEXTURE_SIDE
+        && height + 2 * margin <= MAX_TEXTURE_SIDE
         && (width as u64 + 2 * margin as u64) * (height as u64 + 2 * margin as u64)
             <= MAX_RASTER_BYTES / 4
 }
@@ -241,7 +260,15 @@ impl PanCache {
                         if self.cached.as_ref().is_none_or(|(old, _)| {
                             view.distance(finished.view) <= view.distance(*old)
                         }) {
-                            self.cached = Some((finished.view, image));
+                            let texture = canvas.direct_context().and_then(|mut context| {
+                                gpu::images::texture_from_image(
+                                    &mut context,
+                                    &image,
+                                    gpu::Mipmapped::No,
+                                    gpu::Budgeted::Yes,
+                                )
+                            });
+                            self.cached = Some((finished.view, texture.unwrap_or(image)));
                         }
                     } else {
                         self.failed = Some(view.key);
@@ -256,10 +283,10 @@ impl PanCache {
         }
         if !self.pending
             && self.failed != Some(view.key)
-            && self.cached.as_ref().is_none_or(|(old, _)| {
-                let distance = view.distance(*old);
-                distance > 0 && distance >= (old.margin / 2).max(1)
-            })
+            && self
+                .cached
+                .as_ref()
+                .is_none_or(|(old, _)| !view.cached_render_covers(*old))
         {
             self.pending = self
                 .submit
@@ -312,7 +339,7 @@ mod tests {
         let view = |generation, scale, camera| {
             View::new(generation, VIEWPORT, scale, camera, Color::WHITE).unwrap()
         };
-        assert_eq!(initial.margin, 40);
+        assert_eq!(initial.margin, 20);
         assert_eq!(
             view(
                 1,
@@ -324,7 +351,7 @@ mod tests {
                 }
             )
             .blit_origin(initial),
-            Some((15., -28.))
+            Some((35., -8.))
         );
         assert_eq!(view(2, 2., CAMERA).blit_origin(initial), None);
         assert_eq!(view(1, 1., CAMERA).blit_origin(initial), None);
@@ -342,6 +369,28 @@ mod tests {
         assert!(within_budget(compact_margin.size, compact_margin.margin));
         assert!(View::new(1, Rect::new(0., 0., 3500., 2200.), 1., CAMERA, Color::WHITE,).is_none());
         assert!(View::new(1, VIEWPORT, f64::NAN, CAMERA, Color::WHITE).is_none());
+    }
+
+    #[test]
+    fn pan_refills_before_the_retained_texture_edge() {
+        let viewport = Rect::new(0., 0., 1000., 800.);
+        let view =
+            |x, y| View::new(1, viewport, 1., Camera { x, y, ..CAMERA }, Color::WHITE).unwrap();
+        let initial = view(0., 0.);
+        assert_eq!(initial.margin, 100);
+        for (x, y) in [(50., 0.), (0., -50.)] {
+            assert!(view(x, y).cached_render_covers(initial));
+        }
+        for (x, y) in [(51., 0.), (0., -51.)] {
+            assert!(!view(x, y).cached_render_covers(initial));
+            assert!(view(x, y).blit_origin(initial).is_some());
+        }
+        let slender = (390, 844);
+        let margin = overscan_margin(slender);
+        let retained = (slender.0 + margin * 2) * (slender.1 + margin * 2);
+        assert!(retained * 5 <= slender.0 * slender.1 * 8);
+        assert_eq!(overscan_margin((MAX_TEXTURE_SIDE - 16, 256)), 8);
+        assert!(!within_budget((MAX_TEXTURE_SIDE + 1, 1), 0));
     }
 
     #[test]

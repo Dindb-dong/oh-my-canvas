@@ -35,6 +35,12 @@ Desktop-first Electron, minimum 960 × 640. Main content scrolls independently o
 ## Interaction and content
 Use concrete language: New canvas, Open file, Export, Starred. Show actual local dates and file counts. Search and sort act immediately; view and stars persist locally. Saved means persistence succeeded. A failed edit shows an actionable error. Collaboration shows host, guests, capacity, reconnecting and offline conditions. Local MCP does not remove the AI client's own costs or limits.
 
+### Native editor and HTML authoring
+
+The editable **Oh My Canvas · Native editor shell · FigCraft study** document contains **Screens / FigCraft UI port / 1434 × 855** (`c8c782ec-02ff-4e8d-af0c-42aac4ee73e9`) and **States / FigCraft tabs, grouped dock and inspector** (`2facf0ab-a650-4f7d-9c52-9fe14b922444`). The native preview has a 40 px Home and document-tab strip, 52 px navigation rail, 240 px pages/layers sidebar and 236 px inspector. Its 48 px floating toolbar, grouped dropdowns, vector glyphs and inspector field layout adapt FigCraft v0.17.0. Mint marks the selected rail item, layer and tool. The hand tool pans the view and Select moves layers. The Design inspector groups position, layout, appearance, typography, fill and stroke, and scrolling stops at the last row. Keyboard focus has its own outline.
+
+**Paste HTML** opens clipboard source in a new editable document. **Import** also accepts `.html` and `.htm` files. The importer accepts inline and embedded design CSS. Use the ordinary layer tree, inspector, save and export controls on the result. Native rendering and input behavior are described in the [native editor guide](docs/native-engine/EDITOR_SHELL.md#metal-editor-and-html-authoring).
+
 ### Canvas naming and document access (2026-11-09)
 
 The latest user direction replaces the separate Rename button with an inline title field. The editable **Oh My Canvas · Inline naming** document contains **States / Inline canvas title / 2026-11-09** (`2d076472-8553-4ecf-9a23-ebb97430abcc`), with the **Canvas / Editable title** main (`component-5bfa0b92-d2ec-43ad-aa6d-137634983461`) and linked example instance. It was authored in an isolated design profile to avoid changing another session's active canvas. The shareable source is `docs/design/inline-naming.html`. This supersedes the earlier separate-control board in the UI Kit.
