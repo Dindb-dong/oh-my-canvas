@@ -2,6 +2,7 @@ use crate::{
     Event,
     client::{Bridge, DocumentEntry, Request, Response},
     geometry::{Camera, Rect},
+    pan_cache::PanCache,
     scene_cache::SceneCache,
     text::EditBuffer,
 };
@@ -251,10 +252,12 @@ pub struct App {
     pub snapshots: BTreeMap<String, Arc<DocumentSnapshot>>,
     pub active: Option<String>,
     pub page: Option<String>,
-    pub scene: Option<Scene>,
+    pub scene: Option<Arc<Scene>>,
     pub scene_generation: u64,
     pub scene_cache: RefCell<SceneCache>,
-    pub resources: BTreeMap<String, Vec<u8>>,
+    pub pan_cache: RefCell<PanCache>,
+    pan_view: bool,
+    pub resources: Arc<BTreeMap<String, Vec<u8>>>,
     pub camera: Camera,
     pub cameras: BTreeMap<(String, String), Camera>,
     pub selected: BTreeSet<String>,
@@ -375,6 +378,10 @@ impl App {
                 }
             }
         });
+        let pan_proxy = proxy.clone();
+        let pan_cache = PanCache::new(move || {
+            let _ = pan_proxy.send_event(Event::PanRasterReady);
+        });
         Self {
             window: None,
             surface: None,
@@ -391,7 +398,9 @@ impl App {
             scene: None,
             scene_generation: 0,
             scene_cache: RefCell::default(),
-            resources: BTreeMap::new(),
+            pan_cache: RefCell::new(pan_cache),
+            pan_view: false,
+            resources: Arc::default(),
             camera: Camera::default(),
             cameras: BTreeMap::new(),
             selected: BTreeSet::new(),
@@ -484,6 +493,9 @@ impl App {
     pub fn inspector_visible(&self) -> bool {
         self.width >= 960.
     }
+    pub fn uses_pan_raster(&self) -> bool {
+        self.pan_view
+    }
     pub fn canvas_rect(&self) -> Rect {
         let right = if self.inspector_visible() { RIGHT } else { 0. };
         Rect::new(
@@ -574,6 +586,8 @@ impl App {
             .unwrap_or_default();
         self.scene = None;
         self.scene_cache.get_mut().clear();
+        self.pan_cache.get_mut().clear();
+        self.pan_view = false;
         self.schedule_scene();
     }
     pub fn refresh_visible_layers(&mut self) {
@@ -830,6 +844,7 @@ impl App {
                 }
             }
             Action::Fit => {
+                self.pan_view = false;
                 if let Some(scene) = &self.scene {
                     let mut bounds: Option<[f64; 4]> = None;
                     for item in &scene.items {
@@ -881,6 +896,8 @@ impl App {
                     .unwrap_or_default();
                 self.scene = None;
                 self.scene_cache.get_mut().clear();
+                self.pan_cache.get_mut().clear();
+                self.pan_view = false;
                 self.schedule_scene();
             }
             Action::Field(property) => self.begin_property(property),
@@ -1459,6 +1476,7 @@ impl App {
                 Drag::Pan { origin, camera } => {
                     self.camera.x = camera.x + x - origin.0;
                     self.camera.y = camera.y + y - origin.1;
+                    self.pan_view = true;
                 }
                 Drag::Move { origin, delta, .. } => {
                     *delta = (world.0 - origin.0, world.1 - origin.1)
@@ -1738,6 +1756,8 @@ impl App {
                     self.active = None;
                     self.scene = None;
                     self.scene_cache.get_mut().clear();
+                    self.pan_cache.get_mut().clear();
+                    self.pan_view = false;
                     if let Some(id) = self.tabs.last().cloned() {
                         self.switch(id);
                     }
@@ -1877,9 +1897,11 @@ impl ApplicationHandler<Event> for App {
                     match reply.result {
                         Ok(scene) => {
                             self.scene_cache.get_mut().clear();
+                            self.pan_cache.get_mut().clear();
+                            self.pan_view = false;
                             self.scene_generation = self.scene_generation.wrapping_add(1);
-                            self.scene = Some(scene);
-                            self.resources = reply.resources;
+                            self.scene = Some(Arc::new(scene));
+                            self.resources = Arc::new(reply.resources);
                             if let Some(error) = reply.resource_errors.first() {
                                 self.error = Some(error.clone());
                             }
@@ -1893,6 +1915,7 @@ impl ApplicationHandler<Event> for App {
                 }
                 self.redraw();
             }
+            Event::PanRasterReady => self.redraw(),
             Event::Accessibility(event) => crate::accessibility::handle(self, event),
         }
     }
@@ -1911,7 +1934,7 @@ impl ApplicationHandler<Event> for App {
         if let Some(access) = &mut self.access {
             access.process_event(&window, &event);
         }
-        let is_redraw = matches!(event, WindowEvent::RedrawRequested);
+        let mut needs_redraw = !matches!(event, WindowEvent::RedrawRequested);
         match event {
             WindowEvent::CloseRequested => self.shutdown(),
             WindowEvent::Resized(size) => {
@@ -1929,7 +1952,13 @@ impl ApplicationHandler<Event> for App {
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::CursorMoved { position, .. } => {
                 let scale = window.scale_factor();
+                let previous = self.cursor;
                 self.pointer_move(position.x / scale, position.y / scale);
+                needs_redraw = self.drag.is_some()
+                    || self.controls.iter().any(|control| {
+                        control.rect.contains(previous.0, previous.1)
+                            != control.rect.contains(self.cursor.0, self.cursor.1)
+                    });
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
@@ -1958,15 +1987,19 @@ impl ApplicationHandler<Event> for App {
                         self.inspector_scroll = self.inspector_scroll.saturating_sub(1);
                     }
                 } else if self.modifiers.control_key() || self.modifiers.super_key() {
+                    self.pan_view = false;
                     let r = self.canvas_rect();
                     self.camera.zoom_at(
                         (-dy * 0.005).exp(),
                         self.cursor.0 - r.x,
                         self.cursor.1 - r.y,
                     );
-                } else {
+                } else if (dx != 0. || dy != 0.)
+                    && self.canvas_rect().contains(self.cursor.0, self.cursor.1)
+                {
                     self.camera.x += dx;
                     self.camera.y += dy;
+                    self.pan_view = true;
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => self.keyboard(&event),
@@ -2004,9 +2037,9 @@ impl ApplicationHandler<Event> for App {
                     self.error = Some(error);
                     self.smoke_failed = true;
                 }
-                let update = crate::accessibility::tree(self);
-                if let Some(access) = &mut self.access {
-                    access.update_if_active(|| update);
+                if let Some(mut access) = self.access.take() {
+                    access.update_if_active(|| crate::accessibility::tree(self));
+                    self.access = Some(access);
                 }
                 window.set_ime_allowed(self.editing.is_some());
                 if let (Some(edit), Some(area)) = (&self.editing, crate::text_ui::editor_rect(self))
@@ -2038,7 +2071,7 @@ impl ApplicationHandler<Event> for App {
         {
             event_loop.exit();
         }
-        if !is_redraw {
+        if needs_redraw {
             self.redraw();
         }
     }

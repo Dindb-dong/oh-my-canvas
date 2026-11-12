@@ -82,3 +82,9 @@ A complete milestone means the reviewed shell is implemented, the cache passes i
 - New tools or inspector capabilities, full library redesign, native OS menu redesign, collaboration changes, storage/schema migration and MCP/API redesign.
 - Full native/Electron parity, comprehensive OS IME/screen-reader qualification, Windows/Linux packaging, and W1–W7 certification.
 - Merge, release, installation replacement, deployment and destructive cleanup without separately applicable authorization.
+
+## Trackpad pan follow-up
+
+The stationary cache includes the camera translation, so ordinary trackpad scroll previously invalidated it on every frame. During canvas pan, draw a matching retained image at the new device-pixel offset and render overscan on one background worker. Keep at most one job in flight and refill near the edge of the retained image. Reject previews across scene generations, viewports, device scales or zooms. A fast move past overscan can expose workspace color until the worker catches up. Keep the worker-rendered, device-aligned view after pan settles so stopping does not trigger a synchronous scene repaint. Use the exact path for screenshots and return to it on scene changes, fit or zoom. Preserve direct drawing for editing previews and unsupported or unavailable raster paths.
+
+The stationary raster remains bounded to 32 MiB. The pan worker and its retained image use up to 24 MiB each. The window presentation path reads the native Skia raster in place and writes RGB to the softbuffer, with the reserved byte cleared. This removes the additional full-window byte buffer. Skip repainting on idle pointer moves that do not change control hover, and build accessibility updates only when the adapter is active. The desktop still composites through a CPU window buffer.

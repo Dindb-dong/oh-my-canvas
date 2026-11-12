@@ -5,8 +5,7 @@ use crate::{
 };
 use omc_render::paint_scene_preview;
 use skia_safe::{
-    AlphaType, Canvas, Color, ColorType, Font, FontMgr, FontStyle, ImageInfo, Paint, PaintStyle,
-    Rect as SkRect, Surface,
+    Canvas, Color, ColorType, Font, FontMgr, FontStyle, Paint, PaintStyle, Rect as SkRect, Surface,
 };
 use std::{num::NonZeroU32, path::Path};
 
@@ -640,7 +639,13 @@ fn selection_dimensions(canvas: &Canvas, app: &App, viewport: Rect, font: &Font)
     control_text(canvas, r, &label, 7., r.y + 13., 11., Color::WHITE, font);
 }
 
-fn render(app: &App, width: u32, height: u32, scale: f64) -> Result<Surface, String> {
+fn render(
+    app: &App,
+    width: u32,
+    height: u32,
+    scale: f64,
+    allow_pan_preview: bool,
+) -> Result<Surface, String> {
     if width == 0 || height == 0 || u64::from(width) * u64::from(height) > 33_554_432 {
         return Err("The window surface is outside its 128 MiB budget.".into());
     }
@@ -723,17 +728,37 @@ fn render(app: &App, width: u32, height: u32, scale: f64) -> Result<Surface, Str
     if let Some(scene) = &app.scene {
         let translations = app.drag_translations();
         let paint = |canvas: &Canvas| {
-            paint_scene_preview(canvas, scene, &app.resources, &translations).map(|_| ())
+            paint_scene_preview(canvas, scene, app.resources.as_ref(), &translations).map(|_| ())
         };
         let cached = if matches!(app.drag, Some(Drag::Move { .. })) || !translations.is_empty() {
             None
         } else {
-            let mut cache = app.scene_cache.borrow_mut();
-            match SceneCacheKey::new(app.scene_generation, viewport, scale, app.camera) {
-                Some(key) => Some(cache.paint(canvas, key, WORKSPACE, paint)),
-                None => {
-                    cache.clear();
-                    None
+            let panning = allow_pan_preview && app.uses_pan_raster();
+            if panning
+                && app.pan_cache.borrow_mut().paint(
+                    canvas,
+                    app.scene_generation,
+                    viewport,
+                    scale,
+                    app.camera,
+                    scene,
+                    &app.resources,
+                    WORKSPACE,
+                    true,
+                )
+            {
+                Some(Ok(()))
+            } else {
+                let mut cache = app.scene_cache.borrow_mut();
+                match SceneCacheKey::new(app.scene_generation, viewport, scale, app.camera) {
+                    Some(key) if panning && cache.pan_preview(canvas, key, WORKSPACE) => {
+                        Some(Ok(()))
+                    }
+                    Some(key) => Some(cache.paint(canvas, key, WORKSPACE, paint)),
+                    None => {
+                        cache.clear();
+                        None
+                    }
                 }
             }
         };
@@ -1004,6 +1029,24 @@ fn render(app: &App, width: u32, height: u32, scale: f64) -> Result<Surface, Str
     Ok(surface)
 }
 
+fn copy_present_row(out: &mut [u32], source: &[u32], red_first: bool) {
+    if cfg!(target_endian = "little") && !red_first {
+        for (out, source) in out.iter_mut().zip(source) {
+            *out = *source & 0x00ff_ffff;
+        }
+    } else {
+        for (out, source) in out.iter_mut().zip(source) {
+            let [first, green, third, _] = source.to_ne_bytes();
+            let (red, blue) = if red_first {
+                (first, third)
+            } else {
+                (third, first)
+            };
+            *out = u32::from(red) << 16 | u32::from(green) << 8 | u32::from(blue);
+        }
+    }
+}
+
 pub fn draw(app: &mut App) -> Result<(), String> {
     let Some(window) = app.window.as_ref().cloned() else {
         return Ok(());
@@ -1013,17 +1056,16 @@ pub fn draw(app: &mut App) -> Result<(), String> {
         return Ok(());
     }
     app.controls = controls(app);
-    let mut raster = render(app, size.width, size.height, window.scale_factor())?;
-    let mut pixels = vec![0u8; size.width as usize * size.height as usize * 4];
-    let info = ImageInfo::new(
-        (size.width as i32, size.height as i32),
-        ColorType::RGBA8888,
-        AlphaType::Unpremul,
-        None,
-    );
-    if !raster.read_pixels(&info, &mut pixels, size.width as usize * 4, (0, 0)) {
-        return Err("Could not read the native drawing surface.".into());
-    }
+    let mut raster = render(app, size.width, size.height, window.scale_factor(), true)?;
+    let pixmap = raster
+        .peek_pixels()
+        .ok_or("Could not read the native drawing surface.")?;
+    let pixels = pixmap
+        .pixels::<u32>()
+        .ok_or("Unexpected native pixel format.")?;
+    let stride = pixmap.row_bytes() / 4;
+    let width = size.width as usize;
+    let red_first = pixmap.color_type() == ColorType::RGBA8888;
     let Some(surface) = &mut app.surface else {
         return Ok(());
     };
@@ -1034,8 +1076,8 @@ pub fn draw(app: &mut App) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
     let mut buffer = surface.buffer_mut().map_err(|e| e.to_string())?;
-    for (out, rgba) in buffer.iter_mut().zip(pixels.chunks_exact(4)) {
-        *out = u32::from(rgba[2]) | (u32::from(rgba[1]) << 8) | (u32::from(rgba[0]) << 16);
+    for (out, row) in buffer.chunks_exact_mut(width).zip(pixels.chunks(stride)) {
+        copy_present_row(out, &row[..width], red_first);
     }
     buffer.present().map_err(|e| e.to_string())?;
     app.presented = true;
@@ -1044,7 +1086,7 @@ pub fn draw(app: &mut App) -> Result<(), String> {
 pub fn screenshot(app: &App, path: &Path) -> Result<(), String> {
     let window = app.window.as_ref().ok_or("No native window")?;
     let size = window.inner_size();
-    let mut surface = render(app, size.width, size.height, window.scale_factor())?;
+    let mut surface = render(app, size.width, size.height, window.scale_factor(), false)?;
     let image = surface.image_snapshot();
     let bytes = image
         .encode(None, skia_safe::EncodedImageFormat::PNG, None)
@@ -1055,6 +1097,23 @@ pub fn screenshot(app: &App, path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn present_rows_preserve_rgb_and_clear_alpha() {
+        let mut out = [0; 1];
+        copy_present_row(
+            &mut out,
+            &[u32::from_ne_bytes([0x12, 0x34, 0x56, 0xff])],
+            true,
+        );
+        assert_eq!(out, [0x0012_3456]);
+        copy_present_row(
+            &mut out,
+            &[u32::from_ne_bytes([0x56, 0x34, 0x12, 0xff])],
+            false,
+        );
+        assert_eq!(out, [0x0012_3456]);
+    }
 
     #[test]
     fn strip_and_tools_fit_compact_and_standard_windows() {

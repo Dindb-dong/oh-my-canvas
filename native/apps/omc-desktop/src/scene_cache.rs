@@ -66,6 +66,39 @@ impl SceneCache {
         self.entry = None;
     }
 
+    /// Shift the last exact frame while the first overscan render is still in flight.
+    pub fn pan_preview(&self, canvas: &Canvas, key: SceneCacheKey, background: Color) -> bool {
+        let Some((old, color, image)) = &self.entry else {
+            return false;
+        };
+        if old.generation != key.generation
+            || old.viewport != key.viewport
+            || old.scale != key.scale
+            || old.camera[2] != key.camera[2]
+            || *color != background
+        {
+            return false;
+        }
+        let scale = f64::from_bits(key.scale);
+        let dx = ((f64::from_bits(key.camera[0]) - f64::from_bits(old.camera[0])) * scale).round();
+        let dy = ((f64::from_bits(key.camera[1]) - f64::from_bits(old.camera[1])) * scale).round();
+        if dx.abs() >= f64::from(key.size.0) || dy.abs() >= f64::from(key.size.1) {
+            return false;
+        }
+        let saved = canvas.save();
+        canvas.reset_matrix();
+        canvas.draw_image(
+            image,
+            (
+                (f64::from(key.origin.0) + dx) as f32,
+                (f64::from(key.origin.1) + dy) as f32,
+            ),
+            None,
+        );
+        canvas.restore_to_count(saved);
+        true
+    }
+
     /// The destination is device-scaled and clipped to the freshly painted workspace.
     /// Paint selection and other live overlays only after this call.
     /// The document painter receives the same world transform as the direct path.
@@ -288,6 +321,40 @@ mod tests {
     }
 
     #[test]
+    fn first_pan_reuses_only_a_matching_visible_frame() {
+        let mut cache = SceneCache::default();
+        let count = Cell::new(0);
+        let scene = scene(1);
+        let mut surface = frame(&scene, Some(&mut cache), 2., 53., &count);
+        let canvas = surface.canvas();
+        canvas.save();
+        canvas.scale((2., 2.));
+        canvas.clip_rect(SkRect::from_xywh(29., 17., 320., 210.), None, Some(false));
+        let shifted = Camera {
+            x: CAMERA.x + 32.,
+            ..CAMERA
+        };
+        let key =
+            |generation, camera| SceneCacheKey::new(generation, VIEWPORT, 2., camera).unwrap();
+        assert!(cache.pan_preview(canvas, key(1, shifted), BACKGROUND));
+        assert!(!cache.pan_preview(canvas, key(2, shifted), BACKGROUND));
+        assert!(!cache.pan_preview(
+            canvas,
+            key(
+                1,
+                Camera {
+                    zoom: 2.,
+                    ..shifted
+                }
+            ),
+            BACKGROUND
+        ));
+        assert!(!cache.pan_preview(canvas, key(1, Camera { x: 400., ..shifted }), BACKGROUND));
+        assert_eq!(count.get(), 1);
+        canvas.restore();
+    }
+
+    #[test]
     fn exact_key_covers_scene_viewport_camera_and_scale() {
         let key = |generation, viewport, scale, camera| {
             SceneCacheKey::new(generation, viewport, scale, camera).unwrap()
@@ -384,6 +451,78 @@ mod tests {
         }
         assert_eq!(paints.get(), 2);
         assert_eq!(cache.retained_bytes(), 0);
+    }
+
+    #[test]
+    #[ignore = "explicit panning viewport measurement"]
+    fn measure_pan_redraw() {
+        use crate::pan_cache::PanCache;
+        use std::{
+            collections::BTreeMap,
+            sync::{Arc, mpsc},
+            time::Duration,
+        };
+
+        let scene = Arc::new(scene(640));
+        let resources = Arc::new(BTreeMap::new());
+        let (wake, ready) = mpsc::channel();
+        let mut pan = PanCache::new(move || {
+            let _ = wake.send(());
+        });
+        let mut surface = surfaces::raster_n32_premul((720, 480)).unwrap();
+        let canvas = surface.canvas();
+        canvas.scale((2., 2.));
+        canvas.clip_rect(SkRect::from_xywh(29., 17., 320., 210.), None, Some(false));
+        let cold = Instant::now();
+        assert!(!pan.paint(
+            canvas, 1, VIEWPORT, 2., CAMERA, &scene, &resources, BACKGROUND, false
+        ));
+        ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        eprintln!(
+            "initial overscan ready: {:.3} ms",
+            cold.elapsed().as_secs_f64() * 1e3
+        );
+        for use_preview in [false, true] {
+            let mut samples = [0.; 30];
+            let mut paints = 0;
+            for (step, sample) in samples.iter_mut().enumerate() {
+                let camera = Camera {
+                    x: CAMERA.x + step as f64 * 6.,
+                    ..CAMERA
+                };
+                let start = Instant::now();
+                canvas.clear(BACKGROUND);
+                if !use_preview
+                    || !pan.paint(
+                        canvas, 1, VIEWPORT, 2., camera, &scene, &resources, BACKGROUND, true,
+                    )
+                {
+                    paints += 1;
+                    let saved = canvas.save();
+                    canvas.translate((VIEWPORT.x as f32, VIEWPORT.y as f32));
+                    canvas.translate((camera.x as f32, camera.y as f32));
+                    canvas.scale((camera.zoom as f32, camera.zoom as f32));
+                    paint_scene(canvas, &scene, resources.as_ref()).unwrap();
+                    canvas.restore_to_count(saved);
+                }
+                *sample = start.elapsed().as_secs_f64() * 1e3;
+                if use_preview {
+                    std::thread::sleep(Duration::from_millis(16));
+                }
+            }
+            samples.sort_by(f64::total_cmp);
+            eprintln!(
+                "{}: median {:.3} ms, p95 {:.3} ms, {paints} synchronous scene paints over 30 frames",
+                if use_preview {
+                    "pan preview"
+                } else {
+                    "direct pan"
+                },
+                (samples[14] + samples[15]) / 2.,
+                samples[28]
+            );
+            assert_eq!(paints, if use_preview { 0 } else { 30 });
+        }
     }
 
     #[test]

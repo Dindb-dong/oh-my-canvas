@@ -5,6 +5,7 @@ mod commands;
 mod geometry;
 mod inspector;
 mod paint;
+mod pan_cache;
 mod scene_cache;
 mod text;
 mod text_ui;
@@ -15,6 +16,7 @@ use winit::event_loop::EventLoop;
 pub enum Event {
     Service(client::Response),
     Scene(app::SceneReply),
+    PanRasterReady,
     Accessibility(accesskit_winit::Event),
 }
 impl From<accesskit_winit::Event> for Event {
