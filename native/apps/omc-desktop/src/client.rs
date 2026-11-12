@@ -19,6 +19,7 @@ use winit::event_loop::EventLoopProxy;
 const MAX_REPLY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_EXPORT_REPLY_BYTES: usize = 96 * 1024 * 1024;
 const MAX_IMPORT_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_PASTE_HTML_BYTES: usize = 1024 * 1024;
 const MAX_EXPORT_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -40,6 +41,9 @@ pub enum Request {
         id: String,
     },
     Import,
+    ImportHtml {
+        html: String,
+    },
     Export {
         id: String,
         page: Option<String>,
@@ -155,6 +159,7 @@ impl Bridge {
                         | Request::Undo { .. }
                         | Request::Splice { .. }
                         | Request::Import
+                        | Request::ImportHtml { .. }
                         | Request::Export { .. }
                 );
                 let response = client
@@ -328,6 +333,32 @@ impl Client {
         })
     }
 
+    fn import_design(
+        &self,
+        format: &str,
+        bytes: &[u8],
+        title: &str,
+        leases: &mut BTreeSet<String>,
+    ) -> Result<Response, String> {
+        let value = self.call(
+            "document.import",
+            json!({
+                "format": format,
+                "contentBase64": base64::engine::general_purpose::STANDARD.encode(bytes),
+                "title": title,
+                "strict": true,
+            }),
+        )?;
+        let document: DocumentSnapshot =
+            serde_json::from_value(value).map_err(|e| format!("Invalid imported document: {e}"))?;
+        leases.insert(document.id.clone());
+        Ok(Response::Snapshot {
+            document,
+            mutation: true,
+            activate: true,
+        })
+    }
+
     fn handle(
         &mut self,
         request: Request,
@@ -371,6 +402,7 @@ impl Client {
                         "Supported designs",
                         &["omc", "json", "svg", "html", "htm", "fig", "sketch"],
                     )
+                    .add_filter("HTML with CSS", &["html", "htm"])
                     .pick_file()
                 else {
                     return Ok(Response::FileOperation {
@@ -406,15 +438,20 @@ impl Client {
                     .file_stem()
                     .and_then(|v| v.to_str())
                     .unwrap_or("Imported design");
-                let value=self.call("document.import",json!({"format":format,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"title":title,"strict":true}))?;
-                let document: DocumentSnapshot = serde_json::from_value(value)
-                    .map_err(|e| format!("Invalid imported document: {e}"))?;
-                leases.insert(document.id.clone());
-                Ok(Response::Snapshot {
-                    document,
-                    mutation: true,
-                    activate: true,
-                })
+                self.import_design(format, &bytes, title, leases)
+            }
+            Request::ImportHtml { html } => {
+                let markup = html.trim_start_matches('\u{feff}').trim();
+                if !markup.starts_with('<') {
+                    return Err("Copy HTML source with its CSS, then choose Paste HTML.".into());
+                }
+                if markup.len() > MAX_PASTE_HTML_BYTES {
+                    return Err(
+                        "Paste HTML accepts up to one MiB. Import larger HTML files from disk."
+                            .into(),
+                    );
+                }
+                self.import_design("html", markup.as_bytes(), "Imported HTML", leases)
             }
             Request::Export { id, page, title } => {
                 use std::io::Write;

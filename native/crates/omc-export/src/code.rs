@@ -101,6 +101,9 @@ fn element(
             _ => "div",
         });
     let mut attrs = format!(" data-omc-id=\"{}\"", escape(id));
+    if tag == "button" {
+        attrs.push_str(" type=\"button\"");
+    }
     if let Some(id) = node.properties.get("htmlId").and_then(Value::as_str) {
         attrs.push_str(&format!(" id=\"{}\"", escape(id)));
     }
@@ -490,6 +493,7 @@ fn safe_tag(tag: &str) -> bool {
             | "ol"
             | "li"
             | "label"
+            | "button"
             | "a"
             | "img"
             | "pre"

@@ -68,6 +68,22 @@ try{
   await t.test('native PNG/SVG/PDF and editable copy output',async()=>{
    for(const format of ['png','svg','pdf','omc']){const output=await client.call('export_document',{id:documentId,format});assert.equal(output.ok,true);assert.ok(output.byteLength>20);if(format==='png')assert.equal(Buffer.from(output.base64,'base64').subarray(1,4).toString(),'PNG');if(format==='pdf')assert.equal(Buffer.from(output.base64,'base64').subarray(0,4).toString(),'%PDF');if(format==='omc'){const parsed=JSON.parse(output.content);assert.equal(parsed.format,'omc.native/1');const copy=await client.call('import_document',{format:'omc',payload:output.content});assert.notEqual(copy.documentId,documentId);}}
   });
+  await t.test('agent HTML and CSS import returns editable layers',async()=>{
+   const imported=await client.call('import_document',{
+    format:'html',title:'Agent HTML card',
+    payload:'<style>.card { width: 140px; background: #eef2ff; }</style><div class="card" data-name="Card"><p data-name="Label">참가 신청</p></div>',
+   });
+   const tree=await client.call('get_tree',{documentId:imported.documentId,detail:'detailed'});
+   const card=tree.nodes.find(node=>node.name==='Card');
+   assert.ok(card);
+   const styles=await client.call('get_styles',{documentId:imported.documentId,ids:[card.id]});
+   assert.equal(styles.styles[0].styles.width,'140px');
+   const label=tree.nodes.find(node=>node.name==='Label');
+   assert.ok(label);
+   await client.call('update',{documentId:imported.documentId,id:label.id,attrs:{name:'Edited label'}});
+   const edited=await client.call('get_tree',{documentId:imported.documentId});
+   assert.ok(edited.nodes.some(node=>node.name==='Edited label'));
+  });
   await t.test('resumed principal replays original receipt after service restart',async()=>{
    await client.client.close();await stop(service);service=await start(service.profile);client=await connect(service,identity);await client.call('open_document',{id:documentId});
    const replay=await client.call('create_shape',repeatArgs,repeatMeta);assert.equal(replay.receipt.replayed,true);assert.deepEqual(replay.rawIds,created.rawIds);const tree=await client.call('get_tree',{documentId,detail:'detailed'});assert.equal(tree.nodes.filter(n=>n.name==='Retry-safe text').length,1);

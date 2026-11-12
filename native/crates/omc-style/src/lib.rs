@@ -165,6 +165,12 @@ fn compute_one(
             }
         }
     }
+    if let Some(tag) = node.properties.get("tag").and_then(Value::as_str) {
+        for default in parse_declarations(html_defaults(tag)) {
+            out.provenance.remove(&default.name);
+            out.values.insert(default.name, default.value);
+        }
+    }
     for rule in &sheet.rules {
         if rule.min_width.is_some_and(|v| viewport.0 < v)
             || rule.max_width.is_some_and(|v| viewport.0 > v)
@@ -320,6 +326,21 @@ fn compute_one(
     expand_box_shorthand(&mut out, "padding");
     expand_box_shorthand(&mut out, "margin");
     out
+}
+
+fn html_defaults(tag: &str) -> &'static str {
+    match tag {
+        "body" => "display:block;margin:8px",
+        "h1" => "font-size:32px;font-weight:bold;margin:0 0 16px 0",
+        "h2" => "font-size:24px;font-weight:bold;margin:0 0 12px 0",
+        "h3" => "font-size:20px;font-weight:bold",
+        "strong" | "b" => "font-weight:bold",
+        "em" | "i" => "font-style:italic",
+        "p" => "margin:0 0 16px 0",
+        "pre" | "code" => "font-family:monospace;white-space:pre",
+        "ul" | "ol" => "padding-left:24px;display:block",
+        _ => "",
+    }
 }
 
 fn expand_box_shorthand(style: &mut ComputedStyle, key: &str) {

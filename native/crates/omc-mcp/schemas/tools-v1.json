@@ -4216,7 +4216,7 @@
   },
   {
     "name": "import_document",
-    "description": "Import .omc or canvas JSON from a bounded payload or explicit absolute local file path; .fig and .sketch require filePath without a dialog. Opening stays in the background by default.",
+    "description": "Import editable HTML with design CSS, .omc, or canvas JSON from a bounded payload or explicit absolute local file path; .fig and .sketch require filePath without a dialog. Opening stays in the background by default.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4225,6 +4225,7 @@
           "enum": [
             "omc",
             "json",
+            "html",
             "fig",
             "sketch"
           ]
