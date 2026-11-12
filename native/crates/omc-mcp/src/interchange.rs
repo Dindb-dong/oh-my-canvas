@@ -381,7 +381,7 @@ impl ToolRouter {
         Ok(result)
     }
 }
-fn write_explicit(path: &str, bytes: &[u8], overwrite: bool) -> Result<()> {
+pub(super) fn write_explicit(path: &str, bytes: &[u8], overwrite: bool) -> Result<()> {
     let destination = Path::new(path);
     if !destination.is_absolute() {
         return Err(EngineError::invalid("output filePath must be absolute"));

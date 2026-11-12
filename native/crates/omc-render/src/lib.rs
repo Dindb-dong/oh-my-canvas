@@ -763,6 +763,16 @@ fn paint_item(
     result
 }
 
+pub fn shape_path_bounds(item: &SceneItem) -> Result<[f64; 4], RenderError> {
+    let bounds = shape_path(item)?.compute_tight_bounds();
+    Ok([
+        bounds.left as f64,
+        bounds.top as f64,
+        bounds.width() as f64,
+        bounds.height() as f64,
+    ])
+}
+
 fn shape_path(item: &SceneItem) -> Result<Path, RenderError> {
     let mut path = Path::new();
     let rect = Rect::from_xywh(0., 0., item.width as f32, item.height as f32);

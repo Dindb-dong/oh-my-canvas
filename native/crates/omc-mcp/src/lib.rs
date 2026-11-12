@@ -2,10 +2,12 @@
 mod extensions;
 pub use extensions::capabilities as native_capabilities;
 mod figcraft;
+mod figcraft_file;
 mod interchange;
 pub use figcraft::tools as figcraft_tools;
 mod libraries;
 mod mutations;
+mod paths;
 mod resources;
 pub mod schema;
 use omc_model::{DocumentContent, DocumentSnapshot, Node, Properties};
@@ -24,6 +26,7 @@ pub(crate) struct ViewState {
     pub root: String,
     pub aliases: HashMap<String, String>,
     pub next_alias: usize,
+    pub fig_file: Option<figcraft_file::FigFile>,
     pub fig_aliases: HashMap<String, u64>,
     pub view: Value,
     pub clipboard: Option<Value>,
@@ -32,6 +35,7 @@ pub struct ToolRouter {
     pub workspace: Arc<Workspace>,
     states: Mutex<HashMap<(String, String), ViewState>>,
     extensions: extensions::ExtensionState,
+    fig_file_access: Mutex<()>,
 }
 impl ToolRouter {
     pub fn new(workspace: Arc<Workspace>) -> Self {
@@ -39,6 +43,7 @@ impl ToolRouter {
             workspace,
             states: Mutex::new(HashMap::new()),
             extensions: extensions::ExtensionState::default(),
+            fig_file_access: Mutex::new(()),
         }
     }
     pub fn tools(&self) -> Value {
@@ -386,13 +391,11 @@ impl ToolRouter {
         }
         if name == "get_path" {
             let raw = self.resolve(session, id, string(args, "id")?)?;
-            let node = snapshot
-                .nodes
-                .get(&raw)
-                .ok_or_else(|| EngineError::invalid("path not found"))?;
-            return Ok(
-                json!({"ok":true,"id":args["id"],"revision":snapshot.sequence,"path":node.properties.get("path"),"properties":node.properties}),
-            );
+            let mut result = paths::inspect(&snapshot, &self.state(session, id)?.page_id, &raw)?;
+            result["ok"] = true.into();
+            result["id"] = self.alias(session, id, &raw).into();
+            result["revision"] = snapshot.sequence.into();
+            return Ok(result);
         }
         if name == "components" {
             let offset = args["offset"].as_u64().unwrap_or(0) as usize;

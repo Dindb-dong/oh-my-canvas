@@ -5,6 +5,9 @@ use omc_model::{NodeKind, rank_between};
 const COMMANDS: &[(&str, &str, bool, &str)] = &[
     ("doc.list", "List documents", false, ""),
     ("file.new", "New document", false, "name?"),
+    ("file.open", "Open document", false, "path"),
+    ("file.save", "Save document", false, "path?, overwrite?"),
+    ("file.saveAs", "Save as", false, "path | data"),
     (
         "node.create",
         "Create layer",
@@ -152,6 +155,18 @@ pub fn tools() -> Vec<Value> {
             &["text"],
         ),
         tool(
+            "open_file",
+            "Open a file into an editable native document.",
+            json!({"path":{"type":"string"},"reload":{"type":"boolean"}}),
+            &["path"],
+        ),
+        tool(
+            "save_file",
+            "Save the current document as an editable archive.",
+            json!({"path":{"type":"string"}}),
+            &[],
+        ),
+        tool(
             "undo",
             "Undo the last eligible edit by this MCP author.",
             json!({}),
@@ -196,6 +211,7 @@ impl ToolRouter {
             (tool, &args)
         };
         match name {
+            "open_file" | "file.open" => return self.fig_open_file(session, params),
             "doc.list" => {
                 let listing = self.workspace.list(false)?;
                 return Ok(json!(listing["documents"].as_array().unwrap().iter().enumerate().map(|(index, doc)| {
@@ -262,6 +278,9 @@ impl ToolRouter {
             .as_u64()
             .unwrap_or(if name == "get_node" { 1 } else { 4 }) as usize;
         match name {
+            "save_file" | "file.save" | "file.saveAs" => {
+                self.fig_save_file(session, &snapshot, &state, params, name == "file.saveAs")
+            }
             "inspect_document" => {
                 let mut budget = 300;
                 let tree = children(&snapshot, &state.root)

@@ -273,6 +273,11 @@ impl ToolRouter {
         let mut result = self.submit(session, id, command, meta, revision)?;
 
         result["changedIds"] = json!(draft.affected);
+        if name == "edit_path" {
+            let raw = self.resolve(session, id, string(args, "id")?)?;
+            result["id"] = self.alias(session, id, &raw).into();
+            result["rawId"] = raw.into();
+        }
         if name == "page" {
             if matches!(args["action"].as_str(), Some("create" | "duplicate"))
                 && let Some(page) = draft.snapshot.pages.last()
@@ -665,7 +670,31 @@ impl ToolRouter {
             "edit_shapes" => self.edit_shapes(session, id, args, draft),
             "component" => self.component_mutation(session, id, args, draft),
             "write_html" | "write_svg" => self.insert_markup(session, id, name, args, draft),
-            "edit_path" | "boolean" | "outline" | "image" => Err(EngineError::new(
+            "edit_path" => {
+                let raw = resolve("id")?;
+                let other = if matches!(args["action"].as_str(), Some("join" | "merge")) {
+                    args["otherId"]
+                        .as_str()
+                        .map(|id_alias| self.resolve(session, id, id_alias))
+                        .transpose()?
+                } else {
+                    None
+                };
+                if other.as_deref() == Some(&raw) {
+                    return Err(EngineError::invalid("choose distinct paths"));
+                }
+                for command in paths::edit(
+                    &draft.snapshot,
+                    &self.state(session, id)?.page_id,
+                    &raw,
+                    other.as_deref(),
+                    args,
+                )? {
+                    draft.apply(command)?;
+                }
+                Ok(())
+            }
+            "boolean" | "outline" | "image" => Err(EngineError::new(
                 "unsupported_feature",
                 "this native geometry/image operation has not passed its capability gate",
             )),
@@ -1595,15 +1624,25 @@ fn normalize_paints(props: &mut Properties) {
     }
 }
 fn polygon_path(width: f64, height: f64, count: usize, star: bool) -> String {
-    let total = if star { count * 2 } else { count };
+    regular_polygon_path(
+        [0., 0., width, height],
+        if star { count * 2 } else { count },
+        if star { 0.45 } else { 1. },
+    )
+}
+pub(super) fn regular_polygon_path(
+    [x, y, width, height]: [f64; 4],
+    total: usize,
+    inner_ratio: f64,
+) -> String {
     let points: Vec<_> = (0..total)
         .map(|i| {
             let a = -std::f64::consts::FRAC_PI_2 + i as f64 * std::f64::consts::TAU / total as f64;
-            let ratio = if star && i % 2 == 1 { 0.45 } else { 1. };
+            let ratio = if i % 2 == 1 { inner_ratio } else { 1. };
             format!(
                 "{} {}",
-                width / 2. + a.cos() * width / 2. * ratio,
-                height / 2. + a.sin() * height / 2. * ratio
+                x + width / 2. + a.cos() * width / 2. * ratio,
+                y + height / 2. + a.sin() * height / 2. * ratio
             )
         })
         .collect();

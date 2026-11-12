@@ -2577,8 +2577,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "svgtypes",
  "tempfile",
  "uuid",
+ "zip",
 ]
 
 [[package]]

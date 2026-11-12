@@ -1,7 +1,7 @@
 // Uses the project's official MCP SDK. Runtime applications remain Rust-only.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,rm,writeFile,copyFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
@@ -180,6 +180,53 @@ try{
    assert.equal((await page('list')).pageId,doc.page.id);
    await assert.rejects(page('delete',{pageId:doc.page.id}),/last page/);
   });
+  await t.test('legacy vector actions edit world-space path geometry and support undo',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Vector editing fixture'});
+   await client.call('write_svg',{documentId,target:'root',position:'last',svg:'<svg width="100" height="100"><path id="first" fill="#222222" d="M10 10 C20 10 30 30 40 30 L60 45"/><path id="second" fill="#222222" d="M70 60 L80 60"/></svg>'});
+   const {nodes}=await client.call('get_tree',{documentId,detail:'detailed'});
+   const paths=nodes.filter(n=>n.kind==='path');
+   assert.equal(paths.length,2);
+   const candidates=await Promise.all(paths.map(node=>client.call('get_path',{documentId,id:node.rawId})));
+   const id=candidates.find(path=>path.segments.length===3).rawId;
+   const otherId=candidates.find(path=>path.segments.length===2).rawId;
+   const inspect=(layer=id)=>client.call('get_path',{documentId,id:layer});
+   const edit=async(action,fields={})=>client.call('edit_path',{documentId,id,revision:(await inspect()).revision,action,...fields});
+   const original=await inspect();
+   assert.equal(original.coordinateSpace,'world');
+   assert.equal(original.segments.length,3);
+   await edit('move_nodes',{indices:[1],dx:3,dy:4});
+   let current=await inspect();
+   assert.equal(current.segments[1].x,original.segments[1].x+3);
+   assert.equal(current.segments[1].y2,original.segments[1].y2+4);
+   await edit('insert_node',{index:1,t:0.5});
+   assert.equal((await inspect()).segments.length,4);
+   const point=(await inspect()).segments[1];
+   await edit('set_handle',{index:1,handle:'in',point:{x:point.x-5,y:point.y},mode:'symmetric'});
+   current=await inspect();
+   assert.ok(Math.abs(current.segments[1].x2-(point.x-5))<0.001);
+   assert.ok(Math.abs(current.segments[2].x1-(point.x+5))<0.001);
+   await edit('convert_node',{index:1,nodeKind:'corner'});
+   assert.equal((await inspect()).segments[1].handleMode,'corner');
+   await edit('delete_nodes',{indices:[1]});
+   assert.equal((await inspect()).segments.length,3);
+   await edit('close');
+   assert.equal((await inspect()).segments.at(-1).command,'close');
+   await edit('open');
+   assert.equal((await inspect()).segments.at(-1).command,'line');
+   await edit('join',{otherId});
+   assert.equal((await inspect()).segments.length,5);
+   await assert.rejects(inspect(otherId));
+   await client.call('undo',{documentId});
+   assert.equal((await inspect(otherId)).segments.length,2);
+   await edit('merge',{otherId,firstStart:true,secondEnd:true});
+   assert.equal((await inspect()).segments.length,4);
+   await edit('primitive',{primitive:{kind:'star',count:5,ratio:0.45}});
+   current=await inspect();
+   assert.equal(current.segments.length,11);
+   assert.equal(current.segments.at(-1).command,'close');
+   const svg=await client.call('export_document',{id:documentId,format:'svg'});
+   assert.match(svg.content,/<path/);
+  });
   await t.test('legacy spacing and tidy move actual layers with one undo per operation',async()=>{
    const {documentId}=await client.call('create_document',{title:'Arrangement fixture'});
    const ids=[];
@@ -273,6 +320,25 @@ try{
     assert.equal((await call('get_node',{id:ellipse.id})).type,'ELLIPSE');
     await run('edit.redo');
     await assert.rejects(call('get_node',{id:ellipse.id}),/layer not found/);
+    const simple=await run('file.new',{name:'Archive fixture'});
+    const frame=await call('create_node',{type:'frame',name:'Archive frame',width:180,height:80,props:{fill:'#E8E8E8'}});
+    const text=await call('create_node',{type:'text',parent:frame.id,name:'Archive text',text:'한글 아카이브',x:10,y:12,props:{fontSize:18,fill:'#312E81'}});
+    const data=await run('file.saveAs',{data:true});
+    assert.equal(Buffer.from(data.data,'base64').subarray(0,2).toString(),'PK');
+    const path=join(temporary,'sdk-archive.figcraft');
+    assert.equal((await call('save_file',{path})).path,path);
+    assert.deepEqual(await readFile(path),Buffer.from(data.data,'base64'));
+    await call('type_text',{id:text.id,text:'재저장'});
+    await run('file.save');
+    const reloaded=join(temporary,'reloaded-archive.figcraft');
+    await copyFile(path,reloaded);
+    const opened=await call('open_file',{path:reloaded});
+    assert.notEqual(opened.document,simple.id);
+    assert.equal((await call('inspect_document')).layers[0].children[0].characters,'재저장');
+    await assert.rejects(call('save_file',{path}),/output exists/);
+    await writeFile(reloaded,'outside edit');
+    assert.equal((await run('file.open',{path:reloaded})).stale,true);
+    await assert.rejects(call('save_file'),/file changed on disk/);
    } finally {await fig.close();}
   });
   await t.test('native collaboration exchanges durable edits over a dedicated pinned TLS room',async()=>{
