@@ -108,7 +108,7 @@ fn geometry(node: &Node) -> Result<Vec<Segment>> {
     Ok(segments)
 }
 
-fn scene(snapshot: &DocumentSnapshot, page: &str) -> Result<Scene> {
+pub(super) fn scene(snapshot: &DocumentSnapshot, page: &str) -> Result<Scene> {
     omc_scene::build_scene(
         snapshot,
         &SceneOptions {
@@ -119,7 +119,7 @@ fn scene(snapshot: &DocumentSnapshot, page: &str) -> Result<Scene> {
     .map_err(|error| EngineError::invalid(error.to_string()))
 }
 
-fn editable(scene: &Scene, id: &str) -> bool {
+pub(super) fn editable(scene: &Scene, id: &str) -> bool {
     let mut item = scene.item(id);
     while let Some(node) = item {
         if node.hidden || node.locked {
@@ -132,12 +132,26 @@ fn editable(scene: &Scene, id: &str) -> bool {
 
 pub(super) fn inspect(snapshot: &DocumentSnapshot, page: &str, id: &str) -> Result<Value> {
     let scene = scene(snapshot, page)?;
-    let world = scene
+    let item = scene
         .item(id)
-        .ok_or_else(|| EngineError::invalid("path is outside the selected page"))?
-        .world;
-    let node = &snapshot.nodes[id];
-    let segments = geometry(node)?
+        .ok_or_else(|| EngineError::invalid("path is outside the selected page"))?;
+    let world = item.world;
+    let live = item.boolean_operation().is_some();
+    let authored = snapshot.nodes.get(id);
+    let mut projected;
+    let node = if let Some(node) = authored.filter(|_| !live) {
+        node
+    } else {
+        projected = authored.cloned().unwrap_or_else(|| Node::new(item.kind));
+        projected.properties = item.properties.clone();
+        &projected
+    };
+    let geometry = if live && node.string("path") == Some("") {
+        Vec::new()
+    } else {
+        geometry(node)?
+    };
+    let segments = geometry
         .into_iter()
         .enumerate()
         .map(|(index, mut segment)| {
@@ -160,7 +174,7 @@ pub(super) fn inspect(snapshot: &DocumentSnapshot, page: &str, id: &str) -> Resu
         .collect::<Vec<_>>();
     Ok(
         json!({"rawId":id,"coordinateSpace":"world","fillRule":node.string("fillRule").unwrap_or("nonzero"),
-        "editable":editable(&scene,id),"segments":segments,"path":node.string("path"),"properties":node.properties}),
+        "editable":!live && authored.is_some() && editable(&scene,id),"segments":segments,"path":node.string("path"),"properties":node.properties}),
     )
 }
 
@@ -172,9 +186,21 @@ pub(super) fn edit(
     args: &Value,
 ) -> Result<Vec<Command>> {
     let scene = scene(snapshot, page)?;
-    if !editable(&scene, id) || other.is_some_and(|id| !editable(&scene, id)) {
+    let editable_path = |id| snapshot.nodes.contains_key(id) && editable(&scene, id);
+    if !editable_path(id) || other.is_some_and(|id| !editable_path(id)) {
         return Err(EngineError::invalid(
             "path is locked, hidden or outside the selected page",
+        ));
+    }
+    if scene
+        .item(id)
+        .is_some_and(|item| item.boolean_operation().is_some())
+        || other
+            .and_then(|id| scene.item(id))
+            .is_some_and(|item| item.boolean_operation().is_some())
+    {
+        return Err(EngineError::invalid(
+            "flatten live Boolean paths before editing their points",
         ));
     }
     let node = &snapshot.nodes[id];

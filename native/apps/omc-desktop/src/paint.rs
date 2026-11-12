@@ -2457,14 +2457,22 @@ pub fn draw(app: &mut App) -> Result<bool, String> {
     Ok(true)
 }
 pub fn screenshot(app: &App, path: &Path) -> Result<(), String> {
+    let (_, _, bytes) = screenshot_png(app)?;
+    std::fs::write(path, bytes.as_bytes()).map_err(|e| e.to_string())
+}
+
+pub fn screenshot_png(app: &App) -> Result<(u32, u32, skia_safe::Data), String> {
     let window = app.window.as_ref().ok_or("No native window")?;
     let size = window.inner_size();
+    if u64::from(size.width) * u64::from(size.height) > 16_777_216 {
+        return Err("Native window exceeds the screenshot pixel limit.".into());
+    }
     let mut surface = render(app, size.width, size.height, window.scale_factor(), false)?;
     let image = surface.image_snapshot();
     let bytes = image
         .encode(None, skia_safe::EncodedImageFormat::PNG, None)
         .ok_or("PNG encoding failed")?;
-    std::fs::write(path, bytes.as_bytes()).map_err(|e| e.to_string())
+    Ok((size.width, size.height, bytes))
 }
 
 #[cfg(test)]

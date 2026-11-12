@@ -1,5 +1,6 @@
 //! Browser-free Skia rendering shared by desktop, screenshots and PDF exports.
 mod paints;
+pub use paints::stroke_outlines;
 mod resources;
 
 use omc_model::NodeKind;
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use skia_safe::{
     AlphaType, BlendMode, Canvas, Color4f, ColorSpace, ColorType, Data, EncodedImageFormat, Image,
-    ImageInfo, Matrix, Paint, Path, RRect, Rect, Shader, Surface, TileMode, canvas::SaveLayerRec,
+    ImageInfo, Matrix, Paint, Path, Rect, Shader, Surface, TileMode, canvas::SaveLayerRec,
     paint::Style,
 };
 use std::collections::BTreeMap;
@@ -573,17 +574,8 @@ fn paint_item(
                     if alpha < 1. {
                         canvas.save_layer_alpha_f(None, alpha as f32);
                     }
-                    let extra = (item.height - item.text_offset.1 - text.height).max(0.);
-                    let offset = match item
-                        .properties
-                        .get("textVerticalAlign")
-                        .and_then(Value::as_str)
-                    {
-                        Some("middle") => extra * 0.5,
-                        Some("bottom") => extra,
-                        _ => 0.,
-                    };
-                    text.paint(canvas, item.text_offset.0, item.text_offset.1 + offset);
+                    let (x, y) = item.text_origin(text);
+                    text.paint(canvas, x, y);
                     if alpha < 1. {
                         canvas.restore();
                     }
@@ -734,7 +726,7 @@ fn paint_item(
                     }
                 }
             }
-        } else if mask_mode.is_none() {
+        } else if mask_mode.is_none() && item.boolean_operation().is_none() {
             let mut children = item.children.as_slice();
             if let Some((plan, pass)) = pass {
                 // Sibling spans follow painter order. Skip entire stationary subtrees on move.
@@ -774,49 +766,8 @@ pub fn shape_path_bounds(item: &SceneItem) -> Result<[f64; 4], RenderError> {
 }
 
 fn shape_path(item: &SceneItem) -> Result<Path, RenderError> {
-    let mut path = Path::new();
-    let rect = Rect::from_xywh(0., 0., item.width as f32, item.height as f32);
-    match item.kind {
-        NodeKind::Ellipse => {
-            path.add_oval(rect, None);
-        }
-        NodeKind::Line => {
-            path.move_to((0., 0.))
-                .line_to((item.width as f32, item.height as f32));
-        }
-        NodeKind::Path => {
-            let svg = item
-                .properties
-                .get("path")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            path = Path::from_svg(svg).ok_or_else(|| {
-                RenderError::Unsupported(format!("invalid SVG path for {}", item.id))
-            })?;
-            if item.properties.get("fillRule").and_then(Value::as_str) == Some("evenodd") {
-                path.set_fill_type(skia_safe::PathFillType::EvenOdd);
-            }
-        }
-        _ => {
-            let radius = item
-                .style
-                .get("border-radius")
-                .and_then(|v| {
-                    resolve_length(
-                        v,
-                        LengthContext {
-                            percent_basis: item.width.min(item.height),
-                            ..Default::default()
-                        },
-                    )
-                })
-                .unwrap_or(0.)
-                .max(0.)
-                .min(item.width.min(item.height) / 2.) as f32;
-            path.add_rrect(RRect::new_rect_xy(rect, radius, radius), None);
-        }
-    }
-    Ok(path)
+    omc_scene::shape_path(item)
+        .ok_or_else(|| RenderError::Unsupported(format!("invalid SVG path for {}", item.id)))
 }
 
 fn draw_image(

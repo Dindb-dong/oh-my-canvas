@@ -1,7 +1,7 @@
 //! Native paragraph shaping and its shared measurement, drawing and caret maps.
 use omc_style::{ComputedStyle, Diagnostic, LengthContext, resolve_length};
 use skia_safe::{
-    Canvas, Color4f, FontMgr, FontStyle, Picture, PictureRecorder, Rect, font_style,
+    Canvas, Color4f, FontMgr, FontStyle, Path, Picture, PictureRecorder, Rect, font_style,
     textlayout::{
         FontCollection, Paragraph, ParagraphBuilder, ParagraphStyle, RectHeightStyle,
         RectWidthStyle, TextAlign, TextDirection, TextStyle,
@@ -19,6 +19,8 @@ pub enum TextError {
     ResourceLimit,
     #[error("native text recording failed")]
     Recording,
+    #[error("text contains glyphs without vector outlines or exceeds the path complexity limit")]
+    Outline,
 }
 
 struct SelectionBox {
@@ -249,6 +251,48 @@ pub fn measure_runs(
         baseline: paragraph.alphabetic_baseline() as f64,
     })
 }
+pub fn outline(
+    text: &str,
+    runs: Option<&serde_json::Value>,
+    style: &ComputedStyle,
+    width: f64,
+) -> Result<Path, TextError> {
+    let (mut paragraph, _, _) = paragraph(text, runs, style, width)?;
+    let mut path = Path::new();
+    let mut unsupported = false;
+    paragraph.visit(|_, info| {
+        let Some(info) = info.filter(|_| !unsupported) else {
+            return;
+        };
+        let origin = info.origin();
+        let font = info.font();
+        for (&glyph, position) in info.glyphs().iter().zip(info.positions()) {
+            if let Some(outline) = font.get_path(glyph) {
+                if path.count_verbs() + outline.count_verbs() > 10_000 {
+                    unsupported = true;
+                    break;
+                }
+                path.add_path(
+                    &outline,
+                    (origin.x + position.x, origin.y + position.y),
+                    None,
+                );
+            } else {
+                let mut bounds = [Rect::default()];
+                font.get_bounds(&[glyph], &mut bounds, None);
+                if !bounds[0].is_empty() {
+                    unsupported = true;
+                    break;
+                }
+            }
+        }
+    });
+    if unsupported || path.is_empty() {
+        return Err(TextError::Outline);
+    }
+    Ok(path)
+}
+
 fn paragraph(
     text: &str,
     runs: Option<&serde_json::Value>,
@@ -534,6 +578,15 @@ pub fn utf16_to_byte(text: &str, index: usize) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn vector_outline_includes_native_line_layout() {
+        let text = "Hello world\n한글";
+        let style = ComputedStyle::default();
+        let path = outline(text, None, &style, 200.).unwrap();
+        let line = outline("Hello world", None, &style, 200.).unwrap();
+        assert!(path.count_verbs() > line.count_verbs());
+        assert!(path.compute_tight_bounds().bottom > line.compute_tight_bounds().bottom);
+    }
     #[test]
     fn surrogate_and_grapheme_boundaries() {
         let text = "A😀e\u{301}한";

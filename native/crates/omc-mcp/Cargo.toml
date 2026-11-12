@@ -24,6 +24,9 @@ hex.workspace = true
 regex = "=1.13.1"
 svgtypes.workspace = true
 zip.workspace = true
+tokio.workspace = true
+skia-safe.workspace = true
+tract-onnx = { version = "=0.23.10", default-features = false }
 
 [dev-dependencies]
 tempfile.workspace = true

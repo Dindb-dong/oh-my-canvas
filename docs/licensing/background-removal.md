@@ -1,7 +1,8 @@
 # Local background removal
 
-The app bundles U²-Netp and ONNX Runtime Web. Images are processed locally in a
-worker using the WASM CPU backend on macOS, Windows and Linux. There is no model
+The Electron app bundles U²-Netp and ONNX Runtime Web and processes images
+locally in a worker using the WASM CPU backend on macOS, Windows and Linux.
+The native service uses the same model with Tract on the CPU. There is no model
 download or image upload at runtime. The lightweight 320 × 320 saliency model
 can lose fine hair, translucent edges, or subjects with weak background contrast.
 The exported PNG keeps the source pixel dimensions and existing transparency.
@@ -27,3 +28,13 @@ the pinned, checksum-verified file only when needed at build time. It copies the
 WASM runtime from the locked npm package into the distribution. The model license
 and this attribution accompany those assets. ONNX Runtime and dependency notices
 are included in the generated npm runtime license inventory.
+
+To prepare a native build from the repository root, run
+`node scripts/prepare-background-removal.mjs --native native/target/debug`.
+The native service reads `background-removal/u2netp.onnx` next to its executable
+or inside its macOS app’s `Contents/Resources`. A macOS packager can pass that
+`Contents/Resources` directory to the preparation script. A local deployment
+can also set `OMC_BACKGROUND_MODEL` to the verified file. The image background
+tool reports unavailable when the model is missing or fails checksum validation.
+The native service retains both asset hashes so Restore, Undo, export, and
+collaboration can use the preserved original.

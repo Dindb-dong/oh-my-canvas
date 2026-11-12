@@ -57,7 +57,7 @@ impl ExtensionState {
     }
 }
 pub fn capabilities() -> Value {
-    json!({"protocol":"omc.native/1","releaseStatus":"incomplete-preview","browserRuntime":false,"legacyToolCount":50,"legacyParity":"incomplete","extensions":["identity.resume/1","workspace.organization/1","comments/1","tokens/1","code.static/1","query.snapshot/1","jobs/1"],"limits":{"mcpRequestBytes":1048576,"batchOperations":100,"queryPageNodes":200,"queryPageBytes":524288,"snapshotsPerSession":4,"snapshotIdleSeconds":60,"resultBytes":67108864},"qualification":{"databaseCommitKillTests":200,"installedOsInteraction":"NOT_RUN","fourHardwarePeers":"NOT_RUN","fullPerformanceWorkloads":"NOT_RUN"},"unsupported":["native network peer transport","complete FIG/Sketch fidelity","full desktop capability matrix","complete 30 shader registry","large staged library updates","portable native history backup"]})
+    json!({"protocol":"omc.native/1","releaseStatus":"incomplete-preview","browserRuntime":false,"legacyToolCount":50,"legacyParity":"incomplete","extensions":["identity.resume/1","workspace.organization/1","comments/1","tokens/1","code.static/1","query.snapshot/1","jobs/1"],"limits":{"mcpRequestBytes":1048576,"batchOperations":100,"queryPageNodes":200,"queryPageBytes":524288,"snapshotsPerSession":4,"snapshotIdleSeconds":60,"resultBytes":67108864},"qualification":{"databaseCommitKillTests":200,"installedOsInteraction":"NOT_RUN","fourHardwarePeers":"NOT_RUN","fullPerformanceWorkloads":"NOT_RUN"},"unsupported":["complete FIG/Sketch fidelity","full desktop capability matrix","complete 30 shader registry","large staged library updates","portable native history backup"]})
 }
 pub fn definitions() -> Vec<Value> {
     let defs = [

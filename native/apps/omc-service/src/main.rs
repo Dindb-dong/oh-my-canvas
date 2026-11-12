@@ -1,5 +1,6 @@
 //! Authenticated loopback service. Document authority lives in isolated workers.
 mod collaboration;
+mod desktop_automation;
 mod legacy_https;
 use axum::{
     Json, Router,
@@ -35,6 +36,7 @@ struct App {
     workspace: Arc<Workspace>,
     router: Arc<ToolRouter>,
     collaboration: Arc<collaboration::Collaboration>,
+    desktop_automation: Arc<desktop_automation::DesktopAutomation>,
     token: String,
     admission: Arc<tokio::sync::Semaphore>,
 }
@@ -64,6 +66,7 @@ async fn run() -> Result<()> {
         router: Arc::new(ToolRouter::new(workspace.clone())),
         collaboration: Arc::new(collaboration::Collaboration::new(workspace.clone())),
         workspace,
+        desktop_automation: Arc::default(),
         token: token.clone(),
         admission: Arc::new(tokio::sync::Semaphore::new(32)),
     };
@@ -189,11 +192,32 @@ async fn rpc(State(app): State<App>, headers: HeaderMap, body: Bytes) -> Respons
     };
     let id = request["id"].clone();
     let method = request["method"].as_str().unwrap_or("").to_owned();
-    if body.len() > 1024 * 1024 && method != "document.import" {
-        return(StatusCode::PAYLOAD_TOO_LARGE,Json(json!({"id":id,"error":{"code":"resource_limit","message":"ordinary RPC body exceeds 1 MiB"}}))).into_response();
+    let max_mib = match method.as_str() {
+        "document.import" => 64,
+        // The desktop can return a 6 MiB PNG, expanded to 8 MiB by base64.
+        "desktop.complete" => 9,
+        _ => 1,
+    };
+    if body.len() > max_mib * 1024 * 1024 {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({"id":id,"error":{
+                "code":"resource_limit","message":format!("RPC body exceeds {max_mib} MiB")
+            }})),
+        )
+            .into_response();
     }
     let session = header(&headers, "x-omc-session").ok().map(str::to_owned);
-    let result = if method == "collaboration" {
+    let result = if matches!(method.as_str(), "desktop.poll" | "desktop.complete") {
+        app.desktop_automation
+            .rpc(
+                &app.workspace,
+                session.as_deref(),
+                &method,
+                request["params"].clone(),
+            )
+            .await
+    } else if method == "collaboration" {
         match session {
             Some(session) => {
                 app.collaboration
@@ -248,7 +272,7 @@ fn dispatch_rpc(app: &App, session: Option<&str>, method: &str, args: Value) -> 
         "document.command" => {
             let envelope: CommandEnvelope = serde_json::from_value(args["envelope"].clone())
                 .map_err(|e| EngineError::invalid(e.to_string()))?;
-            app.workspace.execute(session, envelope)
+            app.router.execute_observed(session, envelope)
         }
         "document.undo" | "document.redo" => app.workspace.command(
             session,
@@ -392,7 +416,12 @@ async fn mcp_request(app: App, headers: HeaderMap, body: Bytes, figcraft: bool) 
                         "Native incomplete preview. Inspect native_capabilities before depending on extensions or unqualified tool branches.",
                     )
                 };
-                let mut response=Json(json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":version,"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":name,"version":"0.1.0"},"instructions":instructions,"_meta":{"oh-my-canvas/identity":session}}})).into_response();
+                let capabilities = if figcraft {
+                    json!({"tools":{"listChanged":false},"resources":{},"prompts":{}})
+                } else {
+                    json!({"tools":{"listChanged":false}})
+                };
+                let mut response=Json(json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":version,"capabilities":capabilities,"serverInfo":{"name":name,"version":"0.1.0"},"instructions":instructions,"_meta":{"oh-my-canvas/identity":session}}})).into_response();
                 response.headers_mut().insert(
                     "mcp-session-id",
                     HeaderValue::from_str(session["sessionId"].as_str().unwrap()).unwrap(),
@@ -426,7 +455,65 @@ async fn mcp_request(app: App, headers: HeaderMap, body: Bytes, figcraft: bool) 
         ),
         "tools/call" => {
             let params = request["params"].clone();
-            let result = if !figcraft && params["name"] == "collaboration" {
+            let tool_name = params["name"].as_str().unwrap_or("");
+            let result = if figcraft && tool_name == "wait_for_changes" {
+                app.router
+                    .fig_wait_for_changes(
+                        &session,
+                        params
+                            .get("arguments")
+                            .cloned()
+                            .unwrap_or_else(|| json!({})),
+                        app.desktop_automation.attached(),
+                    )
+                    .await
+            } else if figcraft
+                && (matches!(tool_name, "pointer" | "key" | "inspect_ui")
+                    || tool_name == "type_text" && params["arguments"].get("id").is_none()
+                    || tool_name == "screenshot"
+                        && app.desktop_automation.attached()
+                        && params["arguments"]
+                            .get("window")
+                            .is_some_and(|window| window != false))
+            {
+                let mut arguments = params
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                let input = matches!(tool_name, "pointer" | "key" | "type_text");
+                match omc_mcp::validate_figcraft_tool(tool_name, &arguments) {
+                    Ok(()) => {
+                        let mut bind = false;
+                        if input && arguments.get("document").is_none() {
+                            if let Ok(caller) = app.workspace.session(&session) {
+                                if let Some(document) = caller.binding {
+                                    arguments["document"] = document.into();
+                                } else {
+                                    bind = true;
+                                }
+                            }
+                        }
+                        match app
+                            .desktop_automation
+                            .call(&session, tool_name, arguments)
+                            .await
+                        {
+                            Ok(value) => tokio::task::spawn_blocking(move || {
+                                app.router.fig_desktop_result(&session, value, input, bind)
+                            })
+                            .await
+                            .unwrap_or_else(|_| {
+                                Err(EngineError::new(
+                                    "internal_error",
+                                    "desktop result worker stopped",
+                                ))
+                            }),
+                            Err(error) => Err(error),
+                        }
+                    }
+                    Err(error) => Err(error),
+                }
+            } else if !figcraft && params["name"] == "collaboration" {
                 let args = params["arguments"].clone();
                 match omc_mcp::schema::validate("collaboration", &args) {
                     Ok(()) => app.collaboration.call(&session, args).await,
@@ -475,11 +562,39 @@ async fn mcp_request(app: App, headers: HeaderMap, body: Bytes, figcraft: bool) 
                 }
             })
         }
+        "resources/list"
+        | "resources/templates/list"
+        | "resources/read"
+        | "prompts/list"
+        | "prompts/get"
+            if figcraft =>
+        {
+            tokio::task::spawn_blocking(move || {
+                app.router
+                    .fig_protocol(&session, &method, &request["params"])
+            })
+            .await
+            .unwrap_or_else(|_| {
+                Err(EngineError::new(
+                    "internal_error",
+                    "protocol worker stopped",
+                ))
+            })
+        }
         _ => Err(EngineError::new("method_not_found", "unknown MCP method")),
     };
     match result {
         Ok(value) => Json(json!({"jsonrpc":"2.0","id":id,"result":value})).into_response(),
-        Err(error) => mcp_error(id, -32601, &error.message),
+        Err(error) => mcp_error(
+            id,
+            match error.code.as_str() {
+                "method_not_found" => -32601,
+                "invalid_argument" => -32602,
+                "not_found" => -32002,
+                _ => -32000,
+            },
+            &error.message,
+        ),
     }
 }
 async fn close_mcp(State(app): State<App>, headers: HeaderMap) -> Response {

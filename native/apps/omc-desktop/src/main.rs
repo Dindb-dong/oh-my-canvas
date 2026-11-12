@@ -20,8 +20,9 @@ mod text_ui;
 use std::{path::PathBuf, time::Duration};
 use winit::event_loop::EventLoop;
 
-pub enum Event {
+pub(crate) enum Event {
     Service(client::Response),
+    Automation(app::automation::Job, app::automation::Reply),
     Scene(app::SceneReply),
     PanRasterReady,
     Accessibility(accesskit_winit::Event),

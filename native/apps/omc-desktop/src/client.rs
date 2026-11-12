@@ -237,6 +237,9 @@ impl Bridge {
                 }
             };
             let _ = proxy.send_event(crate::Event::Service(Response::Connected));
+            let automation = client.clone();
+            let automation_proxy = proxy.clone();
+            thread::spawn(move || automation.poll_automation(automation_proxy));
             let mut leases = BTreeSet::new();
             while let Ok(request) = receiver.recv() {
                 if matches!(request, Request::Shutdown) {
@@ -280,6 +283,7 @@ impl Bridge {
     }
 }
 
+#[derive(Clone)]
 struct Client {
     http: reqwest::blocking::Client,
     endpoint: String,
@@ -288,6 +292,44 @@ struct Client {
 }
 
 impl Client {
+    fn poll_automation(&self, proxy: EventLoopProxy<crate::Event>) {
+        loop {
+            let value = match self.call("desktop.poll", json!({})) {
+                Ok(value) => value,
+                Err(message) if message.starts_with("busy:") => {
+                    thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
+                Err(_) => break,
+            };
+            if value.is_null() {
+                continue;
+            }
+            let id = value["id"].clone();
+            let result = match serde_json::from_value::<crate::app::automation::Job>(value) {
+                Ok(job) => {
+                    let (reply, receiver) = mpsc::sync_channel(1);
+                    if proxy
+                        .send_event(crate::Event::Automation(job, reply))
+                        .is_err()
+                    {
+                        break;
+                    }
+                    receiver.recv_timeout(Duration::from_secs(7))
+                        .unwrap_or_else(|_| Err("The desktop did not finish in time. Check the document before retrying an edit.".into()))
+                }
+                Err(error) => Err(format!("Invalid desktop request: {error}")),
+            };
+            let complete = match result {
+                Ok(result) => json!({"id":id,"result":result}),
+                Err(error) => json!({"id":id,"error":error}),
+            };
+            if self.call("desktop.complete", complete).is_err() {
+                break;
+            }
+        }
+    }
+
     fn connect(profile: &Path) -> Result<Self, String> {
         let path = profile.join("native-v1/service.json");
         let http = reqwest::blocking::Client::builder()

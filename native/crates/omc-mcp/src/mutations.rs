@@ -1,4 +1,5 @@
 use super::*;
+mod variants;
 use omc_model::{NodeKind, Page, new_id, rank_between};
 use std::collections::BTreeSet;
 
@@ -694,10 +695,18 @@ impl ToolRouter {
                 }
                 Ok(())
             }
-            "boolean" | "outline" | "image" => Err(EngineError::new(
-                "unsupported_feature",
-                "this native geometry/image operation has not passed its capability gate",
-            )),
+            "boolean" | "outline" => {
+                for command in vector::build(
+                    &draft.snapshot,
+                    &self.state(session, id)?.page_id,
+                    name,
+                    &selected()?,
+                    args,
+                )? {
+                    draft.apply(command)?;
+                }
+                Ok(())
+            }
             _ => Err(EngineError::new(
                 "unsupported_feature",
                 format!("native adapter for {name} is not implemented"),
@@ -991,6 +1000,9 @@ impl ToolRouter {
         draft: &mut Draft,
     ) -> Result<()> {
         match args["action"].as_str().unwrap() {
+            "add_variant" | "combine" | "variant" | "axes" => {
+                self.variant_mutation(session, id, args, draft)
+            }
             "create" => {
                 let raw = self.resolve(
                     session,

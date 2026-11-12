@@ -26,15 +26,17 @@ pub fn catalog_entities(snapshot: &DocumentSnapshot, namespace: &str) -> BTreeMa
     entities
 }
 
-pub struct ReferenceContext {
+pub struct ReferenceContext<'a> {
+    snapshot: &'a DocumentSnapshot,
     styles: BTreeMap<String, Value>,
     tokens: BTreeMap<String, Value>,
     active_mode: Option<String>,
 }
 
-impl ReferenceContext {
-    pub fn new(snapshot: &DocumentSnapshot) -> Self {
+impl<'a> ReferenceContext<'a> {
+    pub fn new(snapshot: &'a DocumentSnapshot) -> Self {
         Self {
+            snapshot,
             styles: catalog_entities(snapshot, "styles"),
             tokens: catalog_entities(snapshot, "tokens"),
             active_mode: snapshot
@@ -50,7 +52,7 @@ impl ReferenceContext {
         let mut diagnostics = Vec::new();
         for (id, token) in &self.tokens {
             let name = token.get("name").and_then(Value::as_str).unwrap_or(id);
-            match self.token(id, &mut BTreeSet::new(), 0) {
+            match self.token(id, None, &mut BTreeSet::new(), 0) {
                 Ok(value) => {
                     if let Some(value) = css_value(&value) {
                         variables.insert(format!("--{}", name.trim_start_matches("--")), value);
@@ -140,8 +142,44 @@ impl ReferenceContext {
                 properties.remove(stack);
             }
         }
+        if let Some(bindings) = node
+            .properties
+            .get("figcraftVariableBindings")
+            .and_then(Value::as_object)
+        {
+            for (field, reference) in bindings {
+                if matches!(
+                    field.as_str(),
+                    "width" | "height" | "fontSize" | "strokeWidth" | "opacity"
+                ) && reference.get("$token").is_some()
+                {
+                    match self.resolve(reference, Some(node), &mut BTreeSet::new(), 0) {
+                        Ok(value) if value.is_number() => {
+                            let value = if field == "opacity" {
+                                json!((value.as_f64().unwrap() / 100.).clamp(0., 1.))
+                            } else {
+                                json!(value.as_f64().unwrap().max(0.))
+                            };
+                            properties.insert(field.clone(), value);
+                        }
+                        Ok(_) => diagnostics.push(reference_diagnostic(
+                            Some(&node.id),
+                            field,
+                            &reference.to_string(),
+                            "Numeric field resolved to a nonnumeric value",
+                        )),
+                        Err(reason) => diagnostics.push(reference_diagnostic(
+                            Some(&node.id),
+                            field,
+                            &reference.to_string(),
+                            &reason,
+                        )),
+                    }
+                }
+            }
+        }
         for (key, value) in &mut properties {
-            match self.resolve(value, &mut BTreeSet::new(), 0) {
+            match self.resolve(value, Some(node), &mut BTreeSet::new(), 0) {
                 Ok(resolved) => *value = resolved,
                 Err(reason) => diagnostics.push(reference_diagnostic(
                     Some(&node.id),
@@ -155,7 +193,34 @@ impl ReferenceContext {
         (properties, diagnostics)
     }
 
-    fn token(&self, id: &str, seen: &mut BTreeSet<String>, depth: usize) -> Result<Value, String> {
+    fn mode_for(&self, node: &Node, collection: &str) -> Option<String> {
+        let mut current = Some(node);
+        // Cap traversal for unvalidated readers as with layout.
+        for _ in 0..512 {
+            let node = current?;
+            if let Some(mode) = node
+                .properties
+                .get("figcraftVariableModes")
+                .and_then(|modes| modes.get(collection))
+                .and_then(Value::as_str)
+            {
+                return Some(mode.to_owned());
+            }
+            current = node
+                .parent_id
+                .as_ref()
+                .and_then(|id| self.snapshot.nodes.get(id));
+        }
+        None
+    }
+
+    fn token(
+        &self,
+        id: &str,
+        node: Option<&Node>,
+        seen: &mut BTreeSet<String>,
+        depth: usize,
+    ) -> Result<Value, String> {
         if depth > 32 || !seen.insert(id.to_owned()) {
             return Err("Token reference cycle or depth limit".into());
         }
@@ -163,15 +228,18 @@ impl ReferenceContext {
             .tokens
             .get(id)
             .ok_or_else(|| format!("Missing token {id}"))?;
-        let mode = token
-            .get("activeMode")
-            .and_then(Value::as_str)
+        let inherited = node
+            .zip(token.get("collectionId").and_then(Value::as_str))
+            .and_then(|(node, collection)| self.mode_for(node, collection));
+        let mode = inherited
+            .as_deref()
+            .or_else(|| token.get("activeMode").and_then(Value::as_str))
             .or(self.active_mode.as_deref());
         let value = mode
             .and_then(|mode| token.get("modes").and_then(|m| m.get(mode)))
             .or_else(|| token.get("value"))
             .ok_or_else(|| format!("Token {id} has no value for the active mode"))?;
-        let result = self.resolve(value, seen, depth + 1);
+        let result = self.resolve(value, node, seen, depth + 1);
         seen.remove(id);
         result
     }
@@ -179,6 +247,7 @@ impl ReferenceContext {
     fn resolve(
         &self,
         value: &Value,
+        node: Option<&Node>,
         seen: &mut BTreeSet<String>,
         depth: usize,
     ) -> Result<Value, String> {
@@ -186,17 +255,17 @@ impl ReferenceContext {
             return Err("Reference nesting limit".into());
         }
         if let Some(id) = value.get("$token").and_then(Value::as_str) {
-            return self.token(id, seen, depth + 1);
+            return self.token(id, node, seen, depth + 1);
         }
         match value {
             Value::Array(values) => values
                 .iter()
-                .map(|v| self.resolve(v, seen, depth + 1))
+                .map(|v| self.resolve(v, node, seen, depth + 1))
                 .collect::<Result<Vec<_>, _>>()
                 .map(Value::Array),
             Value::Object(values) => values
                 .iter()
-                .map(|(k, v)| Ok((k.clone(), self.resolve(v, seen, depth + 1)?)))
+                .map(|(k, v)| Ok((k.clone(), self.resolve(v, node, seen, depth + 1)?)))
                 .collect::<Result<Map<_, _>, String>>()
                 .map(Value::Object),
             _ => Ok(value.clone()),

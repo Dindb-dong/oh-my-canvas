@@ -245,6 +245,43 @@ try{
    await client.call('undo',{documentId});
    assert.deepEqual(await coords(),[[10,5],[40,12],[70,25]]);
   });
+  await t.test('legacy boolean, outline and component variant actions change exported geometry',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Native vector and variants'});
+   const make=async (type,x,y,width,height,properties)=>(await client.call('create_shape',{documentId,type,x,y,width,height,properties})).rawIds[0];
+   const a=await make('rect',10,10,80,40,{fills:[{type:'solid',color:'#ff0000'}]});
+   const b=await make('rect',50,10,80,40,{fills:[{type:'solid',color:'#0000ff'}]});
+   const revision=async()=>(await client.call('get_context',{documentId})).revision;
+   const live=(await client.call('boolean',{documentId,operation:'subtract',ids:[a,b],revision:await revision()})).rawIds[0];
+   const inspect=id=>client.call('get_path',{documentId,id});
+   assert.equal((await inspect(live)).editable,false);
+   const flat=(await client.call('boolean',{documentId,operation:'flatten',ids:[live],revision:await revision()})).rawIds[0];
+   assert.equal((await inspect(flat)).editable,true);
+   const text=await make('text',20,80,100,24,{text:'한글',fills:[{type:'solid',color:'#123456'}]});
+   const outline=(await client.call('outline',{documentId,kind:'text',ids:[text],revision:await revision()})).rawIds[0];
+   assert.ok((await inspect(outline)).segments.length>4);
+   const component=async (action,args)=>(await client.call('component',{documentId,action,...args})).rawIds;
+   const red=await make('rect',20,120,30,30,{fills:[{type:'solid',color:'#ff0000'}]});
+   const blue=await make('rect',80,120,30,30,{fills:[{type:'solid',color:'#0000ff'}]});
+   const [normal]=await component('create',{id:red,name:'State=Normal'});
+   const [pressed]=await component('create',{id:blue,name:'State=Pressed'});
+   await component('combine',{ids:[normal,pressed],name:'Button'});
+   const [instance]=await component('instance',{source:normal,x:180,y:120});
+   const png=async()=>(await client.call('export_document',{id:documentId,format:'png',bounds:{x:0,y:0,width:240,height:180}})).base64;
+   const before=await png();
+   await component('variant',{id:instance,name:'State',value:'Pressed'});
+   assert.notEqual(await png(),before);
+  });
+  await t.test('legacy viewport fits actual world-space layer bounds',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Viewport fit'});
+   const rect=await client.call('create_shape',{documentId,type:'rect',x:100,y:200,width:200,height:100});
+   await client.call('view',{documentId,action:'set',viewport:{vport:{width:800,height:600},vbox:{x:0,y:0,width:800,height:600},zoom:1},flags:{showGrids:true}});
+   const fitted=(await client.call('view',{documentId,action:'fit',ids:rect.rawIds})).view;
+   assert.equal(fitted.viewport.zoom,3.36);
+   const {x,y,width,height}=fitted.viewport.vbox;
+   assert.ok(Math.abs(x+width/2-200)<1e-9 && Math.abs(y+height/2-250)<1e-9);
+   assert.equal(fitted.flags.showGrids,true);
+   assert.deepEqual((await client.call('view',{documentId,action:'get'})).view,fitted);
+  });
   await t.test('FigCraft-compatible stdio works on the same native document',async()=>{
    const cli=process.env.OMC_CLI_BINARY??join(root,'native/target/debug',process.platform==='win32'?'omc-cli.exe':'omc-cli');
    const transport=new StdioClientTransport({command:cli,args:['--profile',service.profile,'--connect-only','--dialect','figcraft'],stderr:'pipe'});
@@ -340,6 +377,71 @@ try{
     assert.equal((await run('file.open',{path:reloaded})).stale,true);
     await assert.rejects(call('save_file'),/file changed on disk/);
    } finally {await fig.close();}
+  });
+  await t.test('FigCraft resources, prompts and comment cursors reflect native data',async()=>{
+   const endpoint=new URL(service.endpoint+'/mcp/figcraft');
+   const transport=new StreamableHTTPClientTransport(endpoint,{requestInit:{headers:{Authorization:`Bearer ${service.token}`}}});
+   const fig=new Client({name:'figcraft-protocol-contracts',version:'1.0.0'});
+   const call=async(name,args={})=>{
+    const result=await fig.callTool({name,arguments:args});
+    assert.equal(result.isError,false,JSON.stringify(result.content));
+    return result.structuredContent??JSON.parse(result.content[0].text);
+   };
+   const read=async uri=>JSON.parse((await fig.readResource({uri})).contents[0].text);
+   await fig.connect(transport);
+   try {
+    const {resources}=await fig.listResources();
+    assert.equal(resources.length,3);
+    assert.equal((await fig.listResourceTemplates()).resourceTemplates.length,2);
+    assert.equal((await fig.listPrompts()).prompts.length,6);
+    const prompt=await fig.getPrompt({name:'mobile_screen',arguments:{screen:'Korean checkout',brand_color:'#112233'}});
+    assert.match(prompt.messages[0].content.text,/Korean checkout/);
+    assert.match(prompt.messages[0].content.text,/#112233/);
+    await assert.rejects(fig.getPrompt({name:'mobile_screen'}));
+    const document=await call('run_command',{command:'file.new',params:{name:'Comment event document'}});
+    const layer=await call('create_node',{type:'text',name:'Feedback target',text:'검토'});
+    assert.equal((await read('figcraft://document')).name,'Comment event document');
+    assert.equal((await read(`figcraft://node/${layer.id}`)).characters,'검토');
+    assert.equal((await read('figcraft://command/node.create')).id,'node.create');
+    await assert.rejects(fig.readResource({uri:'figcraft://command/missing'}));
+    const before=await call('wait_for_changes',{topics:['document']});
+    await client.call('native_comments',{version:'1',action:'create',documentId:document.id,body:'Needs review'});
+    const result=await call('wait_for_changes',{after:before.cursor,limit:1});
+    assert.equal(result.events[0].kind,'comment.added');
+    const open=await read('figcraft://comments');
+    assert.equal(open.comments[0].text,'Needs review');
+    assert.equal(result.events[0].data.commentId,open.comments[0].id);
+    assert.equal(result.events[0].documentId,document.id);
+    assert.equal((await call('wait_for_changes',{after:result.cursor,timeoutMs:0})).events.length,0);
+    assert.equal((await call('wait_for_changes',{after:result.cursor+1000,timeoutMs:0})).reset,true);
+    await call('run_command',{command:'comment.reply',params:{id:open.comments[0].id,text:'Checked'}});
+    const [reply]=(await call('wait_for_changes',{after:result.cursor})).events;
+    assert.equal(reply.kind,'comment.replied');
+    assert.equal(reply.data.reply,0);
+    await call('run_command',{command:'comment.edit',params:{id:reply.data.commentId,reply:reply.data.reply,text:'Checked again'}});
+    assert.equal((await read('figcraft://comments')).comments[0].replies[0].text,'Checked again');
+   } finally {await fig.close();}
+  });
+  await t.test('desktop result accepts PNG payloads larger than ordinary RPC bodies',async()=>{
+   const owner=(await rpc(service,null,'session.open')).sessionId;
+   const poll=rpc(service,owner,'desktop.poll');
+   await delay(40);
+   const transport=new StreamableHTTPClientTransport(new URL(service.endpoint+'/mcp/figcraft'),{requestInit:{headers:{Authorization:`Bearer ${service.token}`}}});
+   const fig=new Client({name:'desktop-upload-contract',version:'1.0.0'});
+   await fig.connect(transport);
+   try {
+    const pending=fig.callTool({name:'screenshot',arguments:{window:true}});
+    const job=await poll;
+    assert.equal(job.method,'screenshot');
+    const base64=Buffer.alloc(900_000,1).toString('base64');
+    await rpc(service,owner,'desktop.complete',{id:job.id,result:{mimeType:'image/png',base64}});
+    const result=await pending;
+    assert.equal(result.isError,false);
+    assert.equal(result.content.find(item=>item.type==='image').data,base64);
+   } finally {
+    await fig.close();
+    await rpc(service,owner,'session.close');
+   }
   });
   await t.test('native collaboration exchanges durable edits over a dedicated pinned TLS room',async()=>{
    const peer=await start(join(temporary,'room-guest'));

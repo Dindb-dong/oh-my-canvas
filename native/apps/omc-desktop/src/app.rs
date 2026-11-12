@@ -1,3 +1,5 @@
+pub(crate) mod automation;
+
 use crate::{
     Event,
     client::{Bridge, DocumentEntry, Request, Response},
@@ -329,6 +331,7 @@ pub struct App {
     pub bridge: Bridge,
     profile: PathBuf,
     pub service_connected: bool,
+    automation: automation::State,
     pub collaboration_document: Option<String>,
     pub collaboration: Value,
     pub collaboration_pending: bool,
@@ -511,6 +514,7 @@ impl App {
             bridge,
             profile,
             service_connected: false,
+            automation: automation::State::default(),
             collaboration_document: None,
             collaboration: Value::Null,
             collaboration_pending: false,
@@ -1836,7 +1840,7 @@ impl App {
         true
     }
 
-    fn pointer_down(&mut self, button: MouseButton) {
+    fn pointer_down(&mut self, button: MouseButton, canvas_only: bool) {
         let (x, y) = self.cursor;
         if button == MouseButton::Left {
             self.keyboard_focus_visible = false;
@@ -1845,12 +1849,13 @@ impl App {
                 self.drag = Some(Drag::TextSelection);
                 return;
             }
-            if let Some(control) = self
-                .controls
-                .iter()
-                .rev()
-                .find(|c| self.action_available(&c.action) && c.rect.contains(x, y))
-                .cloned()
+            if !canvas_only
+                && let Some(control) = self
+                    .controls
+                    .iter()
+                    .rev()
+                    .find(|c| self.action_available(&c.action) && c.rect.contains(x, y))
+                    .cloned()
             {
                 self.focus = control.id;
                 self.action(control.action);
@@ -1872,7 +1877,7 @@ impl App {
                 return;
             }
             self.popup = None;
-            if y < HEADER {
+            if !canvas_only && y < HEADER {
                 if let Some(window) = &self.window {
                     let _ = window.drag_window();
                 }
@@ -1880,11 +1885,12 @@ impl App {
             }
         }
         if self.prototype_frame.is_some()
-            || crate::paint::palette_rect(self).is_some_and(|area| area.contains(x, y))
+            || !canvas_only
+                && crate::paint::palette_rect(self).is_some_and(|area| area.contains(x, y))
         {
             return;
         }
-        if !self.canvas_rect().contains(x, y) {
+        if !canvas_only && !self.canvas_rect().contains(x, y) {
             self.commit_edit();
             return;
         }
@@ -2227,8 +2233,15 @@ impl App {
         true
     }
     fn keyboard(&mut self, event: &winit::event::KeyEvent) {
-        let down = event.state == ElementState::Pressed;
-        if event.logical_key == Key::Named(NamedKey::Space) && self.editing.is_none() {
+        self.key_input(
+            &event.logical_key,
+            event.text.as_deref(),
+            event.state == ElementState::Pressed,
+        );
+    }
+
+    fn key_input(&mut self, key: &Key, text: Option<&str>, down: bool) {
+        if *key == Key::Named(NamedKey::Space) && self.editing.is_none() {
             self.space_pan = down;
         }
         if !down {
@@ -2236,7 +2249,7 @@ impl App {
         }
         let command = self.modifiers.control_key() || self.modifiers.super_key();
         if self.prototype_frame.is_some() {
-            match event.logical_key {
+            match *key {
                 Key::Named(NamedKey::Escape) => {
                     self.action(Action::PrototypeExit);
                     return;
@@ -2257,7 +2270,7 @@ impl App {
             }
         }
         if let Some(edit) = &mut self.editing {
-            match &event.logical_key {
+            match key {
                 Key::Named(NamedKey::Escape) => {
                     self.editing = None;
                     return;
@@ -2303,7 +2316,7 @@ impl App {
                 _ => {
                     if !command
                         && !edit.buffer.composing
-                        && let Some(text) = &event.text
+                        && let Some(text) = text
                         && !text.chars().any(|c| c.is_control())
                     {
                         edit.buffer.insert(text);
@@ -2313,7 +2326,7 @@ impl App {
             return;
         }
         if self.modifiers.control_key()
-            && event.logical_key == Key::Named(NamedKey::Tab)
+            && *key == Key::Named(NamedKey::Tab)
             && !self.tabs.is_empty()
         {
             let offset = if self.modifiers.shift_key() {
@@ -2330,7 +2343,7 @@ impl App {
             return;
         }
         if command {
-            if let Key::Character(key) = &event.logical_key {
+            if let Key::Character(key) = key {
                 match key.to_lowercase().as_str() {
                     "n" => self.action(Action::New),
                     "s" => self.action(Action::Save),
@@ -2352,7 +2365,7 @@ impl App {
             }
             return;
         }
-        match &event.logical_key {
+        match key {
             Key::Named(NamedKey::Escape) => {
                 self.popup = None;
                 self.drag = None;
@@ -2363,6 +2376,28 @@ impl App {
             }
             Key::Named(NamedKey::Delete) | Key::Named(NamedKey::Backspace) => {
                 self.action(Action::Delete)
+            }
+            Key::Named(
+                arrow @ (NamedKey::ArrowLeft
+                | NamedKey::ArrowRight
+                | NamedKey::ArrowUp
+                | NamedKey::ArrowDown),
+            ) => {
+                let step = if self.modifiers.shift_key() { 10. } else { 1. };
+                let delta = match arrow {
+                    NamedKey::ArrowLeft => (-step, 0.),
+                    NamedKey::ArrowRight => (step, 0.),
+                    NamedKey::ArrowUp => (0., -step),
+                    _ => (0., step),
+                };
+                if self.selected.is_empty() {
+                    self.camera.x -= delta.0 * 20.;
+                    self.camera.y -= delta.1 * 20.;
+                    self.pan_view = true;
+                    self.remember_camera();
+                } else {
+                    self.nudge_selection(delta);
+                }
             }
             Key::Named(NamedKey::Tab) => {
                 self.keyboard_focus_visible = true;
@@ -2406,7 +2441,42 @@ impl App {
             _ => {}
         }
     }
+    fn nudge_selection(&mut self, delta: (f64, f64)) {
+        let Some(doc) = self.document() else {
+            return;
+        };
+        let positions: Vec<_> = self
+            .selected
+            .iter()
+            .filter(|id| self.layer_transformable(id) && Some(*id) != self.current_root().as_ref())
+            .filter_map(|id| {
+                doc.nodes
+                    .get(id)
+                    .map(|node| (id.clone(), number(node, "x", 0.), number(node, "y", 0.)))
+            })
+            .collect();
+        let translations = self.move_translations(&positions, delta);
+        let commands: Vec<_> = positions
+            .into_iter()
+            .filter_map(|(id, x, y)| {
+                let (dx, dy) = translations.get(&id)?;
+                Some(json!({"type":"node.set","nodeId":id,"properties":{"x":x+dx,"y":y+dy}}))
+            })
+            .collect();
+        if !commands.is_empty() {
+            self.mutate(json!({"type":"batch","commands":commands}), "nudge");
+        }
+    }
+
     fn handle_response(&mut self, response: Response) {
+        let automation_edit = self.automation.waiting.is_some();
+        let automation_error = match &response {
+            Response::Error {
+                message,
+                mutation: true,
+            } if automation_edit => Some(message.clone()),
+            _ => None,
+        };
         match response {
             Response::Collaboration { action, result } => {
                 if action != "cursor" {
@@ -2568,6 +2638,9 @@ impl App {
                 self.closing = true;
             }
         }
+        if automation_edit && !self.pending {
+            self.finish_automation(automation_error);
+        }
         self.redraw();
     }
     fn shutdown(&mut self) {
@@ -2696,6 +2769,7 @@ impl ApplicationHandler<Event> for App {
         match event {
             Event::Service(Response::Shutdown) => event_loop.exit(),
             Event::Service(response) => self.handle_response(response),
+            Event::Automation(job, reply) => self.handle_automation(job, reply),
             Event::Scene(reply) => {
                 self.scene_pending = false;
                 if self.active.as_ref() == Some(&reply.id)
@@ -2741,6 +2815,7 @@ impl ApplicationHandler<Event> for App {
                     self.schedule_scene();
                 }
                 self.redraw();
+                self.resume_automation();
             }
             Event::PanRasterReady => self.redraw(),
             Event::Accessibility(event) => crate::accessibility::handle(self, event),
@@ -2790,7 +2865,9 @@ impl ApplicationHandler<Event> for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let scale = window.scale_factor();
                 let previous = self.cursor;
-                self.pointer_move(position.x / scale, position.y / scale);
+                if self.automation.gesture.is_none() {
+                    self.pointer_move(position.x / scale, position.y / scale);
+                }
                 match self.drag {
                     Some(Drag::Pan { .. }) => self.trace_input("pan-drag"),
                     Some(Drag::Move { .. }) => self.trace_input("layer-drag"),
@@ -2807,8 +2884,9 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
+                    self.cancel_automation_gesture();
                     if self.drag_button.is_none() {
-                        self.pointer_down(button);
+                        self.pointer_down(button, false);
                         if self.drag.is_some() {
                             self.drag_button = Some(button);
                         }
@@ -2846,7 +2924,12 @@ impl ApplicationHandler<Event> for App {
                     self.trace_input("pinch");
                 }
             }
-            WindowEvent::KeyboardInput { event, .. } => self.keyboard(&event),
+            WindowEvent::KeyboardInput { event, .. } => {
+                if event.state == ElementState::Pressed {
+                    self.cancel_automation_gesture();
+                }
+                self.keyboard(&event);
+            }
             WindowEvent::Ime(Ime::Preedit(text, range)) => {
                 if !text.is_empty() {
                     self.capture_ime_selection();
@@ -2872,6 +2955,7 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             WindowEvent::Focused(false) => {
+                self.cancel_automation_gesture();
                 self.drag = None;
                 self.drag_button = None;
                 self.scroll_target = None;
@@ -2880,11 +2964,15 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::RedrawRequested if !self.occluded => {
                 let trace = self.input_frame.take();
-                let draw_start = trace.map(|_| Instant::now());
+                let draw_start = Instant::now();
                 match crate::paint::draw(self) {
                     Ok(true) => {
                         self.presented = true;
-                        if let Some(((kind, start), draw_start)) = trace.zip(draw_start) {
+                        self.automation.last_frame =
+                            Some(draw_start.elapsed().as_secs_f64() * 1000.);
+                        self.automation.frames_drawn =
+                            self.automation.frames_drawn.saturating_add(1);
+                        if let Some((kind, start)) = trace {
                             eprintln!(
                                 "Native frame {kind} input_to_submit_ms={:.3} draw_ms={:.3} camera={:.2},{:.2},{:.3}",
                                 start.elapsed().as_secs_f64() * 1000.,
@@ -2966,6 +3054,7 @@ impl ApplicationHandler<Event> for App {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.expire_automation_gesture();
         if self
             .smoke
             .is_some_and(|duration| self.start.elapsed() >= duration)

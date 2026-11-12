@@ -34,4 +34,8 @@ jobs:
       - name: Official MCP client contracts
         env:
           OMC_TEST_SDK_ROOT: ${{ runner.temp }}/omc-mcp-sdk/node_modules/@modelcontextprotocol/sdk
-        run: node native/tests/mcp.e2e.mjs
+        run: >-
+          node --test native/tests/mcp.e2e.mjs
+          native/tests/figcraft-core.e2e.mjs
+          native/tests/figcraft-catalog.e2e.mjs
+          native/tests/mcp.figcraft-files.e2e.mjs

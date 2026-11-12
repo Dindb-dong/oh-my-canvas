@@ -189,6 +189,19 @@ impl Workspace {
         session.owners.insert(document_id.into());
         Ok(())
     }
+    pub fn bind_if_unbound(&self, session_id: &str, document_id: &str) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().unwrap();
+        self.document_path(document_id)?;
+        let mut sessions = self.sessions.lock().unwrap();
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| EngineError::new("authentication_failed", "valid session required"))?;
+        if session.binding.is_none() {
+            session.binding = Some(document_id.into());
+            session.owners.insert(document_id.into());
+        }
+        Ok(())
+    }
     pub fn release(&self, session_id: &str, document_id: &str) -> Result<Value> {
         {
             let _lifecycle = self.lifecycle.lock().unwrap();

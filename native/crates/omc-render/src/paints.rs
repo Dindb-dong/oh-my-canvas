@@ -31,75 +31,9 @@ pub(super) fn stack(
             }
         };
         if key == "strokes" {
-            let width = number(source, "width", number(source, "thickness", 1.));
-            if !(0. ..=10000.).contains(&width) {
-                return Err(RenderError::ResourceLimit(
-                    "stroke width must be 0..10000".into(),
-                ));
-            }
-            let alignment = source
-                .get("align")
-                .or_else(|| source.get("alignment"))
-                .and_then(Value::as_str)
-                .unwrap_or("center");
-            let doubled = matches!(alignment, "inside" | "inner" | "outside" | "outer");
+            let (alignment, doubled) = configure_stroke(source, &mut paint)?;
             if !doubled && alignment != "center" {
                 diagnose(scene, item, "stroke.alignment", alignment, diagnostics)?;
-            }
-            paint
-                .set_style(Style::Stroke)
-                .set_stroke_width((width * if doubled { 2. } else { 1. }) as f32);
-            paint.set_stroke_cap(
-                match source
-                    .get("cap")
-                    .or_else(|| source.get("lineCap"))
-                    .and_then(Value::as_str)
-                {
-                    Some("round") => Cap::Round,
-                    Some("square") => Cap::Square,
-                    _ => Cap::Butt,
-                },
-            );
-            paint.set_stroke_join(
-                match source
-                    .get("join")
-                    .or_else(|| source.get("lineJoin"))
-                    .and_then(Value::as_str)
-                {
-                    Some("round") => Join::Round,
-                    Some("bevel") => Join::Bevel,
-                    _ => Join::Miter,
-                },
-            );
-            paint.set_stroke_miter(number(source, "miterLimit", 4.) as f32);
-            let dash = source
-                .get("dash")
-                .or_else(|| source.get("dashes"))
-                .and_then(Value::as_array)
-                .map(|values| {
-                    values
-                        .iter()
-                        .map(|v| v.as_f64().unwrap_or(f64::NAN) as f32)
-                        .collect::<Vec<_>>()
-                })
-                .or_else(|| match source.get("style").and_then(Value::as_str) {
-                    Some("dotted") => Some(vec![width as f32, width as f32]),
-                    Some("dashed") => Some(vec![width as f32 * 3., width as f32 * 2.]),
-                    _ => None,
-                });
-            if let Some(mut dash) = dash.filter(|d| !d.is_empty()) {
-                if dash.len() % 2 != 0 {
-                    dash.extend(dash.clone());
-                }
-                if dash.len() > 128 || dash.iter().any(|v| !v.is_finite() || *v <= 0.) {
-                    return Err(RenderError::Unsupported(
-                        "dash intervals must be positive, finite and bounded".into(),
-                    ));
-                }
-                paint.set_path_effect(PathEffect::dash(
-                    &dash,
-                    number(source, "dashOffset", 0.) as f32,
-                ));
             }
             for name in ["startCap", "endCap", "sides"] {
                 if let Some(value) = source.get(name) {
@@ -131,6 +65,170 @@ pub(super) fn stack(
         }
     }
     Ok(true)
+}
+
+fn configure_stroke<'a>(
+    source: &'a Value,
+    paint: &mut Paint,
+) -> Result<(&'a str, bool), RenderError> {
+    let width = number(source, "width", number(source, "thickness", 1.));
+    if !(0. ..=10000.).contains(&width) {
+        return Err(RenderError::ResourceLimit(
+            "stroke width must be 0..10000".into(),
+        ));
+    }
+    let alignment = source
+        .get("align")
+        .or_else(|| source.get("alignment"))
+        .and_then(Value::as_str)
+        .unwrap_or("center");
+    let doubled = matches!(alignment, "inside" | "inner" | "outside" | "outer");
+    paint
+        .set_style(Style::Stroke)
+        .set_stroke_width((width * if doubled { 2. } else { 1. }) as f32);
+    paint.set_stroke_cap(
+        match source
+            .get("cap")
+            .or_else(|| source.get("lineCap"))
+            .and_then(Value::as_str)
+        {
+            Some("round") => Cap::Round,
+            Some("square") => Cap::Square,
+            _ => Cap::Butt,
+        },
+    );
+    paint.set_stroke_join(
+        match source
+            .get("join")
+            .or_else(|| source.get("lineJoin"))
+            .and_then(Value::as_str)
+        {
+            Some("round") => Join::Round,
+            Some("bevel") => Join::Bevel,
+            _ => Join::Miter,
+        },
+    );
+    paint.set_stroke_miter(number(source, "miterLimit", 4.) as f32);
+    let dash = source
+        .get("dash")
+        .or_else(|| source.get("dashes"))
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .map(|v| v.as_f64().unwrap_or(f64::NAN) as f32)
+                .collect::<Vec<_>>()
+        })
+        .or_else(|| match source.get("style").and_then(Value::as_str) {
+            Some("dotted") => Some(vec![width as f32, width as f32]),
+            Some("dashed") => Some(vec![width as f32 * 3., width as f32 * 2.]),
+            _ => None,
+        });
+    if let Some(mut dash) = dash.filter(|d| !d.is_empty()) {
+        if dash.len() % 2 != 0 {
+            dash.extend(dash.clone());
+        }
+        if dash.len() > 128 || dash.iter().any(|v| !v.is_finite() || *v <= 0.) {
+            return Err(RenderError::Unsupported(
+                "dash intervals must be positive, finite and bounded".into(),
+            ));
+        }
+        paint.set_path_effect(PathEffect::dash(
+            &dash,
+            number(source, "dashOffset", 0.) as f32,
+        ));
+    }
+    Ok((alignment, doubled))
+}
+
+pub fn stroke_outlines(item: &SceneItem) -> Result<Vec<(Path, Value)>, RenderError> {
+    let path = shape_path(item)?;
+    let mut outlines = Vec::new();
+    let strokes = item.properties.get("strokes").and_then(Value::as_array);
+    if let Some(strokes) = strokes {
+        if strokes.len() > 128 {
+            return Err(RenderError::ResourceLimit(
+                "paint stack exceeds 128 entries".into(),
+            ));
+        }
+        for source in strokes.iter().filter(|p| {
+            p.get("visible") != Some(&Value::Bool(false))
+                && p.get("hidden") != Some(&Value::Bool(true))
+        }) {
+            let mut paint = make_paint(source, item)?;
+            if paint.shader().is_some()
+                || ["startCap", "endCap", "sides"]
+                    .iter()
+                    .any(|key| source.get(key).is_some())
+            {
+                return Err(RenderError::Unsupported(
+                    "stroke outline requires solid paint and uniform caps and sides".into(),
+                ));
+            }
+            let (alignment, _) = configure_stroke(source, &mut paint)?;
+            if !matches!(
+                alignment,
+                "center" | "inside" | "inner" | "outside" | "outer"
+            ) {
+                return Err(RenderError::Unsupported(format!(
+                    "stroke alignment {alignment}"
+                )));
+            }
+            let mut fill = source.clone();
+            if fill.get("color").is_none() {
+                fill = serde_json::json!({"type":"solid","color":source,"opacity":source.get("opacity").and_then(Value::as_f64).unwrap_or(1.)});
+            }
+            push_outline(&mut outlines, &path, &paint, alignment, fill)?;
+        }
+    } else if let Some(color) = item.style.get("border-color") {
+        let mut paint = Paint::default();
+        let fill = serde_json::json!({"type":"solid","color":color});
+        let stroke = serde_json::json!({
+            "width":item.style.get("border-width").and_then(|v| resolve_length(v, LengthContext::default())).unwrap_or(1.)
+        });
+        configure_stroke(&stroke, &mut paint)?;
+        push_outline(&mut outlines, &path, &paint, "center", fill)?;
+    }
+    if outlines.is_empty() {
+        return Err(RenderError::Unsupported(
+            "layer has no convertible stroke".into(),
+        ));
+    }
+    Ok(outlines)
+}
+
+fn push_outline(
+    outlines: &mut Vec<(Path, Value)>,
+    path: &Path,
+    paint: &Paint,
+    alignment: &str,
+    fill: Value,
+) -> Result<(), RenderError> {
+    let mut outline = Path::new();
+    if !skia_safe::path_utils::fill_path_with_paint(path, paint, &mut outline, None, None) {
+        return Err(RenderError::Unsupported(
+            "hairline stroke has no fill outline".into(),
+        ));
+    }
+    if alignment != "center" {
+        let op = if matches!(alignment, "inside" | "inner") {
+            skia_safe::PathOp::Intersect
+        } else {
+            skia_safe::PathOp::Difference
+        };
+        outline = outline.op(path, op).ok_or_else(|| {
+            RenderError::Unsupported("stroke alignment could not be outlined".into())
+        })?;
+    }
+    if !outline.is_finite() || outline.count_verbs() > 10_000 {
+        return Err(RenderError::ResourceLimit(
+            "stroke outline exceeds 10000 path verbs".into(),
+        ));
+    }
+    if !outline.is_empty() {
+        outlines.push((outline, fill));
+    }
+    Ok(())
 }
 
 fn make_paint(source: &Value, item: &SceneItem) -> Result<Paint, RenderError> {

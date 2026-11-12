@@ -2,21 +2,25 @@
 mod extensions;
 pub use extensions::capabilities as native_capabilities;
 mod figcraft;
+mod figcraft_catalog;
 mod figcraft_file;
+mod figcraft_protocol;
+mod image;
 mod interchange;
-pub use figcraft::tools as figcraft_tools;
+pub use figcraft_protocol::{figcraft_tools, validate_figcraft_tool};
 mod libraries;
 mod mutations;
 mod paths;
 mod resources;
 pub mod schema;
+mod vector;
 use omc_model::{DocumentContent, DocumentSnapshot, Node, Properties};
 use omc_protocol::{Command, CommandEnvelope, EngineError, Preconditions, Result};
 use omc_workspace::Workspace;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::AtomicU64},
 };
 
 #[derive(Clone, Default)]
@@ -26,6 +30,7 @@ pub(crate) struct ViewState {
     pub root: String,
     pub aliases: HashMap<String, String>,
     pub next_alias: usize,
+    pub fig_saved_revision: Option<u64>,
     pub fig_file: Option<figcraft_file::FigFile>,
     pub fig_aliases: HashMap<String, u64>,
     pub view: Value,
@@ -35,7 +40,9 @@ pub struct ToolRouter {
     pub workspace: Arc<Workspace>,
     states: Mutex<HashMap<(String, String), ViewState>>,
     extensions: extensions::ExtensionState,
-    fig_file_access: Mutex<()>,
+    fig_file_access: Mutex<HashMap<String, Vec<String>>>,
+    fig_events: figcraft_protocol::Events,
+    next_fig_alias: AtomicU64,
 }
 impl ToolRouter {
     pub fn new(workspace: Arc<Workspace>) -> Self {
@@ -43,7 +50,9 @@ impl ToolRouter {
             workspace,
             states: Mutex::new(HashMap::new()),
             extensions: extensions::ExtensionState::default(),
-            fig_file_access: Mutex::new(()),
+            fig_file_access: Mutex::new(HashMap::new()),
+            fig_events: figcraft_protocol::Events::default(),
+            next_fig_alias: AtomicU64::new(1),
         }
     }
     pub fn tools(&self) -> Value {
@@ -54,6 +63,7 @@ impl ToolRouter {
     pub fn end_session(&self, session: &str) {
         self.states.lock().unwrap().retain(|(s, _), _| s != session);
         self.extensions.release_session(session);
+        self.fig_file_access.lock().unwrap().remove(session);
     }
     pub fn call(
         self: &Arc<Self>,
@@ -189,6 +199,7 @@ impl ToolRouter {
                     self.context(session, &id)?;
                 }
                 match name {
+                    "image" => self.image_operation(session, &id, &args, &meta),
                     "select_page" => {
                         let snapshot = self.workspace.snapshot(&id)?;
                         let page = snapshot
@@ -558,7 +569,7 @@ impl ToolRouter {
         } else {
             (envelope, output)
         };
-        let receipt = self.workspace.execute(session, envelope)?;
+        let receipt = self.execute_observed(session, envelope)?;
         Ok(self.receipt_output(session, id, receipt, output))
     }
     fn workspace_tool(&self, session: &str, args: &Value) -> Result<Value> {
@@ -612,27 +623,72 @@ impl ToolRouter {
         Ok(json!({"ok":true,"preferences":preferences}))
     }
     fn view_tool(&self, session: &str, id: &str, args: &Value) -> Result<Value> {
+        let action = string(args, "action")?;
+        let mut bounds = None;
+        if action == "fit" {
+            let snapshot = self.workspace.snapshot(id)?;
+            let view = self.state(session, id)?;
+            let scene = paths::scene(&snapshot, &view.page_id)?;
+            let mut targets = Vec::new();
+            if let Some(ids) = args["ids"].as_array().filter(|ids| !ids.is_empty()) {
+                for alias in ids {
+                    let raw = self.resolve(session, id, alias.as_str().unwrap())?;
+                    let item = scene
+                        .item(&raw)
+                        .filter(|item| item.id != view.root)
+                        .ok_or_else(|| {
+                            EngineError::invalid("layer is outside the selected page")
+                        })?;
+                    targets.push(item.bounds);
+                }
+            } else {
+                targets.extend(
+                    scene
+                        .items
+                        .iter()
+                        .filter(|item| item.parent == Some(scene.root) && !item.hidden)
+                        .map(|item| item.bounds),
+                );
+            }
+            bounds = targets
+                .into_iter()
+                .map(|[x, y, w, h]| [x, y, x + w, y + h])
+                .reduce(|[x1, y1, x2, y2], [a, b, c, d]| {
+                    [x1.min(a), y1.min(b), x2.max(c), y2.max(d)]
+                });
+        }
         let mut states = self.states.lock().unwrap();
         let state = states.get_mut(&(session.into(), id.into())).unwrap();
         if !state.view.is_object() {
-            state.view = json!({"selection":[],"tool":"move","flags":{},"viewport":{}});
+            state.view = json!({"selection":[],"tool":"move","flags":{"snapping":true,"showOutlines":false,"uiHidden":false,"pixelSnap":false,"showRulers":false,"showGrids":false,"multiSelect":false},
+                "viewport":{"vport":{"width":1000,"height":800},"vbox":{"x":0,"y":0,"width":1000,"height":800},"zoom":1}});
         }
-        match args["action"].as_str().unwrap() {
+        match action {
             "get" => {}
             "set" => {
-                for key in ["viewport", "flags"] {
-                    if let Some(v) = args.get(key) {
-                        state.view[key] = v.clone();
+                if let Some(viewport) = args.get("viewport") {
+                    state.view["viewport"] = viewport.clone();
+                }
+                if let Some(flags) = args["flags"].as_object() {
+                    for (key, value) in flags {
+                        state.view["flags"][key] = value.clone();
                     }
                 }
             }
             "select" => state.view["selection"] = args["ids"].clone(),
             "tool" => state.view["tool"] = args["tool"].clone(),
             "fit" => {
-                return Err(EngineError::new(
-                    "unsupported_feature",
-                    "fit requires the native desktop viewport",
-                ));
+                if let Some([x1, y1, x2, y2]) = bounds {
+                    let viewport = &mut state.view["viewport"];
+                    let width = viewport["vport"]["width"].as_f64().unwrap_or(1000.0);
+                    let height = viewport["vport"]["height"].as_f64().unwrap_or(800.0);
+                    let zoom = ((width - 128.0) / (x2 - x1).max(1.0))
+                        .min((height - 128.0) / (y2 - y1).max(1.0))
+                        .clamp(0.01, 200.0);
+                    let (w, h) = (width / zoom, height / zoom);
+                    viewport["zoom"] = json!(zoom);
+                    viewport["vbox"] = json!({"x":(x1 + x2 - w) / 2.0,"y":(y1 + y2 - h) / 2.0,"width":w,"height":h});
+                }
             }
             _ => return Err(EngineError::invalid("unknown view action")),
         }

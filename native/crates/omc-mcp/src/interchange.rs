@@ -167,17 +167,7 @@ impl ToolRouter {
                 "explicit export background is not yet available in this renderer profile",
             ));
         }
-        if let Some(constraint) = args.get("constraint") {
-            let n = constraint["value"]
-                .as_f64()
-                .ok_or_else(|| EngineError::invalid("constraint value required"))?;
-            options.scale = match constraint["type"].as_str() {
-                Some("scale") => n,
-                Some("width") => n / options.width,
-                Some("height") => n / options.height,
-                _ => return Err(EngineError::invalid("constraint type required")),
-            };
-        }
+        apply_export_scale(args, &mut options)?;
         if args.get("ids").is_some() {
             return Err(EngineError::new(
                 "unsupported_feature",
@@ -201,17 +191,7 @@ impl ToolRouter {
         if let Some(job) = job {
             job.begin_commit()?;
         }
-        if let Some(path) = args["filePath"].as_str() {
-            write_explicit(
-                path,
-                &artifact.bytes,
-                args["overwrite"].as_bool().unwrap_or(false),
-            )?;
-            return Ok(
-                json!({"ok":true,"filePath":path,"byteLength":artifact.bytes.len(),"sha256":artifact.sha256,"revision":{"epoch":artifact.epoch,"sequence":artifact.sequence.to_string()},"diagnostics":artifact.diagnostics}),
-            );
-        }
-        self.artifact_result(session, artifact)
+        self.deliver_export(session, &args, artifact)
     }
     pub(crate) fn export_tool(
         &self,
@@ -260,7 +240,6 @@ impl ToolRouter {
         }
         if args.get("bounds").is_some()
             || args.get("background").is_some()
-            || args.get("constraint").is_some()
             || args["omitFill"] == true
         {
             return Err(EngineError::new(
@@ -343,19 +322,36 @@ impl ToolRouter {
         } else {
             string(&args, "format")?
         };
-        let artifact = omc_export::export(
-            &selection,
-            &ExportOptions {
-                format: format.into(),
-                width: (right - left).max(1.),
-                height: (bottom - top).max(1.),
-                scale: args["scale"].as_f64().unwrap_or(1.),
-                quality: (args["quality"].as_f64().unwrap_or(0.9) * 100.) as u32,
-                ..Default::default()
-            },
-            &self.resources()?,
-        )
-        .map_err(|e| EngineError::invalid(e.to_string()))?;
+        let mut options = ExportOptions {
+            format: format.into(),
+            width: (right - left).max(1.),
+            height: (bottom - top).max(1.),
+            scale: args["scale"].as_f64().unwrap_or(1.),
+            quality: (args["quality"].as_f64().unwrap_or(0.9) * 100.).round() as u32,
+            ..Default::default()
+        };
+        apply_export_scale(&args, &mut options)?;
+        let artifact = omc_export::export(&selection, &options, &self.resources()?)
+            .map_err(|e| EngineError::invalid(e.to_string()))?;
+        self.deliver_export(session, &args, artifact)
+    }
+
+    fn deliver_export(
+        &self,
+        session: &str,
+        args: &Value,
+        artifact: ExportArtifact,
+    ) -> Result<Value> {
+        if let Some(path) = args["filePath"].as_str() {
+            write_explicit(
+                path,
+                &artifact.bytes,
+                args["overwrite"].as_bool().unwrap_or(false),
+            )?;
+            return Ok(
+                json!({"ok":true,"filePath":path,"byteLength":artifact.bytes.len(),"sha256":artifact.sha256,"revision":{"epoch":artifact.epoch,"sequence":artifact.sequence.to_string()},"diagnostics":artifact.diagnostics}),
+            );
+        }
         self.artifact_result(session, artifact)
     }
     fn artifact_result(&self, session: &str, artifact: ExportArtifact) -> Result<Value> {
@@ -381,6 +377,27 @@ impl ToolRouter {
         Ok(result)
     }
 }
+fn apply_export_scale(args: &Value, options: &mut ExportOptions) -> Result<()> {
+    if let Some(constraint) = args.get("constraint") {
+        let value = constraint["value"]
+            .as_f64()
+            .filter(|value| value.is_finite() && *value > 0.)
+            .ok_or_else(|| EngineError::invalid("constraint value must be positive"))?;
+        options.scale = match constraint["type"].as_str() {
+            Some("scale") => value,
+            Some("width") => value / options.width,
+            Some("height") => value / options.height,
+            _ => return Err(EngineError::invalid("constraint type required")),
+        };
+    }
+    if let Some(limit) = args["maxSize"].as_u64().filter(|limit| *limit > 0) {
+        options.scale = options
+            .scale
+            .min(limit as f64 / options.width.max(options.height));
+    }
+    Ok(())
+}
+
 pub(super) fn write_explicit(path: &str, bytes: &[u8], overwrite: bool) -> Result<()> {
     let destination = Path::new(path);
     if !destination.is_absolute() {

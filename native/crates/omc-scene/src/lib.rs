@@ -1,11 +1,13 @@
 //! A coherent native display list and its exact shared hit-test coordinate chain.
 mod components;
+mod vectors;
 pub use components::{ComponentProjection, resolve_components};
 use omc_model::{DocumentSnapshot, NodeKind};
 use omc_style::{ComputedStyle, Diagnostic, LengthContext, resolve_length};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
+pub use vectors::{combine_paths, normalize_path, path_geometry, shape_path};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Affine(pub [f64; 6]);
@@ -140,7 +142,11 @@ impl Scene {
             let mut eligible = true;
             while let Some(index) = ancestor {
                 let parent = &self.items[index];
-                if parent.hidden || parent.locked || (parent.clip && !parent.contains(x, y)) {
+                if parent.hidden
+                    || parent.locked
+                    || parent.boolean_operation().is_some()
+                    || (parent.clip && !parent.contains(x, y))
+                {
                     eligible = false;
                     break;
                 }
@@ -154,6 +160,48 @@ impl Scene {
     }
 }
 impl SceneItem {
+    pub fn text_origin(&self, text: &omc_text::TextLayout) -> (f64, f64) {
+        let extra = (self.height - self.text_offset.1 - text.height).max(0.);
+        let offset = match self
+            .properties
+            .get("textVerticalAlign")
+            .and_then(Value::as_str)
+        {
+            Some("middle") => extra * 0.5,
+            Some("bottom") => extra,
+            _ => 0.,
+        };
+        (self.text_offset.0, self.text_offset.1 + offset)
+    }
+
+    pub fn text_outline(&self) -> Result<skia_safe::Path, SceneError> {
+        let layout = self
+            .text
+            .as_ref()
+            .ok_or_else(|| SceneError::Text("choose a text layer".into()))?;
+        let text = self
+            .properties
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let mut path = omc_text::outline(
+            text,
+            self.properties.get("textRuns"),
+            &self.style,
+            layout.width,
+        )
+        .map_err(|error| SceneError::Text(error.to_string()))?;
+        let (x, y) = self.text_origin(layout);
+        path.offset((x as f32, y as f32));
+        Ok(path)
+    }
+
+    pub fn boolean_operation(&self) -> Option<&str> {
+        (self.kind == NodeKind::Path)
+            .then(|| self.properties.get("booleanOperation")?.as_str())
+            .flatten()
+    }
+
     pub fn contains(&self, world_x: f64, world_y: f64) -> bool {
         let Some(inverse) = self.world.inverse() else {
             return false;
@@ -178,12 +226,9 @@ impl SceneItem {
                 (x - t * self.width).hypot(y - t * self.height)
                     <= self.style.number("border-width", 1.).max(8.) / 2.
             }
-            NodeKind::Path => self
-                .properties
-                .get("path")
-                .and_then(Value::as_str)
-                .and_then(skia_safe::Path::from_svg)
-                .is_some_and(|p| p.contains((x as f32, y as f32))),
+            NodeKind::Path => {
+                shape_path(self).is_some_and(|path| path.contains((x as f32, y as f32)))
+            }
             _ => {
                 if x < 0. || y < 0. || x > self.width || y > self.height {
                     return false;
@@ -335,6 +380,41 @@ pub fn build_scene(
             text,
             text_offset: (b.content_x, b.content_y),
         });
+    }
+    for index in (0..items.len()).rev() {
+        if let Some(operation) = items[index].boolean_operation() {
+            let item = &items[index];
+            let operands = item
+                .children
+                .iter()
+                .map(|&index| &items[index])
+                .filter(|child| !child.hidden);
+            if let Some(path) = item
+                .world
+                .inverse()
+                .and_then(|inverse| combine_paths(operands, &items, inverse, operation))
+            {
+                let (svg, _, fill_rule) = path_geometry(&path);
+                let mut world_path = path;
+                world_path.transform(&vectors::matrix(item.world));
+                let bounds = world_path.compute_tight_bounds();
+                let item = &mut items[index];
+                item.properties.insert("path".into(), svg.into());
+                item.properties.insert("fillRule".into(), fill_rule.into());
+                item.bounds = [
+                    bounds.left as f64,
+                    bounds.top as f64,
+                    bounds.width() as f64,
+                    bounds.height() as f64,
+                ];
+            } else {
+                diagnostics.push(Diagnostic::unsupported(
+                    Some(&item.id),
+                    Some("booleanOperation"),
+                    "Invalid Boolean operands or geometry limit exceeded",
+                ));
+            }
+        }
     }
     if options.strict && diagnostics.iter().any(|d| d.fidelity_lost) {
         return Err(SceneError::Unsupported(
