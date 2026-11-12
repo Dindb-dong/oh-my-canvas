@@ -6,13 +6,14 @@ use crate::{
 };
 use accesskit::{
     Action as AxAction, ActionData, Node, NodeId, Rect as AxRect, Role, TextPosition,
-    TextSelection, TreeId, TreeInfo, TreeUpdate,
+    TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
 };
 
 const ROOT: NodeId = NodeId(1);
 const EDITOR: NodeId = NodeId(1_u64 << 60);
 const TEXT_RUN: NodeId = NodeId((1_u64 << 60) + 1);
 const STATUS: NodeId = NodeId((1_u64 << 60) + 2);
+const INSPECTOR_DETAIL_START: u64 = (1_u64 << 60) + 100;
 
 fn bounds(r: Rect, scale: f64) -> AxRect {
     AxRect::new(
@@ -33,8 +34,14 @@ pub fn tree(app: &App) -> TreeUpdate {
     for control in &app.controls {
         let id = NodeId(control.id);
         children.push(id);
+        let layer_toggle = matches!(
+            control.action,
+            Action::LayerVisibility(_) | Action::LayerLock(_)
+        );
         let mut node = Node::new(if control.field_value.is_some() {
             Role::TextInput
+        } else if layer_toggle {
+            Role::CheckBox
         } else if control.rect.y < HEADER && matches!(control.action, Action::Open(_)) {
             Role::Tab
         } else {
@@ -42,15 +49,29 @@ pub fn tree(app: &App) -> TreeUpdate {
         });
         node.set_label(control.label.clone());
         node.set_bounds(bounds(control.rect, scale));
-        node.add_action(AxAction::Focus);
-        node.add_action(AxAction::Click);
+        if !app.action_available(&control.action) {
+            node.set_disabled();
+        } else {
+            node.add_action(AxAction::Focus);
+            node.add_action(AxAction::Click);
+        }
         if let Some(value) = &control.field_value {
             node.set_value(value.clone());
             node.add_action(AxAction::SetValue);
         }
-        if control.selected {
+        if layer_toggle {
+            node.set_toggled(Toggled::from(control.selected));
+        } else if control.selected {
             node.set_selected(true);
         }
+        nodes.push((id, node));
+    }
+    for (index, (rect, label)) in crate::inspector::detail_text(app).into_iter().enumerate() {
+        let id = NodeId(INSPECTOR_DETAIL_START + index as u64);
+        let mut node = Node::new(Role::Label);
+        node.set_label(label);
+        node.set_bounds(bounds(rect, scale));
+        children.push(id);
         nodes.push((id, node));
     }
     let focus = if let Some(edit) = &app.editing

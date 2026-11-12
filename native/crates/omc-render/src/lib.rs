@@ -3,7 +3,7 @@ mod paints;
 mod resources;
 
 use omc_model::NodeKind;
-use omc_scene::{Scene, SceneItem};
+use omc_scene::{Affine, Scene, SceneItem};
 use omc_style::{Color, Diagnostic, LengthContext, parse_color, resolve_length};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -238,6 +238,45 @@ pub fn paint_scene(
     paint_scene_preview(canvas, scene, resources, &BTreeMap::new())
 }
 
+/// Paints one prototype frame in scene coordinates, clipped to its own bounds.
+pub fn paint_scene_frame(
+    canvas: &Canvas,
+    scene: &Scene,
+    frame_id: &str,
+    resources: &dyn ResourceProvider,
+) -> Result<Vec<Diagnostic>, RenderError> {
+    let index = scene
+        .items
+        .iter()
+        .position(|item| item.id == frame_id && item.kind == NodeKind::Frame)
+        .ok_or_else(|| RenderError::Backend("Prototype frame is unavailable".into()))?;
+    let item = &scene.items[index];
+    let mut clip = Path::rect(Rect::from_wh(item.width as f32, item.height as f32), None);
+    clip.transform(&skia_matrix(item.world));
+    let saved = canvas.save();
+    canvas.clip_path(&clip, None, true);
+    if let Some(parent) = item.parent {
+        canvas.concat(&skia_matrix(scene.items[parent].world));
+    }
+    let mut diagnostics = scene.diagnostics.clone();
+    let result = paint_item(
+        canvas,
+        scene,
+        index,
+        resources,
+        &mut diagnostics,
+        &BTreeMap::new(),
+        None,
+    );
+    canvas.restore_to_count(saved);
+    result.map(|()| diagnostics)
+}
+
+fn skia_matrix(affine: Affine) -> Matrix {
+    let [a, b, c, d, x, y] = affine.0.map(|value| value as f32);
+    Matrix::new_all(a, c, x, b, d, y, 0., 0., 1.)
+}
+
 /// Non-authoritative gesture preview. Offscreen/export callers use paint_scene
 /// without overrides, so editor overlays never change the committed output.
 pub fn paint_scene_preview(
@@ -403,18 +442,7 @@ fn paint_item(
         if let Some((x, y)) = translations.get(&item.id) {
             canvas.translate((*x as f32, *y as f32));
         }
-        let a = item.local.0;
-        canvas.concat(&Matrix::new_all(
-            a[0] as f32,
-            a[2] as f32,
-            a[4] as f32,
-            a[1] as f32,
-            a[3] as f32,
-            a[5] as f32,
-            0.,
-            0.,
-            1.,
-        ));
+        canvas.concat(&skia_matrix(item.local));
         let opacity = item.style.number("opacity", 1.).clamp(0., 1.) as f32;
         let blend = blend_mode(
             item.style
@@ -1022,6 +1050,57 @@ mod tests {
         )
         .unwrap()
     }
+
+    #[test]
+    fn prototype_paints_only_the_requested_frame_and_clips_overflow() {
+        let mut content = DocumentContent::empty("Prototype pixels");
+        let root = content.pages[0].root_node_id.clone();
+        let mut frame = Node::new(NodeKind::Frame);
+        frame.parent_id = Some(root.clone());
+        frame.properties.extend([
+            ("x".into(), json!(8)),
+            ("y".into(), json!(8)),
+            ("width".into(), json!(24)),
+            ("height".into(), json!(24)),
+            ("fill".into(), json!("blue")),
+        ]);
+        let frame_id = frame.id.clone();
+        content.nodes.insert(frame_id.clone(), frame);
+        for (parent, x, fill) in [(&frame_id, 16, "red"), (&root, 28, "green")] {
+            let mut node = Node::new(NodeKind::Rect);
+            node.parent_id = Some(parent.clone());
+            node.properties.extend([
+                ("x".into(), json!(x)),
+                ("y".into(), json!(8)),
+                ("width".into(), json!(32)),
+                ("height".into(), json!(24)),
+                ("fill".into(), json!(fill)),
+            ]);
+            content.nodes.insert(node.id.clone(), node);
+        }
+        let snapshot = DocumentSnapshot {
+            id: "test".into(),
+            title: content.title,
+            epoch: "test".into(),
+            sequence: 1,
+            pages: content.pages,
+            nodes: content.nodes,
+            metadata: content.metadata,
+        };
+        let scene = build_scene(&snapshot, &SceneOptions::default()).unwrap();
+        let info = ImageInfo::new((64, 64), ColorType::RGBA8888, AlphaType::Premul, None);
+        let mut surface = skia_safe::surfaces::raster(&info, None, None).unwrap();
+        let canvas = surface.canvas();
+        canvas.clear(skia_safe::Color::TRANSPARENT);
+        paint_scene_frame(canvas, &scene, &frame_id, &EmptyResources).unwrap();
+        let mut pixels = vec![0; 64 * 64 * 4];
+        assert!(surface.read_pixels(&info, &mut pixels, 64 * 4, (0, 0)));
+        let pixel = |x: usize| &pixels[(20 * 64 + x) * 4..(20 * 64 + x) * 4 + 4];
+        assert_eq!(pixel(12), [0, 0, 255, 255]);
+        assert_eq!(pixel(29), [255, 0, 0, 255]);
+        assert_eq!(pixel(40), [0, 0, 0, 0]);
+    }
+
     #[test]
     fn native_pixels_png_pdf_and_budget() {
         let scene = fixture();

@@ -107,6 +107,8 @@ pub enum Action {
     Fit,
     Layer(String),
     ToggleLayer(String),
+    LayerVisibility(String),
+    LayerLock(String),
     Page(String),
     Field(String),
     RenameDocument,
@@ -114,6 +116,12 @@ pub enum Action {
     SelectAll,
     Delete,
     Inspector(Inspector),
+    InspectorZoom,
+    ZoomPercent(f64),
+    CopyInspectorCss,
+    PrototypeTarget(Option<String>),
+    PrototypePreview,
+    PrototypeExit,
     Reorder(bool),
     ToggleProperty(String),
     Group(bool),
@@ -136,7 +144,8 @@ pub enum Action {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Inspector {
     Design,
-    Text,
+    Prototype,
+    Inspect,
     Assets,
     Tokens,
 }
@@ -145,6 +154,7 @@ pub enum Inspector {
 pub enum Popup {
     Files,
     Tabs,
+    InspectorZoom,
     Tools(crate::figcraft_chrome::DockGroup),
 }
 #[derive(Clone, Debug)]
@@ -227,6 +237,8 @@ pub struct LayerRow {
     pub depth: usize,
     pub has_children: bool,
     pub auto_layout: bool,
+    pub dimmed: bool,
+    pub locked_above: bool,
 }
 pub struct SceneReply {
     id: String,
@@ -258,28 +270,36 @@ fn layer_index(document: &DocumentSnapshot, page: Option<&str>) -> Vec<LayerRow>
         list.sort_by(|a, b| a.rank.cmp(&b.rank).then(a.id.cmp(&b.id)));
     }
     let mut result = vec![];
-    let mut stack: Vec<(&Node, usize)> = children
+    let mut stack: Vec<(&Node, usize, bool, bool)> = children
         .get(root.as_str())
         .into_iter()
         .flatten()
         .rev()
-        .map(|node| (*node, 0))
+        .map(|node| (*node, 0, false, false))
         .collect();
     let mut seen = BTreeSet::new();
-    while let Some((node, depth)) = stack.pop() {
+    while let Some((node, depth, hidden_above, locked_above)) = stack.pop() {
         if !seen.insert(node.id.clone()) {
             continue;
         }
         let kids = children.get(node.id.as_str());
+        let dimmed = hidden_above || crate::commands::layer_hidden(node);
+        let locked = locked_above || crate::commands::layer_locked(node);
         result.push(LayerRow {
             id: node.id.clone(),
             name: node_name(node),
             depth,
             has_children: kids.is_some_and(|k| !k.is_empty()),
             auto_layout: false,
+            dimmed,
+            locked_above,
         });
         if let Some(kids) = kids {
-            stack.extend(kids.iter().rev().map(|child| (*child, depth + 1)));
+            stack.extend(
+                kids.iter()
+                    .rev()
+                    .map(|child| (*child, depth + 1, dimmed, locked)),
+            );
         }
     }
     result
@@ -345,6 +365,8 @@ pub struct App {
     pub layer_scroll: usize,
     pub inspector: Inspector,
     pub inspector_scroll: f64,
+    pub prototype_frame: Option<String>,
+    editor_camera: Option<Camera>,
     pub layers: Vec<LayerRow>,
     pub visible_layers: Vec<usize>,
     pub collapsed: BTreeSet<String>,
@@ -514,6 +536,8 @@ impl App {
             height: 900.,
             layer_scroll: 0,
             inspector: Inspector::Design,
+            prototype_frame: None,
+            editor_camera: None,
             inspector_scroll: 0.,
             layers: vec![],
             visible_layers: vec![],
@@ -604,7 +628,7 @@ impl App {
         self.document()?.nodes.get(id)
     }
     pub fn inspector_visible(&self) -> bool {
-        self.width >= 960. || matches!(self.inspector, Inspector::Assets | Inspector::Tokens)
+        self.width >= 960. || self.inspector != Inspector::Design
     }
     pub fn uses_pan_raster(&self) -> bool {
         self.pan_view
@@ -665,6 +689,9 @@ impl App {
         }
     }
     fn mutate(&mut self, command: Value, group: &str) {
+        if self.inspector == Inspector::Inspect || self.prototype_frame.is_some() {
+            return;
+        }
         if self.pending {
             self.error = Some("Wait for the pending edit to finish.".into());
             return;
@@ -736,8 +763,39 @@ impl App {
             );
         }
     }
-    pub fn action(&mut self, action: Action) {
+    pub fn action_available(&self, action: &Action) -> bool {
         if self.closing {
+            return false;
+        }
+        if self.prototype_frame.is_some() {
+            return matches!(action, Action::PrototypeExit);
+        }
+        !(self.inspector == Inspector::Inspect
+            && matches!(
+                action,
+                Action::Field(_)
+                    | Action::RenamePage
+                    | Action::RenameDocument
+                    | Action::Delete
+                    | Action::Undo
+                    | Action::Redo
+                    | Action::Reorder(_)
+                    | Action::ToggleProperty(_)
+                    | Action::LayerVisibility(_)
+                    | Action::LayerLock(_)
+                    | Action::PrototypeTarget(_)
+                    | Action::Group(_)
+                    | Action::Ungroup
+                    | Action::Instance
+                    | Action::Detach
+                    | Action::NewPage
+                    | Action::CreateCatalog(_)
+                    | Action::ApplyCatalog { .. }
+                    | Action::EditCatalog { .. }
+            ))
+    }
+    pub fn action(&mut self, action: Action) {
+        if !self.action_available(&action) {
             return;
         }
         let previous_popup = self.popup.take();
@@ -746,6 +804,9 @@ impl App {
                 action,
                 Action::Reorder(_)
                     | Action::ToggleProperty(_)
+                    | Action::LayerVisibility(_)
+                    | Action::LayerLock(_)
+                    | Action::PrototypeTarget(_)
                     | Action::Group(_)
                     | Action::Ungroup
                     | Action::Instance
@@ -793,8 +854,66 @@ impl App {
             }
             Action::Inspector(tab) => {
                 self.commit_edit();
-                self.inspector = tab;
-                self.inspector_scroll = 0.;
+                if self.editing.is_none() {
+                    self.inspector = tab;
+                    self.inspector_scroll = 0.;
+                }
+            }
+            Action::InspectorZoom => {
+                self.popup =
+                    (previous_popup != Some(Popup::InspectorZoom)).then_some(Popup::InspectorZoom);
+            }
+            Action::ZoomPercent(zoom) => {
+                let rect = self.canvas_rect();
+                self.camera
+                    .zoom_at(zoom / self.camera.zoom, rect.width * 0.5, rect.height * 0.5);
+                self.remember_camera();
+            }
+            Action::CopyInspectorCss => {
+                if let Some(css) = crate::inspector::css_for_selection(self) {
+                    match self.clipboard.as_mut().map(|clip| clip.set_text(css)) {
+                        Some(Ok(())) => self.status = "CSS copied".into(),
+                        Some(Err(error)) => {
+                            self.error = Some(format!("Clipboard unavailable: {error}"))
+                        }
+                        None => self.error = Some("The system clipboard is unavailable.".into()),
+                    }
+                }
+            }
+            Action::PrototypeTarget(target) => {
+                if let (Some(doc), Some(page), Some(node)) =
+                    (self.document(), self.page.as_deref(), self.node())
+                    && self.selected.len() == 1
+                {
+                    let command =
+                        crate::prototype::set_target(doc, page, &node.id, target.as_deref());
+                    self.apply_plan(command, "prototype");
+                }
+            }
+            Action::PrototypePreview => {
+                if !self.pending
+                    && self.editing.is_none()
+                    && let (Some(doc), Some(page)) = (self.document(), self.page.as_deref())
+                    && let Some(frame) = crate::prototype::preview_frame(
+                        doc,
+                        page,
+                        self.node()
+                            .filter(|_| self.selected.len() == 1)
+                            .map(|n| n.id.as_str()),
+                    )
+                {
+                    let id = frame.id.clone();
+                    let editor_camera = self.camera;
+                    if self.show_prototype_frame(id) {
+                        self.editor_camera = Some(editor_camera);
+                    }
+                }
+            }
+            Action::PrototypeExit => {
+                self.prototype_frame = None;
+                if let Some(camera) = self.editor_camera.take() {
+                    self.camera = camera;
+                }
             }
             Action::Reorder(forward) => {
                 if let (Some(doc), Some(node)) = (self.document(), self.node()) {
@@ -804,10 +923,15 @@ impl App {
             }
             Action::ToggleProperty(property) => {
                 if let Some(node) = self.node() {
-                    let value = node.properties.get(&property) != Some(&json!(true));
-                    let command =
-                        json!({"type":"node.set","nodeId":node.id,"properties":{property:value}});
-                    self.mutate(command, "property");
+                    let id = node.id.clone();
+                    match property.as_str() {
+                        "hidden" | "visible" => self.action(Action::LayerVisibility(id)),
+                        "locked" => self.action(Action::LayerLock(id)),
+                        _ => {
+                            let value = node.properties.get(&property) != Some(&json!(true));
+                            self.mutate(json!({"type":"node.set","nodeId":id,"properties":{property:value}}), "property");
+                        }
+                    }
                 }
             }
             Action::Group(component) => {
@@ -921,6 +1045,9 @@ impl App {
                 }
             }
             Action::ImportHtml => {
+                if self.inspector == Inspector::Inspect {
+                    self.inspector = Inspector::Design;
+                }
                 if self.pending || self.editing.is_some() {
                     self.error = Some("Finish the current edit before importing HTML.".into());
                     return;
@@ -988,7 +1115,15 @@ impl App {
             Action::Refresh => self.send(Request::Refresh),
             Action::Tool(tool) => {
                 self.commit_edit();
-                self.tool = tool;
+                if self.editing.is_none() {
+                    if self.inspector == Inspector::Inspect
+                        && !matches!(tool, Tool::Select | Tool::Pan)
+                    {
+                        self.inspector = Inspector::Design;
+                        self.inspector_scroll = 0.;
+                    }
+                    self.tool = tool;
+                }
             }
             Action::Undo | Action::Redo => {
                 if self.editing.is_some() {
@@ -1049,6 +1184,18 @@ impl App {
                     self.selected.clear();
                 }
                 self.selected.insert(id);
+            }
+            Action::LayerVisibility(id) => {
+                if let Some(doc) = self.document() {
+                    let plan = crate::commands::toggle_layer_visibility(doc, &id);
+                    self.apply_plan(plan, "visibility");
+                }
+            }
+            Action::LayerLock(id) => {
+                if let Some(doc) = self.document() {
+                    let plan = crate::commands::toggle_layer_lock(doc, &id);
+                    self.apply_plan(plan, "lock");
+                }
             }
             Action::ToggleLayer(id) => {
                 if !self.collapsed.remove(&id) {
@@ -1463,6 +1610,22 @@ impl App {
         self.mutate(json!({"type":"batch","commands":commands}), "draw");
         self.tool = Tool::Select;
     }
+    fn show_prototype_frame(&mut self, id: String) -> bool {
+        let Some(frame) = self
+            .scene
+            .as_ref()
+            .and_then(|scene| scene.item(&id))
+            .filter(|frame| !frame.hidden)
+        else {
+            self.error = Some("Wait for the preview frame to render.".into());
+            return false;
+        };
+        let rect = self.canvas_rect();
+        self.camera.fit(frame.bounds, rect.width, rect.height);
+        self.prototype_frame = Some(id);
+        true
+    }
+
     fn pointer_down(&mut self, button: MouseButton) {
         let (x, y) = self.cursor;
         if button == MouseButton::Left {
@@ -1476,11 +1639,26 @@ impl App {
                 .controls
                 .iter()
                 .rev()
-                .find(|c| c.rect.contains(x, y))
+                .find(|c| self.action_available(&c.action) && c.rect.contains(x, y))
                 .cloned()
             {
                 self.focus = control.id;
                 self.action(control.action);
+                return;
+            }
+            if let Some(frame) = self.prototype_frame.as_deref() {
+                if self.canvas_rect().contains(x, y)
+                    && let (Some(doc), Some(page), Some(scene)) =
+                        (self.document(), self.page.as_deref(), self.scene.as_deref())
+                {
+                    let world = self.world(x, y);
+                    let target =
+                        crate::prototype::hit_target(doc, page, scene, frame, world.0, world.1)
+                            .map(|node| node.id.clone());
+                    if let Some(target) = target {
+                        self.show_prototype_frame(target);
+                    }
+                }
                 return;
             }
             self.popup = None;
@@ -1491,7 +1669,9 @@ impl App {
                 return;
             }
         }
-        if crate::paint::palette_rect(self).is_some_and(|area| area.contains(x, y)) {
+        if self.prototype_frame.is_some()
+            || crate::paint::palette_rect(self).is_some_and(|area| area.contains(x, y))
+        {
             return;
         }
         if !self.canvas_rect().contains(x, y) {
@@ -1517,10 +1697,15 @@ impl App {
         if self.pending || self.pending_move.is_some() {
             return;
         }
-        if self.tool == Tool::Select && self.selected.len() == 1 && self.begin_resize(world) {
+        let inspect = self.inspector == Inspector::Inspect;
+        if !inspect
+            && self.tool == Tool::Select
+            && self.selected.len() == 1
+            && self.begin_resize(world)
+        {
             return;
         }
-        if self.tool != Tool::Select {
+        if !inspect && self.tool != Tool::Select {
             self.drag = Some(Drag::Draw {
                 origin: world,
                 end: world,
@@ -1540,6 +1725,16 @@ impl App {
                     .to_string()
             })
             .filter(|id| Some(id) != self.current_root().as_ref());
+        if inspect {
+            if !self.modifiers.shift_key() {
+                self.selected.clear();
+            }
+            if let Some(id) = hit {
+                self.selected.insert(id);
+            }
+            self.inspector_scroll = 0.;
+            return;
+        }
         let double = self.last_click.is_some_and(|(at, pos)| {
             at.elapsed() < Duration::from_millis(400)
                 && (pos.0 - x).abs() < 5.
@@ -1561,6 +1756,7 @@ impl App {
                 let positions = self
                     .selected
                     .iter()
+                    .filter(|id| self.layer_transformable(id))
                     .filter_map(|id| {
                         doc.nodes
                             .get(id)
@@ -1583,6 +1779,23 @@ impl App {
             });
         }
     }
+    pub fn layer_transformable(&self, id: &str) -> bool {
+        let Some(scene) = &self.scene else {
+            return false;
+        };
+        let Some(mut item) = scene.item(id) else {
+            return false;
+        };
+        loop {
+            if item.hidden || item.locked {
+                return false;
+            }
+            let Some(parent) = item.parent else {
+                return true;
+            };
+            item = &scene.items[parent];
+        }
+    }
     fn begin_resize(&mut self, world: (f64, f64)) -> bool {
         let (Some(scene), Some(node)) = (&self.scene, self.node()) else {
             return false;
@@ -1591,7 +1804,12 @@ impl App {
             return false;
         };
         let [a, b, c, d, _, _] = item.world.0;
-        if b.abs() > 1e-8 || c.abs() > 1e-8 || a <= 0. || d <= 0. || item.locked {
+        if b.abs() > 1e-8
+            || c.abs() > 1e-8
+            || a <= 0.
+            || d <= 0.
+            || !self.layer_transformable(&node.id)
+        {
             return false;
         }
         let [left, top, width, height] = item.bounds;
@@ -1740,6 +1958,11 @@ impl App {
 
     fn wheel(&mut self, delta: MouseScrollDelta, scale: f64, phase: TouchPhase) -> bool {
         let (dx, dy) = scroll_delta(delta, scale, self.modifiers.shift_key());
+        if self.prototype_frame.is_some()
+            && self.canvas_rect().contains(self.cursor.0, self.cursor.1)
+        {
+            return false;
+        }
         let canvas = self.canvas_rect();
         let under_cursor = scroll_target_at(canvas, self.inspector_visible(), self.cursor);
         let target = if matches!(delta, MouseScrollDelta::PixelDelta(_)) {
@@ -1802,6 +2025,27 @@ impl App {
             return;
         }
         let command = self.modifiers.control_key() || self.modifiers.super_key();
+        if self.prototype_frame.is_some() {
+            match event.logical_key {
+                Key::Named(NamedKey::Escape) => {
+                    self.action(Action::PrototypeExit);
+                    return;
+                }
+                Key::Named(NamedKey::Tab) if !command => {
+                    if let Some(exit) = self
+                        .controls
+                        .iter()
+                        .find(|control| matches!(control.action, Action::PrototypeExit))
+                    {
+                        self.focus = exit.id;
+                        self.keyboard_focus_visible = true;
+                    }
+                    return;
+                }
+                Key::Named(NamedKey::Enter) if !command => {}
+                _ => return,
+            }
+        }
         if let Some(edit) = &mut self.editing {
             match &event.logical_key {
                 Key::Named(NamedKey::Escape) => {
@@ -1888,7 +2132,8 @@ impl App {
                     "y" => self.action(Action::Redo),
                     "a" => self.action(Action::SelectAll),
                     "c" => self.copy_selection(false),
-                    "x" => self.copy_selection(true),
+                    "x" if self.inspector != Inspector::Inspect => self.copy_selection(true),
+                    "v" if self.inspector == Inspector::Inspect => {}
                     "v" if self.modifiers.shift_key() => self.action(Action::ImportHtml),
                     "v" => self.paste(),
                     "0" => self.action(Action::Fit),
@@ -1922,7 +2167,15 @@ impl App {
                     } else {
                         1
                     };
-                    self.focus = self.controls[(current + delta) % self.controls.len()].id;
+                    let mut index = (current + delta) % self.controls.len();
+                    for _ in 0..self.controls.len() {
+                        let control = &self.controls[index];
+                        if self.action_available(&control.action) {
+                            self.focus = control.id;
+                            break;
+                        }
+                        index = (index + delta) % self.controls.len();
+                    }
                 }
             }
             Key::Named(NamedKey::Enter) => {
@@ -1931,12 +2184,12 @@ impl App {
                 }
             }
             Key::Character(key) => match key.to_lowercase().as_str() {
-                "v" => self.tool = Tool::Select,
-                "f" => self.tool = Tool::Frame,
-                "r" => self.tool = Tool::Rect,
-                "o" => self.tool = Tool::Ellipse,
-                "t" => self.tool = Tool::Text,
-                "h" => self.tool = Tool::Pan,
+                "v" => self.action(Action::Tool(Tool::Select)),
+                "f" => self.action(Action::Tool(Tool::Frame)),
+                "r" => self.action(Action::Tool(Tool::Rect)),
+                "o" => self.action(Action::Tool(Tool::Ellipse)),
+                "t" => self.action(Action::Tool(Tool::Text)),
+                "h" => self.action(Action::Tool(Tool::Pan)),
                 "1" => self.camera = Camera::default(),
                 _ => {}
             },
@@ -2213,6 +2466,11 @@ impl ApplicationHandler<Event> for App {
                             self.pan_view = false;
                             self.scene_generation = self.scene_generation.wrapping_add(1);
                             self.scene = Some(Arc::new(scene));
+                            if let Some(id) = self.prototype_frame.clone()
+                                && !self.show_prototype_frame(id)
+                            {
+                                self.action(Action::PrototypeExit);
+                            }
                             self.resources = Arc::new(reply.resources);
                             if let Some(error) = reply.resource_errors.first() {
                                 self.error = Some(error.clone());
@@ -2264,6 +2522,9 @@ impl ApplicationHandler<Event> for App {
                 let scale = window.scale_factor();
                 self.width = size.width as f64 / scale;
                 self.height = size.height as f64 / scale;
+                if let Some(id) = self.prototype_frame.clone() {
+                    self.show_prototype_frame(id);
+                }
                 self.schedule_scene();
             }
             WindowEvent::ScaleFactorChanged { .. } => {
@@ -2287,6 +2548,9 @@ impl ApplicationHandler<Event> for App {
                         control.rect.contains(previous.0, previous.1)
                             != control.rect.contains(self.cursor.0, self.cursor.1)
                     });
+            }
+            WindowEvent::CursorLeft { .. } if self.drag.is_none() => {
+                self.cursor = (-1., -1.);
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
@@ -2315,6 +2579,7 @@ impl ApplicationHandler<Event> for App {
                 let r = self.canvas_rect();
                 needs_redraw = delta.is_finite()
                     && delta != 0.
+                    && self.prototype_frame.is_none()
                     && self.drag.is_none()
                     && r.contains(self.cursor.0, self.cursor.1);
                 if needs_redraw {

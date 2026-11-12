@@ -2,6 +2,7 @@ use crate::{
     app::{
         Action, App, Control, Drag, EditTarget, FOOTER, HEADER, Inspector, LEFT, Popup, RIGHT, Tool,
     },
+    commands::{layer_hidden, layer_locked},
     figcraft_chrome::{self, RAIL_WIDTH, RailItem},
     geometry::Rect,
     scene_cache::SceneCacheKey,
@@ -39,7 +40,9 @@ const FILE_ACTIONS: [(u64, &str, Action); 5] = [
 const TAB_BG: Color = Color::from_rgb(232, 232, 232);
 const TAB_LABEL_X: f64 = 35.;
 const TAB_LABEL_RIGHT_PAD: f64 = 2.;
-const POPUP_FIRST: u64 = 2_000_000;
+const LAYER_FIRST: u64 = 1 << 32;
+const LAYER_CONTROLS: u64 = 4;
+const POPUP_FIRST: u64 = 1 << 48;
 
 fn sidebar_top() -> f64 {
     HEADER + 60.
@@ -72,6 +75,7 @@ fn tabs(app: &App) -> (tab_strip::TabLayout, f64) {
 fn popup_rect(app: &App) -> Option<Rect> {
     match app.popup? {
         Popup::Files => Some(FILE_MENU),
+        Popup::InspectorZoom => crate::inspector::popup_rect(app),
         Popup::Tabs => {
             let (layout, x) = tabs(app);
             let hidden = app.tabs.len() - layout.widths.len();
@@ -99,6 +103,9 @@ fn popup_rect(app: &App) -> Option<Rect> {
 }
 
 pub fn palette_rect(app: &App) -> Option<Rect> {
+    if app.prototype_frame.is_some() {
+        return None;
+    }
     if app
         .editing
         .as_ref()
@@ -245,7 +252,10 @@ pub fn controls(app: &App) -> Vec<Control> {
                 40,
                 "Files",
                 Action::Files,
-                matches!(app.inspector, Inspector::Design | Inspector::Text),
+                matches!(
+                    app.inspector,
+                    Inspector::Design | Inspector::Prototype | Inspector::Inspect
+                ),
             ),
             RailItem::Assets => (
                 41,
@@ -317,24 +327,23 @@ pub fn controls(app: &App) -> Vec<Control> {
         }
         for ((id, label, action, selected), rect) in [
             (
-                60,
-                "Text inspector",
-                Action::Inspector(Inspector::Text),
-                app.inspector == Inspector::Text,
-            ),
-            (
                 61,
-                "Design inspector",
+                "디자인 모드",
                 Action::Inspector(Inspector::Design),
                 app.inspector == Inspector::Design,
             ),
             (
                 62,
-                "Variables",
-                Action::Inspector(Inspector::Tokens),
-                app.inspector == Inspector::Tokens,
+                "프로토타입 모드",
+                Action::Inspector(Inspector::Prototype),
+                app.inspector == Inspector::Prototype,
             ),
-            (63, "Paste HTML", Action::ImportHtml, false),
+            (
+                63,
+                "검사 모드",
+                Action::Inspector(Inspector::Inspect),
+                app.inspector == Inspector::Inspect,
+            ),
         ]
         .into_iter()
         .zip(figcraft_chrome::dock_modes(palette))
@@ -392,10 +401,18 @@ pub fn controls(app: &App) -> Vec<Control> {
             .take(visible)
         {
             let row = &app.layers[*index];
-            let indent = (row.depth.min(7) * 16) as f64;
+            let Some(node) = doc.nodes.get(&row.id) else {
+                continue;
+            };
+            let indent = (row.depth.min(6) * 16) as f64;
+            let id = LAYER_FIRST + *index as u64 * LAYER_CONTROLS;
+            let bounds = layer_bounds(y);
+            let [lock, eye] = figcraft_chrome::layer_action_bounds(bounds);
+            let locked = layer_locked(node);
+            let hidden = layer_hidden(node);
             add(
-                1000 + *index as u64,
-                Rect::new(RAIL_WIDTH + 10., y, LEFT - RAIL_WIDTH - 20., 32.),
+                id,
+                bounds,
                 row.name.clone(),
                 Action::Layer(row.id.clone()),
                 app.selected.contains(&row.id),
@@ -403,7 +420,7 @@ pub fn controls(app: &App) -> Vec<Control> {
             );
             if row.has_children {
                 add(
-                    1_000_000 + *index as u64,
+                    id + 1,
                     Rect::new(RAIL_WIDTH + 11. + indent, y, 17., 32.),
                     if app.collapsed.contains(&row.id) {
                         format!("Expand {}", row.name)
@@ -415,6 +432,24 @@ pub fn controls(app: &App) -> Vec<Control> {
                     None,
                 );
             }
+            let lock_label = if locked { "Unlock" } else { "Lock" };
+            let eye_label = if hidden { "Show" } else { "Hide" };
+            add(
+                id + 2,
+                lock,
+                format!("{lock_label} {}", row.name),
+                Action::LayerLock(row.id.clone()),
+                locked || row.locked_above,
+                None,
+            );
+            add(
+                id + 3,
+                eye,
+                format!("{eye_label} {}", row.name),
+                Action::LayerVisibility(row.id.clone()),
+                hidden,
+                None,
+            );
             y += 37.;
         }
     } else {
@@ -439,8 +474,30 @@ pub fn controls(app: &App) -> Vec<Control> {
             );
         }
     }
+    for control in crate::inspector::controls(app) {
+        add(
+            control.id,
+            control.rect,
+            control.label,
+            control.action,
+            control.selected,
+            control.field_value,
+        );
+    }
     if let Some(menu) = popup_rect(app) {
         match app.popup {
+            Some(Popup::InspectorZoom) => {
+                for control in crate::inspector::popup_controls(app, POPUP_FIRST) {
+                    add(
+                        control.id,
+                        control.rect,
+                        control.label,
+                        control.action,
+                        control.selected,
+                        control.field_value,
+                    );
+                }
+            }
             Some(Popup::Files) => {
                 for (index, (_, label, action)) in FILE_ACTIONS.into_iter().enumerate() {
                     add(
@@ -506,8 +563,18 @@ pub fn controls(app: &App) -> Vec<Control> {
             None => {}
         }
     }
-    controls.extend(crate::inspector::controls(app));
     controls
+}
+
+fn layer_actions_revealed(app: &App, control: &Control) -> bool {
+    let base = control.id - (control.id - LAYER_FIRST) % LAYER_CONTROLS;
+    layer_bounds(control.rect.y - (32. - control.rect.height) / 2.)
+        .contains(app.cursor.0, app.cursor.1)
+        || app.keyboard_focus_visible && (base..base + LAYER_CONTROLS).contains(&app.focus)
+}
+
+fn layer_bounds(y: f64) -> Rect {
+    Rect::new(RAIL_WIDTH + 10., y, LEFT - RAIL_WIDTH - 20., 32.)
 }
 
 fn control_text(
@@ -600,7 +667,7 @@ fn mark(canvas: &Canvas, r: Rect, source: &'static str, color: Color) {
 fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
     use omc_model::NodeKind;
     let r = control.rect;
-    let hovered = r.contains(app.cursor.0, app.cursor.1);
+    let hovered = app.action_available(&control.action) && r.contains(app.cursor.0, app.cursor.1);
     if r.y < HEADER {
         if control.selected {
             fill(canvas, r, Color::WHITE);
@@ -697,7 +764,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         }
         return;
     }
-    if (60..=63).contains(&control.id) {
+    if (61..=63).contains(&control.id) {
         if control.selected || hovered {
             round(canvas, r, Color::WHITE, 5.);
         }
@@ -716,14 +783,45 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         }
         return;
     }
+    if let Action::LayerLock(id) | Action::LayerVisibility(id) = &control.action {
+        let interactive = app.action_available(&control.action);
+        if !control.selected && !(interactive && layer_actions_revealed(app, control)) {
+            return;
+        }
+        let focused = interactive && app.focus == control.id && app.keyboard_focus_visible;
+        if hovered || focused {
+            round(canvas, r, Color::from_argb(18, 0, 0, 0), 4.);
+        }
+        let inherited_lock = matches!(&control.action, Action::LayerLock(_))
+            && control.selected
+            && app
+                .document()
+                .and_then(|doc| doc.nodes.get(id))
+                .is_some_and(|node| !layer_locked(node));
+        let color = if inherited_lock || !interactive {
+            Color::from_rgb(161, 161, 161)
+        } else {
+            MUTED
+        };
+        match control.action {
+            Action::LayerLock(_) => {
+                figcraft_chrome::paint_layer_lock(canvas, r, control.selected, color)
+            }
+            _ => figcraft_chrome::paint_layer_eye(canvas, r, control.selected, color),
+        }
+        if focused {
+            stroke(canvas, r, SELECTED_INK, 1.35);
+        }
+        return;
+    }
     let tool = match control.action {
         Action::Tool(tool) => Some(tool),
         _ => None,
     };
     let background = if control.id == 34 || control.selected && tool.is_some() {
         Some(ACCENT)
-    } else if matches!(control.action, Action::Layer(_)) && control.selected {
-        Some(SELECTED)
+    } else if matches!(control.action, Action::Layer(_)) {
+        control.selected.then_some(SELECTED)
     } else if control.selected || hovered || control.field_value.is_some() {
         Some(WORKSPACE)
     } else {
@@ -746,6 +844,27 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
     }
     if (30..=32).contains(&control.id) {
         figcraft_chrome::paint_dock_utility(canvas, (control.id - 30) as usize, r, INK);
+        return;
+    }
+    if matches!(control.action, Action::InspectorZoom) {
+        control_text(
+            canvas,
+            Rect::new(r.x, r.y, r.width - 13., r.height),
+            control
+                .label
+                .strip_prefix("Zoom ")
+                .unwrap_or(&control.label),
+            5.,
+            r.y + 16.,
+            11.,
+            INK,
+            font,
+        );
+        figcraft_chrome::paint_dock_chevron(
+            canvas,
+            Rect::new(r.x + r.width - 16., r.y, 16., r.height),
+            MUTED,
+        );
         return;
     }
     let icon = match control.id {
@@ -772,17 +891,30 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         return;
     }
     if let Action::Layer(id) = &control.action {
-        let row = app.layers.get((control.id - 1000) as usize);
-        let depth = row.map_or(0, |row| row.depth).min(7);
-        let kind = app
-            .document()
-            .and_then(|doc| doc.nodes.get(id))
-            .map_or(NodeKind::Frame, |n| n.kind.clone());
-        let color = if matches!(kind, NodeKind::Component | NodeKind::Instance) {
+        let index = (control.id - LAYER_FIRST) / LAYER_CONTROLS;
+        let row = app.layers.get(index as usize);
+        let depth = row.map_or(0, |row| row.depth).min(6);
+        let node = app.document().and_then(|doc| doc.nodes.get(id));
+        let kind = node.map_or(NodeKind::Frame, |n| n.kind.clone());
+        let color = if row.is_some_and(|row| row.dimmed) || node.is_some_and(layer_hidden) {
+            MUTED
+        } else if matches!(kind, NodeKind::Component | NodeKind::Instance) {
             COMPONENT
         } else {
             INK
         };
+        if hovered && !control.selected {
+            let mut outline = Paint::default();
+            outline.set_color(ACCENT);
+            outline.set_anti_alias(true);
+            outline.set_style(PaintStyle::Stroke);
+            canvas.draw_round_rect(
+                rect(Rect::new(r.x + 0.5, r.y + 0.5, r.width - 1., r.height - 1.)),
+                5.,
+                5.,
+                &outline,
+            );
+        }
         let auto_layout = row.is_some_and(|row| row.auto_layout);
         let x = r.x + 18. + depth as f64 * 16.;
         figcraft_chrome::paint_layer_icon(
@@ -792,9 +924,10 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
             Rect::new(x, r.y, 16., r.height),
             color,
         );
+        let [lock, _] = figcraft_chrome::layer_action_bounds(r);
         control_text(
             canvas,
-            Rect::new(x + 21., r.y, (r.x + r.width - x - 21.).max(0.), r.height),
+            Rect::new(x + 21., r.y, (lock.x - 4. - x - 21.).max(0.), r.height),
             &control.label,
             0.,
             r.y + 20.,
@@ -879,7 +1012,8 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
             .strip_prefix("Rename ")
             .unwrap_or(&control.label),
         (Action::Inspector(Inspector::Design), _) => "디자인",
-        (Action::Inspector(Inspector::Text), _) => "텍스트",
+        (Action::Inspector(Inspector::Prototype), _) => "프로토타입",
+        (Action::Inspector(Inspector::Inspect), _) => "검사",
         (Action::Inspector(Inspector::Assets), _) => "에셋",
         (Action::Inspector(Inspector::Tokens), _) => "변수",
         _ => &control.label,
@@ -909,6 +1043,61 @@ fn tool_title(tool: Tool) -> &'static str {
         Tool::Ellipse => "타원",
         Tool::Text => "텍스트",
     }
+}
+
+fn dock_tooltip_label(control: &Control) -> Option<String> {
+    use figcraft_chrome::DockGroup;
+    let command = if cfg!(target_os = "macos") {
+        "⌘"
+    } else {
+        "Ctrl+"
+    };
+    let shift = if cfg!(target_os = "macos") {
+        "⇧"
+    } else {
+        "Shift+"
+    };
+    let label = match &control.action {
+        Action::Tool(tool) => format!(
+            "{}  {}",
+            tool_title(*tool),
+            figcraft_chrome::dock_tool_shortcut(*tool)
+        ),
+        Action::ToolMenu(group) => match group {
+            DockGroup::Move => "이동 도구",
+            DockGroup::Frame => "프레임 도구",
+            DockGroup::Shape => "도형 도구",
+            DockGroup::Text => "텍스트 도구",
+        }
+        .into(),
+        Action::Undo => format!("실행 취소  {command}Z"),
+        Action::Redo => format!("다시 실행  {command}{shift}Z"),
+        Action::Fit => format!("화면에 맞추기  {command}0"),
+        _ if (61..=63).contains(&control.id) => control.label.clone(),
+        _ => return None,
+    };
+    Some(label)
+}
+
+fn dock_tooltip_target(
+    controls: &[Control],
+    dock: Rect,
+    cursor: (f64, f64),
+    focus: Option<u64>,
+) -> Option<&Control> {
+    let dock_control = |control: &&Control| dock.contains(control.rect.x, control.rect.y);
+    controls
+        .iter()
+        .rev()
+        .filter(dock_control)
+        .find(|control| control.rect.contains(cursor.0, cursor.1))
+        .or_else(|| {
+            let focus = focus?;
+            controls
+                .iter()
+                .filter(dock_control)
+                .find(|control| control.id == focus)
+        })
 }
 
 fn selection_dimensions(canvas: &Canvas, app: &App, viewport: Rect, font: &Font) {
@@ -1076,16 +1265,11 @@ fn render_to_canvas(
         fill(canvas, Rect::new(panel_x, HEADER + 50., RIGHT, 1.), LINE);
         if app.document().is_some() {
             fill(canvas, Rect::new(panel_x, HEADER + 90., RIGHT, 1.), LINE);
-            text(
-                canvas,
-                &format!("{:.0}%", app.camera.zoom * 100.),
-                app.width - 39.,
-                HEADER + 74.,
-                11.,
-                INK,
-                &font,
-            );
-            if let Some(node) = app.node() {
+            if app.inspector == Inspector::Inspect {
+                text(canvas, "검사", x, HEADER + 119., 14., INK, &font);
+            } else if let Some(node) = app.node()
+                && matches!(app.inspector, Inspector::Design | Inspector::Prototype)
+            {
                 let label = match node.kind {
                     omc_model::NodeKind::Text => "텍스트",
                     omc_model::NodeKind::Frame => "프레임",
@@ -1096,16 +1280,8 @@ fn render_to_canvas(
                     _ => "레이어",
                 };
                 text(canvas, label, x, HEADER + 119., 14., INK, &font);
-            } else if !matches!(app.inspector, Inspector::Assets | Inspector::Tokens) {
-                text(
-                    canvas,
-                    "레이어를 선택하세요",
-                    x,
-                    HEADER + 117.,
-                    12.,
-                    MUTED,
-                    &font,
-                );
+            } else if app.inspector == Inspector::Prototype {
+                text(canvas, "프로토타입", x, HEADER + 119., 14., INK, &font);
             }
             for (label, y) in crate::inspector::sections(app) {
                 fill(
@@ -1115,11 +1291,34 @@ fn render_to_canvas(
                 );
                 text(canvas, label, x, y, 12., INK, &font);
             }
+            for (bounds, label) in crate::inspector::detail_text(app) {
+                control_text(
+                    canvas,
+                    bounds,
+                    &label,
+                    0.,
+                    bounds.y + 16.,
+                    12.,
+                    MUTED,
+                    &font,
+                );
+            }
         }
     }
     canvas.save();
     canvas.clip_rect(rect(viewport), None, Some(false));
-    if let Some(scene) = &app.scene {
+    if let (Some(frame), Some(scene)) = (app.prototype_frame.as_deref(), app.scene.as_ref()) {
+        canvas.translate((
+            (viewport.x + app.camera.x) as f32,
+            (viewport.y + app.camera.y) as f32,
+        ));
+        canvas.scale((app.camera.zoom as f32, app.camera.zoom as f32));
+        if let Err(error) =
+            omc_render::paint_scene_frame(canvas, scene, frame, app.resources.as_ref())
+        {
+            text(canvas, &error.to_string(), 12., 20., 13., Color::RED, &font);
+        }
+    } else if let Some(scene) = &app.scene {
         let translations = app.drag_translations();
         let key = SceneCacheKey::new(app.scene_generation, viewport, scale, app.camera);
         let moving = !translations.is_empty();
@@ -1198,10 +1397,11 @@ fn render_to_canvas(
                     }
                 }
                 stroke(canvas, Rect::new(x, y, w, h), ACCENT, line_width);
-                if app.selected.len() != 1
+                if app.inspector == Inspector::Inspect
+                    || app.selected.len() != 1
+                    || !app.layer_transformable(id)
                     || scene.item(id).is_none_or(|item| {
-                        item.locked
-                            || item.world.0[1].abs() > 1e-8
+                        item.world.0[1].abs() > 1e-8
                             || item.world.0[2].abs() > 1e-8
                             || item.world.0[0] <= 0.
                             || item.world.0[3] <= 0.
@@ -1376,30 +1576,33 @@ fn render_to_canvas(
                 draw_control(canvas, app, control, &font);
             }
         }
-    } else if let Some(dock) = palette_rect(app)
-        && let Some(control) = app.controls.iter().find(|control| {
-            (20..=23).contains(&control.id) && control.rect.contains(app.cursor.0, app.cursor.1)
-        })
-        && let Action::Tool(tool) = control.action
+    } else if app.popup.is_none()
+        && app.drag.is_none()
+        && let Some(dock) = palette_rect(app)
+        && let Some(control) = dock_tooltip_target(
+            &app.controls,
+            dock,
+            app.cursor,
+            app.keyboard_focus_visible.then_some(app.focus),
+        )
+        && let Some(label) = dock_tooltip_label(control)
     {
-        let label = format!(
-            "{}  {}",
-            tool_title(tool),
-            figcraft_chrome::dock_tool_shortcut(tool)
+        let layout = crate::text_ui::layout(&label, 12., INK, 1000.);
+        let width = layout.as_ref().map_or_else(
+            || label.chars().count() as f64 * 12.,
+            |text| text.intrinsic_width,
         );
-        let width = label.chars().count() as f64 * 9. + 18.;
         let tip = figcraft_chrome::dock_tooltip(dock, control.rect, viewport, width);
         figcraft_chrome::paint_dock_tooltip(canvas, tip);
-        control_text(
-            canvas,
-            tip,
-            &label,
-            8.,
-            tip.y + tip.height * 0.5 + 4.,
-            12.,
-            INK,
-            &font,
-        );
+        if let Some(layout) = layout {
+            layout.paint(
+                canvas,
+                tip.x + 9.,
+                tip.y + (tip.height - layout.height) / 2.,
+            );
+        } else {
+            control_text(canvas, tip, &label, 9., tip.y + 19., 12., INK, &font);
+        }
     }
     if let Some(edit) = &app.editing {
         if !matches!(edit.target, EditTarget::Property { .. }) {
@@ -1593,6 +1796,58 @@ pub fn screenshot(app: &App, path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dock_tooltips_follow_pointer_then_keyboard_focus_and_clear_on_leave() {
+        let viewport = Rect::new(292., 40., 432., 600.);
+        let dock = figcraft_chrome::dock_rect(viewport).unwrap();
+        let (group, button, caret) = figcraft_chrome::dock_groups(dock).next().unwrap();
+        let controls = [
+            Control {
+                id: 20,
+                rect: button,
+                label: "Select".into(),
+                action: Action::Tool(Tool::Select),
+                selected: false,
+                field_value: None,
+            },
+            Control {
+                id: 80,
+                rect: caret,
+                label: "Move tools".into(),
+                action: Action::ToolMenu(group),
+                selected: false,
+                field_value: None,
+            },
+            Control {
+                id: 30,
+                rect: figcraft_chrome::dock_utilities(dock)[0],
+                label: "Undo".into(),
+                action: Action::Undo,
+                selected: false,
+                field_value: None,
+            },
+            Control {
+                id: 62,
+                rect: figcraft_chrome::dock_modes(dock)[1],
+                label: "프로토타입".into(),
+                action: Action::Inspector(Inspector::Prototype),
+                selected: false,
+                field_value: None,
+            },
+        ];
+        for control in &controls {
+            let cursor = (control.rect.x + 1., control.rect.y + 1.);
+            let target = dock_tooltip_target(&controls, dock, cursor, Some(20)).unwrap();
+            assert_eq!(target.id, control.id);
+            assert!(dock_tooltip_label(target).is_some_and(|label| !label.is_empty()));
+        }
+        assert_eq!(
+            dock_tooltip_target(&controls, dock, (-1., -1.), Some(30)).map(|control| control.id),
+            Some(30)
+        );
+        assert!(dock_tooltip_target(&controls, dock, (-1., -1.), None).is_none());
+    }
 
     #[test]
     fn present_rows_preserve_rgb_and_clear_alpha() {

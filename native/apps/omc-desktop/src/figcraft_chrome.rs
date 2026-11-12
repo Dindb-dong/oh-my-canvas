@@ -23,7 +23,7 @@ const GROUP_STRIDE: f64 = TOOL_CELL + FLYOUT_GAP + FLYOUT_W + GAP;
 const ACTIONS_X: f64 = PAD + GROUPS.len() as f64 * GROUP_STRIDE;
 const DIVIDER_X: f64 = ACTIONS_X + 3. * (TOOL_CELL + GAP);
 const MODES_X: f64 = DIVIDER_X + DIVIDER + GAP;
-const DOCK_WIDTH: f64 = MODES_X + 4. * TOOL_CELL + PAD;
+const DOCK_WIDTH: f64 = MODES_X + 3. * TOOL_CELL + PAD;
 const BORDER: Color = Color::from_rgb(0xe6, 0xe6, 0xe6);
 const FIELD: Color = Color::from_rgb(0xf5, 0xf5, 0xf5);
 
@@ -94,7 +94,7 @@ pub fn dock_utilities(dock: Rect) -> [Rect; 3] {
     std::array::from_fn(|i| dock_hit(dock, ACTIONS_X + i as f64 * (TOOL_CELL + GAP), TOOL_CELL))
 }
 
-pub fn dock_modes(dock: Rect) -> [Rect; 4] {
+pub fn dock_modes(dock: Rect) -> [Rect; 3] {
     std::array::from_fn(|i| dock_hit(dock, MODES_X + i as f64 * TOOL_CELL, TOOL_CELL))
 }
 
@@ -150,7 +150,7 @@ pub fn dock_tooltip(dock: Rect, button: Rect, viewport: Rect, label_width: f64) 
         (center - width * 0.5)
             .min(viewport.x + viewport.width - width)
             .max(viewport.x),
-        dock.y - 34.,
+        (dock.y - 34.).max(viewport.y),
         width,
         30.,
     )
@@ -184,7 +184,7 @@ pub fn paint_dock(canvas: &Canvas, dock: Rect) {
         12.,
         Color::WHITE,
     );
-    let [first, _, _, last] = dock_modes(dock);
+    let [first, _, last] = dock_modes(dock);
     round(
         canvas,
         Rect::new(
@@ -354,6 +354,63 @@ pub fn paint_layer_icon(
             ] {
                 g.path(&[(x + 3.5 * dx, y), (x, y), (x, y + 3.5 * dy)], false);
             }
+        }
+    });
+}
+
+pub fn layer_action_bounds(row: Rect) -> [Rect; 2] {
+    [36., 14.].map(|offset| {
+        Rect::new(
+            row.x + row.width - offset - 10.,
+            row.y + (row.height - 20.) * 0.5,
+            20.,
+            20.,
+        )
+    })
+}
+
+pub fn paint_layer_lock(canvas: &Canvas, bounds: Rect, locked: bool, color: Color) {
+    draw_glyph(canvas, bounds, 14., color, |g| {
+        g.rect(3.5, 7.5, 12.5, 13.5, 1.);
+        g.dot(8., 10.5, 1.);
+        let shackle: Vec<_> = if locked {
+            g.line(5.5, 7.5, 5.5, 5.5);
+            g.line(10.5, 7.5, 10.5, 5.5);
+            arc_pts(8., 5.5, 2.5, PI, TAU).collect()
+        } else {
+            g.line(10.5, 7.5, 10.5, 4.5);
+            arc_pts(13., 4.5, 2.5, PI, TAU).collect()
+        };
+        g.path(&shackle, false);
+    });
+}
+
+pub fn paint_layer_eye(canvas: &Canvas, bounds: Rect, hidden: bool, color: Color) {
+    draw_glyph(canvas, bounds, 14., color, |g| {
+        let radius = 7.;
+        let center_y = 7.5;
+        let angle = (5.5_f32 / radius).asin();
+        let center_offset = radius * angle.cos();
+        let mut outline: Vec<_> = arc_pts(
+            8.,
+            center_y + center_offset,
+            radius,
+            -FRAC_PI_2 - angle,
+            -FRAC_PI_2 + angle,
+        )
+        .collect();
+        outline.extend(arc_pts(
+            8.,
+            center_y - center_offset,
+            radius,
+            FRAC_PI_2 - angle,
+            FRAC_PI_2 + angle,
+        ));
+        g.path(&outline, true);
+        if hidden {
+            g.line(3., 13., 13., 2.);
+        } else {
+            g.circle(8., center_y, 2.);
         }
     });
 }
@@ -567,5 +624,17 @@ mod tests {
         assert_eq!(menu.width, 220.);
         assert_eq!(menu.y + menu.height, dock.y - 8.);
         assert_eq!(dock_flyout_rows(menu, group).count(), 2);
+    }
+
+    #[test]
+    fn layer_actions_keep_separate_hit_regions_in_the_row() {
+        let row = Rect::new(62., 256., 220., 32.);
+        let [lock, eye] = layer_action_bounds(row);
+        assert_eq!(lock.x + lock.width + 2., eye.x);
+        assert_eq!(eye.x + eye.width + 4., row.x + row.width);
+        for button in [lock, eye] {
+            assert!(row.contains(button.x, button.y));
+            assert!(row.contains(button.x + button.width, button.y + button.height));
+        }
     }
 }

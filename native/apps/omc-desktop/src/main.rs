@@ -10,6 +10,7 @@ mod inspector;
 mod move_cache;
 mod paint;
 mod pan_cache;
+mod prototype;
 mod scene_cache;
 mod tab_strip;
 mod text;
