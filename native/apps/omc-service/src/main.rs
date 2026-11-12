@@ -1,5 +1,6 @@
 //! Authenticated loopback service. Document authority lives in isolated workers.
 mod collaboration;
+mod legacy_https;
 use axum::{
     Json, Router,
     body::Bytes,
@@ -25,6 +26,9 @@ struct Options {
     port: u16,
     #[arg(long)]
     document_worker: bool,
+    /// Also serve certificate-pinned legacy MCP HTTPS (47831 for existing clients).
+    #[arg(long)]
+    legacy_mcp_port: Option<u16>,
 }
 #[derive(Clone)]
 struct App {
@@ -78,6 +82,23 @@ async fn run() -> Result<()> {
         .route("/health", get(health))
         .layer(middleware::from_fn_with_state(app.clone(), authenticate))
         .with_state(app.clone());
+    let legacy_port = match (
+        options.legacy_mcp_port,
+        std::env::var_os("OMC_LEGACY_MCP_PORT"),
+    ) {
+        (Some(port), _) => Some(port),
+        (None, Some(value)) => Some(
+            value
+                .to_string_lossy()
+                .parse()
+                .map_err(|_| EngineError::invalid("OMC_LEGACY_MCP_PORT must be a TCP port"))?,
+        ),
+        (None, None) => None,
+    };
+    let legacy = match legacy_port {
+        Some(port) => Some(legacy_https::start(app.clone(), &app.workspace.profile, port).await?),
+        None => None,
+    };
     let descriptor = app.workspace.profile.join("native-v1/service.json");
     publish_descriptor(
         &descriptor,
@@ -90,6 +111,9 @@ async fn run() -> Result<()> {
         })
         .await
         .map_err(io_error);
+    if let Some(legacy) = legacy {
+        legacy.close().await;
+    }
     let _ = std::fs::remove_file(descriptor);
     result
 }
@@ -481,6 +505,9 @@ fn io_error(error: std::io::Error) -> EngineError {
     EngineError::new("storage_unavailable", error.to_string())
 }
 fn publish_descriptor(path: &std::path::Path, value: &Value) -> Result<()> {
+    publish_private(path, value.to_string().as_bytes())
+}
+fn publish_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().unwrap();
     let temporary = parent.join(format!(".service-{}", uuid::Uuid::new_v4().simple()));
     let mut options = std::fs::OpenOptions::new();
@@ -491,10 +518,15 @@ fn publish_descriptor(path: &std::path::Path, value: &Value) -> Result<()> {
         options.mode(0o600);
     }
     let mut file = options.open(&temporary).map_err(io_error)?;
-    file.write_all(value.to_string().as_bytes())
-        .map_err(io_error)?;
-    file.sync_all().map_err(io_error)?;
-    drop(file);
-    std::fs::rename(temporary, path).map_err(io_error)?;
-    omc_assets::sync_directory(parent)
+    let result = (|| {
+        file.write_all(bytes).map_err(io_error)?;
+        file.sync_all().map_err(io_error)?;
+        drop(file);
+        std::fs::rename(&temporary, path).map_err(io_error)?;
+        omc_assets::sync_directory(parent)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(temporary);
+    }
+    result
 }

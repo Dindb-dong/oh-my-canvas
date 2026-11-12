@@ -93,6 +93,21 @@ impl Draft {
                     .ok_or_else(|| EngineError::invalid("page not found"))?;
                 page.title = title.clone();
             }
+            Command::PageMove { page_id, rank } => {
+                let page = self
+                    .snapshot
+                    .pages
+                    .iter_mut()
+                    .find(|page| page.id == *page_id)
+                    .ok_or_else(|| EngineError::invalid("page not found"))?;
+                page.rank.clone_from(rank);
+                self.snapshot
+                    .pages
+                    .sort_by(|a, b| a.rank.cmp(&b.rank).then(a.id.cmp(&b.id)));
+            }
+            Command::PageDelete { page_id } => {
+                self.snapshot.pages.retain(|page| page.id != *page_id);
+            }
             Command::TextInsert {
                 node_id,
                 offset,
@@ -258,14 +273,20 @@ impl ToolRouter {
         let mut result = self.submit(session, id, command, meta, revision)?;
 
         result["changedIds"] = json!(draft.affected);
-        if name == "page" && args["action"] == "create" {
-            if let Some(page) = draft.snapshot.pages.last() {
+        if name == "page" {
+            if matches!(args["action"].as_str(), Some("create" | "duplicate"))
+                && let Some(page) = draft.snapshot.pages.last()
+            {
                 let mut states = self.states.lock().unwrap();
                 let state = states.get_mut(&(session.into(), id.into())).unwrap();
                 state.page_id = page.id.clone();
                 state.root = page.root_node_id.clone();
                 state.aliases.clear();
             }
+            let context = self.context(session, id)?;
+            result["pageId"] = context["page"]["id"].clone();
+            result["pages"] = context["pages"].clone();
+            result["context"] = context;
         }
         Ok(result)
     }
@@ -460,27 +481,98 @@ impl ToolRouter {
                     placement(draft, &target, args["position"].as_str().unwrap_or("after"))?;
                 duplicate_subtree(draft, &raw, &parent, &rank)
             }
-            "page" => match args["action"].as_str().unwrap() {
-                "create" => {
-                    let root = Node::new(NodeKind::Frame);
-                    let mut page = Page::new(args["name"].as_str().unwrap_or("New page"), &root.id);
-                    let last = draft.snapshot.pages.last().map(|p| p.rank.as_str());
-                    page.rank = rank_between(last, None)
-                        .ok_or_else(|| EngineError::new("resource_limit", "page rank exhausted"))?;
-                    draft.apply(Command::PageCreate { page, root })
+            "page" => {
+                let action = string(args, "action")?;
+                let selected = args["pageId"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or(self.state(session, id)?.page_id);
+                let current = draft
+                    .snapshot
+                    .pages
+                    .iter()
+                    .find(|page| page.id == selected)
+                    .cloned();
+                let page = || {
+                    current
+                        .as_ref()
+                        .ok_or_else(|| EngineError::invalid("page not found"))
+                };
+                match action {
+                    "create" | "duplicate" => {
+                        let name = args["name"].as_str();
+                        let mut root = Node::new(NodeKind::Frame);
+                        let copied = if action == "duplicate" {
+                            let source = page()?;
+                            let mut copies =
+                                copy_subtree(draft, &source.root_node_id, None, None)?.into_iter();
+                            root = copies
+                                .next()
+                                .ok_or_else(|| EngineError::invalid("page has no root"))?;
+                            copies.collect::<Vec<_>>()
+                        } else {
+                            Vec::new()
+                        };
+                        let title = match (name, current.as_ref(), action) {
+                            (Some(name), _, _) => name.to_owned(),
+                            (None, Some(source), "duplicate") => format!("{} Copy", source.title),
+                            _ => "New page".into(),
+                        };
+                        let mut page = Page::new(title, &root.id);
+                        let last = draft.snapshot.pages.last().map(|p| p.rank.as_str());
+                        page.rank = rank_between(last, None).ok_or_else(|| {
+                            EngineError::new("resource_limit", "page rank exhausted")
+                        })?;
+                        draft.apply(Command::PageCreate { page, root })?;
+                        for node in copied {
+                            draft.apply(Command::NodeCreate { node })?;
+                        }
+                        Ok(())
+                    }
+                    "rename" => draft.apply(Command::PageRename {
+                        page_id: page()?.id.clone(),
+                        title: string(args, "name")?.into(),
+                    }),
+                    "delete" => draft.apply(Command::PageDelete {
+                        page_id: page()?.id.clone(),
+                    }),
+                    "reorder" => {
+                        let page = page()?;
+                        let others: Vec<_> = draft
+                            .snapshot
+                            .pages
+                            .iter()
+                            .filter(|other| other.id != page.id)
+                            .collect();
+                        let index = args["index"]
+                            .as_u64()
+                            .unwrap_or(others.len() as u64)
+                            .min(others.len() as u64) as usize;
+                        let left = index.checked_sub(1).map(|i| others[i].rank.as_str());
+                        let right = others.get(index).map(|p| p.rank.as_str());
+                        if left.is_none_or(|rank| rank < page.rank.as_str())
+                            && right.is_none_or(|rank| rank > page.rank.as_str())
+                        {
+                            return Ok(());
+                        }
+                        let rank = rank_between(left, right).ok_or_else(|| {
+                            EngineError::new("resource_limit", "page rank exhausted")
+                        })?;
+                        draft.apply(Command::PageMove {
+                            page_id: page.id.clone(),
+                            rank,
+                        })
+                    }
+                    "update" => {
+                        let properties = properties(&args["properties"])?;
+                        draft.apply(Command::NodeSet {
+                            node_id: page()?.root_node_id.clone(),
+                            properties,
+                        })
+                    }
+                    _ => Err(EngineError::invalid("unknown page action")),
                 }
-                "rename" => draft.apply(Command::PageRename {
-                    page_id: string(args, "pageId")?.into(),
-                    title: string(args, "name")?.into(),
-                }),
-                "delete" => draft.apply(Command::PageDelete {
-                    page_id: string(args, "pageId")?.into(),
-                }),
-                _ => Err(EngineError::new(
-                    "unsupported_feature",
-                    "native page action is not yet qualified",
-                )),
-            },
+            }
             "edit_text" => {
                 let raw = resolve("id")?;
                 let node = draft.node(&raw)?.clone();
@@ -595,6 +687,9 @@ impl ToolRouter {
             .map(|id| draft.node(id).cloned())
             .collect::<Result<_>>()?;
         let action = string(args, "action")?;
+        if matches!(action, "distribute" | "tidy") {
+            return space_layers(draft, nodes, action, args);
+        }
         if matches!(action, "mask" | "unmask") {
             if nodes
                 .iter()
@@ -1315,7 +1410,139 @@ fn step_order(draft: &mut Draft, nodes: &[Node], forward: bool) -> Result<()> {
     Ok(())
 }
 
+fn space_layers(draft: &mut Draft, mut nodes: Vec<Node>, action: &str, args: &Value) -> Result<()> {
+    let first = nodes
+        .first()
+        .ok_or_else(|| EngineError::invalid("choose layers to arrange"))?;
+    let parent = first
+        .parent_id
+        .as_deref()
+        .ok_or_else(|| EngineError::invalid("cannot arrange page roots"))?;
+    if nodes
+        .iter()
+        .any(|node| node.parent_id.as_deref() != Some(parent))
+        || draft
+            .node(parent)?
+            .properties
+            .get("layout")
+            .is_some_and(|layout| !layout.is_null())
+    {
+        return Err(EngineError::invalid(
+            "choose layers in the same fixed-position container",
+        ));
+    }
+    if nodes
+        .iter()
+        .map(|node| &node.id)
+        .collect::<BTreeSet<_>>()
+        .len()
+        != nodes.len()
+    {
+        return Err(EngineError::invalid("choose distinct layers"));
+    }
+    for node in &nodes {
+        mask_editable(draft, &node.id)?;
+    }
+    let bounds = |node: &Node| {
+        let [x, y, width, height] = ["x", "y", "width", "height"].map(|key| node.number(key, 0.));
+        let (sin, cos) = node.number("rotation", 0.).to_radians().sin_cos();
+        let visual_width = width * cos.abs() + height * sin.abs();
+        let visual_height = width * sin.abs() + height * cos.abs();
+        [
+            x + (width - visual_width) / 2.,
+            y + (height - visual_height) / 2.,
+            visual_width,
+            visual_height,
+        ]
+    };
+    if action == "distribute" {
+        if nodes.len() < 2 {
+            return Err(EngineError::invalid("choose at least two layers"));
+        }
+        let horizontal = args["axis"] == "h";
+        let axis = usize::from(!horizontal);
+        let position = if horizontal { "x" } else { "y" };
+        nodes.sort_by(|a, b| a.number(position, 0.).total_cmp(&b.number(position, 0.)));
+        let extents = nodes.iter().map(bounds).collect::<Vec<_>>();
+        let start = extents
+            .iter()
+            .map(|b| b[axis])
+            .fold(f64::INFINITY, f64::min);
+        let end = extents
+            .iter()
+            .map(|b| b[axis] + b[axis + 2])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let size = extents.iter().map(|b| b[axis + 2]).sum::<f64>();
+        let gap = args["gap"]
+            .as_f64()
+            .unwrap_or((end - start - size) / (nodes.len() - 1) as f64);
+        let mut cursor = extents[0][axis];
+        for (node, extent) in nodes.into_iter().zip(extents) {
+            let coordinate = node.number(position, 0.) + cursor - extent[axis];
+            draft.apply(Command::NodeSet {
+                node_id: node.id,
+                properties: Properties::from([(position.into(), json!(coordinate))]),
+            })?;
+            cursor += extent[axis + 2] + gap;
+        }
+    } else {
+        nodes.sort_by(|a, b| {
+            a.number("y", 0.)
+                .total_cmp(&b.number("y", 0.))
+                .then(a.number("x", 0.).total_cmp(&b.number("x", 0.)))
+        });
+        let columns = args["columns"]
+            .as_u64()
+            .unwrap_or((nodes.len() as f64).sqrt().ceil() as u64) as usize;
+        let gap = args["gap"].as_f64().unwrap_or(16.);
+        let left = nodes
+            .iter()
+            .map(|n| bounds(n)[0])
+            .fold(f64::INFINITY, f64::min);
+        let top = nodes
+            .iter()
+            .map(|n| bounds(n)[1])
+            .fold(f64::INFINITY, f64::min);
+        let width = nodes
+            .iter()
+            .map(|n| n.number("width", 0.))
+            .fold(0., f64::max);
+        let height = nodes
+            .iter()
+            .map(|n| n.number("height", 0.))
+            .fold(0., f64::max);
+        for (index, node) in nodes.into_iter().enumerate() {
+            draft.apply(Command::NodeSet {
+                node_id: node.id,
+                properties: Properties::from([
+                    (
+                        "x".into(),
+                        json!(left + (index % columns) as f64 * (width + gap)),
+                    ),
+                    (
+                        "y".into(),
+                        json!(top + (index / columns) as f64 * (height + gap)),
+                    ),
+                ]),
+            })?;
+        }
+    }
+    Ok(())
+}
+
 fn duplicate_subtree(draft: &mut Draft, source: &str, parent: &str, rank: &str) -> Result<()> {
+    for node in copy_subtree(draft, source, Some(parent), Some(rank))? {
+        draft.apply(Command::NodeCreate { node })?;
+    }
+    Ok(())
+}
+
+fn copy_subtree(
+    draft: &Draft,
+    source: &str,
+    parent: Option<&str>,
+    rank: Option<&str>,
+) -> Result<Vec<Node>> {
     let mut pending = vec![source.to_owned()];
     let mut order = Vec::new();
     while let Some(id) = pending.pop() {
@@ -1328,22 +1555,24 @@ fn duplicate_subtree(draft: &mut Draft, source: &str, parent: &str, rank: &str) 
         .iter()
         .map(|id| (id.clone(), new_id("node")))
         .collect();
-    for raw in order {
-        let mut node = draft.node(&raw)?.clone();
-        node.id = ids[&raw].clone();
-        node.home_shard = new_id("shard");
-        node.parent_id = if raw == source {
-            Some(parent.into())
-        } else {
-            node.parent_id.as_ref().and_then(|p| ids.get(p)).cloned()
-        };
-        if raw == source {
-            node.rank = rank.into();
-        }
-        remap_values(&mut node.properties, &ids);
-        draft.apply(Command::NodeCreate { node })?;
-    }
-    Ok(())
+    order
+        .into_iter()
+        .map(|raw| {
+            let mut node = draft.node(&raw)?.clone();
+            node.id = ids[&raw].clone();
+            node.home_shard = new_id("shard");
+            if raw == source {
+                node.parent_id = parent.map(str::to_owned);
+                if let Some(rank) = rank {
+                    node.rank = rank.into();
+                }
+            } else {
+                node.parent_id = node.parent_id.as_ref().and_then(|p| ids.get(p)).cloned();
+            }
+            remap_values(&mut node.properties, &ids);
+            Ok(node)
+        })
+        .collect()
 }
 fn normalize_paints(props: &mut Properties) {
     if let Some(color) = props

@@ -856,7 +856,28 @@ impl DocumentEngine {
                     },
                 )?;
             }
+            Command::PageMove { page_id, rank } => {
+                if !valid_rank(rank)
+                    || !candidate
+                        .catalog
+                        .current_pages()
+                        .iter()
+                        .any(|page| &page.id == page_id)
+                {
+                    return Err(EngineError::invalid("invalid page or rank"));
+                }
+                self.append(
+                    candidate,
+                    Action::MovePage {
+                        page_id: page_id.clone(),
+                        rank: rank.clone(),
+                    },
+                )?;
+            }
             Command::PageDelete { page_id } => {
+                if candidate.catalog.current_pages().len() <= 1 {
+                    return Err(EngineError::invalid("cannot delete the last page"));
+                }
                 let page = candidate
                     .catalog
                     .current_pages()

@@ -24,6 +24,7 @@ pub(crate) struct ViewState {
     pub root: String,
     pub aliases: HashMap<String, String>,
     pub next_alias: usize,
+    pub fig_aliases: HashMap<String, u64>,
     pub view: Value,
     pub clipboard: Option<Value>,
 }
@@ -209,7 +210,11 @@ impl ToolRouter {
                     "page" if args["action"] == "list" => {
                         let s = self.workspace.snapshot(&id)?;
                         Ok(
-                            json!({"ok":true,"revision":s.sequence,"pages":s.pages,"pageId":self.state(session,&id)?.page_id}),
+                            json!({"ok":true,"revision":s.sequence,"pages":s.pages.iter().map(|page| {
+                                let mut value = json!(page);
+                                value["guides"] = s.nodes.get(&page.root_node_id).and_then(|root| root.properties.get("guides")).cloned().unwrap_or(json!([]));
+                                value
+                            }).collect::<Vec<_>>(),"pageId":self.state(session,&id)?.page_id}),
                         )
                     }
                     "styles" | "libraries" => self.catalog_tool(session, &id, name, args, meta),
@@ -298,6 +303,10 @@ impl ToolRouter {
             if state.epoch != snapshot.epoch || state.page_id != page.id {
                 state.aliases.clear();
                 state.next_alias = 0;
+                if state.epoch != snapshot.epoch {
+                    state.fig_aliases.clear();
+                    state.view = Value::Null;
+                }
             }
             state.epoch = snapshot.epoch.clone();
             state.page_id = page.id.clone();

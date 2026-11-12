@@ -7,6 +7,7 @@ import {join,resolve} from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
+import {createMcpFetch} from '../../core/mcp-fetch.mjs';
 
 const root=resolve(fileURLToPath(new URL('../..',import.meta.url)));
 const sdk=process.env.OMC_TEST_SDK_ROOT;
@@ -15,8 +16,8 @@ const {StreamableHTTPClientTransport}=await import(sdk?pathToFileURL(join(sdk,'d
 const {StdioClientTransport}=await import(sdk?pathToFileURL(join(sdk,'dist/esm/client/stdio.js')).href:'@modelcontextprotocol/sdk/client/stdio.js');
 const binary=process.env.OMC_SERVICE_BINARY??join(root,'native/target/debug',process.platform==='win32'?'omc-service.exe':'omc-service');
 const temporary=await mkdtemp(join(tmpdir(),'omc-native-sdk-'));const children=[];
-async function start(profile){
- const child=spawn(binary,['--profile',profile,'--port','0'],{stdio:['ignore','ignore','pipe']});children.push(child);let errors='';child.stderr.on('data',d=>{errors=(errors+d.toString()).slice(-2000);});
+async function start(profile,options=[]){
+ const child=spawn(binary,['--profile',profile,'--port','0',...options],{stdio:['ignore','ignore','pipe']});children.push(child);let errors='';child.stderr.on('data',d=>{errors=(errors+d.toString()).slice(-2000);});
  for(let i=0;i<200;i++){if((child.exitCode!==null||child.signalCode!==null))throw Error(`service exited ${child.exitCode}: ${errors}`);try{const descriptor=JSON.parse(await readFile(join(profile,'native-v1/service.json'),'utf8'));const health=await fetch(descriptor.endpoint+'/health',{headers:{Authorization:`Bearer ${descriptor.token}`}});if(health.ok)return{child,profile,...descriptor};}catch{}await delay(25);}throw Error('service startup deadline');
 }
 async function stop(service){if(service.child.exitCode!==null||service.child.signalCode!==null)return;service.child.kill();await new Promise(resolve=>service.child.once('exit',resolve));}
@@ -33,6 +34,53 @@ async function rpc(service,session,method,params={}){const response=await fetch(
 function native(external){return 'doc_'+external.replaceAll('-','');}
 
 try{
+ await test('legacy HTTPS SDK calls persist pinned identity and real edits across restarts',async()=>{
+  const profile=join(temporary,'legacy-https');
+  let service=await start(profile,['--legacy-mcp-port','0']);
+  const identity=async()=>{
+   const runtime=JSON.parse(await readFile(join(profile,'mcp-runtime.json'),'utf8'));
+   assert.equal(runtime.version,2);assert.equal(runtime.token,undefined);
+   return {
+    endpoint:new URL(`https://127.0.0.1:${runtime.port}/mcp`),
+    cert:await readFile(runtime.certFile,'utf8'),
+    token:await readFile(join(profile,'mcp-token-v2'),'utf8')
+   };
+  };
+  const legacy=await identity();
+  const pinned=createMcpFetch(legacy.cert);
+  const headers={Authorization:`Bearer ${legacy.token}`,'Content-Type':'application/json'};
+  const client=new Client({name:'old-omc-https-contract',version:'1.0.0'});
+  const connectLegacy=endpoint=>client.connect(new StreamableHTTPClientTransport(endpoint,{fetch:pinned,requestInit:{headers}}));
+  const request={method:'POST',headers,body:JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-06-18'}})};
+  assert.equal((await pinned(legacy.endpoint,{...request,headers:{...headers,Authorization:'Bearer rejected'}})).status,403);
+  assert.equal((await pinned(legacy.endpoint,{...request,headers:{...headers,Origin:legacy.endpoint.origin}})).status,403);
+  assert.equal((await pinned(new URL('/rpc',legacy.endpoint),request)).status,404);
+  const other=await start(join(temporary,'other-pin'),['--legacy-mcp-port','0']);
+  const otherRuntime=JSON.parse(await readFile(join(other.profile,'mcp-runtime.json'),'utf8'));
+  await assert.rejects(pinned(new URL(`https://127.0.0.1:${otherRuntime.port}/mcp`),request),{code:'DEPTH_ZERO_SELF_SIGNED_CERT'});
+  await stop(other);
+  await connectLegacy(legacy.endpoint);
+  const invoke=async(name,args)=>{
+   const result=await client.callTool({name,arguments:args});
+   assert.equal(result.isError,false,JSON.stringify(result.content));
+   return result.structuredContent;
+  };
+  const doc=await invoke('create_document',{title:'HTTPS persisted document'});
+  const shape=await invoke('create_shape',{documentId:doc.documentId,type:'rect',width:50,height:20,properties:{name:'Pinned edit'}});
+  assert.equal(shape.receipt.status,'durable');
+  await client.transport.terminateSession();await client.close();
+  await stop(service);
+  service=await start(profile,['--legacy-mcp-port',legacy.endpoint.port]);
+  const restarted=await identity();
+  assert.equal(restarted.endpoint.href,legacy.endpoint.href);
+  assert.equal(restarted.token===legacy.token,true);
+  assert.equal(restarted.cert===legacy.cert,true);
+  await connectLegacy(restarted.endpoint);
+  const tree=await invoke('get_tree',{documentId:doc.documentId,detail:'detailed'});
+  assert.equal(tree.nodes.find(node=>node.name==='Pinned edit').width,50);
+  await client.transport.terminateSession();await client.close();
+  await stop(service);
+ });
  await test('official MCP SDK + independent native services',async t=>{
   let service=await start(join(temporary,'primary'));let client=await connect(service);const identity=client.registration;assert.ok(identity?.credential);
   const initial=await client.call('create_document',{title:'SDK contract canvas'});const documentId=initial.documentId;const doc=native(documentId);
@@ -111,6 +159,45 @@ try{
    const stdio=new Client({name:'stdio-contracts',version:'1.0.0'});
    try{await stdio.connect(transport);const listed=await stdio.listTools();assert.equal(listed.tools.filter(t=>!t.name.startsWith('native_')).length,50);const result=await stdio.callTool({name:'create_document',arguments:{title:'Rust stdio document'}});assert.notEqual(result.isError,true);assert.ok(result.structuredContent.documentId);}finally{await stdio.close();}
   });
+  await t.test('legacy page duplication, reordering and guides persist and support undo',async()=>{
+   const doc=await client.call('create_document',{title:'Page action fixture'});
+   const documentId=doc.documentId;
+   const page=(action,args={})=>client.call('page',{action,documentId,...args});
+   await client.call('create_shape',{documentId,type:'text',properties:{name:'Original',text:'원본'}});
+   const guides=[{axis:'x',position:20},{axis:'y',position:45}];
+   await page('update',{pageId:doc.page.id,properties:{guides}});
+   const duplicate=await page('duplicate',{pageId:doc.page.id,name:'Copy'});
+   assert.notEqual(duplicate.pageId,doc.page.id);
+   const copied=await client.call('get_tree',{documentId,detail:'detailed'});
+   assert.equal(copied.nodes.find(node=>node.name==='Original').text,'원본');
+   const copyPageId=duplicate.pageId;
+   await page('reorder',{pageId:copyPageId,index:0});
+   assert.deepEqual((await page('list')).pages.map(p=>p.id),[copyPageId,doc.page.id]);
+   assert.deepEqual((await page('list')).pages[0].guides,guides);
+   await client.call('undo',{documentId});
+   assert.deepEqual((await page('list')).pages.map(p=>p.id),[doc.page.id,copyPageId]);
+   await page('delete',{pageId:copyPageId});
+   assert.equal((await page('list')).pageId,doc.page.id);
+   await assert.rejects(page('delete',{pageId:doc.page.id}),/last page/);
+  });
+  await t.test('legacy spacing and tidy move actual layers with one undo per operation',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Arrangement fixture'});
+   const ids=[];
+   for(const [x,y,name] of [[10,5,'A'],[70,12,'B'],[150,25,'C']]) {
+    const shape=await client.call('create_shape',{documentId,type:'rect',x,y,width:20,height:10,properties:{name}});
+    ids.push(shape.rawIds[0]);
+   }
+   const coords=async()=>{
+    const {nodes}=await client.call('get_tree',{documentId,detail:'detailed'});
+    return ids.map(id=>{const {x,y}=nodes.find(n=>n.rawId===id);return [x,y];});
+   };
+   await client.call('edit_shapes',{documentId,action:'distribute',ids,axis:'h',gap:10});
+   assert.deepEqual(await coords(),[[10,5],[40,12],[70,25]]);
+   await client.call('edit_shapes',{documentId,action:'tidy',ids,columns:2,gap:5});
+   assert.deepEqual(await coords(),[[10,5],[35,5],[10,20]]);
+   await client.call('undo',{documentId});
+   assert.deepEqual(await coords(),[[10,5],[40,12],[70,25]]);
+  });
   await t.test('FigCraft-compatible stdio works on the same native document',async()=>{
    const cli=process.env.OMC_CLI_BINARY??join(root,'native/target/debug',process.platform==='win32'?'omc-cli.exe':'omc-cli');
    const transport=new StdioClientTransport({command:cli,args:['--profile',service.profile,'--connect-only','--dialect','figcraft'],stderr:'pipe'});
@@ -145,6 +232,47 @@ try{
     assert.equal((await client.call('get_tree',{documentId:doc.id,detail:'detailed'})).nodes.find(n=>n.name==='Korean label').text,'한글 편집');
     const image=await fig.callTool({name:'screenshot',arguments:{ids:[created[0].id]}});
     assert.ok(image.content.some(item=>item.type==='image'&&item.mimeType==='image/png'));
+    const run=(command,params={})=>call('run_command',{command,params});
+    const docList=await run('doc.list');
+    assert.ok(docList.some(entry=>entry.id===doc.id));
+    const card=created[0].id,label=created[1].id;
+    await call('type_text',{id:label,text:'두 번째 문장'});
+    assert.deepEqual(await run('node.get',{id:label,fields:['characters']}),{characters:'두 번째 문장'});
+    assert.deepEqual((await run('select.set',{ids:[card]})).selection,[card]);
+    assert.deepEqual((await run('select.children')).selection,[label]);
+    assert.deepEqual((await run('select.parent')).selection,[card]);
+    assert.deepEqual((await run('select.byName',{query:'label'})).selection,[label]);
+    assert.deepEqual((await run('select.add',{ids:[card]})).selection,[label,card]);
+    assert.deepEqual((await run('select.remove',{ids:[label]})).selection,[card]);
+    const rect=await run('shape.rectangle',{x:4,y:7,width:70,height:20});
+    assert.equal(rect.node.type,'RECTANGLE');
+    const ellipse=await run('shape.ellipse',{x:20,y:30,width:15,height:10});
+    assert.equal(ellipse.node.type,'ELLIPSE');
+    assert.equal((await run('shape.line',{x:0,y:0,width:30})).node.type,'LINE');
+    assert.equal((await run('frame.create',{name:'Frame alias'})).node.type,'FRAME');
+    assert.equal((await run('text.create',{characters:'문구',name:'Text alias'})).node.characters,'문구');
+    assert.deepEqual((await run('select.next')).selection,[card]);
+    assert.equal((await run('select.previous')).selection.length,1);
+    assert.equal((await run('select.all')).selection.length,6);
+    assert.deepEqual((await run('select.inverse')).selection,[]);
+    const first=(await run('page.list'))[0];
+    const second=await run('page.add',{name:'Second'});
+    assert.notEqual(second.id,first.id);
+    assert.equal((await run('page.rename',{id:second.id,name:'Renamed'})).name,'Renamed');
+    const third=await run('page.duplicate',{id:first.id});
+    await run('page.move',{id:third.id,index:0});
+    assert.deepEqual((await run('page.list')).map(page=>page.id),[third.id,first.id,second.id]);
+    await run('page.delete',{id:third.id});
+    await run('page.select',{id:first.id});
+    assert.equal((await call('get_node',{id:label})).characters,'두 번째 문장');
+    assert.deepEqual((await run('select.none')).selection,[]);
+    assert.match((await run('file.export',{format:'svg'})).content,/<svg/);
+    await run('edit.delete',{ids:[ellipse.id]});
+    await assert.rejects(call('get_node',{id:ellipse.id}),/layer not found/);
+    await run('edit.undo');
+    assert.equal((await call('get_node',{id:ellipse.id})).type,'ELLIPSE');
+    await run('edit.redo');
+    await assert.rejects(call('get_node',{id:ellipse.id}),/layer not found/);
    } finally {await fig.close();}
   });
   await t.test('native collaboration exchanges durable edits over a dedicated pinned TLS room',async()=>{

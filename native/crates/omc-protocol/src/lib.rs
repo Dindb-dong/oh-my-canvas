@@ -142,6 +142,12 @@ pub enum Command {
         page_id: String,
         title: String,
     },
+    #[serde(rename = "page.move")]
+    PageMove {
+        #[serde(rename = "pageId")]
+        page_id: String,
+        rank: String,
+    },
     #[serde(rename = "page.delete")]
     PageDelete {
         #[serde(rename = "pageId")]

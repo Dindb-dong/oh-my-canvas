@@ -16,6 +16,60 @@ const COMMANDS: &[(&str, &str, bool, &str)] = &[
     ("select.none", "Clear selection", false, ""),
     ("edit.undo", "Undo", false, ""),
     ("edit.redo", "Redo", false, ""),
+    (
+        "frame.create",
+        "Create frame",
+        true,
+        "x?, y?, width?, height?, parent?, index?, name?, props?, select?",
+    ),
+    (
+        "shape.rectangle",
+        "Rectangle",
+        true,
+        "x, y, width, height, parent?, index?, name?, props?, select?",
+    ),
+    (
+        "shape.ellipse",
+        "Ellipse",
+        true,
+        "x, y, width, height, parent?, index?, name?, props?, select?",
+    ),
+    (
+        "shape.line",
+        "Line",
+        true,
+        "x, y, width, parent?, index?, name?, props?, select?",
+    ),
+    (
+        "text.create",
+        "Text",
+        true,
+        "text | characters, x, y, parent?, index?, name?, width?, props?, select?",
+    ),
+    ("node.get", "Get layer", false, "id, fields?"),
+    ("select.add", "Add to selection", false, "ids"),
+    ("select.remove", "Remove from selection", false, "ids"),
+    ("select.all", "Select all", false, ""),
+    ("select.inverse", "Invert selection", false, ""),
+    ("select.children", "Select children", false, ""),
+    ("select.parent", "Select parent", false, ""),
+    ("select.next", "Select next sibling", false, ""),
+    ("select.previous", "Select previous sibling", false, ""),
+    (
+        "select.byName",
+        "Select layers by name",
+        false,
+        "query, page?",
+    ),
+    ("edit.delete", "Delete layers", true, "ids?"),
+    ("page.add", "Add page", true, "name?"),
+    ("page.select", "Go to page", false, "id | index"),
+    ("page.rename", "Rename page", true, "id?, name"),
+    ("page.delete", "Delete page", true, "id?"),
+    ("page.duplicate", "Duplicate page", true, "id?"),
+    ("page.move", "Move page", true, "id?, index"),
+    ("page.list", "List pages", false, ""),
+    ("file.export", "Export", false, "ids?, format?, scale?"),
 ];
 
 pub fn tools() -> Vec<Value> {
@@ -92,6 +146,12 @@ pub fn tools() -> Vec<Value> {
             &[],
         ),
         tool(
+            "type_text",
+            "Replace the text in an explicit text layer.",
+            json!({"id":{"type":"integer","minimum":1},"text":{"type":"string"}}),
+            &["text"],
+        ),
+        tool(
             "undo",
             "Undo the last eligible edit by this MCP author.",
             json!({}),
@@ -153,14 +213,46 @@ impl ToolRouter {
             }
             _ => {}
         }
+        let create_type = match name {
+            "frame.create" => Some("frame"),
+            "shape.rectangle" => Some("rectangle"),
+            "shape.ellipse" => Some("ellipse"),
+            "shape.line" => Some("line"),
+            "text.create" => Some("text"),
+            _ => None,
+        };
+        let normalized = if let Some(kind) = create_type {
+            let mut normalized = params.clone();
+            if !normalized.is_object() {
+                return Err(EngineError::invalid("params must be an object"));
+            }
+            if let Some(characters) = normalized.as_object_mut().unwrap().remove("characters") {
+                normalized["text"] = characters;
+            }
+            normalized["type"] = kind.into();
+            Some(normalized)
+        } else {
+            None
+        };
+        let (name, params) = normalized
+            .as_ref()
+            .map_or((name, params), |params| ("node.create", params));
         let target = args["document"].as_str().map(native_id).transpose()?;
         let id = self.workspace.target(session, target.as_deref())?;
         let mut snapshot = self.workspace.snapshot(&id)?;
         let state_key = (session.into(), id.clone());
-        if !self.states.lock().unwrap().contains_key(&state_key) {
+        let current = self.states.lock().unwrap().get(&state_key).cloned();
+        if current.as_ref().is_none_or(|state| {
+            state.epoch != snapshot.epoch
+                || !snapshot.pages.iter().any(|page| page.id == state.page_id)
+        }) {
             self.context_from(session, &snapshot)?;
         }
         let state = self.state(session, &id)?;
+        if name.starts_with("page.") && COMMANDS.iter().any(|command| command.0 == name) {
+            return self.fig_page_command(session, &snapshot, &state, name, params);
+        }
+        let _ = self.fig_alias(session, &id, &state.root);
         let mut selection = state.view["selection"]
             .as_array()
             .cloned()
@@ -178,26 +270,50 @@ impl ToolRouter {
                     .map(|node| self.fig_node(session, &snapshot, node, depth, &mut budget))
                     .collect::<Vec<_>>();
                 Ok(
-                    json!({"id":external_id(&id),"name":snapshot.title,"currentPage":state.page_id,
-                    "pages":snapshot.pages.iter().map(|p|json!({"id":p.id,"name":p.title})).collect::<Vec<_>>(),
+                    json!({"id":external_id(&id),"name":snapshot.title,"currentPage":self.fig_alias(session,&id,&state.root),
+                    "pages":snapshot.pages.iter().map(|p|json!({"id":self.fig_alias(session,&id,&p.root_node_id),"name":p.title})).collect::<Vec<_>>(),
                     "selection":selection,"layers":tree,"revision":snapshot.sequence,"truncated":budget==0}),
                 )
             }
-            "get_node" => {
+            "get_node" | "node.get" => {
                 let layer = self.fig_layer(session, &snapshot, &params["id"])?;
-                Ok(self.fig_node(session, &snapshot, &snapshot.nodes[&layer], depth, &mut 300))
-            }
-            "select" | "select.set" | "select.none" => {
-                let ids = if name == "select.none" {
-                    vec![]
-                } else {
-                    fig_ids(params, &selection)?.to_vec()
-                };
-                for alias in &ids {
-                    self.fig_layer(session, &snapshot, alias)?;
+                let mut node =
+                    self.fig_node(session, &snapshot, &snapshot.nodes[&layer], depth, &mut 300);
+                if let Some(fields) = params.get("fields") {
+                    let fields = fields
+                        .as_array()
+                        .ok_or_else(|| EngineError::invalid("fields must be an array"))?;
+                    node.as_object_mut()
+                        .unwrap()
+                        .retain(|key, _| fields.iter().any(|field| field == key));
                 }
+                Ok(node)
+            }
+            "select" | "select.set" | "select.none" | "select.add" | "select.remove"
+            | "select.all" | "select.inverse" | "select.children" | "select.parent"
+            | "select.next" | "select.previous" | "select.byName" => {
+                let ids = self.fig_select(session, &snapshot, &state, &selection, name, params)?;
                 self.fig_selection(&state_key, &ids);
                 Ok(json!({"selection":ids}))
+            }
+            "edit.delete" => {
+                let raw = self.fig_layers(session, &snapshot, fig_ids(params, &selection)?)?;
+                if !raw.is_empty() {
+                    self.mutate(session, &id, "delete", &json!({"ids":raw}), &Value::Null)?;
+                }
+                self.fig_selection(&state_key, &[]);
+                Ok(json!({"deleted":raw.len()}))
+            }
+            "type_text" => {
+                let layer = self.fig_layer(session, &snapshot, &params["id"])?;
+                self.mutate(
+                    session,
+                    &id,
+                    "edit_text",
+                    &json!({"action":"replace","id":layer,"text":params["text"]}),
+                    &Value::Null,
+                )?;
+                Ok(json!({"ok":true}))
             }
             "create_node" | "node.create" | "set_properties" | "node.set" | "batch" => {
                 let sequence = snapshot.sequence;
@@ -282,17 +398,16 @@ impl ToolRouter {
                 &json!({}),
                 &Value::Null,
             ),
-            "export" | "screenshot" => {
-                let raw: Vec<_> = fig_ids(params, &selection)?
-                    .iter()
-                    .map(|alias| self.fig_layer(session, &snapshot, alias))
-                    .collect::<Result<_>>()?;
-                if raw.is_empty() {
-                    return self.export_tool(session, &id, "screenshot", json!({}));
-                }
-                self.export_tool(session, &id, "export_selection", json!({
-                    "ids":raw,"format":params["format"].as_str().unwrap_or("png"),"scale":params["scale"].as_f64().unwrap_or(1.),
-                }))
+            "export" | "file.export" | "screenshot" => {
+                let raw = self.fig_layers(session, &snapshot, fig_ids(params, &selection)?)?;
+                let ids = if raw.is_empty() {
+                    vec![state.root]
+                } else {
+                    raw
+                };
+                let args = json!({"documentId":external_id(&id),"ids":ids,"format":params["format"].as_str().unwrap_or("png"),"scale":params["scale"].as_f64().unwrap_or(1.)});
+                schema::validate("export_selection", &args)?;
+                self.export_tool(session, &id, "export_selection", args)
             }
             _ => Err(EngineError::new(
                 "unsupported_feature",
@@ -306,7 +421,16 @@ impl ToolRouter {
             .as_u64()
             .filter(|n| *n > 0)
             .ok_or_else(|| EngineError::invalid("numeric layer ID required"))?;
-        let raw = self.resolve(session, &snapshot.id, &format!("n{id}"))?;
+        let state = self.states.lock().unwrap();
+        let raw = state
+            .get(&(session.into(), snapshot.id.clone()))
+            .and_then(|state| {
+                state
+                    .fig_aliases
+                    .iter()
+                    .find_map(|(node, alias)| (*alias == id).then(|| node.clone()))
+            })
+            .ok_or_else(|| EngineError::invalid("unknown FigCraft layer ID"))?;
         if !snapshot.nodes.contains_key(&raw) {
             return Err(EngineError::invalid(
                 "layer not found in the target document",
@@ -316,10 +440,202 @@ impl ToolRouter {
     }
 
     fn fig_alias(&self, session: &str, document: &str, node: &str) -> u64 {
-        self.alias(session, document, node)
-            .strip_prefix('n')
-            .and_then(|id| id.parse().ok())
-            .unwrap_or(0)
+        let mut states = self.states.lock().unwrap();
+        let aliases = &mut states
+            .get_mut(&(session.into(), document.into()))
+            .unwrap()
+            .fig_aliases;
+        let next = aliases.len() as u64 + 1;
+        *aliases.entry(node.into()).or_insert(next)
+    }
+
+    fn fig_layers(
+        &self,
+        session: &str,
+        snapshot: &DocumentSnapshot,
+        ids: &[Value],
+    ) -> Result<Vec<String>> {
+        ids.iter()
+            .map(|alias| self.fig_layer(session, snapshot, alias))
+            .collect()
+    }
+
+    fn fig_page_command(
+        &self,
+        session: &str,
+        snapshot: &DocumentSnapshot,
+        state: &ViewState,
+        name: &str,
+        params: &Value,
+    ) -> Result<Value> {
+        let document = &snapshot.id;
+        let describe = |page: &omc_model::Page, current: &str| {
+            json!({
+                "id":self.fig_alias(session, document, &page.root_node_id),
+                "name":page.title, "children":children(snapshot, &page.root_node_id).len(), "current":page.id == current, "divider":false
+            })
+        };
+        if name == "page.list" {
+            return Ok(json!(
+                snapshot
+                    .pages
+                    .iter()
+                    .map(|page| describe(page, &state.page_id))
+                    .collect::<Vec<_>>()
+            ));
+        }
+        let selected = if let Some(alias) = params.get("id") {
+            let root = self.fig_layer(session, snapshot, alias)?;
+            snapshot.pages.iter().find(|page| page.root_node_id == root)
+        } else if name == "page.select" {
+            params["index"]
+                .as_u64()
+                .and_then(|index| snapshot.pages.get(index as usize))
+        } else {
+            snapshot.pages.iter().find(|page| page.id == state.page_id)
+        }
+        .ok_or_else(|| EngineError::invalid("page not found"))?;
+        if name == "page.select" {
+            let key = (session.into(), document.clone());
+            let mut states = self.states.lock().unwrap();
+            let state = states.get_mut(&key).unwrap();
+            state.page_id = selected.id.clone();
+            state.root = selected.root_node_id.clone();
+            drop(states);
+            self.fig_selection(&key, &[]);
+            return Ok(describe(selected, &selected.id));
+        }
+        let action = match name {
+            "page.add" => "create",
+            "page.move" => "reorder",
+            "page.rename" => "rename",
+            "page.delete" => "delete",
+            "page.duplicate" => "duplicate",
+            _ => return Err(EngineError::invalid("unknown page command")),
+        };
+        let mut args =
+            json!({"documentId":external_id(document),"action":action, "pageId":selected.id});
+        if let Some(name) = params.get("name") {
+            args["name"] = name.clone();
+        }
+        if action == "reorder" {
+            args["index"] = json!(
+                params["index"]
+                    .as_u64()
+                    .ok_or_else(|| EngineError::invalid("page index required"))?
+            );
+        }
+        schema::validate("page", &args)?;
+        self.mutate(session, document, "page", &args, &Value::Null)?;
+        let updated = self.workspace.snapshot(document)?;
+        let current = self.state(session, document)?.page_id;
+        let result = if matches!(action, "create" | "duplicate" | "delete") {
+            self.fig_selection(&(session.into(), document.clone()), &[]);
+            updated.pages.iter().find(|page| page.id == current)
+        } else {
+            updated.pages.iter().find(|page| page.id == selected.id)
+        }
+        .ok_or_else(|| EngineError::invalid("page not found after command"))?;
+        Ok(
+            json!({"id":self.fig_alias(session, document, &result.root_node_id), "name":result.title}),
+        )
+    }
+
+    fn fig_select(
+        &self,
+        session: &str,
+        snapshot: &DocumentSnapshot,
+        state: &ViewState,
+        selection: &[Value],
+        command: &str,
+        params: &Value,
+    ) -> Result<Vec<Value>> {
+        let current = self.fig_layers(session, snapshot, selection)?;
+        let roots = || children(snapshot, &state.root);
+        let selected = match command {
+            "select.none" => vec![],
+            "select" | "select.set" | "select.add" | "select.remove" => {
+                let ids = self.fig_layers(session, snapshot, fig_ids(params, &[])?)?;
+                match command {
+                    "select.add" => current.into_iter().chain(ids).collect(),
+                    "select.remove" => current.into_iter().filter(|id| !ids.contains(id)).collect(),
+                    _ => ids,
+                }
+            }
+            "select.all" | "select.inverse" => roots()
+                .into_iter()
+                .filter(|node| command == "select.all" || !current.contains(&node.id))
+                .map(|node| node.id.clone())
+                .collect(),
+            "select.children" => current
+                .iter()
+                .flat_map(|parent| children(snapshot, parent))
+                .map(|node| node.id.clone())
+                .collect(),
+            "select.parent" => current
+                .iter()
+                .filter_map(|id| snapshot.nodes[id].parent_id.clone())
+                .filter(|id| *id != state.root)
+                .collect(),
+            "select.next" | "select.previous" => {
+                let anchor = current.first();
+                let siblings = anchor
+                    .and_then(|id| snapshot.nodes[id].parent_id.as_deref())
+                    .map(|parent| children(snapshot, parent))
+                    .unwrap_or_else(roots);
+                let step = if command == "select.next" {
+                    1
+                } else {
+                    siblings.len().saturating_sub(1)
+                };
+                let index = anchor
+                    .and_then(|id| siblings.iter().position(|node| node.id == *id))
+                    .map(|index| (index + step) % siblings.len())
+                    .unwrap_or(0);
+                siblings
+                    .get(index)
+                    .map(|node| node.id.clone())
+                    .into_iter()
+                    .collect()
+            }
+            "select.byName" => {
+                let query = string(params, "query")?.to_lowercase();
+                let roots = if params["page"] == "all" {
+                    snapshot
+                        .pages
+                        .iter()
+                        .map(|page| page.root_node_id.clone())
+                        .collect()
+                } else if let Some(alias) = params.get("page") {
+                    vec![self.fig_layer(session, snapshot, alias)?]
+                } else {
+                    vec![state.root.clone()]
+                };
+                let mut matches = Vec::new();
+                let mut pending = roots;
+                while let Some(parent) = pending.pop() {
+                    for node in children(snapshot, &parent) {
+                        pending.push(node.id.clone());
+                        if node
+                            .string("name")
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .contains(&query)
+                        {
+                            matches.push(node.id.clone());
+                        }
+                    }
+                }
+                matches
+            }
+            _ => return Err(EngineError::invalid("unknown selection command")),
+        };
+        let mut seen = std::collections::HashSet::new();
+        Ok(selected
+            .into_iter()
+            .filter(|id| seen.insert(id.clone()))
+            .map(|id| json!(self.fig_alias(session, &snapshot.id, &id)))
+            .collect())
     }
 
     fn fig_node(

@@ -66,6 +66,10 @@ pub enum Action {
         page_id: String,
         title: String,
     },
+    MovePage {
+        page_id: String,
+        rank: String,
+    },
     DeletePage {
         page_id: String,
     },
@@ -871,6 +875,17 @@ impl CatalogState {
                     return Err(EngineError::invalid("page title is too long"));
                 }
             }
+            Action::MovePage { page_id, rank } => {
+                if !known_page(page_id) {
+                    return Err(EngineError::new(
+                        "dependency_unavailable",
+                        "page declaration is missing",
+                    ));
+                }
+                if !omc_model::valid_rank(rank) {
+                    return Err(EngineError::invalid("invalid page rank"));
+                }
+            }
             Action::DeletePage { page_id } => {
                 if !known_page(page_id) {
                     return Err(EngineError::new(
@@ -962,6 +977,11 @@ impl CatalogState {
                         page.title.clone_from(title);
                     }
                 }
+                Action::MovePage { page_id, rank } => {
+                    if let Some(page) = pages.get_mut(page_id) {
+                        page.rank.clone_from(rank);
+                    }
+                }
                 Action::DeletePage { page_id } => {
                     deleted.insert(page_id.clone());
                 }
@@ -992,6 +1012,11 @@ impl CatalogState {
                 Action::RenamePage { page_id, title } => {
                     if let Some(page) = pages.get_mut(page_id) {
                         page.title.clone_from(title);
+                    }
+                }
+                Action::MovePage { page_id, rank } => {
+                    if let Some(page) = pages.get_mut(page_id) {
+                        page.rank.clone_from(rank);
                     }
                 }
                 Action::DeletePage { page_id } => {
