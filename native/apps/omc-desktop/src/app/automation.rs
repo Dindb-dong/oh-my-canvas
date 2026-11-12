@@ -1,25 +1,54 @@
 use super::*;
+mod commands;
+mod libraries;
+mod plugin_manager;
+pub(super) mod workspace;
 use base64::Engine;
 use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+pub(super) fn desktop_preferences(profile: &std::path::Path) -> State {
+    let mut state = State::default();
+    state.view.prefs = commands::EditorPreferences::read(profile);
+    state
+}
 
 pub(crate) type Reply = SyncSender<Result<Value, String>>;
 
 #[derive(Deserialize)]
 pub(crate) struct Job {
-    session: String,
-    method: String,
-    arguments: Value,
-    expires: u64,
+    pub(super) session: String,
+    pub(super) method: String,
+    pub(super) arguments: Value,
+    pub(super) expires: u64,
 }
 
 #[derive(Default)]
 pub(super) struct State {
+    library_description: String,
+    library_page: usize,
+    plugin_manager: plugin_manager::Panel,
+    dev_focus_reply: Option<(Value, Reply)>,
     pub(super) gesture: Option<Gesture>,
     pub(super) waiting: Option<Reply>,
     queued: Option<(Job, Reply)>,
     pub(super) last_frame: Option<f64>,
     pub(super) frames_drawn: u64,
+    pub(super) view: commands::EditorView,
+    pub(super) default_shape: Option<omc_model::Properties>,
+    pub(super) default_text: Option<omc_model::Properties>,
+    pub(super) pick_only: bool,
+    pub(super) picked_color: Option<String>,
+    workspace_tab: Option<(String, bool, Reply)>,
+    pub(super) text_preview: Option<Preview>,
+    pub(super) preview_generation: u64,
+    preview_reply: Option<(u64, Reply)>,
+}
+
+pub(super) struct Preview {
+    owner: String,
+    pub(super) snapshot: Arc<DocumentSnapshot>,
+    pub(super) version: bool,
 }
 
 pub(super) struct Gesture {
@@ -31,10 +60,17 @@ pub(super) struct Gesture {
 }
 
 impl App {
+    pub(super) fn finish_dev_focus_reply(&mut self, error: Option<String>) {
+        if let Some((value, reply)) = self.automation.dev_focus_reply.take() {
+            let _ = reply.try_send(error.map_or(Ok(value), Err));
+        }
+    }
+
     pub(super) fn cancel_automation_gesture(&mut self) {
         if self.automation.gesture.take().is_some() {
             self.drag = None;
             self.move_cache.get_mut().clear();
+            self.cancel_prototype_pointer();
         }
     }
 
@@ -61,6 +97,97 @@ impl App {
         }
     }
 
+    pub fn version_preview_active(&self) -> bool {
+        self.automation
+            .text_preview
+            .as_ref()
+            .is_some_and(|preview| preview.version)
+    }
+
+    pub(super) fn clear_text_preview(&mut self) {
+        if self.automation.text_preview.take().is_some() {
+            self.automation.preview_generation = self.automation.preview_generation.wrapping_add(1);
+            if let Some((_, reply)) = self.automation.preview_reply.take() {
+                let _ = reply.try_send(Err("The live text preview was interrupted.".into()));
+            }
+            self.schedule_scene();
+        }
+    }
+
+    pub(super) fn finish_text_preview(&mut self, generation: u64, error: Option<String>) {
+        if self
+            .automation
+            .preview_reply
+            .as_ref()
+            .is_some_and(|(pending, _)| *pending == generation)
+        {
+            let (_, reply) = self.automation.preview_reply.take().unwrap();
+            let _ = reply.try_send(error.map_or_else(
+                || Ok(json!({"shown": self.automation.text_preview.is_some()})),
+                Err,
+            ));
+        }
+    }
+
+    fn handle_text_preview(&mut self, session: String, apply: bool, args: &Value, reply: Reply) {
+        let version = args["kind"] == "version";
+        if !apply
+            && !self
+                .automation
+                .text_preview
+                .as_ref()
+                .is_some_and(|preview| {
+                    preview.owner == session
+                        && preview.version == version
+                        && self.active.as_ref() == Some(&preview.snapshot.id)
+                        && args["document"].as_str().is_none_or(|target| {
+                            target_document_matches(target, &preview.snapshot.id)
+                        })
+                })
+        {
+            let _ = reply.try_send(Ok(json!({"shown":false})));
+            return;
+        }
+        let preview = if apply {
+            if self.editing.is_some()
+                || self.prototype_frame.is_some()
+                || (!version && self.version_preview_active())
+            {
+                let _ = reply.try_send(Err(
+                    "Finish editing or exit the current preview first.".into()
+                ));
+                return;
+            }
+            let snapshot = serde_json::from_value::<DocumentSnapshot>(args["preview"].clone());
+            let Some(snapshot) = snapshot.ok().filter(|preview| {
+                self.document().is_some_and(|document| {
+                    preview.id == document.id
+                        && preview.epoch == document.epoch
+                        && preview.sequence == document.sequence
+                })
+            }) else {
+                let _ = reply.try_send(Err(
+                    "The source document changed before the preview arrived.".into(),
+                ));
+                return;
+            };
+            Some(Preview {
+                owner: session,
+                snapshot: Arc::new(snapshot),
+                version,
+            })
+        } else {
+            None
+        };
+        if let Some((_, previous)) = self.automation.preview_reply.take() {
+            let _ = previous.try_send(Err("Another request replaced the live preview.".into()));
+        }
+        self.automation.text_preview = preview;
+        self.automation.preview_generation = self.automation.preview_generation.wrapping_add(1);
+        self.automation.preview_reply = Some((self.automation.preview_generation, reply));
+        self.schedule_scene();
+    }
+
     pub(super) fn handle_automation(&mut self, job: Job, reply: Reply) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -71,24 +198,47 @@ impl App {
             ));
             return;
         }
-        if job.method == "inspect_ui" {
+        if job.method == "inspect_ui"
+            || job.method == "workspace" && job.arguments["action"] == "state"
+        {
             let _ = reply.try_send(Ok(self.inspect_automation()));
             return;
         }
-        if self.automation.waiting.is_some() || self.pending || self.drag_button.is_some() {
+        if job.method == "plugins.manage" {
+            let result = self.show_plugin_manager(&job.arguments);
+            let _ = reply.try_send(result);
+            return;
+        }
+        if job.method == "text.preview.clear" {
+            self.handle_text_preview(job.session, false, &job.arguments, reply);
+            return;
+        }
+        if self.automation.waiting.is_some()
+            || self.automation.dev_focus_reply.is_some()
+            || self.pending
+            || self.drag_button.is_some()
+        {
             let _ = reply.try_send(Err(
                 "Wait for the current edit or pointer gesture to finish.".into(),
             ));
             return;
         }
+        if job.method == "legacy.view" {
+            if self.scene_pending && matches!(job.arguments["action"].as_str(), Some("fit" | "select")) {
+                self.automation.queued = Some((job, reply));
+            } else if self.automation.gesture.is_some() {
+                let _ = reply.try_send(Err("Finish the active pointer gesture before changing the view.".into()));
+            } else {
+                let _ = reply.try_send(self.legacy_view(&job.arguments));
+                self.redraw();
+            }
+            return;
+        }
         if let Some(target) = job.arguments["document"].as_str() {
-            let parsed = Uuid::parse_str(target)
-                .ok()
-                .map(|id| format!("doc_{}", id.simple()));
             if self
                 .active
                 .as_deref()
-                .is_none_or(|active| active != target && parsed.as_deref() != Some(active))
+                .is_none_or(|active| !target_document_matches(target, active))
             {
                 let _ = reply.try_send(Err(
                     "The requested document is not the active desktop tab.".into(),
@@ -96,24 +246,153 @@ impl App {
                 return;
             }
         }
+        if job.method == "text.preview.apply" {
+            let preview = &job.arguments["preview"];
+            if let Some(document) = self.document()
+                && preview["id"] == document.id
+                && preview["epoch"] == document.epoch
+                && preview["sequence"]
+                    .as_u64()
+                    .is_some_and(|sequence| sequence > document.sequence)
+            {
+                let id = document.id.clone();
+                self.automation.queued = Some((job, reply));
+                if !self.poll_pending {
+                    self.poll_pending = true;
+                    self.send(Request::Snapshot { id });
+                }
+                return;
+            }
+            self.handle_text_preview(job.session, true, &job.arguments, reply);
+            return;
+        }
+        if matches!(
+            job.method.as_str(),
+            "collab.cursorChat.open" | "collab.presence"
+        ) {
+            self.collaboration_document = self.active.clone();
+            self.collaboration = job.arguments["state"].clone();
+            let result = if job.method == "collab.presence" {
+                self.follow_collaboration_view();
+                Ok(json!({"ok":true}))
+            } else {
+                self.open_cursor_chat()
+                    .then(|| json!({"open":true}))
+                    .ok_or_else(|| "Cursor chat requires an idle live room.".into())
+            };
+            let _ = reply.try_send(result);
+            return;
+        }
+        if matches!(job.method.as_str(), "dev.focus" | "proto.preview" | "proto.present")
+            && let Some(document) = self.document()
+            && job.arguments["minSequence"]
+                .as_u64()
+                .is_some_and(|sequence| sequence > document.sequence)
+        {
+            let id = document.id.clone();
+            self.automation.queued = Some((job, reply));
+            if !self.poll_pending {
+                self.poll_pending = true;
+                self.send(Request::Snapshot { id });
+            }
+            return;
+        }
+        if job.method == "open.url" {
+            let result = if self.background {
+                Err("Background automation cannot open external applications.".into())
+            } else {
+                workspace::open_url(&job.arguments)
+            };
+            let _ = reply.try_send(result);
+            return;
+        }
         if job.method == "screenshot" {
             let _ = reply.try_send(self.automation_screenshot(&job.arguments));
             return;
         }
-        if self.document().is_none() {
+        if job.method == "workspace" {
+            self.handle_workspace_automation(&job.arguments, reply);
+            self.redraw();
+            return;
+        }
+        if self.document().is_none()
+            && !matches!(
+                job.method.as_str(),
+                "window.focus" | "view.fullscreen" | "dev.unfocus"
+            )
+            && !job.method.starts_with("pref.")
+            && !job.method.starts_with("app.")
+            && !job.method.starts_with("help.")
+            && !job.method.starts_with("view.theme")
+            && job.method != "doc.home"
+        {
             let _ = reply.try_send(Err(
                 "Open a document in the desktop before sending canvas input.".into(),
             ));
             return;
         }
         self.expire_automation_gesture();
-        if job.method == "pointer" && self.scene_pending {
+        if self.scene_pending
+            && matches!(
+                job.method.as_str(),
+                "pointer"
+                    | "proto.preview"
+                    | "proto.present"
+                    | "text.edit.begin"
+                    | "view.zoomFit"
+                    | "view.zoomSelection"
+                    | "view.nextFrame"
+                    | "view.prevFrame"
+                    | "dev.focus"
+            )
+        {
             self.automation.queued = Some((job, reply));
+            return;
+        }
+        if job.method == "edit.setDefaultProperties" {
+            let result = self.set_drawing_defaults(&job.arguments);
+            let _ = reply.try_send(result);
             return;
         }
         if job.method == "pointer" && self.scene.is_none() {
             let _ = reply.try_send(Err("The active canvas did not render.".into()));
             return;
+        }
+        if self.version_preview_active()
+            && matches!(
+                job.method.as_str(),
+                "pointer"
+                    | "key"
+                    | "type_text"
+                    | "text.edit.begin"
+                    | "tool.place"
+                    | "edit.setDefaultProperties"
+                    | "edit.pickColor"
+                    | "view.contextMenu"
+            )
+        {
+            if job.method == "key"
+                && job.arguments["key"]
+                    .as_str()
+                    .is_some_and(|key| key.eq_ignore_ascii_case("escape"))
+            {
+                self.handle_text_preview(job.session, false, &json!({"kind":"version"}), reply);
+            } else {
+                let _ = reply.try_send(Err("Exit version preview before editing.".into()));
+            }
+            return;
+        }
+        if self.automation.text_preview.is_some()
+            && matches!(
+                job.method.as_str(),
+                "pointer" | "key" | "type_text" | "text.edit.begin"
+            )
+        {
+            self.clear_text_preview();
+            if self.scene_pending && matches!(job.method.as_str(), "pointer" | "text.edit.begin") {
+                self.automation.queued = Some((job, reply));
+                return;
+            }
         }
         let old_modifiers = self.modifiers;
         self.modifiers = modifiers(&job.arguments);
@@ -125,7 +404,26 @@ impl App {
                 self.automation_text(&job.arguments)
             }
             "key" | "type_text" => Err("Finish the active pointer gesture first.".into()),
-            _ => Err("Unknown desktop automation method.".into()),
+            name if self.automation.gesture.is_none() => {
+                match self.automation_command(name, &job.arguments) {
+                    Ok(Some(value)) => {
+                        self.modifiers = old_modifiers;
+                        self.redraw();
+                        if matches!(name, "dev.focus" | "dev.unfocus")
+                            && self.scene_pending
+                            && self.scene.is_none()
+                        {
+                            self.automation.dev_focus_reply = Some((value, reply));
+                            return;
+                        }
+                        let _ = reply.try_send(Ok(value));
+                        return;
+                    }
+                    Ok(None) => Ok(()),
+                    Err(error) => Err(error),
+                }
+            }
+            _ => Err("Finish the active pointer gesture first.".into()),
         };
         self.modifiers = old_modifiers;
         self.redraw();
@@ -144,38 +442,111 @@ impl App {
         }
     }
 
+    fn set_drawing_defaults(&mut self, args: &Value) -> Result<Value, String> {
+        let id = args["layer"]
+            .as_str()
+            .or_else(|| self.selected.iter().next().map(String::as_str))
+            .or_else(|| args["fallbackLayer"].as_str())
+            .ok_or("Select a layer to set its drawing defaults.")?;
+        let node = self
+            .document()
+            .and_then(|document| document.nodes.get(id))
+            .filter(|node| node.parent_id.is_some())
+            .ok_or("The selected layer no longer exists.")?;
+        let item = self
+            .scene
+            .as_ref()
+            .and_then(|scene| scene.item(id))
+            .ok_or("The selected layer is outside the current canvas.")?;
+        let properties = omc_style::drawing_defaults(node, &item.properties, &item.style);
+        let is_text = node.kind == omc_model::NodeKind::Text;
+        if is_text {
+            self.automation.default_text = Some(properties.clone());
+        } else {
+            self.automation.default_shape = Some(properties.clone());
+        }
+        Ok(json!({"for":if is_text {"text"}else{"shapes"},"properties":properties}))
+    }
+
     fn automation_result(&self) -> Value {
         let root = self.current_root();
-        json!({
+        let mut result = json!({
             "documentId": self.active,
             "pageId": self.page,
             "selection": self.selected.iter().filter(|id| root.as_ref() != Some(*id)).collect::<Vec<_>>(),
-            "tool": tool_name(self.tool),
-        })
+            "tool": if self.comments.tool { "comment" } else { tool_name(self.tool) },
+        });
+        if let Some(color) = self.picked_color() {
+            result["pickedColor"] = json!(color);
+        }
+        result
     }
 
-    fn inspect_automation(&self) -> Value {
+    pub(super) fn inspect_automation(&self) -> Value {
         let canvas = self.canvas_rect();
-        let center = self.camera.world(canvas.width * 0.5, canvas.height * 0.5);
+
         let title = self
             .document()
             .map_or("Oh My Canvas", |doc| doc.title.as_str());
         let mut result = self.automation_result();
         result["attached"] = true.into();
-        result["view"] = json!({"zoom":self.camera.zoom, "center":[center.0,center.1]});
+        result["view"] = self.automation_view_state();
         result["status"] = json!(self.status);
-        result["tool"] = json!({"id":tool_name(self.tool),"overlay":{}});
+        result["tool"] = json!({"id":if self.comments.tool { "comment" } else { tool_name(self.tool) },"overlay":{}});
         result["canvas"] = json!([canvas.x, canvas.y, canvas.width, canvas.height]);
         result["panels"] = json!({
-            "left": LEFT, "right": if self.inspector_visible() { RIGHT } else { 0. },
-            "leftCollapsed": false, "leftTab": if self.library_open { "assets" } else { "file" },
+            "left": self.left_width(), "right": self.right_width(),
+            "leftCollapsed": self.left_width() == 0., "leftTab": if self.library_open { "assets" } else { "file" },
             "rightTab":format!("{:?}",self.inspector).to_lowercase()
         });
         result["frameMs"] = json!(self.automation.last_frame);
         result["framesDrawn"] = json!(self.automation.frames_drawn);
-        result["window"] = json!(1);
+        result["window"] = json!(self.proxy.id);
+        result["focus"] = self.automation_focus_state();
+        result["uiScale"] = self.automation_ui_scale_state();
+        result["darkTheme"] = self.dark_theme().into();
+        result["proofSrgb"] = json!({"on":self.proof_enabled(),"ready":self.proof_scene.is_some()});
+        result["language"] = json!(self.interface_language);
+        result["windowMotionReduced"] = json!(self.window_animation_reduced());
+        result["home"] = self.library_open.into();
+        result["textPreview"] = json!(
+            self.automation
+                .text_preview
+                .as_ref()
+                .is_some_and(|preview| !preview.version)
+        );
+        result["versionPreview"] = self.version_preview_active().into();
+        result["dialog"] = json!(self.popup.and_then(|popup| match popup {
+            Popup::Utility(panel) => Some(format!("{panel:?}")),
+            _ => None,
+        }));
+        result["libraryDialog"] = self.library_dialog_state();
+        result["pluginManager"] = self.plugin_manager_state();
+        result["layersCollapsed"] = json!(self.collapsed.len());
+        result["devComparison"] = json!(self.dev_comparison().map(|panel| {
+            let area = self.dev_compare_rect();
+            json!({"id":panel.result["id"],"rows":panel.rows.len(),"scroll":panel.scroll,
+                "rect":[area.x, area.y, area.width, area.height],
+                "images":panel.images.each_ref().map(Option::is_some)})
+        }));
+        result["comments"] = json!({"visible":self.comments.visible,"pins":self.comment_pins().len(),
+            "draft":self.editing.as_ref().is_some_and(|edit| matches!(edit.target, EditTarget::CanvasComment { .. })),
+            "open":self.comments.selected.is_some()});
+        result["devFocus"] = self.dev_focus_active().into();
+        let prototype = json!(
+            self.prototype_frame
+                .as_ref()
+                .map(|id| json!({"current":id,"overlay":self.prototype_playback.overlay.as_ref().map(|overlay| &overlay.id),"transition":self.prototype_playback.motion.as_ref().map(|motion| &motion.kind),"transitionProgress":self.prototype_playback.motion.as_ref().map(|motion| motion.progress()),"matchedLayers":self.prototype_playback.motion.as_ref().map(|motion| motion.matched())}))
+        );
+        if self.automation.view.presenting {
+            result["presenter"] = prototype;
+            result["preview"] = Value::Null;
+        } else {
+            result["presenter"] = Value::Null;
+            result["preview"] = prototype;
+        }
         result["windows"] = json!([{
-            "id":1,"title":title,"main":true,"focused":self.window.as_ref().is_some_and(|window| window.has_focus()),"active":self.active,
+            "id":self.proxy.id,"title":title,"main":self.proxy.id == 1,"focused":self.window.as_ref().is_some_and(|window| window.has_focus()),"active":self.active,
             "activeIndex":self.tabs.iter().position(|tab| self.active.as_ref() == Some(tab)),
             "files": self.tabs.iter().filter_map(|id| self.snapshots.get(id).map(|doc| {
                 json!({"id":id,"title":doc.title,"active":self.active.as_ref()==Some(id)})
@@ -185,15 +556,16 @@ impl App {
     }
 
     fn automation_screenshot(&self, args: &Value) -> Result<Value, String> {
-        if args["window"] != true && args["window"].as_u64() != Some(1) {
+        if args["window"] != true && args["window"].as_u64() != Some(self.proxy.id) {
             return Err("No native window with that ID.".into());
         }
-        if self.occluded
-            || self
-                .window
-                .as_ref()
-                .and_then(|window| window.is_minimized())
-                == Some(true)
+        if !self.background
+            && (self.occluded
+                || self
+                    .window
+                    .as_ref()
+                    .and_then(|window| window.is_minimized())
+                    == Some(true))
         {
             return Err("Show the native window before capturing it.".into());
         }
@@ -210,8 +582,8 @@ impl App {
 
     fn automation_pointer(&mut self, session: &str, args: &Value) -> Result<(), String> {
         let kind = args["kind"].as_str().unwrap_or("click");
-        if self.prototype_frame.is_some() {
-            return Err("Close prototype preview before sending canvas gestures.".into());
+        if self.prototype_frame.is_some() && args.get("tool").is_some() {
+            return Err("A prototype pointer cannot switch editor tools.".into());
         }
         let point = coordinate_pair(&args["x"], &args["y"])?;
         for name in ["pressure", "pressureTo"] {
@@ -252,15 +624,7 @@ impl App {
             return Err("Start a pointer gesture before releasing it.".into());
         }
         if let Some(tool) = args.get("tool") {
-            let tool = match tool.as_str() {
-                Some("move") => Tool::Select,
-                Some("hand") => Tool::Pan,
-                Some("frame") => Tool::Frame,
-                Some("rectangle") => Tool::Rect,
-                Some("ellipse") => Tool::Ellipse,
-                Some("text") => Tool::Text,
-                _ => return Err("This pointer tool is unavailable in the native desktop.".into()),
-            };
+            let tool = canvas_tool(tool.as_str().unwrap_or_default())?;
             if self.automation.gesture.is_some() {
                 return Err("A pointer gesture cannot change tools midway.".into());
             }
@@ -337,7 +701,11 @@ impl App {
             "home" => Key::Named(NamedKey::Home),
             "end" => Key::Named(NamedKey::End),
             "tab" => Key::Named(NamedKey::Tab),
+            "f6" => Key::Named(NamedKey::F6),
             "space" | " " => Key::Named(NamedKey::Space),
+            _ if self.prototype_frame.is_some() && raw.chars().count() == 1 => {
+                Key::Character(raw.into())
+            }
             value if command && matches!(value, "g" | "a" | "z" | "y" | "0") => {
                 Key::Character(value.into())
             }
@@ -346,7 +714,22 @@ impl App {
                     && (self.editing.is_some() && raw.chars().count() == 1
                         || matches!(
                             value,
-                            "v" | "f" | "r" | "o" | "t" | "h" | "+" | "=" | "-" | "plus" | "minus"
+                            "v" | "f"
+                                | "c"
+                                | "r"
+                                | "o"
+                                | "t"
+                                | "h"
+                                | "i"
+                                | "l"
+                                | "s"
+                                | "k"
+                                | "b"
+                                | "+"
+                                | "="
+                                | "-"
+                                | "plus"
+                                | "minus"
                         )
                         || value.len() == 1 && value.as_bytes()[0].is_ascii_digit()) =>
             {
@@ -354,13 +737,26 @@ impl App {
             }
             _ => return Err("This keyboard shortcut is unavailable in the native desktop.".into()),
         };
+        if self.prototype_frame.is_some() {
+            self.key_input(&key, None, true);
+            return Ok(());
+        }
+        if self.popup == Some(Popup::Utility(UtilityPopup::PickedColor)) {
+            self.key_input(&key, None, true);
+            return Ok(());
+        }
+        if self.library_dialog_key(&key) || self.plugin_manager_key(&key) {
+            return Ok(());
+        }
         if self.editing.is_none() {
             match &key {
                 Key::Named(NamedKey::Tab) if !command => {
                     self.automation_select_sibling();
                     return Ok(());
                 }
-                Key::Named(NamedKey::Enter) => {
+                Key::Named(NamedKey::Enter)
+                    if self.tool != Tool::Pen || self.pen_vertices.is_empty() =>
+                {
                     self.automation_select_hierarchy();
                     return Ok(());
                 }
@@ -388,17 +784,12 @@ impl App {
                         return Ok(());
                     }
                     digit if digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit() => {
-                        let digit = digit.as_bytes()[0] - b'0';
-                        let opacity = if digit == 0 {
-                            1.
-                        } else {
-                            f64::from(digit) / 10.
-                        };
-                        let commands: Vec<_> = self.selected.iter().filter(|id| self.layer_transformable(id)).map(|id| {
-                                json!({"type":"node.set","nodeId":id,"properties":{"opacity":opacity}})
-                            }).collect();
-                        if !commands.is_empty() {
-                            self.mutate(json!({"type":"batch","commands":commands}), "opacity");
+                        if self.automation.view.prefs.number_keys_opacity
+                            && !self.selected.is_empty()
+                        {
+                            self.apply_opacity_digit(digit.as_bytes()[0]);
+                        } else if digit == "1" {
+                            self.camera = Camera::default();
                         }
                         return Ok(());
                     }
@@ -493,24 +884,80 @@ impl App {
         let edit = self
             .editing
             .as_mut()
-            .filter(|edit| matches!(edit.target, EditTarget::Text { .. }))
-            .ok_or("Start editing a canvas text layer first.")?;
+            .filter(|edit| {
+                edit.target.is_canvas_text()
+                    || matches!(edit.target, EditTarget::CanvasComment { .. })
+            })
+            .ok_or("Start editing a canvas text layer or comment first.")?;
         if edit.buffer.composing {
             return Err("Finish the current input composition first.".into());
         }
         edit.buffer.insert(text);
+        self.refresh_path_text_scene();
         Ok(())
+    }
+}
+
+fn canvas_tool(name: &str) -> Result<Tool, String> {
+    match name {
+        "move" => Ok(Tool::Select),
+        "scale" => Ok(Tool::Scale),
+        "hand" => Ok(Tool::Pan),
+        "frame" => Ok(Tool::Frame),
+        "section" => Ok(Tool::Section),
+        "slice" => Ok(Tool::Slice),
+        "shape" => Ok(Tool::BoardShape),
+        "rectangle" => Ok(Tool::Rect),
+        "ellipse" => Ok(Tool::Ellipse),
+        "pen" => Ok(Tool::Pen),
+        "pencil" => Ok(Tool::Pencil),
+        "marker" => Ok(Tool::Marker),
+        "highlighter" => Ok(Tool::Highlighter),
+        "eraser" => Ok(Tool::Eraser),
+        "connector" => Ok(Tool::Connector),
+        "stamp" => Ok(Tool::Stamp),
+        "sticky" => Ok(Tool::Sticky),
+        "shapeBuilder" => Ok(Tool::ShapeBuilder),
+        "line" => Ok(Tool::Line),
+        "arrow" => Ok(Tool::Arrow),
+        "polygon" => Ok(Tool::Polygon),
+        "star" => Ok(Tool::Star),
+        "text" => Ok(Tool::Text),
+        "textOnPath" => Ok(Tool::TextOnPath),
+        "eyedropper" => Ok(Tool::Eyedropper),
+        _ => Err(format!(
+            "The {name} tool is unavailable in the native desktop."
+        )),
     }
 }
 
 fn tool_name(tool: Tool) -> &'static str {
     match tool {
         Tool::Select => "move",
+        Tool::Scale => "scale",
         Tool::Pan => "hand",
         Tool::Frame => "frame",
+        Tool::Section => "section",
+        Tool::Slice => "slice",
+        Tool::BoardShape => "shape",
         Tool::Rect => "rectangle",
         Tool::Ellipse => "ellipse",
+        Tool::Pen => "pen",
+        Tool::Pencil => "pencil",
+        Tool::Marker => "marker",
+        Tool::Highlighter => "highlighter",
+        Tool::Eraser => "eraser",
+        Tool::Connector => "connector",
+        Tool::Stamp => "stamp",
+        Tool::Sticky => "sticky",
+        Tool::ShapeBuilder => "shapeBuilder",
+        Tool::Line => "line",
+        Tool::Arrow => "arrow",
+        Tool::Polygon => "polygon",
+        Tool::Star => "star",
         Tool::Text => "text",
+        Tool::TextOnPath => "textOnPath",
+        Tool::Eyedropper => "eyedropper",
     }
 }
 
@@ -527,6 +974,11 @@ fn modifiers(args: &Value) -> ModifiersState {
         args["ctrl"] == true || !cfg!(target_os = "macos") && args["cmd"] == true,
     );
     result
+}
+
+fn target_document_matches(target: &str, native: &str) -> bool {
+    target == native
+        || Uuid::parse_str(target).is_ok_and(|id| format!("doc_{}", id.simple()) == native)
 }
 
 fn coordinate_pair(x: &Value, y: &Value) -> Result<(f64, f64), String> {

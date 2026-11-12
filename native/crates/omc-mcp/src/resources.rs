@@ -437,6 +437,19 @@ impl ToolRouter {
     ) -> Result<Value> {
         let snapshot = self.workspace.snapshot(id)?;
         let action = string(&args, "action")?;
+        if matches!(action, "cut" | "paste" | "paste_properties")
+            && let Some(replayed) = self.replay(session, id, &meta)?
+        {
+            if action == "cut"
+                && let Some(payload) = replayed.get("payload")
+            {
+                self.legacy_clipboards
+                    .lock()
+                    .unwrap()
+                    .insert(session.to_owned(), payload.clone());
+            }
+            return Ok(replayed);
+        }
         if matches!(action, "copy" | "cut" | "copy_properties") {
             let ids: Vec<String> = args["ids"]
                 .as_array()
@@ -444,6 +457,19 @@ impl ToolRouter {
                 .iter()
                 .map(|v| self.resolve(session, id, v.as_str().unwrap_or("")))
                 .collect::<Result<_>>()?;
+            let page = self.state(session, id)?;
+            let scene = paths::scene(&snapshot, &page.page_id)?;
+            let ids = clipboard_roots(&snapshot, &ids);
+            for raw in &ids {
+                if raw == &page.root
+                    || !scene.item(raw).is_some()
+                    || action == "cut" && !paths::editable(&scene, raw)
+                {
+                    return Err(EngineError::invalid(
+                        "clipboard selection is invalid, locked or outside the page",
+                    ));
+                }
+            }
             let mut all = std::collections::BTreeSet::new();
             let mut pending = ids.clone();
             while let Some(raw) = pending.pop() {
@@ -453,68 +479,266 @@ impl ToolRouter {
                 pending.extend(children(&snapshot, &raw).iter().map(|n| n.id.clone()));
             }
             let payload = if action == "copy_properties" {
-                json!({"format":"omc.clipboard-properties/1","properties":snapshot.nodes.get(&ids[0]).ok_or_else(||EngineError::invalid("node not found"))?.properties})
+                let source = snapshot
+                    .nodes
+                    .get(&ids[0])
+                    .ok_or_else(|| EngineError::invalid("node not found"))?;
+                let allowed = clipboard_property_fields();
+                let properties: Properties = source
+                    .properties
+                    .iter()
+                    .filter(|(key, _)| allowed.contains(key.as_str()))
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+                let style_definitions = catalogs(&snapshot.metadata, "styles");
+                let style_definitions: BTreeMap<_, _> = properties
+                    .iter()
+                    .filter(|(key, _)| key.ends_with("StyleId"))
+                    .filter_map(|(_, value)| value.as_str())
+                    .filter_map(|id| style_definitions.get(id).map(|value| (id, value)))
+                    .collect();
+                let text_formatting = source
+                    .properties
+                    .get("textRuns")
+                    .and_then(Value::as_array)
+                    .filter(|_| source.kind == NodeKind::Text)
+                    .map(|runs| {
+                        runs.iter()
+                            .map(|run| run["attributes"].clone())
+                            .collect::<Vec<_>>()
+                    });
+                json!({"format":"omc.clipboard-properties/1","properties":properties,"styleDefinitions":style_definitions,"textFormatting":text_formatting})
             } else {
-                json!({"format":"omc.clipboard/1","roots":ids,"nodes":all.iter().filter_map(|raw|snapshot.nodes.get(raw)).collect::<Vec<_>>()})
+                let geometry: BTreeMap<_, _> = ids
+                    .iter()
+                    .filter_map(|raw| {
+                        scene
+                            .item(raw)
+                            .map(|item| (raw, json!({"matrix":item.world.0,"bounds":item.bounds})))
+                    })
+                    .collect();
+                let mut payload = json!({"format":"omc.clipboard/1","roots":ids,"nodes":all.iter().filter_map(|raw|snapshot.nodes.get(raw)).collect::<Vec<_>>(),"rootGeometry":geometry});
+                let native_bytes = serde_json::to_vec(&payload)
+                    .map_err(|error| EngineError::invalid(error.to_string()))?
+                    .len();
+                let budget = omc_protocol::MAX_REQUEST_BYTES.saturating_sub(native_bytes + 4096);
+                match self.export_legacy_clipboard(
+                    &snapshot,
+                    &scene,
+                    &page.page_id,
+                    &ids,
+                    &all,
+                    budget,
+                ) {
+                    Ok(legacy) => payload.as_object_mut().unwrap().extend(legacy),
+                    Err(error) => payload["legacyCompatibility"] = json!({"error":error.message}),
+                }
+                payload
             };
-            if action == "cut" {
-                self.submit(
+            let result = if action == "cut" {
+                self.submit_with_output(
                     session,
                     id,
                     Command::NodeDelete { node_ids: ids },
                     &meta,
                     Some(snapshot.sequence),
-                )?;
-            }
-            self.states
+                    Properties::from([("payload".into(), payload.clone())]),
+                )?
+            } else {
+                json!({"ok":true,"payload":payload})
+            };
+            self.legacy_clipboards
                 .lock()
                 .unwrap()
-                .get_mut(&(session.into(), id.into()))
-                .unwrap()
-                .clipboard = Some(payload.clone());
-            return Ok(json!({"ok":true,"payload":payload}));
+                .insert(session.to_owned(), payload);
+            return Ok(result);
         }
         let payload = args
             .get("payload")
             .cloned()
-            .or(self.state(session, id)?.clipboard)
+            .or_else(|| self.legacy_clipboards.lock().unwrap().get(session).cloned())
             .ok_or_else(|| EngineError::invalid("clipboard is empty"))?;
         if action == "paste_properties" {
             if payload["format"] != "omc.clipboard-properties/1" {
                 return Err(EngineError::invalid("property payload required"));
             }
-            let patch = properties(&payload["properties"])?;
-            let commands = args["ids"]
+            let mut patch = properties(&payload["properties"])?;
+            let allowed = clipboard_property_fields();
+            let definitions = catalogs(&snapshot.metadata, "styles");
+            patch.retain(|key, value| {
+                allowed.contains(key.as_str())
+                    && (!key.ends_with("StyleId")
+                        || value.as_str().is_some_and(|id| {
+                            definitions
+                                .get(id)
+                                .is_some_and(|style| payload["styleDefinitions"][id] == *style)
+                        }))
+            });
+            let formatting = payload["textFormatting"]
                 .as_array()
-                .ok_or_else(|| EngineError::invalid("ids required"))?
-                .iter()
-                .map(|v| {
-                    Ok(Command::NodeSet {
-                        node_id: self.resolve(session, id, v.as_str().unwrap_or(""))?,
-                        properties: patch.clone(),
-                    })
+                .filter(|runs| !runs.is_empty());
+            let allowed_attributes = clipboard_text_style_fields();
+            let attributes = formatting
+                .into_iter()
+                .flatten()
+                .map(|run| {
+                    let mut attributes = properties(run)?;
+                    attributes.retain(|key, _| allowed_attributes.contains(key.as_str()));
+                    Ok(attributes)
                 })
                 .collect::<Result<Vec<_>>>()?;
-            return self.submit(
+            let page = self.state(session, id)?;
+            let scene = paths::scene(&snapshot, &page.page_id)?;
+            let ids = args["ids"]
+                .as_array()
+                .ok_or_else(|| EngineError::invalid("ids required"))?;
+            let mut commands = Vec::new();
+            let mut selection = Vec::new();
+            for value in ids {
+                let raw = self.resolve(session, id, value.as_str().unwrap_or_default())?;
+                if raw == page.root || !paths::editable(&scene, &raw) {
+                    return Err(EngineError::invalid(
+                        "clipboard destination is unavailable or locked",
+                    ));
+                }
+                let node = &snapshot.nodes[&raw];
+                if !patch.is_empty() {
+                    commands.push(Command::NodeSet {
+                        node_id: raw.clone(),
+                        properties: patch.clone(),
+                    });
+                }
+                if node.kind == NodeKind::Text && !attributes.is_empty() {
+                    let lengths = node
+                        .properties
+                        .get("textRuns")
+                        .and_then(Value::as_array)
+                        .filter(|runs| !runs.is_empty())
+                        .map(|runs| {
+                            runs.iter()
+                                .map(|run| {
+                                    run["text"]
+                                        .as_str()
+                                        .unwrap_or_default()
+                                        .encode_utf16()
+                                        .count() as u32
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_else(|| {
+                            vec![
+                                node.string("text")
+                                    .unwrap_or_default()
+                                    .encode_utf16()
+                                    .count() as u32,
+                            ]
+                        });
+                    let mut start = 0;
+                    for (index, length) in lengths.into_iter().enumerate() {
+                        let marks = attributes[index.min(attributes.len() - 1)].clone();
+                        if length > 0 && !marks.is_empty() {
+                            commands.push(Command::TextMark {
+                                node_id: raw.clone(),
+                                start,
+                                end: start + length,
+                                attributes: marks,
+                            });
+                        }
+                        start += length;
+                    }
+                }
+                selection.push(raw);
+            }
+            if commands.is_empty() {
+                return Ok(
+                    json!({"ok":true,"changed":false,"rawSelection":selection,"selection":selection.iter().map(|raw| self.alias(session,id,raw)).collect::<Vec<_>>()}),
+                );
+            }
+            if commands.len() > 100 {
+                return Err(EngineError::new(
+                    "resource_limit",
+                    "clipboard properties exceed the transaction limit",
+                ));
+            }
+            return self.submit_with_output(
                 session,
                 id,
                 Command::Batch { commands },
                 &meta,
                 Some(snapshot.sequence),
+                Properties::from([("rawSelection".into(), json!(selection))]),
             );
         }
+        if action == "paste" && payload["kind"] == "text" {
+            let text = string(&payload, "text")?;
+            let state = self.state(session, id)?;
+            let parent = args["parentId"]
+                .as_str()
+                .map(|id_value| self.resolve(session, id, id_value))
+                .transpose()?
+                .unwrap_or(state.root);
+            let scene = paths::scene(&snapshot, &state.page_id)?;
+            if !paths::editable(&scene, &parent) {
+                return Err(EngineError::invalid(
+                    "clipboard destination is unavailable or locked",
+                ));
+            }
+            let mut node = Node::new(NodeKind::Text);
+            node.rank = rank_between(
+                children(&snapshot, &parent)
+                    .last()
+                    .map(|node| node.rank.as_str()),
+                None,
+            )
+            .ok_or_else(|| EngineError::new("resource_limit", "rank rebalance required"))?;
+            node.parent_id = Some(parent);
+            node.properties = properties(&json!({
+                "text":text,
+                "x":args["x"].as_f64().unwrap_or_else(|| state.view["viewport"]["vbox"]["x"].as_f64().unwrap_or(0.) + 20.),
+                "y":args["y"].as_f64().unwrap_or_else(|| state.view["viewport"]["vbox"]["y"].as_f64().unwrap_or(0.) + 20.)
+            }))?;
+            return self.submit_with_output(
+                session,
+                id,
+                Command::NodeCreate { node: node.clone() },
+                &meta,
+                Some(snapshot.sequence),
+                Properties::from([("rawSelection".into(), json!([node.id]))]),
+            );
+        }
+        let legacy = payload["format"] != "omc.clipboard/1"
+            && payload["kind"] == crate::clipboard_legacy::KIND;
+        let payload = if action == "paste" && legacy {
+            self.import_legacy_clipboard(&payload)?
+        } else {
+            payload
+        };
         if action != "paste" || payload["format"] != "omc.clipboard/1" {
             return Err(EngineError::invalid("native layer payload required"));
         }
-        if args["mode"] == "replace" {
-            return Err(EngineError::new(
-                "unsupported_feature",
-                "replace clipboard mode requires transform-aware selection conversion",
-            ));
+        let state = self.state(session, id)?;
+        let replace = args["mode"] == "replace";
+        let mut replaced = Vec::new();
+        if replace {
+            let targets = args["ids"]
+                .as_array()
+                .filter(|targets| !targets.is_empty())
+                .ok_or_else(|| EngineError::invalid("paste replace requires explicit ids"))?;
+            for value in targets {
+                let raw = self.resolve(session, id, value.as_str().unwrap_or_default())?;
+                if raw == state.root || !snapshot.nodes.contains_key(&raw) {
+                    return Err(EngineError::invalid("choose replaceable layers"));
+                }
+                replaced.push(raw);
+            }
+            replaced = clipboard_roots(&snapshot, &replaced);
         }
         let nodes: Vec<Node> = serde_json::from_value(payload["nodes"].clone())
             .map_err(|e| EngineError::invalid(e.to_string()))?;
-        if nodes.len() > 100 {
+        if nodes.is_empty() {
+            return Err(EngineError::invalid("clipboard payload is empty"));
+        }
+        if nodes.len() + usize::from(replace) > 100 {
             return Err(EngineError::new(
                 "resource_limit",
                 "clipboard batch exceeds 100 nodes",
@@ -524,17 +748,116 @@ impl ToolRouter {
             .iter()
             .map(|n| (n.id.clone(), new_id("node")))
             .collect();
+        if map.len() != nodes.len() {
+            return Err(EngineError::invalid("duplicate clipboard layer IDs"));
+        }
         let parent = args["parentId"]
             .as_str()
             .map(|p| self.resolve(session, id, p))
             .transpose()?
-            .unwrap_or(self.state(session, id)?.root);
+            .or_else(|| {
+                replaced
+                    .first()
+                    .and_then(|raw| snapshot.nodes[raw].parent_id.clone())
+            })
+            .unwrap_or(state.root);
+        let scene = paths::scene(&snapshot, &state.page_id)?;
+        if !paths::editable(&scene, &parent) {
+            return Err(EngineError::invalid(
+                "clipboard destination is unavailable or locked",
+            ));
+        }
+        let placement = if replace {
+            if replaced.iter().any(|raw| !paths::editable(&scene, raw))
+                || clipboard_roots(
+                    &snapshot,
+                    &replaced
+                        .iter()
+                        .cloned()
+                        .chain([parent.clone()])
+                        .collect::<Vec<_>>(),
+                )
+                .iter()
+                .all(|raw| raw != &parent)
+                || replaced.contains(&parent)
+            {
+                return Err(EngineError::invalid(
+                    "clipboard replacement is locked, outside this page, or contains the destination",
+                ));
+            }
+            let target_origin =
+                clipboard_origin(replaced.iter().filter_map(|raw| scene.bounds(raw)))?;
+            let parent_item = scene.item(&parent).unwrap();
+            if matches!(
+                parent_item.style.get("display"),
+                Some("flex" | "inline-flex" | "grid" | "inline-grid")
+            ) {
+                return Err(EngineError::invalid(
+                    "paste replace requires a positioned parent",
+                ));
+            }
+            let inverse = parent_item
+                .world
+                .inverse()
+                .ok_or_else(|| EngineError::invalid("destination transform is singular"))?;
+            let source_origin = clipboard_origin(
+                nodes
+                    .iter()
+                    .filter(|node| {
+                        node.parent_id
+                            .as_ref()
+                            .is_none_or(|raw| !map.contains_key(raw))
+                    })
+                    .map(|node| clipboard_geometry(node, &payload).map(|(_, bounds)| bounds))
+                    .collect::<Result<Vec<_>>>()?,
+            )?;
+            Some((
+                inverse,
+                target_origin.0 - source_origin.0,
+                target_origin.1 - source_origin.1,
+            ))
+        } else if legacy {
+            let inverse = scene
+                .item(&parent)
+                .unwrap()
+                .world
+                .inverse()
+                .ok_or_else(|| EngineError::invalid("destination transform is singular"))?;
+            let source = clipboard_origin(
+                nodes
+                    .iter()
+                    .filter(|node| {
+                        node.parent_id
+                            .as_ref()
+                            .is_none_or(|parent| !map.contains_key(parent))
+                    })
+                    .map(|node| clipboard_geometry(node, &payload).map(|(_, bounds)| bounds))
+                    .collect::<Result<Vec<_>>>()?,
+            )?;
+            let default_offset = if args["mode"] == "in_place" { 0. } else { 10. };
+            Some((
+                inverse,
+                args["x"].as_f64().map_or(default_offset, |x| x - source.0),
+                args["y"].as_f64().map_or(default_offset, |y| y - source.1),
+            ))
+        } else {
+            None
+        };
         let mut rank = rank_between(
             children(&snapshot, &parent).last().map(|n| n.rank.as_str()),
             None,
         )
         .ok_or_else(|| EngineError::new("resource_limit", "rank rebalance required"))?;
         let mut pending = nodes;
+        if let Some(roots) = payload["roots"].as_array() {
+            let order: BTreeMap<_, _> = roots
+                .iter()
+                .filter_map(Value::as_str)
+                .enumerate()
+                .map(|(index, id)| (id, index))
+                .collect();
+            pending.sort_by_key(|node| order.get(node.id.as_str()).copied().unwrap_or(usize::MAX));
+        }
         let mut done = std::collections::BTreeSet::new();
         let mut commands = Vec::new();
         let mut created = Vec::new();
@@ -550,6 +873,14 @@ impl ToolRouter {
             let mut node = pending.remove(index);
             let old = node.id.clone();
             let top = node.parent_id.as_ref().is_none_or(|p| !map.contains_key(p));
+            let transform = match placement {
+                Some((inverse, dx, dy)) if top => Some(
+                    inverse
+                        .multiply(omc_scene::Affine::translation(dx, dy))
+                        .multiply(clipboard_geometry(&node, &payload)?.0),
+                ),
+                _ => None,
+            };
             node.id = map[&old].clone();
             node.parent_id = Some(
                 node.parent_id
@@ -559,37 +890,205 @@ impl ToolRouter {
                     .unwrap_or(parent.clone()),
             );
             node.home_shard = new_id("shard");
-            remap_values(&mut node.properties, &map);
+            if !legacy {
+                remap_values(&mut node.properties, &map);
+            }
             if top {
                 node.rank = rank.clone();
                 rank = rank_between(Some(&rank), None)
                     .ok_or_else(|| EngineError::new("resource_limit", "rank exhausted"))?;
-                for key in ["x", "y"] {
-                    if let Some(v) = args.get(key) {
-                        node.properties.insert(key.into(), v.clone());
-                    } else if args["mode"] != "in_place" {
-                        node.properties
-                            .insert(key.into(), json!(node.number(key, 0.) + 16.));
+                if let Some(omc_scene::Affine([a, b, c, d, x, y])) = transform {
+                    node.properties.insert("x".into(), json!(x));
+                    node.properties.insert("y".into(), json!(y));
+                    node.properties
+                        .insert("transform".into(), json!([a, b, c, d, 0., 0.]));
+                } else {
+                    for key in ["x", "y"] {
+                        if let Some(v) = args.get(key) {
+                            node.properties.insert(key.into(), v.clone());
+                        } else if args["mode"] != "in_place" {
+                            node.properties
+                                .insert(key.into(), json!(node.number(key, 0.) + 16.));
+                        }
                     }
                 }
+                created.push(node.id.clone());
             }
-            created.push(node.id.clone());
             commands.push(Command::NodeCreate { node });
             done.insert(old);
         }
-        let mut result = self.submit(
+        if replace {
+            commands.push(Command::NodeDelete { node_ids: replaced });
+        }
+        let mut result = self.submit_with_output(
             session,
             id,
             Command::Batch { commands },
             &meta,
             Some(snapshot.sequence),
+            Properties::from([("rawSelection".into(), json!(created))]),
         )?;
-        result["ids"] = json!(
-            created
-                .iter()
-                .map(|raw| self.alias(session, id, raw))
-                .collect::<Vec<_>>()
-        );
+        result["ids"] = result["selection"].clone();
         Ok(result)
     }
+}
+
+fn clipboard_roots(snapshot: &DocumentSnapshot, ids: &[String]) -> Vec<String> {
+    let selected: std::collections::BTreeSet<_> = ids.iter().map(String::as_str).collect();
+    let mut seen = std::collections::BTreeSet::new();
+    ids.iter()
+        .filter(|raw| {
+            if !seen.insert(raw.as_str()) {
+                return false;
+            }
+            let mut current = snapshot
+                .nodes
+                .get(raw.as_str())
+                .and_then(|node| node.parent_id.as_deref());
+            while let Some(parent) = current {
+                if selected.contains(parent) {
+                    return false;
+                }
+                current = snapshot
+                    .nodes
+                    .get(parent)
+                    .and_then(|node| node.parent_id.as_deref());
+            }
+            true
+        })
+        .cloned()
+        .collect()
+}
+
+fn clipboard_origin(bounds: impl IntoIterator<Item = [f64; 4]>) -> Result<(f64, f64)> {
+    bounds
+        .into_iter()
+        .map(|[x, y, _, _]| (x, y))
+        .reduce(|(x, y), (nx, ny)| (x.min(nx), y.min(ny)))
+        .ok_or_else(|| EngineError::invalid("clipboard has no positioned roots"))
+}
+
+fn clipboard_geometry(node: &Node, payload: &Value) -> Result<(omc_scene::Affine, [f64; 4])> {
+    let explicit = payload["rootGeometry"].get(&node.id);
+    let matrix = if let Some(geometry) = explicit {
+        serde_json::from_value::<[f64; 6]>(geometry["matrix"].clone())
+            .map(omc_scene::Affine)
+            .map_err(|_| EngineError::invalid("invalid clipboard transform"))?
+    } else {
+        let x = node.number("x", 0.);
+        let y = node.number("y", 0.);
+        let authored = node
+            .properties
+            .get("transform")
+            .filter(|value| value.is_array())
+            .map(|value| serde_json::from_value::<[f64; 6]>(value.clone()))
+            .transpose()
+            .map_err(|_| EngineError::invalid("invalid clipboard transform"))?;
+        if let Some(authored) = authored {
+            omc_scene::Affine::translation(x, y).multiply(omc_scene::Affine(authored))
+        } else {
+            let (sin, cos) = node.number("rotation", 0.).to_radians().sin_cos();
+            let fx = if node.properties.get("flipX") == Some(&Value::Bool(true)) {
+                -1.
+            } else {
+                1.
+            };
+            let fy = if node.properties.get("flipY") == Some(&Value::Bool(true)) {
+                -1.
+            } else {
+                1.
+            };
+            let (cx, cy) = (
+                node.number("width", 0.) / 2.,
+                node.number("height", 0.) / 2.,
+            );
+            omc_scene::Affine::translation(x + cx, y + cy)
+                .multiply(omc_scene::Affine([
+                    cos * fx,
+                    sin * fx,
+                    -sin * fy,
+                    cos * fy,
+                    0.,
+                    0.,
+                ]))
+                .multiply(omc_scene::Affine::translation(-cx, -cy))
+        }
+    };
+    let bounds = if let Some(geometry) = explicit {
+        serde_json::from_value::<[f64; 4]>(geometry["bounds"].clone())
+            .map_err(|_| EngineError::invalid("invalid clipboard bounds"))?
+    } else {
+        matrix.bounds(node.number("width", 0.), node.number("height", 0.))
+    };
+    if !matrix
+        .0
+        .iter()
+        .chain(bounds.iter())
+        .all(|value| value.is_finite())
+    {
+        return Err(EngineError::invalid("nonfinite clipboard geometry"));
+    }
+    Ok((matrix, bounds))
+}
+
+fn clipboard_property_fields() -> std::collections::BTreeSet<&'static str> {
+    [
+        "fill",
+        "fills",
+        "stroke",
+        "strokes",
+        "strokeWidth",
+        "strokeAlignment",
+        "strokeCap",
+        "strokeJoin",
+        "strokeDashArray",
+        "strokeSides",
+        "opacity",
+        "blendMode",
+        "effects",
+        "shadows",
+        "blur",
+        "backgroundBlur",
+        "radii",
+        "radius",
+        "radiusTopLeft",
+        "radiusTopRight",
+        "radiusBottomLeft",
+        "radiusBottomRight",
+        "cornerSmoothing",
+        "smoothing",
+        "textStyleId",
+        "fillStyleId",
+        "strokeStyleId",
+        "effectStyleId",
+        "textBackground",
+    ]
+    .into_iter()
+    .chain(clipboard_text_style_fields())
+    .collect()
+}
+
+fn clipboard_text_style_fields() -> std::collections::BTreeSet<&'static str> {
+    [
+        "fills",
+        "fontFamily",
+        "fontSize",
+        "fontStyle",
+        "fontWeight",
+        "highlight",
+        "letterSpacing",
+        "lineHeight",
+        "listLevel",
+        "listType",
+        "paragraphIndent",
+        "paragraphSpacing",
+        "textAlign",
+        "textDecoration",
+        "textDecorationStyle",
+        "textDecorationThickness",
+        "textTransform",
+        "verticalAlign",
+    ]
+    .into_iter()
+    .collect()
 }

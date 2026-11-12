@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["apps/omc-cli", "apps/omc-desktop", "apps/omc-service", "crates/omc-assets", "crates/omc-engine", "crates/omc-export", "crates/omc-import", "crates/omc-layout", "crates/omc-mcp", "crates/omc-model", "crates/omc-protocol", "crates/omc-render", "crates/omc-scene", "crates/omc-storage", "crates/omc-style", "crates/omc-sync", "crates/omc-text", "crates/omc-workspace"]
+members = ["apps/omc-cli", "apps/omc-desktop", "apps/omc-service", "crates/omc-assets", "crates/omc-engine", "crates/omc-export", "crates/omc-import", "crates/omc-layout", "crates/omc-mcp", "crates/omc-model", "crates/omc-plugin", "crates/omc-protocol", "crates/omc-render", "crates/omc-scene", "crates/omc-storage", "crates/omc-style", "crates/omc-sync", "crates/omc-text", "crates/omc-workspace"]
 
 [workspace.package]
 version = "0.1.0"

@@ -135,6 +135,26 @@ fn hit_item(scene: &Scene, index: usize, x: f64, y: f64) -> Option<usize> {
         .or(contains.then_some(index))
 }
 
+pub fn hit_layer<'a>(scene: &'a Scene, frame: &str, x: f64, y: f64) -> Option<&'a str> {
+    let index = scene
+        .items
+        .iter()
+        .position(|item| item.id == frame && item.contains(x, y))?;
+    let hit = hit_item(scene, index, x, y)?;
+    Some(&scene.items[hit].id)
+}
+
+pub fn ancestor_instance(document: &DocumentSnapshot, source: &str) -> Option<String> {
+    let mut node = document.nodes.get(source)?;
+    loop {
+        if node.kind == NodeKind::Instance {
+            return Some(node.id.clone());
+        }
+        node = document.nodes.get(node.parent_id.as_deref()?)?;
+    }
+}
+
+#[cfg(test)]
 pub fn hit_target<'a>(
     document: &'a DocumentSnapshot,
     page_id: &str,

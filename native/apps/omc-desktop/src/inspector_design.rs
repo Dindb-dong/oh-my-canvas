@@ -1,7 +1,7 @@
 //! Design-panel composition adapted from FigCraft v0.17.0 (MIT):
 //! panels/right.rs, panels/layout_panel.rs, panels/typography/fields.rs and panels/paints.rs.
 use crate::{
-    app::{Action, App, Control, Inspector, RIGHT},
+    app::{Action, App, Control, Inspector},
     geometry::Rect,
 };
 use omc_model::{Node, NodeKind};
@@ -51,6 +51,7 @@ struct Panel<'a> {
     item: Option<&'a SceneItem>,
     x: f64,
     y: f64,
+    width: f64,
     next: u64,
     layout: Layout,
 }
@@ -113,7 +114,7 @@ impl Panel<'_> {
 
     fn caption(&mut self, y: f64, label: &'static str, muted: bool) {
         self.layout.decorations.push(Decoration::Text(
-            Rect::new(self.x + PAD, self.y + y, RIGHT - 2. * PAD, 16.),
+            Rect::new(self.x + PAD, self.y + y, self.width - 2. * PAD, 16.),
             label,
             muted,
         ));
@@ -152,7 +153,7 @@ impl Panel<'_> {
         command: Command,
     ) {
         self.icon(
-            RIGHT - 29. - index as f64 * 28.,
+            self.width - 29. - index as f64 * 28.,
             y,
             FIELD,
             glyph,
@@ -182,7 +183,8 @@ pub fn compose(app: &App, y: f64, header_y: f64) -> Option<Layout> {
     let mut p = Panel {
         node,
         item,
-        x: app.width - RIGHT,
+        x: app.width - app.right_width(),
+        width: app.right_width(),
         y,
         next: FIRST,
         layout: Layout {
@@ -222,7 +224,7 @@ pub fn compose(app: &App, y: f64, header_y: f64) -> Option<Layout> {
         false,
     );
     p.icon(
-        RIGHT - 81.,
+        p.width - 81.,
         header + 2.,
         FIELD,
         "component",
@@ -390,7 +392,13 @@ pub fn compose(app: &App, y: f64, header_y: f64) -> Option<Layout> {
             "Typography styles",
             Command::Catalog(Inspector::Assets),
         );
-        p.dropdown(PAD, y + 44.5, RIGHT - PAD - 5., "fontFamily", "Font family");
+        p.dropdown(
+            PAD,
+            y + 44.5,
+            p.width - PAD - 5.,
+            "fontFamily",
+            "Font family",
+        );
         p.dropdown(PAD, y + 76.5, COL, "fontWeight", "Weight");
         p.field(second, y + 76.5, COL + 12., "fontSize", "Font size");
         p.trailing(
@@ -502,7 +510,7 @@ pub fn compose(app: &App, y: f64, header_y: f64) -> Option<Layout> {
             ],
         );
         p.icon(
-            RIGHT - 35.,
+            p.width - 35.,
             y + 172.5,
             FIELD,
             "more",

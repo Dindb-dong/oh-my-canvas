@@ -1,5 +1,5 @@
 use crate::{
-    app::{Action, App, Control, FOOTER, HEADER, Inspector, Popup, RIGHT},
+    app::{Action, App, Control, FOOTER, Inspector, Popup, RIGHT, UtilityPopup},
     geometry::Rect,
 };
 use omc_model::NodeKind;
@@ -40,7 +40,9 @@ const FIELD_H: f64 = 24.;
 const PAD: f64 = 16.;
 const PAD_RIGHT: f64 = 8.;
 const SECTION_H: f64 = 40.;
-const TAB_BAR_BOTTOM: f64 = HEADER + 90.;
+fn tab_bar_bottom(app: &App) -> f64 {
+    app.header_height() + 90.
+}
 const SELECTION_HEADER_H: f64 = 46.;
 const ZOOM_ID: u64 = 600_002;
 const ZOOM_CHOICES: [f64; 3] = [0.5, 1., 2.];
@@ -117,9 +119,9 @@ fn body_top(app: &App) -> f64 {
     if (app.inspector == Inspector::Design && app.node().is_some())
         || matches!(app.inspector, Inspector::Inspect | Inspector::Prototype)
     {
-        TAB_BAR_BOTTOM + SELECTION_HEADER_H
+        tab_bar_bottom(app) + SELECTION_HEADER_H
     } else {
-        TAB_BAR_BOTTOM
+        tab_bar_bottom(app)
     }
 }
 
@@ -158,7 +160,11 @@ pub fn scrollbar(app: &App) -> Option<Rect> {
     let top = body_top(app);
     let height = app.height - FOOTER - top;
     let extent = max_scroll(app);
-    if height <= 24. || extent <= 0. || app.cursor.0 < app.width - RIGHT {
+    if !app.inspector_visible()
+        || height <= 24.
+        || extent <= 0.
+        || app.cursor.0 < app.width - app.right_width()
+    {
         return None;
     }
     let thumb = (height * height / (height + extent)).max(18.);
@@ -194,7 +200,7 @@ pub fn sections(app: &App) -> Vec<(&'static str, f64)> {
 
 pub fn design_layout(app: &App) -> Option<crate::inspector_design::Layout> {
     (app.inspector_visible() && app.inspector == Inspector::Design)
-        .then(|| crate::inspector_design::compose(app, body_y(app), TAB_BAR_BOTTOM + 12.))?
+        .then(|| crate::inspector_design::compose(app, body_y(app), tab_bar_bottom(app) + 12.))?
 }
 
 pub fn design_body_top(app: &App) -> f64 {
@@ -374,7 +380,12 @@ pub fn detail_text(app: &App) -> Vec<(Rect, String)> {
 }
 
 fn detail_rect(app: &App, y: f64) -> Rect {
-    Rect::new(app.width - RIGHT + PAD, y, RIGHT - PAD - PAD_RIGHT, FIELD_H)
+    Rect::new(
+        app.width - app.right_width().max(RIGHT) + PAD,
+        y,
+        app.right_width().max(RIGHT) - PAD - PAD_RIGHT,
+        FIELD_H,
+    )
 }
 
 fn row_visible(app: &App, rect: Rect) -> bool {
@@ -413,8 +424,8 @@ pub fn css_for_selection(app: &App) -> Option<String> {
     Some(declarations)
 }
 
-fn zoom_button_rect(width: f64) -> Rect {
-    Rect::new(width - 64., HEADER + 58., 56., FIELD_H)
+fn zoom_button_rect(width: f64, header: f64) -> Rect {
+    Rect::new(width - 64., header + 58., 56., FIELD_H)
 }
 
 fn popup_entries(app: &App) -> Vec<(String, Action, bool)> {
@@ -502,13 +513,13 @@ pub fn popup_rect(app: &App) -> Option<Rect> {
     }
     let height = 12. + 28. * entries.len() as f64;
     let anchor = match app.popup {
-        Some(Popup::InspectorLayer) => TAB_BAR_BOTTOM + 41.,
+        Some(Popup::InspectorLayer) => tab_bar_bottom(app) + 41.,
         Some(Popup::InspectorBlend) => app
             .controls
             .iter()
             .find(|c| c.label == "Blend mode")
-            .map_or(TAB_BAR_BOTTOM + 91., |c| c.rect.y + c.rect.height),
-        _ => HEADER + 91.,
+            .map_or(tab_bar_bottom(app) + 91., |c| c.rect.y + c.rect.height),
+        _ => app.header_height() + 91.,
     };
     Some(Rect::new(
         app.width - 170.,
@@ -545,14 +556,14 @@ pub fn controls(app: &App) -> Vec<Control> {
     let Some(doc) = app.document().filter(|_| app.inspector_visible()) else {
         return vec![];
     };
-    let x = app.width - RIGHT + PAD;
-    let wide = RIGHT - PAD - PAD_RIGHT;
+    let x = app.width - app.right_width().max(RIGHT) + PAD;
+    let wide = app.right_width().max(RIGHT) - PAD - PAD_RIGHT;
     let mut controls = vec![];
-    let mut tab_x = app.width - RIGHT + 4.;
+    let mut tab_x = app.width - app.right_width().max(RIGHT) + 4.;
     for (index, (label, tab, width)) in TABS.into_iter().enumerate() {
         controls.push(Control {
             id: 600_000 + index as u64,
-            rect: Rect::new(tab_x, HEADER + 58., width, FIELD_H),
+            rect: Rect::new(tab_x, app.header_height() + 58., width, FIELD_H),
             label: label.into(),
             action: Action::Inspector(tab),
             selected: app.inspector == tab,
@@ -562,7 +573,7 @@ pub fn controls(app: &App) -> Vec<Control> {
     }
     controls.push(Control {
         id: ZOOM_ID,
-        rect: zoom_button_rect(app.width),
+        rect: zoom_button_rect(app.width, app.header_height()),
         label: format!("Zoom {:.0}%", app.camera.zoom * 100.),
         action: Action::InspectorZoom,
         selected: app.popup == Some(Popup::InspectorZoom),
@@ -583,6 +594,15 @@ pub fn controls(app: &App) -> Vec<Control> {
     };
     if let Some(namespace) = catalog_namespace(app.inspector) {
         let entities = omc_style::catalog_entities(doc, namespace);
+        if app.inspector == Inspector::Assets {
+            add(
+                610_001,
+                Rect::new(x + wide - 82., y + 7., 82., FIELD_H),
+                "라이브러리".into(),
+                Action::Utility(UtilityPopup::Libraries),
+                None,
+            );
+        }
         y += SECTION_H;
         add(
             610_000,
@@ -686,7 +706,7 @@ mod tests {
     #[test]
     fn right_tabs_leave_room_for_the_zoom_menu() {
         let tabs_width = TABS.iter().map(|(_, _, width)| width + 2.).sum::<f64>();
-        assert!(8. + tabs_width <= zoom_button_rect(RIGHT).x);
+        assert!(8. + tabs_width <= zoom_button_rect(RIGHT, crate::app::HEADER).x);
         assert_eq!(
             TABS.map(|(_, tab, _)| tab),
             [Inspector::Design, Inspector::Prototype]

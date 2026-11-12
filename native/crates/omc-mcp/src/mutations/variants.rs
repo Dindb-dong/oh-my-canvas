@@ -4,6 +4,34 @@ use omc_scene::{Affine, SceneItem};
 type Axes = BTreeMap<String, String>;
 
 impl ToolRouter {
+    pub(crate) fn plan_single_variant_set(
+        &self,
+        session: &str,
+        snapshot: &DocumentSnapshot,
+        id: &str,
+    ) -> Result<(String, Vec<Command>)> {
+        let scene = paths::scene(snapshot, &self.state(session, &snapshot.id)?.page_id)?;
+        if !paths::editable(&scene, id) {
+            return Err(EngineError::invalid(
+                "Component layer is locked, hidden or outside the selected page",
+            ));
+        }
+        let mut draft = Draft {
+            snapshot: snapshot.clone(),
+            commands: Vec::new(),
+            created: Vec::new(),
+            affected: BTreeSet::new(),
+            result: Properties::new(),
+        };
+        let set = make_set(
+            &mut draft,
+            &scene,
+            &[id.to_owned()],
+            snapshot.nodes[id].string("name").unwrap_or("Component set"),
+        )?;
+        Ok((set, draft.commands))
+    }
+
     pub(super) fn variant_mutation(
         &self,
         session: &str,
@@ -40,26 +68,61 @@ impl ToolRouter {
                         "choose two or more distinct component definitions",
                     ));
                 }
+                let figcraft = args["_figcraftNames"] == true;
+                let mut ordered = ids.clone();
+                if figcraft {
+                    ordered.sort_by(|a, b| {
+                        draft.snapshot.nodes[a]
+                            .rank
+                            .cmp(&draft.snapshot.nodes[b].rank)
+                    });
+                }
                 let mut variants = Vec::new();
-                for id in &ids {
+                for (index, id) in ordered.iter().enumerate() {
                     let node = definition(draft, id)?;
+                    if figcraft
+                        && (node.string("variantSetId").is_some()
+                            || node.string("libraryId").is_some())
+                    {
+                        return Err(EngineError::invalid(
+                            "Choose local components that are not yet variants",
+                        ));
+                    }
                     let label = node.string("name").unwrap_or(id);
                     let mut values = read_axes(node)?;
+                    let mut rename = None;
                     if values.is_empty() {
-                        values = parse_axes(label)
-                            .unwrap_or_else(|| BTreeMap::from([("Variant".into(), label.into())]));
+                        values = if let Some(axes) = parse_axes(label) {
+                            axes
+                        } else if figcraft {
+                            let value = if index == 0 {
+                                "Default".into()
+                            } else {
+                                format!("Variant{}", index + 1)
+                            };
+                            rename = Some(format!("Property 1={value}"));
+                            BTreeMap::from([("Property 1".into(), value)])
+                        } else {
+                            BTreeMap::from([("Variant".into(), label.into())])
+                        };
                     }
-                    variants.push((id.clone(), values));
+                    variants.push((id.clone(), values, rename));
                 }
-                validate_axes(variants.iter().map(|(_, axes)| axes))?;
+                validate_axes(variants.iter().map(|(_, axes, _)| axes))?;
                 let set = make_set(
                     draft,
                     &scene,
                     &ids,
                     args["name"].as_str().unwrap_or("Variants"),
                 )?;
-                for (id, axes) in variants {
-                    write_axes(draft, id, Some(&set), &axes)?;
+                for (id, axes, rename) in variants {
+                    write_axes(draft, id.clone(), Some(&set), &axes)?;
+                    if let Some(name) = rename {
+                        draft.apply(Command::NodeSet {
+                            node_id: id,
+                            properties: Properties::from([("name".into(), json!(name))]),
+                        })?;
+                    }
                 }
                 Ok(())
             }
@@ -121,6 +184,19 @@ impl ToolRouter {
                         source.string("name").unwrap_or("Variants"),
                     )?;
                     write_axes(draft, source.id.clone(), Some(&set), &old)?;
+                    if args["_figcraftNames"] == true
+                        && source.string("name").and_then(parse_axes).is_none()
+                    {
+                        let name = old
+                            .iter()
+                            .map(|(name, value)| format!("{name}={value}"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        draft.apply(Command::NodeSet {
+                            node_id: source.id.clone(),
+                            properties: Properties::from([("name".into(), json!(name))]),
+                        })?;
+                    }
                     set
                 };
                 let rank = draft.last_rank(&set)?;

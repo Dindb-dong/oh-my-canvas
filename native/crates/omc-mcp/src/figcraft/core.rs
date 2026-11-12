@@ -335,7 +335,7 @@ impl ToolRouter {
                     } else {
                         NodeKind::Frame
                     };
-                    if node.kind != expected {
+                    if node.effective_kind() != expected {
                         return Err(EngineError::invalid(
                             "selected layer is not the requested container type",
                         ));

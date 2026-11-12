@@ -2,6 +2,25 @@ use super::*;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
+thread_local! {
+    static RASTER_PROFILE: std::cell::Cell<omc_style::ColorProfile> =
+        const { std::cell::Cell::new(omc_style::ColorProfile::Srgb) };
+}
+
+pub(super) fn with_raster_profile<T>(
+    profile: omc_style::ColorProfile,
+    render: impl FnOnce() -> T,
+) -> T {
+    struct Reset(omc_style::ColorProfile);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            RASTER_PROFILE.set(self.0);
+        }
+    }
+    let _scope = Reset(RASTER_PROFILE.replace(profile));
+    render()
+}
+
 pub(super) fn image_data(
     hash: &str,
     resources: &dyn ResourceProvider,
@@ -54,9 +73,25 @@ pub(super) fn load_image(
     resources: &dyn ResourceProvider,
 ) -> Result<Image, RenderError> {
     let (data, _, _, _) = image_data(hash, resources)?;
-    Image::from_encoded(data).ok_or_else(|| {
+    let image = Image::from_encoded(data).ok_or_else(|| {
         RenderError::ResourceUnavailable(format!("native image decode failed: {hash}"))
-    })
+    })?;
+    if RASTER_PROFILE.get() == omc_style::ColorProfile::DisplayP3 {
+        // An untagged working surface treats source samples as already in its profile.
+        // Normalize embedded raster assets before compositing into it.
+        let image = if image.color_space().is_none() {
+            image.reinterpret_color_space(ColorSpace::new_srgb())
+                .ok_or_else(|| RenderError::Backend("Image source profile tagging failed".into()))?
+        } else {
+            image
+        };
+        return image
+            .make_color_space(None, display_p3_space()?, Default::default())
+            .ok_or_else(|| {
+                RenderError::Backend("Image asset color profile conversion failed".into())
+            });
+    }
+    Ok(image)
 }
 
 /// Conservative reservation includes compositing/filter surfaces and every image occurrence.
@@ -160,9 +195,16 @@ pub(super) fn reserve(
         for hash in hashes {
             match image_data(hash, resources) {
                 Ok((data, w, h, encoded)) => {
+                    let decoded_bytes = if scene.color_profile == omc_style::ColorProfile::DisplayP3 {
+                        12
+                    } else {
+                        8
+                    };
                     image_bytes = image_bytes
                         .saturating_add(encoded.saturating_mul(3))
-                        .saturating_add((w as usize).saturating_mul(h as usize).saturating_mul(8));
+                        .saturating_add(
+                            (w as usize).saturating_mul(h as usize).saturating_mul(decoded_bytes),
+                        );
                     if peak.saturating_add(image_bytes) > options.max_surface_bytes {
                         return Err(RenderError::ResourceLimit("compositing, encoded resources and decoded pixels exceed the render reservation".into()));
                     }

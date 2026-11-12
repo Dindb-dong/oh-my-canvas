@@ -1,7 +1,14 @@
 //! Bounded FigCraft v1 archives for editable basic layers.
 use super::*;
+use crate::figcraft::{dev_diff, dev_status, prototype_settings};
 use base64::Engine;
 use omc_model::{NodeKind, Page, rank_between};
+use omc_style::prototype::{
+    INTERACTIONS as PROTOTYPE_INTERACTIONS, SETTINGS as PROTOTYPE_SETTINGS,
+};
+mod comments;
+mod prototype_archive;
+pub use comments::WireComments;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
@@ -56,6 +63,7 @@ pub(super) const FILE_COMMANDS: &[(&str, &str, bool, &str)] = &[
 pub(super) struct FigFile {
     pub path: String,
     pub digest: Vec<u8>,
+    upstream_archive: bool,
 }
 
 impl ToolRouter {
@@ -94,7 +102,7 @@ impl ToolRouter {
             );
         }
 
-        let (content, current_page, warnings) = self.fig_decode_input(&input)?;
+        let (content, current_page, warnings, upstream_archive) = self.fig_decode_input(&input)?;
         let images = content
             .nodes
             .values()
@@ -114,6 +122,7 @@ impl ToolRouter {
             input.path.as_ref().map(|path| FigFile {
                 path: path.clone(),
                 digest,
+                upstream_archive,
             }),
             input.path.as_ref().map(|_| snapshot.sequence),
         )?;
@@ -191,6 +200,39 @@ impl ToolRouter {
         Ok(json!({"document":external_id(&snapshot.id), "name":snapshot.title}))
     }
 
+    pub(super) fn fig_adopt_window_file(&self, session: &str, document: &str) {
+        let path = {
+            let mut states = self.states.lock().unwrap();
+            let Some(source) = states.iter().find_map(|((owner, id), state)| {
+                (id == document && owner != session && state.fig_file.is_some()).then(|| {
+                    (
+                        state.fig_file.clone().unwrap(),
+                        state.fig_saved_revision,
+                        state.page_id.clone(),
+                        state.root.clone(),
+                    )
+                })
+            }) else {
+                return;
+            };
+            let Some(target) = states.get_mut(&(session.into(), document.into())) else {
+                return;
+            };
+            if target.fig_file.is_some() {
+                return;
+            }
+            let (file, saved, page, root) = source;
+            let path = file.path.clone();
+            target.fig_file = Some(file);
+            target.fig_saved_revision = saved;
+            target.page_id = page;
+            target.root = root;
+            path
+        };
+        let mut recent = self.fig_file_access.lock().unwrap();
+        remember_recent(recent.entry(session.into()).or_default(), &path);
+    }
+
     fn fig_file_state(
         &self,
         session: &str,
@@ -218,16 +260,19 @@ impl ToolRouter {
         Ok(())
     }
 
-    fn fig_decode_input(&self, input: &FileInput) -> Result<(DocumentContent, usize, Value)> {
+    fn fig_decode_input(&self, input: &FileInput) -> Result<(DocumentContent, usize, Value, bool)> {
         if input.extension == "figcraft" {
+            if let Some((content, page)) = self.fig_decode_catalog_archive(&input.bytes)? {
+                return Ok((content, page, json!([]), false));
+            }
             let (content, page) = decode(&input.bytes)?;
-            return Ok((content, page, json!([])));
+            return Ok((content, page, json!([]), true));
         }
         if input.extension == "json" {
             let file = omc_protocol::decode_json_with_limit(&input.bytes, MAX_FILE)?;
             if file["format"] == "figcraft" {
                 let (content, page) = decode_document(&file)?;
-                return Ok((content, page, json!([])));
+                return Ok((content, page, json!([]), false));
             }
         }
         if matches!(input.extension.as_str(), "png" | "jpg" | "jpeg" | "webp") {
@@ -235,7 +280,7 @@ impl ToolRouter {
             let mut node = self.fig_image_node(&input.bytes, &input.title, &Value::Null)?;
             node.parent_id = Some(content.pages[0].root_node_id.clone());
             content.nodes.insert(node.id.clone(), node);
-            return Ok((content, 0, json!([])));
+            return Ok((content, 0, json!([]), false));
         }
         let imported = omc_import::import_bytes(
             &input.extension,
@@ -257,7 +302,7 @@ impl ToolRouter {
                 ));
             }
         }
-        Ok((imported.content, 0, json!(imported.diagnostics)))
+        Ok((imported.content, 0, json!(imported.diagnostics), false))
     }
 
     pub(super) fn fig_file_command(
@@ -347,7 +392,7 @@ impl ToolRouter {
                             &input.title,
                         );
                     }
-                    let (content, _, warnings) = self.fig_decode_input(&input)?;
+                    let (content, _, warnings, _) = self.fig_decode_input(&input)?;
                     self.fig_import_content(
                         session, snapshot, state, params, &input, content, warnings,
                     )
@@ -579,7 +624,7 @@ impl ToolRouter {
         snapshot: &DocumentSnapshot,
         input: &FileInput,
     ) -> Result<Value> {
-        let (content, current_page, warnings) = self.fig_decode_input(input)?;
+        let (content, current_page, warnings, upstream_archive) = self.fig_decode_input(input)?;
         if !snapshot.metadata.is_empty()
             || !content.metadata.is_empty()
             || warnings.as_array().is_some_and(|warnings| {
@@ -636,13 +681,14 @@ impl ToolRouter {
             Some(FigFile {
                 path,
                 digest: Sha256::digest(&input.bytes).to_vec(),
+                upstream_archive,
             }),
             Some(revision),
         )?;
         Ok(json!({"ok":true,"revision":revision}))
     }
 
-    fn fig_image_node(&self, bytes: &[u8], name: &str, params: &Value) -> Result<Node> {
+    pub(super) fn fig_image_node(&self, bytes: &[u8], name: &str, params: &Value) -> Result<Node> {
         let mime = resources::detect_mime(bytes)?;
         if !matches!(mime, "image/png" | "image/jpeg" | "image/webp") {
             return Err(unsupported(format!("image format {mime}")));
@@ -671,6 +717,7 @@ impl ToolRouter {
         let fit = match params["mode"].as_str().unwrap_or("fill") {
             "fit" => "contain",
             "fill" | "crop" => "cover",
+            "tile" => "tile",
             mode => return Err(unsupported(format!("image mode {mode}"))),
         };
         let x = file_number(params, "x", 0.)?;
@@ -684,7 +731,7 @@ impl ToolRouter {
         Ok(node)
     }
 
-    fn fig_place_image(
+    pub(super) fn fig_place_image(
         &self,
         session: &str,
         snapshot: &DocumentSnapshot,
@@ -752,12 +799,23 @@ impl ToolRouter {
         let state = self
             .state(session, &snapshot.id)
             .unwrap_or_else(|_| state.clone());
+        let native_catalog = crate::figcraft_catalog::library_archive::needs_native(&snapshot);
         if save_as && params["data"] == true && params.get("path").is_none() {
-            let bytes = encode(&snapshot, &state.page_id)?;
-            return Ok(
-                json!({"name":format!("{}.figcraft",snapshot.title),"bytes":bytes.len(),
-                "data":base64::engine::general_purpose::STANDARD.encode(bytes)}),
-            );
+            let bytes = if native_catalog {
+                self.fig_encode_catalog_archive(&snapshot, &state.page_id)?
+            } else {
+                encode(
+                    &snapshot,
+                    &state.page_id,
+                    self.thumbnail_png(&snapshot)?.as_deref(),
+                )?
+            };
+            let mut result = json!({"name":format!("{}.figcraft",snapshot.title),"bytes":bytes.len(),
+                "data":base64::engine::general_purpose::STANDARD.encode(bytes)});
+            if native_catalog {
+                result["nativeCatalog"] = json!(true);
+            }
+            return Ok(result);
         }
         let path = params["path"]
             .as_str()
@@ -773,8 +831,26 @@ impl ToolRouter {
         } else {
             path.to_owned()
         };
-        let bytes = match extension(&path)?.as_str() {
-            "figcraft" => encode(&snapshot, &state.page_id)?,
+        let extension = extension(&path)?;
+        let previous = state.fig_file.as_ref().filter(|file| file.path == path);
+        if extension == "figcraft"
+            && native_catalog
+            && previous.is_some_and(|file| file.upstream_archive)
+        {
+            return Err(EngineError::new(
+                "unsupported",
+                "this document now contains OMC-only catalog data; use file.saveAs with a new .omc path to preserve the original FigCraft archive",
+            ));
+        }
+        let bytes = match extension.as_str() {
+            "figcraft" if native_catalog => {
+                self.fig_encode_catalog_archive(&snapshot, &state.page_id)?
+            }
+            "figcraft" => encode(
+                &snapshot,
+                &state.page_id,
+                self.thumbnail_png(&snapshot)?.as_deref(),
+            )?,
             "omc" => {
                 omc_export::export(
                     &snapshot,
@@ -789,7 +865,6 @@ impl ToolRouter {
             }
             other => return Err(unsupported(format!("export to {other}"))),
         };
-        let previous = state.fig_file.as_ref().filter(|file| file.path == path);
         let overwrite = params["overwrite"] == true
             || if let Some(file) = previous {
                 let disk = resources::read_explicit(&path, MAX_FILE)?;
@@ -811,9 +886,14 @@ impl ToolRouter {
             current.fig_file = Some(FigFile {
                 path: path.clone(),
                 digest: Sha256::digest(&bytes).to_vec(),
+                upstream_archive: extension == "figcraft" && !native_catalog,
             });
         }
-        Ok(json!({"path":path,"bytes":bytes.len()}))
+        let mut result = json!({"path":path,"bytes":bytes.len()});
+        if native_catalog && extension == "figcraft" {
+            result["nativeCatalog"] = json!(true);
+        }
+        Ok(result)
     }
 }
 
@@ -960,7 +1040,7 @@ fn file_data(data: &Value) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn image_input(params: &Value) -> Result<(Vec<u8>, String)> {
+pub(super) fn image_input(params: &Value) -> Result<(Vec<u8>, String)> {
     match (params.get("path"), params.get("data")) {
         (Some(path), None) => {
             let path = path
@@ -1024,8 +1104,16 @@ fn extension(path: &str) -> Result<String> {
 }
 
 fn decode(bytes: &[u8]) -> Result<(DocumentContent, usize)> {
+    decode_document(&read_wire_archive(bytes)?)
+}
+
+pub fn read_recovery_archive(path: &str) -> Result<Value> {
+    read_wire_archive(&resources::read_explicit(path, MAX_FILE)?)
+}
+
+fn read_wire_archive(bytes: &[u8]) -> Result<Value> {
     if bytes.iter().find(|byte| !byte.is_ascii_whitespace()) == Some(&b'{') {
-        return decode_document(&omc_protocol::decode_json_with_limit(bytes, MAX_FILE)?);
+        return omc_protocol::decode_json_with_limit(bytes, MAX_FILE);
     }
     let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(invalid)?;
     if archive.len() > 3
@@ -1049,10 +1137,28 @@ fn decode(bytes: &[u8]) -> Result<(DocumentContent, usize)> {
     if bytes.len() > MAX_FILE {
         return Err(invalid("document.json too large"));
     }
-    decode_document(&omc_protocol::decode_json_with_limit(&bytes, MAX_FILE)?)
+    omc_protocol::decode_json_with_limit(&bytes, MAX_FILE)
 }
 
 fn decode_document(file: &Value) -> Result<(DocumentContent, usize)> {
+    decode_wire_document(file, &mut BTreeMap::new(), &mut BTreeMap::new())
+}
+
+pub fn decode_wire_document(
+    file: &Value,
+    native_ids: &mut BTreeMap<u64, String>,
+    page_ids: &mut BTreeMap<u64, String>,
+) -> Result<(DocumentContent, usize)> {
+    decode_wire_document_with_comments(file, native_ids, page_ids, &mut WireComments::default(), None)
+}
+
+pub fn decode_wire_document_with_comments(
+    file: &Value,
+    native_ids: &mut BTreeMap<u64, String>,
+    page_ids: &mut BTreeMap<u64, String>,
+    comments: &mut WireComments,
+    current_snapshot: Option<&DocumentSnapshot>,
+) -> Result<(DocumentContent, usize)> {
     if file["format"] != "figcraft" || file["version"] != 1 {
         return Err(invalid("FigCraft v1 document required"));
     }
@@ -1072,12 +1178,14 @@ fn decode_document(file: &Value) -> Result<(DocumentContent, usize)> {
                     | "current_page"
                     | "document_colors"
                     | "comments"
+                    | "annotation_categories"
+                    | "color_profile"
             )
         })
     }) {
         return Err(unsupported("unrecognized document metadata"));
     }
-    for key in ["imageIndex", "comments", "styles", "document_colors"] {
+    for key in ["imageIndex", "styles", "document_colors"] {
         if file
             .get(key)
             .is_some_and(|value| value.as_array().is_none_or(|values| !values.is_empty()))
@@ -1111,7 +1219,41 @@ fn decode_document(file: &Value) -> Result<(DocumentContent, usize)> {
         nodes: BTreeMap::new(),
         metadata: Properties::new(),
     };
+    if let Some(value) = file.get("color_profile") {
+        let profile = value
+            .as_str()
+            .and_then(omc_style::ColorProfile::parse)
+            .ok_or_else(|| invalid("invalid file color profile"))?;
+        content
+            .metadata
+            .insert("colorProfile".into(), json!(profile.name()));
+    }
+    if let Some(value) = file.get("annotation_categories") {
+        let categories = value
+            .as_array()
+            .filter(|items| items.len() <= 64)
+            .ok_or_else(|| invalid("invalid annotation categories"))?;
+        let mut native = Vec::new();
+        let mut ids = BTreeSet::new();
+        for category in categories {
+            let id = string(category, "id")?;
+            let name = string(category, "name")?;
+            if id.is_empty()
+                || id.len() > 128
+                || name.trim().is_empty()
+                || name.chars().count() > 64
+                || !ids.insert(id)
+            {
+                return Err(invalid("invalid annotation category ID or name"));
+            }
+            native.push(json!({"id":id,"name":name,"color":read_color(&category["color"])?}));
+        }
+        content
+            .metadata
+            .insert("annotationCategories".into(), json!(native));
+    }
     let mut visited = BTreeSet::new();
+    let mut node_ids = BTreeMap::new();
     let mut pending = vec![];
     let mut add = |data: &Value,
                    parent: Option<(&str, u64)>,
@@ -1139,6 +1281,11 @@ fn decode_document(file: &Value) -> Result<(DocumentContent, usize)> {
             ("text", Some(_)) => NodeKind::Text,
             _ => return Err(unsupported(format!("layer type {kind}"))),
         });
+        if let Some(id) = native_ids.get(&number) {
+            native.id.clone_from(id);
+        } else {
+            native_ids.insert(number, native.id.clone());
+        }
         native.parent_id = parent.map(|(id, _)| id.to_owned());
         if parent.is_some_and(|(_, id)| node["parent"] != id) {
             return Err(invalid("inconsistent node parent"));
@@ -1149,6 +1296,7 @@ fn decode_document(file: &Value) -> Result<(DocumentContent, usize)> {
         );
         native.properties = read_properties(node, kind)?;
         let id = native.id.clone();
+        node_ids.insert(number, id.clone());
         let children = node
             .get("children")
             .map(|value| {
@@ -1164,6 +1312,11 @@ fn decode_document(file: &Value) -> Result<(DocumentContent, usize)> {
     for (index, root) in roots.iter().enumerate() {
         let (number, id, children, node) = add(root, None, index, roots.len())?;
         let mut page = Page::new(node.string("name").unwrap_or("Page"), &id);
+        if let Some(page_id) = page_ids.get(&number) {
+            page.id.clone_from(page_id);
+        } else {
+            page_ids.insert(number, page.id.clone());
+        }
         page.rank.clone_from(&node.rank);
         content.pages.push(page);
         content.nodes.insert(id.clone(), node);
@@ -1184,23 +1337,77 @@ fn decode_document(file: &Value) -> Result<(DocumentContent, usize)> {
     if visited.len() != records.len() {
         return Err(invalid("file contains detached nodes"));
     }
+    for (number, id) in &node_ids {
+        let record = &records[&number.to_string()];
+        let node = content.nodes.get_mut(id).unwrap();
+        if let Some(flows) = record.get("flows").filter(|_| node.parent_id.is_none()) {
+            let flows = flows
+                .as_array()
+                .filter(|items| items.len() <= 100)
+                .ok_or_else(|| invalid("invalid prototype flows"))?;
+            let mut native = Vec::new();
+            for flow in flows {
+                let start = flow["start"]
+                    .as_u64()
+                    .and_then(|id| node_ids.get(&id))
+                    .ok_or_else(|| invalid("invalid prototype flow destination"))?;
+                native.push(json!({"name":string(flow, "name")?,"start":start,"description":flow["description"].as_str().unwrap_or("")}));
+            }
+            if !native.is_empty() {
+                node.properties
+                    .insert("prototypeFlows".into(), json!(native));
+            }
+        }
+        if let Some(interactions) = record
+            .get("interactions")
+            .filter(|_| node.parent_id.is_some())
+        {
+            prototype_archive::decode(node, interactions, &node_ids)?;
+        }
+    }
     content.validate().map_err(invalid)?;
+    comments::decode(file, &mut content, &node_ids, page_ids, comments, current_snapshot)?;
+    let marked = content
+        .nodes
+        .values()
+        .filter(|node| {
+            node.string(dev_status::STATUS) == Some("readyForDev")
+                && !node.properties.contains_key(dev_status::BASELINE)
+        })
+        .map(|node| node.id.clone())
+        .collect::<Vec<_>>();
+    if !marked.is_empty() {
+        let tree = dev_status::Tree::new(&content.nodes);
+        let baselines = marked
+            .into_iter()
+            .map(|id| {
+                let baseline = tree.hash(&id);
+                (id, baseline)
+            })
+            .collect::<Vec<_>>();
+        for (id, baseline) in baselines {
+            content
+                .nodes
+                .get_mut(&id)
+                .unwrap()
+                .properties
+                .insert(dev_status::BASELINE.into(), json!(baseline));
+        }
+    }
     Ok((content, current))
 }
 
-fn read_properties(node: &Value, kind: &str) -> Result<Properties> {
+pub(crate) fn read_properties(node: &Value, kind: &str) -> Result<Properties> {
     let mut out = Properties::from([("name".into(), node["name"].clone())]);
+    read_design_properties(node, &mut out)?;
     if kind == "page" {
-        for key in ["flows", "guides", "layoutGrids"] {
-            if node
-                .get(key)
-                .is_some_and(|value| value.as_array().is_none_or(|items| !items.is_empty()))
-            {
-                return Err(unsupported(format!("page {key}")));
-            }
-        }
         if let Some(background) = node.get("background") {
             out.insert("fill".into(), json!(read_color(background)?));
+        }
+        if let Some(settings) = node.get("prototype")
+            && let Some(native) = prototype_settings::decode_archive_settings(settings)?
+        {
+            out.insert(PROTOTYPE_SETTINGS.into(), native);
         }
         return Ok(out);
     }
@@ -1232,9 +1439,65 @@ fn read_properties(node: &Value, kind: &str) -> Result<Properties> {
                 | "opacity"
                 | "visible"
                 | "locked"
+                | "annotations"
+                | "dev_resources"
+                | "dev_status"
+                | "dev_changed"
+                | "dev_note"
+                | "guides"
+                | "grids"
+                | "exports"
+                | "interactions"
+                | "plugin_data"
         ) {
             return Err(unsupported(format!("layer property {key}")));
         }
+    }
+    if let Some(data) = node.get("plugin_data") {
+        let marker = data
+            .as_object()
+            .filter(|data| data.keys().all(|key| key == "figcraft.thumbnail"))
+            .ok_or_else(|| unsupported("layer plugin data"))?;
+        if marker.get("figcraft.thumbnail").and_then(Value::as_str) == Some("true") {
+            out.insert("figThumbnail".into(), json!(true));
+        }
+    }
+    for (source, destination, limit) in [
+        ("annotations", "annotations", 64),
+        ("dev_resources", "devResources", 32),
+    ] {
+        if let Some(entries) = node.get(source) {
+            if entries.as_array().is_none_or(|values| {
+                values.len() > limit || values.iter().any(|value| !value.is_object())
+            }) {
+                return Err(invalid(format!("invalid {source}")));
+            }
+            out.insert(destination.into(), entries.clone());
+        }
+    }
+    if let Some(status) = node.get("dev_status") {
+        let status = dev_status::parse(status)?;
+        if !status.is_null() {
+            out.insert(dev_status::STATUS.into(), status);
+        }
+    }
+    if node
+        .get("dev_changed")
+        .is_some_and(|value| !value.is_boolean())
+    {
+        return Err(invalid("dev_changed must be boolean"));
+    }
+    if node["dev_changed"] == true && out.get(dev_status::STATUS) == Some(&json!("readyForDev")) {
+        out.insert(
+            dev_status::BASELINE.into(),
+            json!(dev_status::ARCHIVE_CHANGED),
+        );
+    }
+    if let Some(note) = node.get("dev_note") {
+        if note.as_str().is_none_or(|note| note.len() > 16_000) {
+            return Err(invalid("invalid dev_note"));
+        }
+        out.insert(dev_status::NOTE.into(), note.clone());
     }
     if node.get("blend").is_some_and(|blend| blend != "normal")
         || kind == "ellipse"
@@ -1375,7 +1638,7 @@ fn read_properties(node: &Value, kind: &str) -> Result<Properties> {
     Ok(out)
 }
 
-fn read_color(color: &Value) -> Result<String> {
+pub(crate) fn read_color(color: &Value) -> Result<String> {
     let mut result = String::from("#");
     for key in ["r", "g", "b", "a"] {
         let n = color[key]
@@ -1390,14 +1653,39 @@ fn read_color(color: &Value) -> Result<String> {
     Ok(result)
 }
 
-fn encode(snapshot: &DocumentSnapshot, page: &str) -> Result<Vec<u8>> {
-    if !snapshot.metadata.is_empty() {
-        return Err(unsupported("document-level styles, comments or metadata"));
+fn encode(snapshot: &DocumentSnapshot, page: &str, thumbnail: Option<&[u8]>) -> Result<Vec<u8>> {
+    let mut ids = BTreeMap::new();
+    let document =
+        serde_json::to_vec(&encode_wire_document(snapshot, page, &mut ids, 0)?).map_err(invalid)?;
+    write_archive(&document, thumbnail)
+}
+
+pub fn encode_wire_document(
+    snapshot: &DocumentSnapshot,
+    page: &str,
+    ids: &mut BTreeMap<String, usize>,
+    client: u32,
+) -> Result<Value> {
+    encode_wire_document_with_comments(snapshot, page, ids, client, &mut WireComments::default())
+}
+
+pub fn encode_wire_document_with_comments(
+    snapshot: &DocumentSnapshot,
+    page: &str,
+    ids: &mut BTreeMap<String, usize>,
+    client: u32,
+    comments: &mut WireComments,
+) -> Result<Value> {
+    if snapshot
+        .metadata
+        .keys()
+        .any(|key| !matches!(key.as_str(), "annotationCategories" | "colorProfile") && !key.starts_with("comments/"))
+    {
+        return Err(unsupported("document-level styles or metadata"));
     }
     if snapshot.nodes.len() > MAX_NODES {
         return Err(invalid("document exceeds the archive node limit"));
     }
-    let mut ids = BTreeMap::new();
     let mut pending = snapshot
         .pages
         .iter()
@@ -1413,8 +1701,15 @@ fn encode(snapshot: &DocumentSnapshot, page: &str) -> Result<Vec<u8>> {
     for nodes in child_ids.values_mut() {
         nodes.sort_by(|a, b| a.rank.cmp(&b.rank).then(a.id.cmp(&b.id)));
     }
+    let prefix = (client as u64) << 32;
+    let mut next = ids
+        .values()
+        .copied()
+        .filter(|id| (*id as u64) >> 32 == u64::from(client))
+        .max()
+        .map(|id| id as u64 + 1)
+        .unwrap_or(prefix + 1);
     while let Some(raw) = pending.pop() {
-        let number = ids.len() + 1;
         pending.extend(
             child_ids
                 .get(raw.as_str())
@@ -1423,7 +1718,16 @@ fn encode(snapshot: &DocumentSnapshot, page: &str) -> Result<Vec<u8>> {
                 .rev()
                 .map(|node| node.id.clone()),
         );
-        ids.insert(raw, number);
+        if let std::collections::btree_map::Entry::Vacant(slot) = ids.entry(raw) {
+            if next >> 32 != u64::from(client) {
+                return Err(invalid("FigCraft node id space exhausted"));
+            }
+            slot.insert(
+                usize::try_from(next)
+                    .map_err(|_| invalid("FigCraft node id exceeds platform size"))?,
+            );
+            next += 1;
+        }
     }
     let mut nodes = serde_json::Map::new();
     let pages = snapshot
@@ -1437,6 +1741,11 @@ fn encode(snapshot: &DocumentSnapshot, page: &str) -> Result<Vec<u8>> {
             current = ids[&entry.root_node_id];
         }
     }
+    let dev_tree = snapshot
+        .nodes
+        .values()
+        .any(|node| node.properties.contains_key(dev_status::BASELINE))
+        .then(|| dev_status::Tree::new(&snapshot.nodes));
     for (raw, node) in &snapshot.nodes {
         let id = ids[raw];
         let children = child_ids
@@ -1445,12 +1754,19 @@ fn encode(snapshot: &DocumentSnapshot, page: &str) -> Result<Vec<u8>> {
             .flatten()
             .map(|node| ids[&node.id])
             .collect::<Vec<_>>();
-        let record = if node.parent_id.is_none() {
-            if node
-                .properties
-                .keys()
-                .any(|key| !matches!(key.as_str(), "name" | "fill"))
-            {
+        let mut record = if node.parent_id.is_none() {
+            if node.properties.keys().any(|key| {
+                !matches!(
+                    key.as_str(),
+                    "name"
+                        | "fill"
+                        | "prototypeFlows"
+                        | PROTOTYPE_SETTINGS
+                        | "guides"
+                        | "layoutGrids"
+                        | "exports"
+                )
+            }) {
                 return Err(unsupported("page properties"));
             }
             let page = snapshot
@@ -1458,20 +1774,76 @@ fn encode(snapshot: &DocumentSnapshot, page: &str) -> Result<Vec<u8>> {
                 .iter()
                 .find(|page| page.root_node_id == *raw)
                 .unwrap();
+            let mut flows = Vec::new();
+            if let Some(entries) = node
+                .properties
+                .get("prototypeFlows")
+                .and_then(Value::as_array)
+            {
+                for flow in entries {
+                    if let Some(start) = flow["start"].as_str().and_then(|raw| ids.get(raw)) {
+                        flows.push(json!({"name":flow["name"],"start":start,"description":flow["description"]}));
+                    }
+                }
+            }
+            let prototype = node.properties.get(PROTOTYPE_SETTINGS)
+                .map(prototype_settings::encode_archive_settings).transpose()?
+                .unwrap_or_else(|| json!({"device":"None","background":{"r":0.118,"g":0.118,"b":0.118,"a":1},"rotation":"portrait"}));
             json!({"id":id,"name":page.title,"type":"page","background":encode_color(node.string("fill").unwrap_or("#F5F5F5"))?,
-                "flows":[],"prototype":{"device":"None","background":{"r":0.118,"g":0.118,"b":0.118,"a":1},"rotation":"portrait"},"children":children,"width":0,"height":0})
+                "flows":flows,"prototype":prototype,"children":children,"width":0,"height":0})
         } else {
             let mut record = write_properties(node, id)?;
+            if node.string(dev_status::STATUS) == Some("readyForDev")
+                && let Some(baseline) = node.string(dev_status::BASELINE)
+                && dev_tree
+                    .as_ref()
+                    .is_some_and(|tree| baseline != tree.hash(raw))
+            {
+                record["dev_changed"] = json!(true);
+            }
+            if let Some(interactions) = node.properties.get(PROTOTYPE_INTERACTIONS) {
+                record["interactions"] = prototype_archive::encode(interactions, ids)?;
+            } else if let Some(target) = node
+                .string("prototypeClickTargetId")
+                .and_then(|raw| ids.get(raw))
+            {
+                record["interactions"] = json!([{"trigger":{"type":"onClick"},"actions":[{"type":"navigate","dest":target}],
+                    "transition":{"type":"instant"},"duration_ms":300,"easing":"easeInOut"}]);
+            }
+            if node.properties.get("figThumbnail") == Some(&Value::Bool(true)) {
+                record["plugin_data"] = json!({"figcraft.thumbnail":"true"});
+            }
             record["parent"] = json!(ids[node.parent_id.as_ref().unwrap()]);
             if !children.is_empty() {
                 record["children"] = json!(children);
             }
             record
         };
+        write_design_properties(node, &mut record)?;
         nodes.insert(id.to_string(), record);
     }
-    let document=serde_json::to_vec(&json!({"format":"figcraft","version":1,"imageIndex":[],"name":snapshot.title,"pages":pages,
-        "nodes":nodes,"next_id":nodes.len()+1,"styles":[],"variables":{"collections":[],"variables":[]},"current_page":current,"document_colors":[],"comments":[]})).map_err(invalid)?;
+    let mut document = json!({"format":"figcraft","version":1,"imageIndex":[],"name":snapshot.title,"pages":pages,
+        "nodes":nodes,"next_id":nodes.keys().filter_map(|key|key.parse::<u64>().ok()).max().unwrap_or(0).saturating_add(1),"styles":[],"variables":{"collections":[],"variables":[]},"current_page":current,"document_colors":[],"comments":[]});
+    document["comments"] = comments::encode(snapshot, ids, client, comments)?;
+    let profile = omc_style::ColorProfile::from_metadata(&snapshot.metadata);
+    if profile != omc_style::ColorProfile::Srgb {
+        document["color_profile"] = json!(profile.name());
+    }
+    if let Some(categories) = snapshot
+        .metadata
+        .get("annotationCategories")
+        .and_then(Value::as_array)
+    {
+        let mut records = Vec::new();
+        for category in categories {
+            records.push(json!({"id":category["id"],"name":category["name"],"color":encode_color(string(category, "color")?)?}));
+        }
+        document["annotation_categories"] = json!(records);
+    }
+    Ok(document)
+}
+
+fn write_archive(document: &[u8], thumbnail: Option<&[u8]>) -> Result<Vec<u8>> {
     if document.len() > MAX_FILE {
         return Err(invalid("document.json too large"));
     }
@@ -1482,11 +1854,156 @@ fn encode(snapshot: &DocumentSnapshot, page: &str) -> Result<Vec<u8>> {
             SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated),
         )
         .map_err(invalid)?;
-    archive.write_all(&document).map_err(invalid)?;
+    archive.write_all(document).map_err(invalid)?;
+    if let Some(thumbnail) = thumbnail {
+        archive
+            .start_file(
+                "thumbnail.png",
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored),
+            )
+            .map_err(invalid)?;
+        archive.write_all(thumbnail).map_err(invalid)?;
+    }
     Ok(archive.finish().map_err(invalid)?.into_inner())
 }
 
-fn write_properties(node: &Node, id: usize) -> Result<Value> {
+fn read_design_properties(node: &Value, out: &mut Properties) -> Result<()> {
+    if let Some(guides) = node.get("guides") {
+        let guides = guides
+            .as_array()
+            .filter(|guides| {
+                guides.len() <= 10_000
+                    && guides.iter().all(|guide| {
+                        guide["vertical"].is_boolean()
+                            && guide["offset"]
+                                .as_f64()
+                                .is_some_and(|value| value.abs() <= 1e7)
+                    })
+            })
+            .ok_or_else(|| invalid("invalid guides"))?;
+        if !guides.is_empty() {
+            out.insert("guides".into(), json!(guides));
+        }
+    }
+    if let Some(grids) = node.get("grids") {
+        let grids = grids
+            .as_array()
+            .filter(|grids| grids.len() <= 128)
+            .ok_or_else(|| invalid("invalid layout grids"))?;
+        let mut result = Vec::with_capacity(grids.len());
+        for grid in grids {
+            let mut grid = grid.clone();
+            if !grid.is_object() {
+                return Err(invalid("invalid layout grid"));
+            }
+            if let Some(color) = grid.get("color") {
+                grid["color"] = json!(read_color(color)?);
+            }
+            result.push(grid);
+        }
+        if !result.is_empty() {
+            out.insert("layoutGrids".into(), json!(result));
+        }
+    }
+    if let Some(exports) = node.get("exports") {
+        let exports = exports
+            .as_array()
+            .filter(|exports| exports.len() <= 1000)
+            .ok_or_else(|| invalid("invalid export settings"))?;
+        let mut result = Vec::with_capacity(exports.len());
+        for export in exports {
+            let mut export = export.clone();
+            if !export.is_object() {
+                return Err(invalid("invalid export setting"));
+            }
+            if export["size"].is_null() {
+                export["size"] = json!({"by":"scale","value":1});
+            }
+            if export["format"] == "vectorDrawable" {
+                export["format"] = json!("xml");
+            }
+            if let Some(print) = export.as_object_mut().unwrap().remove("print") {
+                for key in ["bleed", "cropMarks", "bleedMarks", "cmyk"] {
+                    if let Some(value) = print.get(key) {
+                        export[key] = value.clone();
+                    }
+                }
+            }
+            result.push(super::figcraft::normalize_fig_export_setting(&export)?);
+        }
+        if !result.is_empty() {
+            out.insert("exports".into(), json!(result));
+        }
+    }
+    Ok(())
+}
+
+fn write_design_properties(node: &Node, record: &mut Value) -> Result<()> {
+    if let Some(guides) = node
+        .properties
+        .get("guides")
+        .filter(|guides| guides.as_array().is_some_and(|guides| !guides.is_empty()))
+    {
+        record["guides"] = guides.clone();
+    }
+    if let Some(grids) = node
+        .properties
+        .get("layoutGrids")
+        .and_then(Value::as_array)
+        .filter(|grids| !grids.is_empty())
+    {
+        let mut result = Vec::with_capacity(grids.len());
+        for grid in grids {
+            let mut grid = grid.clone();
+            if !grid.is_object() {
+                return Err(invalid("invalid layout grid"));
+            }
+            if let Some(color) = grid["color"].as_str() {
+                grid["color"] = encode_color(color)?;
+            }
+            if let Some(align) = match grid["align"].as_str() {
+                Some("start") => Some("min"),
+                Some("end") => Some("max"),
+                _ => None,
+            } {
+                grid["align"] = json!(align);
+            }
+            result.push(grid);
+        }
+        record["grids"] = json!(result);
+    }
+    if let Some(exports) = node
+        .properties
+        .get("exports")
+        .and_then(Value::as_array)
+        .filter(|exports| !exports.is_empty())
+    {
+        let mut result = Vec::with_capacity(exports.len());
+        for export in exports {
+            let mut export = export.clone();
+            if !export.is_object() {
+                return Err(invalid("invalid export setting"));
+            }
+            if export["format"] == "xml" {
+                export["format"] = json!("vectorDrawable");
+            }
+            let mut print = serde_json::Map::new();
+            for key in ["bleed", "cropMarks", "bleedMarks", "cmyk"] {
+                if let Some(value) = export.as_object_mut().unwrap().remove(key) {
+                    print.insert(key.into(), value);
+                }
+            }
+            if !print.is_empty() {
+                export["print"] = Value::Object(print);
+            }
+            result.push(export);
+        }
+        record["exports"] = json!(result);
+    }
+    Ok(())
+}
+
+pub(crate) fn write_properties(node: &Node, id: usize) -> Result<Value> {
     let kind = match node.kind {
         NodeKind::Frame => "frame",
         NodeKind::Group => "group",
@@ -1515,6 +2032,18 @@ fn write_properties(node: &Node, id: usize) -> Result<Value> {
                 | "textRuns"
                 | "fill"
                 | "transform"
+                | "annotations"
+                | "devResources"
+                | dev_status::STATUS
+                | dev_status::BASELINE
+                | dev_diff::SNAPSHOT
+                | dev_status::NOTE
+                | "guides"
+                | "layoutGrids"
+                | "exports"
+                | "prototypeClickTargetId"
+                | PROTOTYPE_INTERACTIONS
+                | "figThumbnail"
         ) && !(kind == "line" && matches!(key.as_str(), "stroke" | "strokeWidth"))
         {
             return Err(unsupported(format!("export layer property {key}")));
@@ -1549,9 +2078,17 @@ fn write_properties(node: &Node, id: usize) -> Result<Value> {
     };
     let mut record = json!({"id":id,"name":node.string("name").unwrap_or("Layer"),"type":kind,
         "transform":matrix,"width":node.number("width",0.),"height":node.number("height",0.),"fills":fills,"blend":"normal"});
-    for key in ["opacity", "visible", "locked"] {
-        if let Some(value) = node.properties.get(key) {
-            record[key] = value.clone();
+    for (source, destination) in [
+        ("opacity", "opacity"),
+        ("visible", "visible"),
+        ("locked", "locked"),
+        ("annotations", "annotations"),
+        ("devResources", "dev_resources"),
+        (dev_status::STATUS, "dev_status"),
+        (dev_status::NOTE, "dev_note"),
+    ] {
+        if let Some(value) = node.properties.get(source) {
+            record[destination] = value.clone();
         }
     }
     if kind == "frame" {
@@ -1610,25 +2147,10 @@ fn write_properties(node: &Node, id: usize) -> Result<Value> {
     Ok(record)
 }
 
-fn encode_color(value: &str) -> Result<Value> {
-    if value == "transparent" {
-        return Ok(json!({"r":0,"g":0,"b":0,"a":0}));
-    }
-    let hex = value
-        .strip_prefix('#')
-        .ok_or_else(|| unsupported("non-hex color"))?;
-    let hex = if hex.len() == 3 || hex.len() == 4 {
-        hex.chars().flat_map(|c| [c, c]).collect::<String>()
-    } else {
-        hex.into()
-    };
-    let bytes = hex::decode(hex).map_err(invalid)?;
-    if !matches!(bytes.len(), 3 | 4) {
-        return Err(invalid("invalid hex color"));
-    }
-    Ok(
-        json!({"r":bytes[0] as f64/255.,"g":bytes[1] as f64/255.,"b":bytes[2] as f64/255.,"a":bytes.get(3).copied().unwrap_or(255) as f64/255.}),
-    )
+pub(crate) fn encode_color(value: &str) -> Result<Value> {
+    let color = omc_style::parse_color(value)
+        .ok_or_else(|| unsupported("a color outside the native CSS color grammar"))?;
+    Ok(json!({"r":color.r,"g":color.g,"b":color.b,"a":color.a}))
 }
 
 fn unsupported(message: impl std::fmt::Display) -> EngineError {

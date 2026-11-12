@@ -32,23 +32,36 @@ pub enum DockGroup {
     Move,
     Frame,
     Shape,
+    Vector,
     Text,
 }
 
-const GROUPS: [DockGroup; 4] = [
+const GROUPS: [DockGroup; 5] = [
     DockGroup::Move,
     DockGroup::Frame,
     DockGroup::Shape,
+    DockGroup::Vector,
     DockGroup::Text,
 ];
 
 impl DockGroup {
     pub fn tools(self) -> &'static [Tool] {
         match self {
-            Self::Move => &[Tool::Select, Tool::Pan],
-            Self::Frame => &[Tool::Frame],
-            Self::Shape => &[Tool::Rect, Tool::Ellipse],
-            Self::Text => &[Tool::Text],
+            Self::Move => &[Tool::Select, Tool::Scale, Tool::Pan],
+            Self::Frame => &[Tool::Frame, Tool::Section, Tool::Slice],
+            Self::Vector => &[Tool::Pen, Tool::Pencil, Tool::ShapeBuilder, Tool::Marker, Tool::Highlighter, Tool::Eraser, Tool::Connector],
+            Self::Shape => &[
+                Tool::Rect,
+                Tool::Line,
+                Tool::Arrow,
+                Tool::Ellipse,
+                Tool::Polygon,
+                Tool::Star,
+                Tool::BoardShape,
+                Tool::Sticky,
+                Tool::Stamp,
+            ],
+            Self::Text => &[Tool::Text, Tool::TextOnPath],
         }
     }
 
@@ -135,11 +148,29 @@ pub fn dock_flyout_rows(menu: Rect, group: DockGroup) -> impl Iterator<Item = (u
 pub fn dock_tool_shortcut(tool: Tool) -> &'static str {
     match tool {
         Tool::Select => "V",
+        Tool::Scale => "K",
         Tool::Pan => "H",
         Tool::Frame => "F",
+        Tool::Section => "Shift+S",
+        Tool::Slice => "S",
+        Tool::BoardShape => "B",
         Tool::Rect => "R",
         Tool::Ellipse => "O",
+        Tool::Pen => "P",
+        Tool::Pencil => "Shift+P",
+        Tool::Marker => "M",
+        Tool::Highlighter => "U",
+        Tool::Eraser => "E",
+        Tool::Connector => "X",
+        Tool::Sticky => "Q",
+        Tool::Stamp => "W",
+        Tool::ShapeBuilder => "Shift+M",
+        Tool::Line => "L",
+        Tool::Arrow => "Shift+L",
+        Tool::Polygon | Tool::Star => "",
         Tool::Text => "T",
+        Tool::TextOnPath => "",
+        Tool::Eyedropper => "I",
     }
 }
 
@@ -297,8 +328,93 @@ fn tool_glyph(g: &Glyph<'_>, tool: Tool) {
             g.line(3., 5.5, 13., 5.5);
             g.line(3., 10.5, 13., 10.5);
         }
+        Tool::Section => {
+            g.rect(2.5, 4.5, 13.5, 13.5, 1.);
+            g.path(&[(3.5, 4.5), (3.5, 2.5), (9.5, 2.5), (9.5, 4.5)], false);
+        }
         Tool::Rect => g.rect(2.5, 2.5, 13.5, 13.5, 1.),
+        Tool::Scale => {
+            g.rect(3., 3., 13., 13., 0.5);
+            g.line(5., 11., 11., 5.);
+            g.path(&[(7., 5.), (11., 5.), (11., 9.)], false);
+        }
+        Tool::Slice => {
+            g.path(&[(3., 8.), (3., 3.), (8., 3.)], false);
+            g.path(&[(8., 13.), (13., 13.), (13., 8.)], false);
+            g.line(3., 13., 13., 3.);
+        }
+        Tool::BoardShape => {
+            g.rect(2., 2., 8., 8., 1.);
+            g.circle(10.5, 10.5, 3.5);
+        }
         Tool::Ellipse => g.circle(8., 8., 5.5),
+        Tool::Pen => {
+            g.path(&[(8.,2.),(13.,8.),(11.,13.),(5.,13.),(3.,8.)],true);
+            g.line(8.,2.,8.,8.);
+            g.circle(8.,8.5,1.);
+        }
+        Tool::Pencil => {
+            g.path(&[(3.,13.),(4.,9.),(11.,2.),(14.,5.),(7.,12.)],true);
+            g.line(9.5,3.5,12.5,6.5);
+        }
+        Tool::Marker | Tool::Highlighter => {
+            g.path(&[(3.,13.),(4.,9.),(11.,2.),(14.,5.),(7.,12.)],true);
+            if tool == Tool::Highlighter { g.line(2.,14.,10.,14.); }
+            else { g.line(4.,9.,7.,12.); }
+        }
+        Tool::Eraser => {
+            g.path(&[(2.,10.),(8.,3.),(14.,8.),(9.,13.),(5.,13.)],true);
+            g.line(5.,7.,10.,12.);
+            g.line(9.,13.,14.,13.);
+        }
+        Tool::Connector => {
+            g.path(&[(3.,12.),(3.,6.),(12.,6.),(12.,3.)],false);
+            g.path(&[(9.,5.),(12.,2.),(15.,5.)],false);
+        }
+        Tool::Sticky => {
+            g.path(&[(2.,2.),(14.,2.),(14.,10.),(10.,14.),(2.,14.)],true);
+            g.path(&[(10.,14.),(10.,10.),(14.,10.)],false);
+        }
+        Tool::Stamp => {
+            g.path(&[(6.,8.),(5.,5.),(6.,2.),(10.,2.),(11.,5.),(10.,8.)],true);
+            g.rect(2.,8.,14.,13.,1.);
+            g.line(3.,15.,13.,15.);
+        }
+        Tool::ShapeBuilder => {
+            g.circle(6.,6.,3.5);
+            g.circle(10.,10.,3.5);
+        }
+        Tool::Line => g.line(3., 13., 13., 3.),
+        Tool::Arrow => {
+            g.line(3., 13., 13., 3.);
+            g.path(&[(8., 3.), (13., 3.), (13., 8.)], false);
+        }
+        Tool::Polygon => g.path(&[(8., 2.), (14., 13.), (2., 13.)], true),
+        Tool::Star => g.path(
+            &[
+                (8., 2.),
+                (10., 6.),
+                (14., 7.),
+                (11., 10.),
+                (12., 14.),
+                (8., 12.),
+                (4., 14.),
+                (5., 10.),
+                (2., 7.),
+                (6., 6.),
+            ],
+            true,
+        ),
+        Tool::Eyedropper => {
+            g.path(&[(3., 13.), (4., 10.), (10., 4.), (12., 6.), (6., 12.)], true);
+            g.line(9., 3., 13., 7.);
+            g.line(11., 3., 13., 5.);
+        }
+        Tool::TextOnPath => {
+            g.path(&[(2., 12.), (5., 10.), (8., 9.5), (11., 10.5), (14., 12.5)], false);
+            g.line(5., 3., 10., 3.);
+            g.line(7.5, 3., 7.5, 7.5);
+        }
         Tool::Text => {
             g.line(3., 3.5, 12., 3.5);
             g.line(7.5, 3., 7.5, 12.5);
@@ -502,7 +618,7 @@ fn round(canvas: &Canvas, rect: Rect, radius: f32, color: Color) {
 fn colored(color: Color) -> Paint {
     let mut paint = Paint::default();
     paint.set_anti_alias(true);
-    paint.set_color(color);
+    paint.set_color(crate::theme::color(color));
     paint
 }
 

@@ -11,6 +11,8 @@ pub(super) fn stack(
     path: &Path,
     key: &str,
     diagnostics: &mut Vec<Diagnostic>,
+    resources: &dyn ResourceProvider,
+    mut pattern: impl FnMut(&Value, &mut Vec<Diagnostic>) -> Result<(), RenderError>,
 ) -> Result<bool, RenderError> {
     let Some(paints) = item.properties.get(key).and_then(Value::as_array) else {
         return Ok(false);
@@ -23,7 +25,11 @@ pub(super) fn stack(
     for source in paints.iter().filter(|p| {
         p.get("visible") != Some(&Value::Bool(false)) && p.get("hidden") != Some(&Value::Bool(true))
     }) {
-        let mut paint = match make_paint(source, item) {
+        if source["type"] == "pattern" {
+            pattern(source, diagnostics)?;
+            continue;
+        }
+        let mut paint = match make_paint(source, item, Some(resources)) {
             Ok(paint) => paint,
             Err(error) => {
                 diagnose(scene, item, key, &error.to_string(), diagnostics)?;
@@ -47,6 +53,7 @@ pub(super) fn stack(
                 }
             }
             let saved = canvas.save();
+            let outline = stroke_geometry(item, path, &paint);
             if doubled {
                 canvas.clip_path(
                     path,
@@ -58,13 +65,64 @@ pub(super) fn stack(
                     true,
                 );
             }
-            canvas.draw_path(path, &paint);
+            if let Some(outline) = outline {
+                paint.set_style(Style::Fill).set_path_effect(None);
+                canvas.draw_path(&outline, &paint);
+            } else {
+                canvas.draw_path(path, &paint);
+            }
             canvas.restore_to_count(saved);
         } else {
             canvas.draw_path(path, &paint);
         }
     }
     Ok(true)
+}
+
+fn stroke_geometry(item: &SceneItem, path: &Path, paint: &Paint) -> Option<Path> {
+    super::vector_point_stroke::outline(item, path, paint, variable_geometry(item, path, paint))
+        .or_else(|| {
+            if item.properties.get("_svgOutlineStroke") != Some(&Value::Bool(true)) {
+                return None;
+            }
+            let mut outline = Path::new();
+            skia_safe::path_utils::fill_path_with_paint(path, paint, &mut outline, None, None)
+                .then_some(outline)
+        })
+}
+
+fn variable_geometry(item: &SceneItem, path: &Path, paint: &Paint) -> Option<Path> {
+    let profile = item.properties.get("widthProfile");
+    let brush = item.properties.get("strokeBrush");
+    let width = paint.stroke_width();
+    let outline = super::variable_stroke::outline(path, width, profile, brush)?;
+    if brush.is_some() || paint.path_effect().is_none() {
+        return Some(outline);
+    }
+    let mut dash_mask = Path::new();
+    let mut dashed = paint.clone();
+    dashed
+        .set_stroke_width((width * 2048.).min(1e6))
+        .set_stroke_cap(Cap::Butt);
+    if skia_safe::path_utils::fill_path_with_paint(path, &dashed, &mut dash_mask, None, None) {
+        outline.op(&dash_mask, skia_safe::PathOp::Intersect)
+    } else {
+        Some(outline)
+    }
+}
+
+pub(super) fn draw_authored_stroke(
+    canvas: &Canvas,
+    item: &SceneItem,
+    path: &Path,
+    paint: &mut Paint,
+) {
+    if let Some(outline) = stroke_geometry(item, path, paint) {
+        paint.set_style(Style::Fill).set_path_effect(None);
+        canvas.draw_path(&outline, paint);
+    } else {
+        canvas.draw_path(path, paint);
+    }
 }
 
 fn configure_stroke<'a>(
@@ -155,7 +213,7 @@ pub fn stroke_outlines(item: &SceneItem) -> Result<Vec<(Path, Value)>, RenderErr
             p.get("visible") != Some(&Value::Bool(false))
                 && p.get("hidden") != Some(&Value::Bool(true))
         }) {
-            let mut paint = make_paint(source, item)?;
+            let mut paint = make_paint(source, item, None)?;
             if paint.shader().is_some()
                 || ["startCap", "endCap", "sides"]
                     .iter()
@@ -178,7 +236,7 @@ pub fn stroke_outlines(item: &SceneItem) -> Result<Vec<(Path, Value)>, RenderErr
             if fill.get("color").is_none() {
                 fill = serde_json::json!({"type":"solid","color":source,"opacity":source.get("opacity").and_then(Value::as_f64).unwrap_or(1.)});
             }
-            push_outline(&mut outlines, &path, &paint, alignment, fill)?;
+            push_outline(&mut outlines, item, &path, &paint, alignment, fill)?;
         }
     } else if let Some(color) = item.style.get("border-color") {
         let mut paint = Paint::default();
@@ -187,7 +245,7 @@ pub fn stroke_outlines(item: &SceneItem) -> Result<Vec<(Path, Value)>, RenderErr
             "width":item.style.get("border-width").and_then(|v| resolve_length(v, LengthContext::default())).unwrap_or(1.)
         });
         configure_stroke(&stroke, &mut paint)?;
-        push_outline(&mut outlines, &path, &paint, "center", fill)?;
+        push_outline(&mut outlines, item, &path, &paint, "center", fill)?;
     }
     if outlines.is_empty() {
         return Err(RenderError::Unsupported(
@@ -199,17 +257,23 @@ pub fn stroke_outlines(item: &SceneItem) -> Result<Vec<(Path, Value)>, RenderErr
 
 fn push_outline(
     outlines: &mut Vec<(Path, Value)>,
+    item: &SceneItem,
     path: &Path,
     paint: &Paint,
     alignment: &str,
     fill: Value,
 ) -> Result<(), RenderError> {
-    let mut outline = Path::new();
-    if !skia_safe::path_utils::fill_path_with_paint(path, paint, &mut outline, None, None) {
-        return Err(RenderError::Unsupported(
-            "hairline stroke has no fill outline".into(),
-        ));
-    }
+    let mut outline = if let Some(outline) = stroke_geometry(item, path, paint) {
+        outline
+    } else {
+        let mut outline = Path::new();
+        if !skia_safe::path_utils::fill_path_with_paint(path, paint, &mut outline, None, None) {
+            return Err(RenderError::Unsupported(
+                "hairline stroke has no fill outline".into(),
+            ));
+        }
+        outline
+    };
     if alignment != "center" {
         let op = if matches!(alignment, "inside" | "inner") {
             skia_safe::PathOp::Intersect
@@ -231,7 +295,11 @@ fn push_outline(
     Ok(())
 }
 
-fn make_paint(source: &Value, item: &SceneItem) -> Result<Paint, RenderError> {
+fn make_paint(
+    source: &Value,
+    item: &SceneItem,
+    resources: Option<&dyn ResourceProvider>,
+) -> Result<Paint, RenderError> {
     let mut paint = Paint::default();
     paint.set_anti_alias(true);
     let kind = source
@@ -253,6 +321,12 @@ fn make_paint(source: &Value, item: &SceneItem) -> Result<Paint, RenderError> {
         let color = paint_color(color)
             .ok_or_else(|| RenderError::Unsupported(format!("paint color {color}")))?;
         paint.set_color4f(Color4f::new(color.r, color.g, color.b, color.a), None);
+    } else if kind == "image" {
+        let resources = resources.ok_or_else(|| {
+            RenderError::ResourceUnavailable("image paint requires the asset store".into())
+        })?;
+        paint.set_shader(super::image_paint::shader(source, item, resources)?);
+        super::image_paint::filters(&mut paint, &source["filters"]);
     } else if matches!(
         kind,
         "linear" | "linear-gradient" | "radial" | "radial-gradient" | "angular" | "conic"
@@ -320,6 +394,49 @@ fn native_gradient(source: &Value, item: &SceneItem, kind: &str) -> Option<Shade
     }
     if positions.windows(2).any(|p| p[0] > p[1]) {
         return None;
+    }
+    let handle = |key: &str| -> Option<(f64, f64)> {
+        let point = gradient.get(key)?;
+        let x = point.get(0).or_else(|| point.get("x"))?.as_f64()? * item.width;
+        let y = point.get(1).or_else(|| point.get("y"))?.as_f64()? * item.height;
+        (x.is_finite() && y.is_finite()).then_some((x, y))
+    };
+    if let (Some((x, y)), Some((ex, ey)), Some((wx, wy))) =
+        (handle("from"), handle("to"), handle("width"))
+    {
+        let affine = Affine([ex - x, ey - y, wx - x, wy - y, x, y]);
+        let matrix = skia_matrix(affine);
+        if affine.inverse().is_none() {
+            return None;
+        }
+        return match kind {
+            "linear" | "linear-gradient" => Shader::linear_gradient(
+                ((0., 0.), (1., 0.)),
+                colors.as_slice(),
+                positions.as_slice(),
+                TileMode::Clamp,
+                None,
+                Some(&matrix),
+            ),
+            "angular" | "conic" => Shader::sweep_gradient(
+                (0., 0.),
+                colors.as_slice(),
+                positions.as_slice(),
+                TileMode::Clamp,
+                None,
+                None,
+                Some(&matrix),
+            ),
+            _ => Shader::radial_gradient(
+                (0., 0.),
+                1.,
+                colors.as_slice(),
+                positions.as_slice(),
+                TileMode::Clamp,
+                None,
+                Some(&matrix),
+            ),
+        };
     }
     let coordinate = |key: &str, axis: &str, default: f64| {
         gradient
@@ -412,6 +529,7 @@ pub(super) fn shadows(
     item: &SceneItem,
     path: &Path,
     diagnostics: &mut Vec<Diagnostic>,
+    inner: bool,
 ) -> Result<(), RenderError> {
     let Some(shadows) = item.properties.get("shadows").and_then(Value::as_array) else {
         return Ok(());
@@ -431,8 +549,8 @@ pub(super) fn shadows(
                 "shadow blur/spread range".into(),
             ));
         }
-        if shadow.get("style").and_then(Value::as_str) == Some("inner") {
-            diagnose(scene, item, "shadow.style", "inner", diagnostics)?;
+        let is_inner = shadow["style"] == "inner" || shadow["type"] == "innerShadow";
+        if is_inner != inner {
             continue;
         }
         let color = shadow.get("color").and_then(paint_color).unwrap_or(Color {
@@ -453,6 +571,62 @@ pub(super) fn shadows(
                 shadow.get("offset").map_or(0., |v| number(v, "y", 0.)),
             ),
         );
+        let blend = shadow
+            .get("blendMode")
+            .or_else(|| shadow.get("blend"))
+            .and_then(Value::as_str)
+            .unwrap_or("normal");
+        let mode = blend_mode(blend).map_err(|error| {
+            let _ = diagnose(
+                scene,
+                item,
+                "shadow.blendMode",
+                &error.to_string(),
+                diagnostics,
+            );
+            error
+        })?;
+        if inner {
+            let save = canvas.save();
+            canvas.clip_path(path, None, true);
+            let mut inverse = path.clone();
+            inverse
+                .offset((offset.0 as f32, offset.1 as f32))
+                .toggle_inverse_fill_type();
+            let mut paint = Paint::default();
+            paint
+                .set_anti_alias(true)
+                .set_color4f(
+                    Color4f::new(
+                        color.r,
+                        color.g,
+                        color.b,
+                        color.a * number(shadow, "opacity", 1.) as f32,
+                    ),
+                    None,
+                )
+                .set_blend_mode(mode);
+            let spread_filter = if spread > 0. {
+                skia_safe::image_filters::dilate((spread as f32, spread as f32), None, None)
+            } else if spread < 0. {
+                skia_safe::image_filters::erode((-spread as f32, -spread as f32), None, None)
+            } else {
+                None
+            };
+            paint.set_image_filter(if blur > 0. {
+                skia_safe::image_filters::blur(
+                    (blur as f32, blur as f32),
+                    TileMode::Decal,
+                    spread_filter,
+                    None,
+                )
+            } else {
+                spread_filter
+            });
+            canvas.draw_path(&inverse, &paint);
+            canvas.restore_to_count(save);
+            continue;
+        }
         let input = if spread > 0. {
             skia_safe::image_filters::dilate((spread as f32, spread as f32), None, None)
         } else if spread < 0. {
@@ -461,7 +635,7 @@ pub(super) fn shadows(
             None
         };
         let mut paint = Paint::default();
-        paint.set_anti_alias(true);
+        paint.set_anti_alias(true).set_blend_mode(mode);
         paint.set_color4f(
             Color4f::new(0., 0., 0., number(shadow, "opacity", 1.) as f32),
             None,
@@ -474,10 +648,39 @@ pub(super) fn shadows(
             input,
             None,
         ));
+        let save = canvas.save();
+        if shadow["showBehind"] == false || shadow["show_behind"] == false {
+            canvas.clip_path(path, ClipOp::Difference, true);
+        }
         canvas.draw_path(path, &paint);
+        canvas.restore_to_count(save);
     }
     Ok(())
 }
+
+pub(super) fn backdrop(canvas: &Canvas, item: &SceneItem, path: &Path) {
+    let value = item
+        .properties
+        .get("backgroundBlur")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.)
+        .clamp(0., 256.) as f32;
+    if value > 0.
+        && item.properties.get("backgroundBlurHidden") != Some(&Value::Bool(true))
+        && let Some(filter) =
+            skia_safe::image_filters::blur((value, value), TileMode::Clamp, None, None)
+    {
+        let save = canvas.save();
+        canvas.clip_path(path, None, true);
+        canvas.save_layer(
+            &SaveLayerRec::default()
+                .backdrop(&filter)
+                .backdrop_tile_mode(TileMode::Clamp),
+        );
+        canvas.restore_to_count(save);
+    }
+}
+
 fn number(value: &Value, key: &str, default: f64) -> f64 {
     value
         .get(key)

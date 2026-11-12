@@ -1,4 +1,15 @@
 pub(crate) mod automation;
+mod board_tools;
+mod comments;
+mod dev_compare;
+mod dev_focus;
+mod eyedropper;
+mod object_snap;
+mod prototype_runtime;
+mod scale_tool;
+mod text_on_path;
+mod vector_tools;
+pub(crate) mod windows;
 
 use crate::{
     Event,
@@ -28,7 +39,7 @@ use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
     event::{ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy},
+    event_loop::{ActiveEventLoop, ControlFlow},
     keyboard::{Key, ModifiersState, NamedKey},
     window::{CursorIcon, Window, WindowId},
 };
@@ -72,20 +83,58 @@ fn scroll_delta(delta: MouseScrollDelta, scale: f64, shift: bool) -> (f64, f64) 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
     Select,
+    Scale,
     Frame,
+    Section,
+    Slice,
+    BoardShape,
     Rect,
     Ellipse,
+    Line,
+    Arrow,
+    Polygon,
+    Star,
     Text,
+    TextOnPath,
+    Eyedropper,
+    Pen,
+    Pencil,
+    Marker,
+    Highlighter,
+    Eraser,
+    Connector,
+    Stamp,
+    Sticky,
+    ShapeBuilder,
     Pan,
 }
 impl Tool {
     pub fn label(self) -> &'static str {
         match self {
             Self::Select => "Select",
+            Self::Scale => "Scale",
             Self::Frame => "Frame",
+            Self::Section => "Section",
+            Self::Slice => "Slice",
+            Self::BoardShape => "Board shape",
             Self::Rect => "Rectangle",
             Self::Ellipse => "Ellipse",
+            Self::Line => "Line",
+            Self::Arrow => "Arrow",
+            Self::Polygon => "Polygon",
+            Self::Star => "Star",
             Self::Text => "Text",
+            Self::TextOnPath => "Text on a path",
+            Self::Eyedropper => "Pick color",
+            Self::Pen => "Pen",
+            Self::Pencil => "Pencil",
+            Self::Marker => "Marker",
+            Self::Highlighter => "Highlighter",
+            Self::Eraser => "Eraser",
+            Self::Connector => "Connector",
+            Self::Stamp => "Stamp",
+            Self::Sticky => "Sticky note",
+            Self::ShapeBuilder => "Shape builder",
             Self::Pan => "Pan canvas (H)",
         }
     }
@@ -99,6 +148,14 @@ pub enum Action {
     Collaborate,
     Collaboration(&'static str),
     Library,
+    Utility(UtilityPopup),
+    EditLibraryDescription,
+    PublishLibrary,
+    LibraryPage(bool),
+    PluginManager(&'static str, Option<String>),
+    PluginManagerPage(bool),
+    ClosePopup,
+    ToggleFontDownloads,
     TabOverflow,
     ToolMenu(crate::figcraft_chrome::DockGroup),
     Import,
@@ -140,6 +197,7 @@ pub enum Action {
     NewPage,
     RenamePage,
     CreateCatalog(String),
+    CreatePickedColor(&'static str),
     ApplyCatalog {
         namespace: String,
         id: String,
@@ -168,7 +226,21 @@ pub enum Popup {
     InspectorZoom,
     InspectorLayer,
     InspectorBlend,
+    Utility(UtilityPopup),
     Tools(crate::figcraft_chrome::DockGroup),
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UtilityPopup {
+    Preferences,
+    Libraries,
+    Plugins,
+    PublishLibrary,
+    PickedColor,
+    Actions,
+    Shortcuts,
+    About,
+    GettingStarted,
+    Context,
 }
 #[derive(Clone, Debug)]
 pub struct Control {
@@ -188,6 +260,18 @@ pub enum EditTarget {
     Text {
         node_id: String,
     },
+    TextOnPath {
+        source_id: String,
+        draft: Box<Node>,
+        previous_selection: BTreeSet<String>,
+    },
+    LibraryDescription,
+    CursorChat,
+    CanvasComment {
+        page: String,
+        point: (f64, f64),
+        anchor: Option<(String, f64, f64)>,
+    },
     Title,
     Page {
         page_id: String,
@@ -198,6 +282,12 @@ pub enum EditTarget {
         property: String,
     },
 }
+impl EditTarget {
+    pub fn is_canvas_text(&self) -> bool {
+        matches!(self, Self::Text { .. } | Self::TextOnPath { .. })
+    }
+}
+
 #[derive(Clone)]
 pub struct Editing {
     pub target: EditTarget,
@@ -209,6 +299,7 @@ pub struct Editing {
 #[derive(Clone)]
 pub enum Drag {
     TextSelection,
+    Scale(scale_tool::ScaleDrag),
     Resize {
         id: String,
         origin: (f64, f64),
@@ -217,6 +308,8 @@ pub enum Drag {
         preview: [f64; 4],
         west: bool,
         north: bool,
+        snap: Option<Box<object_snap::GestureSnap>>,
+        snap_handle: (f64, f64),
     },
     Pan {
         origin: (f64, f64),
@@ -224,12 +317,23 @@ pub enum Drag {
     },
     Move {
         origin: (f64, f64),
+        snap_origin: (f64, f64),
         positions: Vec<(String, f64, f64)>,
         delta: (f64, f64),
+        snap: Option<Box<object_snap::GestureSnap>>,
     },
     Draw {
         origin: (f64, f64),
         end: (f64, f64),
+        tool: Tool,
+    },
+    PenHandle {
+        origin: (f64, f64),
+        point: (f64, f64),
+        end: (f64, f64),
+    },
+    VectorTrace {
+        points: Vec<(f64, f64)>,
         tool: Tool,
     },
     Marquee {
@@ -254,11 +358,14 @@ pub struct LayerRow {
     pub locked_above: bool,
 }
 pub struct SceneReply {
+    preview_generation: u64,
     id: String,
     epoch: String,
     sequence: u64,
     page: Option<String>,
     result: Result<Scene, String>,
+    proof: bool,
+    proof_scene: Option<Scene>,
     layers: Vec<LayerRow>,
     resources: BTreeMap<String, Vec<u8>>,
     resource_errors: Vec<String>,
@@ -318,17 +425,24 @@ fn layer_index(document: &DocumentSnapshot, page: Option<&str>) -> Vec<LayerRow>
     result
 }
 struct SceneRequest {
+    proof: bool,
     document: Arc<DocumentSnapshot>,
+    preview: Option<Arc<DocumentSnapshot>>,
+    preview_generation: u64,
     page: Option<String>,
     width: f64,
     height: f64,
 }
 
 pub struct App {
+    pub(crate) comments: comments::CanvasComments,
+    dev_comparison: Option<dev_compare::DevComparison>,
+    dev_focus: Option<dev_focus::DevFocus>,
     pub surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
     pub access: Option<accesskit_winit::Adapter>,
-    pub proxy: EventLoopProxy<Event>,
+    pub proxy: crate::WindowProxy,
     pub bridge: Bridge,
+    plugin_bridge: Option<Bridge>,
     profile: PathBuf,
     pub service_connected: bool,
     automation: automation::State,
@@ -336,6 +450,7 @@ pub struct App {
     pub collaboration: Value,
     pub collaboration_pending: bool,
     last_presence: Instant,
+    muted_spotlight: Option<String>,
     scene_sender: SyncSender<SceneRequest>,
     scene_pending: bool,
     pub documents: Vec<DocumentEntry>,
@@ -344,6 +459,7 @@ pub struct App {
     pub active: Option<String>,
     pub page: Option<String>,
     pub scene: Option<Arc<Scene>>,
+    pub proof_scene: Option<Scene>,
     pub scene_generation: u64,
     pub scene_cache: RefCell<SceneCache>,
     pub pan_cache: RefCell<PanCache>,
@@ -359,6 +475,11 @@ pub struct App {
     pub cameras: BTreeMap<(String, String), Camera>,
     pub selected: BTreeSet<String>,
     pub tool: Tool,
+    scale_anchor: usize,
+    board_shape: String,
+    pen_vertices: Vec<vector_tools::PenVertex>,
+    vector_ink: vector_tools::InkState,
+    board_tools: board_tools::BoardTools,
     pub cursor: (f64, f64),
     cursor_icon: CursorIcon,
     pub drag: Option<Drag>,
@@ -374,6 +495,11 @@ pub struct App {
     pub focus: u64,
     pub keyboard_focus_visible: bool,
     pub popup: Option<Popup>,
+    pub context_anchor: Option<(f64, f64)>,
+    font_generation: Vec<PathBuf>,
+    font_scan_at: Instant,
+    pub interface_language: String,
+    pub board_grid: Value,
     pub library_open: bool,
     pub modifiers: ModifiersState,
     pub space_pan: bool,
@@ -386,6 +512,7 @@ pub struct App {
     pub inspector: Inspector,
     pub inspector_scroll: f64,
     pub prototype_frame: Option<String>,
+    pub(crate) prototype_playback: prototype_runtime::Playback,
     editor_camera: Option<Camera>,
     pub layers: Vec<LayerRow>,
     pub visible_layers: Vec<usize>,
@@ -398,6 +525,7 @@ pub struct App {
     start: Instant,
     smoke: Option<Duration>,
     smoke_size: Option<(u32, u32)>,
+    background: bool,
     pub smoke_failed: bool,
     pub presented: bool,
     trace_frames: bool,
@@ -409,10 +537,11 @@ pub struct App {
 impl App {
     pub fn new(
         profile: PathBuf,
-        proxy: EventLoopProxy<Event>,
+        proxy: crate::WindowProxy,
         smoke: Option<Duration>,
         screenshot: Option<PathBuf>,
         smoke_size: Option<(u32, u32)>,
+        background: bool,
     ) -> Self {
         let resource_profile = profile.clone();
         let bridge = Bridge::start(profile.clone(), proxy.clone());
@@ -421,15 +550,45 @@ impl App {
         thread::spawn(move || {
             let store = omc_assets::AssetStore::open(&resource_profile);
             while let Ok(request) = receiver.recv() {
+                let page = if let Some(preview) = request.preview.as_ref() {
+                    preview
+                        .pages
+                        .iter()
+                        .find(|page| Some(&page.id) == request.page.as_ref())
+                        .or_else(|| preview.pages.first())
+                        .map(|page| page.id.clone())
+                } else {
+                    request.page.clone()
+                };
                 let options = SceneOptions {
-                    page_id: request.page.clone(),
+                    page_id: page,
                     width: request.width,
                     height: request.height,
                     time_ms: 0.0,
                     strict: false,
                 };
                 let mut layers = layer_index(&request.document, request.page.as_deref());
-                let result = build_scene(&request.document, &options).map_err(|e| e.to_string());
+                let _fonts =
+                    omc_text::font_scope(omc_text::profile_font_manager(&resource_profile));
+                let result = build_scene(
+                    request.preview.as_deref().unwrap_or(&request.document),
+                    &options,
+                )
+                .map_err(|e| e.to_string());
+                let rendered_document = request.preview.as_deref().unwrap_or(&request.document);
+                let proof_scene = if request.proof
+                    && omc_style::ColorProfile::from_metadata(&rendered_document.metadata)
+                        == omc_style::ColorProfile::DisplayP3
+                {
+                    omc_scene::build_scene_in_color_profile(
+                        rendered_document,
+                        &options,
+                        omc_style::ColorProfile::DisplayP3,
+                    )
+                    .ok()
+                } else {
+                    None
+                };
                 let mut resources = BTreeMap::new();
                 let mut resource_errors = vec![];
                 let mut reserved = 0usize;
@@ -484,11 +643,14 @@ impl App {
 
                 if scene_proxy
                     .send_event(Event::Scene(SceneReply {
+                        preview_generation: request.preview_generation,
                         id: request.document.id.clone(),
                         epoch: request.document.epoch.clone(),
                         sequence: request.document.sequence,
                         page: request.page,
                         result,
+                        proof: request.proof,
+                        proof_scene,
                         layers,
                         resources,
                         resource_errors,
@@ -503,7 +665,14 @@ impl App {
         let pan_cache = PanCache::new(move || {
             let _ = pan_proxy.send_event(Event::PanRasterReady);
         });
+        let automation = automation::desktop_preferences(&profile);
+        let library_open = automation.view.prefs.start_home;
+        let font_generation = omc_text::profile_font_generation(&profile);
+        let interface_language = crate::localization::chosen(&profile);
         Self {
+            comments: comments::CanvasComments::default(),
+            dev_comparison: None,
+            dev_focus: None,
             window: None,
             occluded: false,
             surface: None,
@@ -512,13 +681,15 @@ impl App {
             access: None,
             proxy,
             bridge,
+            plugin_bridge: None,
+            automation,
             profile,
             service_connected: false,
-            automation: automation::State::default(),
             collaboration_document: None,
             collaboration: Value::Null,
             collaboration_pending: false,
             last_presence: Instant::now(),
+            muted_spotlight: None,
             scene_sender,
             scene_pending: false,
             documents: vec![],
@@ -527,6 +698,7 @@ impl App {
             active: None,
             page: None,
             scene: None,
+            proof_scene: None,
             scene_generation: 0,
             scene_cache: RefCell::default(),
             pan_cache: RefCell::new(pan_cache),
@@ -538,6 +710,11 @@ impl App {
             cameras: BTreeMap::new(),
             selected: BTreeSet::new(),
             tool: Tool::Select,
+            scale_anchor: 0,
+            board_shape: "rectangle".into(),
+            pen_vertices: Vec::new(),
+            vector_ink: vector_tools::InkState::default(),
+            board_tools: board_tools::BoardTools::default(),
             cursor: (0., 0.),
             cursor_icon: CursorIcon::Default,
             drag: None,
@@ -553,7 +730,12 @@ impl App {
             focus: 1,
             keyboard_focus_visible: false,
             popup: None,
-            library_open: false,
+            context_anchor: None,
+            font_generation,
+            font_scan_at: Instant::now(),
+            interface_language,
+            board_grid: Value::Null,
+            library_open,
             modifiers: ModifiersState::empty(),
             space_pan: false,
             pending: false,
@@ -564,6 +746,7 @@ impl App {
             layer_scroll: 0,
             inspector: Inspector::Design,
             prototype_frame: None,
+            prototype_playback: prototype_runtime::Playback::default(),
             editor_camera: None,
             inspector_scroll: 0.,
             layers: vec![],
@@ -577,14 +760,21 @@ impl App {
             start: Instant::now(),
             smoke,
             smoke_size,
+            background,
             smoke_failed: false,
             presented: false,
             trace_frames: std::env::var_os("OMC_NATIVE_FRAME_TRACE").is_some(),
             input_frame: None,
             screenshot,
-            clipboard: arboard::Clipboard::new().ok(),
+            clipboard: (!background)
+                .then(|| arboard::Clipboard::new().ok())
+                .flatten(),
         }
     }
+    pub(crate) fn join_launch_invite(&mut self, link: &str) {
+        self.collaboration_request("join", json!({"invite":link}));
+    }
+
     fn collaboration_request(&mut self, action: &'static str, args: Value) {
         match self.bridge.send(Request::Collaboration { action, args }) {
             Ok(()) => {
@@ -593,6 +783,142 @@ impl App {
             }
             Err(error) => self.error = Some(error),
         }
+    }
+
+    fn open_cursor_chat(&mut self) -> bool {
+        if self.editing.is_some() || self.pending {
+            return false;
+        }
+        let Some(doc) = self.document() else {
+            return false;
+        };
+        if self.collaboration_document.as_deref() != Some(&doc.id)
+            || !matches!(
+                self.collaboration["mode"].as_str(),
+                Some("hosting" | "connected" | "reconnecting")
+            )
+        {
+            return false;
+        }
+        self.editing = Some(Editing {
+            target: EditTarget::CursorChat,
+            buffer: EditBuffer::new(String::new(), false),
+            id: doc.id.clone(),
+            epoch: doc.epoch.clone(),
+            sequence: doc.sequence,
+        });
+        self.redraw();
+        true
+    }
+
+    fn follow_collaboration_view(&mut self) {
+        if self.active != self.collaboration_document
+            || self.active.is_none()
+            || self.prototype_frame.is_some()
+            || self.drag.is_some()
+            || self.editing.is_some()
+            || self.collaboration["spotlighting"] == true
+        {
+            return;
+        }
+        let Some(peers) = self.collaboration["participants"].as_array() else {
+            return;
+        };
+        if self.muted_spotlight.as_ref().is_some_and(|muted| {
+            !peers
+                .iter()
+                .any(|peer| peer["id"] == *muted && peer["spotlighting"] == true)
+        }) {
+            self.muted_spotlight = None;
+        }
+        let target = if let Some(id) = self.collaboration["follow"].as_str() {
+            peers.iter().find(|peer| peer["id"] == id)
+        } else {
+            peers.iter().find(|peer| {
+                peer["isSelf"] != true
+                    && peer["spotlighting"] == true
+                    && peer["id"].as_str() != self.muted_spotlight.as_deref()
+            })
+        };
+        let Some((page, [x, y, width, height])) = target.and_then(|peer| {
+            let values = peer["presence"]["viewport"].as_array()?;
+            let [page, x, y, w, h] = values.as_slice() else {
+                return None;
+            };
+            Some((
+                page.as_str()?.to_owned(),
+                [x.as_f64()?, y.as_f64()?, w.as_f64()?, h.as_f64()?],
+            ))
+        }) else {
+            return;
+        };
+        if !self
+            .document()
+            .is_some_and(|doc| doc.pages.iter().any(|candidate| candidate.id == page))
+        {
+            return;
+        }
+        if self.page.as_ref() != Some(&page) {
+            self.choose_page(page);
+        }
+        let viewport = self.canvas_rect();
+        let zoom = (viewport.width / width)
+            .min(viewport.height / height)
+            .clamp(0.05, 16.);
+        let camera = Camera {
+            x: viewport.width / 2. - (x + width / 2.) * zoom,
+            y: viewport.height / 2. - (y + height / 2.) * zoom,
+            zoom,
+        };
+        if (self.camera.x - camera.x).abs() < 0.01
+            && (self.camera.y - camera.y).abs() < 0.01
+            && (self.camera.zoom - camera.zoom).abs() < 0.0001
+        {
+            return;
+        }
+        self.camera = camera;
+        self.pan_view = false;
+        self.redraw();
+    }
+
+    fn stop_following_collaboration_view(&mut self) {
+        if self.active != self.collaboration_document {
+            return;
+        }
+        if let Some(peer) = self.collaboration["participants"]
+            .as_array()
+            .and_then(|peers| {
+                peers
+                    .iter()
+                    .find(|peer| peer["isSelf"] != true && peer["spotlighting"] == true)
+            })
+        {
+            self.muted_spotlight = peer["id"].as_str().map(str::to_owned);
+        }
+        if self.collaboration["follow"].is_string()
+            && let Some(id) = self.collaboration_document.clone()
+        {
+            self.collaboration["follow"] = Value::Null;
+            self.collaboration_request("follow", json!({"documentId":id}));
+        }
+    }
+
+    fn collaboration_viewport(&self, document: &str) -> Value {
+        if self.active.as_deref() != Some(document) {
+            return Value::Null;
+        }
+        let Some(page) = self.page.as_ref() else {
+            return Value::Null;
+        };
+        let viewport = self.canvas_rect();
+        let (x, y) = self.camera.world(0., 0.);
+        json!([
+            page,
+            x,
+            y,
+            viewport.width / self.camera.zoom,
+            viewport.height / self.camera.zoom
+        ])
     }
 
     pub fn mcp_configuration(&self) -> Result<String, String> {
@@ -648,6 +974,14 @@ impl App {
             self.pending_move.as_ref().map(|preview| preview.delta)
         }
     }
+    pub fn object_snap_guides(&self) -> impl Iterator<Item = [(f64, f64); 2]> + '_ {
+        let snap = match &self.drag {
+            Some(Drag::Move { snap, .. } | Drag::Resize { snap, .. }) => snap.as_deref(),
+            _ => None,
+        };
+        snap.into_iter()
+            .flat_map(|snap| snap.guides.into_iter().flatten())
+    }
     fn move_translations(
         &self,
         positions: &[(String, f64, f64)],
@@ -698,18 +1032,22 @@ impl App {
         self.document()?.nodes.get(id)
     }
     pub fn inspector_visible(&self) -> bool {
-        self.width >= 960. || self.inspector != Inspector::Design
+        let view = &self.automation.view;
+        !self.ui_hidden()
+            && (!view.compact || self.library_open || !self.selected.is_empty())
+            && (self.width >= 960. || self.inspector != Inspector::Design)
     }
     pub fn uses_pan_raster(&self) -> bool {
         self.pan_view
     }
     pub fn canvas_rect(&self) -> Rect {
-        let right = if self.inspector_visible() { RIGHT } else { 0. };
+        let left = self.left_width();
+        let header = self.header_height();
         Rect::new(
-            LEFT,
-            HEADER,
-            (self.width - LEFT - right).max(1.),
-            (self.height - HEADER).max(1.),
+            left,
+            header,
+            (self.width - left - self.right_width()).max(1.),
+            (self.height - header).max(1.),
         )
     }
     pub fn world(&self, x: f64, y: f64) -> (f64, f64) {
@@ -732,6 +1070,12 @@ impl App {
             self.input_frame = Some((kind, Instant::now()));
         }
     }
+    pub fn proof_enabled(&self) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|id| self.automation.view.proof_documents.contains(id))
+    }
+
     fn schedule_scene(&mut self) {
         if self.scene_pending {
             return;
@@ -744,11 +1088,37 @@ impl App {
         else {
             return;
         };
+        if self
+            .automation
+            .text_preview
+            .as_ref()
+            .is_some_and(|preview| {
+                let preview = &preview.snapshot;
+                preview.id != document.id
+                    || preview.epoch != document.epoch
+                    || preview.sequence != document.sequence
+            })
+        {
+            self.clear_text_preview();
+            return;
+        }
         let r = self.canvas_rect();
+        let preview = self
+            .prototype_scene_copy(&document)
+            .or_else(|| self.path_text_preview(&document))
+            .or_else(|| {
+                self.automation
+                    .text_preview
+                    .as_ref()
+                    .map(|preview| preview.snapshot.clone())
+            });
         if self
             .scene_sender
             .try_send(SceneRequest {
+                proof: self.proof_enabled(),
                 document,
+                preview,
+                preview_generation: self.automation.preview_generation,
                 page: self.page.clone(),
                 width: r.width,
                 height: r.height,
@@ -759,6 +1129,10 @@ impl App {
         }
     }
     fn mutate(&mut self, command: Value, group: &str) {
+        if self.version_preview_active() {
+            return;
+        }
+        self.clear_text_preview();
         if self.inspector == Inspector::Inspect || self.prototype_frame.is_some() {
             return;
         }
@@ -782,10 +1156,18 @@ impl App {
         self.send(request);
     }
     fn switch(&mut self, id: String) {
+        self.pen_vertices.clear();
         if self.pending || self.editing.is_some() {
             self.error = Some("Finish the current edit before switching documents.".into());
             return;
         }
+        if self.prototype_frame.is_some() {
+            self.action(Action::PrototypeExit);
+        }
+        self.close_dev_comparison();
+        self.escape_comments();
+        self.exit_dev_focus(false);
+        self.clear_text_preview();
         self.remember_camera();
         self.pending_move = None;
         self.move_cache.get_mut().clear();
@@ -803,6 +1185,7 @@ impl App {
             .copied()
             .unwrap_or_default();
         self.scene = None;
+        self.proof_scene = None;
         self.scene_cache.get_mut().clear();
         self.pan_cache.get_mut().clear();
         self.pan_view = false;
@@ -826,6 +1209,9 @@ impl App {
             .min(self.visible_layers.len().saturating_sub(1));
     }
     fn remember_camera(&mut self) {
+        if self.dev_focus_active() {
+            return;
+        }
         if let Some(id) = &self.active {
             self.cameras.insert(
                 (id.clone(), self.page.clone().unwrap_or_default()),
@@ -835,6 +1221,11 @@ impl App {
     }
     pub fn action_available(&self, action: &Action) -> bool {
         if self.closing
+            || self.version_preview_active()
+                && !matches!(
+                    action,
+                    Action::ClosePopup | Action::Library | Action::Open(_) | Action::Close(_)
+                )
             || matches!(action, Action::Collaboration(_)) && self.collaboration_pending
             || matches!(action, Action::Collaboration(action) if *action != "join")
                 && self.collaboration_document.is_none()
@@ -922,7 +1313,7 @@ impl App {
                         .and_then(|clip| clip.get_text().ok());
                     match link {
                         Some(link) if !link.trim().is_empty() => {
-                            json!({"invite":link.trim(),"name":"Guest"})
+                            json!({"invite":link.trim()})
                         }
                         _ => {
                             self.error = Some("Copy a native OMC invitation first.".into());
@@ -930,7 +1321,7 @@ impl App {
                         }
                     }
                 } else {
-                    json!({"documentId":self.collaboration_document,"name":"Host"})
+                    json!({"documentId":self.collaboration_document})
                 };
                 self.collaboration_request(action, args);
             }
@@ -966,16 +1357,63 @@ impl App {
                     self.error = Some("Finish the current edit before opening the library.".into());
                     return;
                 }
+                self.exit_dev_focus(false);
+                if self.prototype_frame.is_some() {
+                    self.action(Action::PrototypeExit);
+                }
+                self.clear_text_preview();
                 self.remember_camera();
                 self.library_open = true;
                 self.active = None;
                 self.page = None;
                 self.scene = None;
+                self.proof_scene = None;
                 self.selected.clear();
                 self.scene_cache.get_mut().clear();
                 self.pan_cache.get_mut().clear();
                 self.move_cache.get_mut().clear();
                 self.pending_move = None;
+                self.send(Request::Refresh);
+            }
+            Action::Utility(panel @ (UtilityPopup::Libraries | UtilityPopup::PublishLibrary)) => {
+                if panel == UtilityPopup::Libraries
+                    && self
+                        .editing
+                        .as_ref()
+                        .is_some_and(|edit| matches!(edit.target, EditTarget::LibraryDescription))
+                {
+                    self.editing = None;
+                }
+                if let Err(error) = self.open_library_dialog(panel) {
+                    self.popup = previous_popup;
+                    self.error = Some(error);
+                }
+            }
+            Action::EditLibraryDescription => self.edit_library_description(),
+            Action::PublishLibrary => self.submit_library_publication(),
+            Action::LibraryPage(next) => self.page_library_dialog(next),
+            Action::Utility(UtilityPopup::Plugins) => {
+                self.open_native_plugin_manager();
+            }
+            Action::PluginManager(operation, plugin) => self.send_plugin_manager(operation, plugin),
+            Action::PluginManagerPage(next) => self.page_plugin_manager(next),
+            Action::Utility(panel) => {
+                self.popup = Some(Popup::Utility(panel));
+                self.focus = crate::paint::POPUP_FIRST;
+                self.keyboard_focus_visible = true;
+            }
+            Action::ClosePopup => {}
+            Action::ToggleFontDownloads => {
+                let result = omc_text::set_profile_font_downloads(
+                    &self.profile,
+                    !self.font_downloads_allowed(),
+                );
+                if let Err(error) = result {
+                    self.error = Some(format!(
+                        "Font download permission could not be changed: {error}"
+                    ));
+                }
+                self.popup = Some(Popup::Utility(UtilityPopup::Preferences));
             }
             Action::TabOverflow => {
                 self.popup = (previous_popup != Some(Popup::Tabs)).then_some(Popup::Tabs);
@@ -1061,13 +1499,17 @@ impl App {
                 {
                     let id = frame.id.clone();
                     let editor_camera = self.camera;
+                    self.reset_prototype(Value::Null);
                     if self.show_prototype_frame(id) {
                         self.editor_camera = Some(editor_camera);
                     }
                 }
             }
             Action::PrototypeExit => {
+                self.automation.view.presenting = false;
                 self.prototype_frame = None;
+                self.reset_prototype(Value::Null);
+                self.refresh_prototype_scene();
                 if let Some(camera) = self.editor_camera.take() {
                     self.camera = camera;
                 }
@@ -1146,6 +1588,7 @@ impl App {
                     });
                 }
             }
+            Action::CreatePickedColor(namespace) => self.create_picked_color(namespace),
             Action::CreateCatalog(namespace) => {
                 if let Some(doc) = self.document() {
                     let value = self
@@ -1222,6 +1665,10 @@ impl App {
                 self.send(Request::ImportHtml { html });
             }
             Action::Import | Action::Export => {
+                if self.background {
+                    self.error = Some("Background automation cannot open file dialogs.".into());
+                    return;
+                }
                 if self.pending || self.editing.is_some() {
                     self.error =
                         Some("Finish the current edit before importing or exporting.".into());
@@ -1271,6 +1718,15 @@ impl App {
             }
             Action::Refresh => self.send(Request::Refresh),
             Action::Tool(tool) => {
+                if tool == Tool::BoardShape
+                    && !self.document().is_some_and(|doc| {
+                        doc.metadata.get("boardDocument") == Some(&Value::Bool(true))
+                    })
+                {
+                    self.error = Some("Open a board before choosing the Shapes tool.".into());
+                    return;
+                }
+                self.comments.tool = false;
                 self.commit_edit();
                 if self.editing.is_none() {
                     if self.inspector == Inspector::Inspect
@@ -1279,7 +1735,14 @@ impl App {
                         self.inspector = Inspector::Design;
                         self.inspector_scroll = 0.;
                     }
+                    if self.tool != tool {
+                        self.pen_vertices.clear();
+                    }
                     self.tool = tool;
+                    if tool == Tool::Eyedropper {
+                        self.automation.pick_only = false;
+                        self.automation.picked_color = None;
+                    }
                 }
             }
             Action::Undo | Action::Redo => {
@@ -1364,19 +1827,8 @@ impl App {
                 if self.pending || self.editing.is_some() {
                     return;
                 }
-                self.remember_camera();
-                self.page = Some(id.clone());
-                self.selected.clear();
-                self.camera = self
-                    .cameras
-                    .get(&(self.active.clone().unwrap_or_default(), id))
-                    .copied()
-                    .unwrap_or_default();
-                self.scene = None;
-                self.scene_cache.get_mut().clear();
-                self.pan_cache.get_mut().clear();
-                self.pan_view = false;
-                self.schedule_scene();
+                self.exit_dev_focus(false);
+                self.choose_page(id);
             }
             Action::Field(property) => {
                 if property == "name" && previous_popup == Some(Popup::InspectorLayer) {
@@ -1545,6 +1997,7 @@ impl App {
             return;
         }
         if edit.buffer.text == edit.buffer.original {
+            self.discard_path_text_preview(&edit.target);
             return;
         }
         if self.pending {
@@ -1552,6 +2005,37 @@ impl App {
             return;
         }
         let command = match &edit.target {
+            EditTarget::CanvasComment {
+                page,
+                point,
+                anchor,
+            } => match self.comment_command(page, *point, anchor.as_ref(), &edit.buffer.text) {
+                Ok(command) => command,
+                Err(error) => {
+                    self.error = Some(error);
+                    self.editing = Some(edit);
+                    return;
+                }
+            },
+            EditTarget::CursorChat => {
+                if edit.buffer.text.chars().count() > 100
+                    || edit.buffer.text.chars().any(char::is_control)
+                {
+                    self.error =
+                        Some("Cursor chat must be at most 100 characters on one line.".into());
+                    self.editing = Some(edit);
+                } else {
+                    self.collaboration_request(
+                        "chat",
+                        json!({"documentId":edit.id,"text":edit.buffer.text}),
+                    );
+                }
+                return;
+            }
+            EditTarget::LibraryDescription => {
+                self.set_library_description(&edit.buffer.text);
+                return;
+            }
             EditTarget::Page { page_id } => {
                 json!({"type":"page.rename","pageId":page_id,"title":edit.buffer.text})
             }
@@ -1651,6 +2135,22 @@ impl App {
                         json!({"type":"node.set","nodeId":node_id,"properties":properties})
                     }
                 }
+            }
+            EditTarget::TextOnPath {
+                source_id, draft, ..
+            } => {
+                let mut node = draft.as_ref().clone();
+                node.properties
+                    .insert("text".into(), json!(edit.buffer.text));
+                node.properties.insert(
+                    "name".into(),
+                    json!(edit.buffer.text.lines().next().unwrap_or("Text")),
+                );
+                self.invalidate_path_text_scene();
+                json!({"type":"batch","commands":[
+                    {"type":"node.create","node":node},
+                    {"type":"node.delete","nodeIds":[source_id]},
+                ]})
             }
             EditTarget::Text { node_id } => {
                 let (start, end, replacement) = edit.buffer.replacement();
@@ -1778,6 +2278,28 @@ impl App {
             .or_else(|| doc.pages.first())
             .map(|p| p.root_node_id.clone())
     }
+
+    fn choose_page(&mut self, id: String) {
+        self.comments.selected = None;
+        if self.prototype_frame.is_some() {
+            self.action(Action::PrototypeExit);
+        }
+        self.clear_text_preview();
+        self.remember_camera();
+        self.page = Some(id.clone());
+        self.selected.clear();
+        self.camera = self
+            .cameras
+            .get(&(self.active.clone().unwrap_or_default(), id))
+            .copied()
+            .unwrap_or_default();
+        self.scene = None;
+        self.proof_scene = None;
+        self.scene_cache.get_mut().clear();
+        self.pan_cache.get_mut().clear();
+        self.pan_view = false;
+        self.schedule_scene();
+    }
     fn create_node(
         &mut self,
         tool: Tool,
@@ -1790,9 +2312,12 @@ impl App {
         };
         let id = format!("node_{}", Uuid::new_v4().simple());
         let kind = match tool {
-            Tool::Frame => "frame",
+            Tool::Frame | Tool::Section => "frame",
+            Tool::Slice => "rect",
             Tool::Rect => "rect",
             Tool::Ellipse => "ellipse",
+            Tool::Line | Tool::Arrow => "line",
+            Tool::Polygon | Tool::Star => "path",
             Tool::Text => "text",
             _ => return,
         };
@@ -1803,9 +2328,71 @@ impl App {
             .abs()
             .max(if tool == Tool::Text { 48. } else { 2. });
         let mut props = json!({"name":tool.label(),"x":origin.0.min(end.0),"y":origin.1.min(end.1),"width":width,"height":height,"fill":if tool==Tool::Text{"#1F2937"}else if tool==Tool::Frame{"#FFFFFF"}else{"#A8B5F7"}});
+        if tool == Tool::Section {
+            props["isSection"] = json!(true);
+            props["primitive"] = json!("section");
+            props["fill"] = json!("#EFEFEF");
+        }
+        if tool == Tool::Slice {
+            props["primitive"] = json!("slice");
+            props["fill"] = Value::Null;
+            props["exports"] =
+                json!([{"format":"png","size":{"by":"scale","value":1},"quality":90}]);
+        }
+        if matches!(tool, Tool::Line | Tool::Arrow) {
+            let delta = (end.0 - origin.0, end.1 - origin.1);
+            let length = delta.0.hypot(delta.1).max(2.);
+            props["x"] = json!((origin.0 + end.0 - length) * 0.5);
+            props["y"] = json!((origin.1 + end.1) * 0.5);
+            props["width"] = json!(length);
+            props["height"] = json!(0.);
+            props["rotation"] = json!(delta.1.atan2(delta.0).to_degrees());
+            props["fill"] = Value::Null;
+            props["stroke"] = json!("#202020");
+            props["strokeWidth"] = json!(2.);
+            props["arrowHead"] = json!(tool == Tool::Arrow);
+        } else if matches!(tool, Tool::Polygon | Tool::Star) {
+            let star = tool == Tool::Star;
+            let count = if star { 10 } else { 3 };
+            let mut path = String::new();
+            for i in 0..count {
+                use std::fmt::Write as _;
+                let angle = i as f64 * std::f64::consts::TAU / f64::from(count)
+                    - std::f64::consts::FRAC_PI_2;
+                let radius = if star && i % 2 == 1 { 0.5 } else { 1. };
+                let _ = write!(
+                    path,
+                    "{}{} {} ",
+                    if i == 0 { 'M' } else { 'L' },
+                    width / 2. + width / 2. * radius * angle.cos(),
+                    height / 2. + height / 2. * radius * angle.sin()
+                );
+            }
+            path.push('Z');
+            props["path"] = path.into();
+            props["primitive"] = json!(if star { "star" } else { "polygon" });
+            props["pointCount"] = json!(if star { 5 } else { 3 });
+            if star {
+                props["innerRadius"] = json!(0.5);
+            }
+        }
         if tool == Tool::Text {
             props["text"] = json!(text.unwrap_or_else(|| "Type something".into()));
             props["fontSize"] = json!(24.);
+        }
+        let defaults = match tool {
+            Tool::Text => self.automation.default_text.as_ref(),
+            Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Star => {
+                self.automation.default_shape.as_ref()
+            }
+            _ => None,
+        };
+        if let Some(defaults) = defaults {
+            props.as_object_mut().unwrap().extend(
+                defaults
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
         }
         let Some(doc) = self.document() else {
             return;
@@ -1822,7 +2409,11 @@ impl App {
         self.selected.clear();
         self.selected.insert(id);
         self.mutate(json!({"type":"batch","commands":commands}), "draw");
-        self.tool = Tool::Select;
+        self.tool = if self.automation.view.prefs.keep_tool {
+            tool
+        } else {
+            Tool::Select
+        };
     }
     fn show_prototype_frame(&mut self, id: String) -> bool {
         let Some(frame) = self
@@ -1836,12 +2427,155 @@ impl App {
         };
         let rect = self.canvas_rect();
         self.camera.fit(frame.bounds, rect.width, rect.height);
-        self.prototype_frame = Some(id);
+        let [x, y, width, height] = frame.bounds;
+        let zx = rect.width / width.max(1.);
+        let zy = rect.height / height.max(1.);
+        if let Some(scale) = match self.prototype_playback.options["scale"].as_str() {
+            Some("actual") => Some(1.),
+            Some("fill") => Some(zx.max(zy)),
+            Some("fitWidth") => Some(zx),
+            Some("fit") => Some(zx.min(zy).min(1.)),
+            _ => None,
+        } {
+            self.camera.zoom = scale.clamp(0.05, 16.);
+            self.camera.x = rect.width / 2. - (x + width / 2.) * self.camera.zoom;
+            self.camera.y = rect.height / 2. - (y + height / 2.) * self.camera.zoom;
+        }
+        let entering = self.prototype_frame.as_deref() != Some(&id);
+        self.prototype_frame = Some(id.clone());
+        if entering {
+            self.prototype_enter(&id);
+        }
         true
+    }
+
+    pub fn font_downloads_allowed(&self) -> bool {
+        omc_text::profile_font_downloads_allowed(&self.profile)
+    }
+
+    fn open_layer_context(&mut self) {
+        if self.selected.is_empty() || self.editing.is_some() || self.prototype_frame.is_some() {
+            return;
+        }
+        let layer = self
+            .keyboard_focus_visible
+            .then(|| {
+                self.controls.iter().find(|control| {
+                    control.id == self.focus && matches!(control.action, Action::Layer(_))
+                })
+            })
+            .flatten();
+        let viewport = self.canvas_rect();
+        self.context_anchor = Some(layer.map_or_else(
+            || {
+                if viewport.contains(self.cursor.0, self.cursor.1) {
+                    self.cursor
+                } else {
+                    (
+                        viewport.x + viewport.width / 2.,
+                        viewport.y + viewport.height / 2.,
+                    )
+                }
+            },
+            |row| {
+                (
+                    row.rect.x + row.rect.width * 0.5,
+                    row.rect.y + row.rect.height,
+                )
+            },
+        ));
+        self.action(Action::Utility(UtilityPopup::Context));
+    }
+
+    fn hit_canvas_item(&self, (x, y): (f64, f64)) -> Option<&omc_scene::SceneItem> {
+        let scene = self.scene.as_ref()?;
+        let accepts = |item: &omc_scene::SceneItem| {
+            !item.is_slice()
+                || self.show_slices() && {
+                    let [left, top, width, height] = item.bounds;
+                    let tolerance = 4. / self.camera.zoom;
+                    [x - left, y - top, left + width - x, top + height - y]
+                        .iter()
+                        .any(|edge| edge.abs() <= tolerance)
+                }
+        };
+        if !self.dev_focus_active()
+            && (!(self.canvas_outlines() || self.selection_outlines())
+                || !(self.hidden_outlines() || self.object_bounds_outlines()))
+        {
+            return scene.hit_test_filter(x, y, accepts);
+        }
+        let tolerance = 4. / self.camera.zoom;
+        for (index, item) in scene.items.iter().enumerate().rev() {
+            if index == scene.root
+                || item.locked
+                || !accepts(item)
+                || !self.focus_includes_item(scene, index)
+            {
+                continue;
+            }
+            let outlined = self.canvas_outlines()
+                || self.selection_outlines() && self.selected.contains(&item.id);
+            let include_hidden = outlined && self.hidden_outlines();
+            let on_bounds = outlined && self.object_bounds_outlines() && {
+                let [left, top, width, height] = item.bounds;
+                let right = left + width;
+                let bottom = top + height;
+                x >= left - tolerance
+                    && x <= right + tolerance
+                    && y >= top - tolerance
+                    && y <= bottom + tolerance
+                    && ((x - left).abs().min((x - right).abs()) <= tolerance
+                        || (y - top).abs().min((y - bottom).abs()) <= tolerance)
+            };
+            if item.hidden && !include_hidden || !(on_bounds || item.contains(x, y)) {
+                continue;
+            }
+            let mut ancestor = item.parent;
+            let mut eligible = true;
+            while let Some(index) = ancestor {
+                let parent = &scene.items[index];
+                if parent.locked
+                    || parent.hidden && !include_hidden
+                    || parent.boolean_operation().is_some()
+                    || parent.clip && !parent.contains(x, y)
+                {
+                    eligible = false;
+                    break;
+                }
+                ancestor = parent.parent;
+            }
+            if eligible {
+                return Some(item);
+            }
+        }
+        None
     }
 
     fn pointer_down(&mut self, button: MouseButton, canvas_only: bool) {
         let (x, y) = self.cursor;
+        if self.dev_comparison.is_some() && self.dev_compare_rect().contains(x, y) {
+            if button == MouseButton::Left && self.dev_compare_close_rect().contains(x, y) {
+                self.close_dev_comparison();
+            }
+            return;
+        }
+        if button == MouseButton::Right
+            && !canvas_only
+            && self.canvas_rect().contains(x, y)
+            && self.editing.is_none()
+        {
+            let world = self.world(x, y);
+            if let Some(id) = self.hit_canvas_item(world).map(|item| item.id.clone())
+                && self.current_root().as_ref() != Some(&id)
+            {
+                if !self.selected.contains(&id) {
+                    self.selected = BTreeSet::from([id]);
+                }
+                self.open_layer_context();
+            }
+            return;
+        }
         if button == MouseButton::Left {
             self.keyboard_focus_visible = false;
             if crate::text_ui::editor_rect(self).is_some_and(|area| area.contains(x, y)) {
@@ -1861,23 +2595,12 @@ impl App {
                 self.action(control.action);
                 return;
             }
-            if let Some(frame) = self.prototype_frame.as_deref() {
-                if self.canvas_rect().contains(x, y)
-                    && let (Some(doc), Some(page), Some(scene)) =
-                        (self.document(), self.page.as_deref(), self.scene.as_deref())
-                {
-                    let world = self.world(x, y);
-                    let target =
-                        crate::prototype::hit_target(doc, page, scene, frame, world.0, world.1)
-                            .map(|node| node.id.clone());
-                    if let Some(target) = target {
-                        self.show_prototype_frame(target);
-                    }
-                }
+            if self.prototype_frame.is_some() {
+                self.prototype_click(x, y);
                 return;
             }
             self.popup = None;
-            if !canvas_only && y < HEADER {
+            if !canvas_only && y < self.header_height() {
                 if let Some(window) = &self.window {
                     let _ = window.drag_window();
                 }
@@ -1900,6 +2623,7 @@ impl App {
             MouseButton::Middle | MouseButton::Back | MouseButton::Forward
         ) || button == MouseButton::Left && (self.space_pan || self.tool == Tool::Pan)
         {
+            self.stop_following_collaboration_view();
             self.drag = Some(Drag::Pan {
                 origin: (x, y),
                 camera: self.camera,
@@ -1909,11 +2633,23 @@ impl App {
         if button != MouseButton::Left {
             return;
         }
+        if self.comment_pointer(x, y) {
+            return;
+        }
         self.commit_edit();
         if self.pending || self.pending_move.is_some() {
             return;
         }
+        if self.tool == Tool::Eyedropper {
+            if let Err(error) = self.pick_canvas_color(world) {
+                self.error = Some(error);
+            }
+            return;
+        }
         let inspect = self.inspector == Inspector::Inspect;
+        if !inspect && self.tool == Tool::Scale && self.begin_scale(world) {
+            return;
+        }
         if !inspect
             && self.tool == Tool::Select
             && self.selected.len() == 1
@@ -1921,18 +2657,32 @@ impl App {
         {
             return;
         }
-        if !inspect && self.tool != Tool::Select {
+        if !inspect && self.tool == Tool::TextOnPath {
+            self.begin_path_text(world);
+            return;
+        }
+        if !inspect && !matches!(self.tool, Tool::Select | Tool::Scale) {
+            let origin = if self.pointer_pixel_snap() {
+                (world.0.round(), world.1.round())
+            } else {
+                world
+            };
+            if self.pointer_vector(if self.tool == Tool::Pen {
+                world
+            } else {
+                origin
+            }) {
+                return;
+            }
             self.drag = Some(Drag::Draw {
-                origin: world,
-                end: world,
+                origin,
+                end: origin,
                 tool: self.tool,
             });
             return;
         }
         let hit = self
-            .scene
-            .as_ref()
-            .and_then(|s| s.hit_test(world.0, world.1))
+            .hit_canvas_item(world)
             .map(|n| {
                 n.properties
                     .get("instanceId")
@@ -1941,8 +2691,9 @@ impl App {
                     .to_string()
             })
             .filter(|id| Some(id) != self.current_root().as_ref());
+        let multi_select = self.automation.view.legacy_multi_select;
         if inspect {
-            if !self.modifiers.shift_key() {
+            if !self.modifiers.shift_key() && !multi_select {
                 self.selected.clear();
             }
             if let Some(id) = hit {
@@ -1964,12 +2715,20 @@ impl App {
                 self.begin_text(id);
                 return;
             }
-            if !self.modifiers.shift_key() && !self.selected.contains(&id) {
+            if multi_select && self.selected.remove(&id) {
+                return;
+            }
+            if !multi_select && !self.modifiers.shift_key() && !self.selected.contains(&id) {
                 self.selected.clear();
             }
+            let snap_origin = self
+                .scene
+                .as_ref()
+                .and_then(|scene| scene.item(&id))
+                .map_or(world, |item| item.world.point(0., 0.));
             self.selected.insert(id);
             if let Some(doc) = self.document() {
-                let positions = self
+                let positions: Vec<_> = self
                     .selected
                     .iter()
                     .filter(|id| self.layer_transformable(id))
@@ -1979,14 +2738,17 @@ impl App {
                             .map(|n| (id.clone(), number(n, "x", 0.), number(n, "y", 0.)))
                     })
                     .collect();
+                let snap = self.gather_object_snap(positions.iter().map(|(id, _, _)| id.as_str()));
                 self.drag = Some(Drag::Move {
                     origin: world,
+                    snap_origin,
                     positions,
                     delta: (0., 0.),
+                    snap,
                 });
             }
         } else {
-            if !self.modifiers.shift_key() {
+            if !self.modifiers.shift_key() && !multi_select {
                 self.selected.clear();
             }
             self.drag = Some(Drag::Marquee {
@@ -2019,6 +2781,9 @@ impl App {
         let Some(item) = scene.item(&node.id) else {
             return false;
         };
+        if item.is_slice() && !self.show_slices() {
+            return false;
+        }
         let [a, b, c, d, _, _] = item.world.0;
         if b.abs() > 1e-8
             || c.abs() > 1e-8
@@ -2050,6 +2815,7 @@ impl App {
                     item.width,
                     item.height,
                 ];
+                let snap = self.gather_object_snap(std::iter::once(node.id.as_str()));
                 self.drag = Some(Drag::Resize {
                     id: node.id.clone(),
                     origin: world,
@@ -2058,22 +2824,56 @@ impl App {
                     preview: original,
                     west,
                     north,
+                    snap,
+                    snap_handle: (cx, cy),
                 });
                 return true;
             }
         }
         false
     }
+    fn pointer_pixel_snap(&self) -> bool {
+        self.automation.view.prefs.snap_pixel
+            && !self.modifiers.super_key()
+            && !self.modifiers.control_key()
+    }
+    fn gather_object_snap<'a>(
+        &self,
+        ids: impl IntoIterator<Item = &'a str>,
+    ) -> Option<Box<object_snap::GestureSnap>> {
+        if !self.automation.view.prefs.snap_objects {
+            return None;
+        }
+        let viewport = self.canvas_rect();
+        let margin = 64. / self.camera.zoom;
+        let (x, y) = self.world(viewport.x, viewport.y);
+        let visible = [
+            x - margin,
+            y - margin,
+            viewport.width / self.camera.zoom + 2. * margin,
+            viewport.height / self.camera.zoom + 2. * margin,
+        ];
+        object_snap::GestureSnap::new(self.scene.as_ref()?, ids, visible).map(Box::new)
+    }
     fn pointer_move(&mut self, x: f64, y: f64) {
         self.cursor = (x, y);
+        if self.prototype_frame.is_some() {
+            self.prototype_move(x, y);
+            return;
+        }
         if matches!(self.drag, Some(Drag::TextSelection)) {
             crate::text_ui::pointer(self, x, y, true);
             return;
         }
         let world = self.world(x, y);
+        let snap_pixel = self.pointer_pixel_snap();
+        let snap_objects = !self.modifiers.super_key() && !self.modifiers.control_key();
         if let Some(drag) = &mut self.drag {
             match drag {
                 Drag::TextSelection => {}
+                Drag::Scale(drag) => {
+                    drag.update(world, self.scale_anchor, self.modifiers.alt_key())
+                }
                 Drag::Resize {
                     origin,
                     inverse,
@@ -2081,13 +2881,45 @@ impl App {
                     preview,
                     west,
                     north,
+                    snap,
+                    snap_handle,
                     ..
                 } => {
-                    let p = inverse.point(world.0, world.1);
+                    let mut at = world;
+                    let mut snapped_axes = [false; 2];
+                    if let Some(snap) = snap {
+                        if snap_objects && !self.modifiers.shift_key() && world != *origin {
+                            let corner = (
+                                snap_handle.0 + world.0 - origin.0,
+                                snap_handle.1 + world.1 - origin.1,
+                            );
+                            let snapped = snap.point(corner, self.camera.zoom);
+                            at = (
+                                world.0 + snapped.0 - corner.0,
+                                world.1 + snapped.1 - corner.1,
+                            );
+                            snapped_axes = snap.guides.map(|guide| guide.is_some());
+                        } else {
+                            snap.guides = [None; 2];
+                        }
+                    }
+                    let p = inverse.point(at.0, at.1);
                     let from = inverse.point(origin.0, origin.1);
+                    let delta = (p.0 - from.0, p.1 - from.1);
                     *preview = crate::geometry::resize(
                         *original,
-                        (p.0 - from.0, p.1 - from.1),
+                        (
+                            if snap_pixel && !snapped_axes[0] {
+                                delta.0.round()
+                            } else {
+                                delta.0
+                            },
+                            if snap_pixel && !snapped_axes[1] {
+                                delta.1.round()
+                            } else {
+                                delta.1
+                            },
+                        ),
                         *west,
                         *north,
                         self.modifiers.shift_key(),
@@ -2098,19 +2930,63 @@ impl App {
                     self.camera.y = camera.y + y - origin.1;
                     self.pan_view = true;
                 }
-                Drag::Move { origin, delta, .. } => {
-                    *delta = (world.0 - origin.0, world.1 - origin.1)
+                Drag::Move {
+                    origin,
+                    snap_origin,
+                    delta,
+                    snap,
+                    ..
+                } => {
+                    let distance = (world.0 - origin.0, world.1 - origin.1);
+                    *delta = if snap_pixel {
+                        (
+                            (distance.0 + snap_origin.0).round() - snap_origin.0,
+                            (distance.1 + snap_origin.1).round() - snap_origin.1,
+                        )
+                    } else {
+                        distance
+                    };
+                    if let Some(snap) = snap {
+                        if snap_objects && world != *origin {
+                            *delta = snap.move_by(*delta, self.camera.zoom);
+                        } else {
+                            snap.guides = [None; 2];
+                        }
+                    }
                 }
-                Drag::Draw { end, .. } | Drag::Marquee { end, .. } => *end = world,
+                Drag::Draw { end, .. } => {
+                    *end = if snap_pixel {
+                        (world.0.round(), world.1.round())
+                    } else {
+                        world
+                    }
+                }
+                Drag::PenHandle { origin, point, end } => {
+                    *end = if (world.0 - origin.0).hypot(world.1 - origin.1) > 3. / self.camera.zoom
+                    {
+                        (point.0 + world.0 - origin.0, point.1 + world.1 - origin.1)
+                    } else {
+                        *point
+                    };
+                }
+                Drag::VectorTrace { points, .. } => {
+                    vector_tools::sample(points, world, 1. / self.camera.zoom)
+                }
+                Drag::Marquee { end, .. } => *end = world,
             }
         }
     }
     fn pointer_up(&mut self) {
+        if self.prototype_frame.is_some() {
+            self.prototype_up();
+            return;
+        }
         let Some(drag) = self.drag.take() else {
             return;
         };
         match drag {
             Drag::TextSelection => {}
+            Drag::Scale(drag) => self.finish_scale(drag),
             Drag::Resize {
                 id,
                 original,
@@ -2123,10 +2999,40 @@ impl App {
             }
             Drag::Pan { .. } => self.remember_camera(),
             Drag::Draw { origin, end, tool } => {
+                if self.finish_board_tool(tool, origin, end) {
+                    return;
+                }
+                if tool == Tool::BoardShape {
+                    let width = (end.0 - origin.0).abs();
+                    let height = (end.1 - origin.1).abs();
+                    let args = if width + height > 3. {
+                        json!({"shape":self.board_shape,"x":origin.0.min(end.0),"y":origin.1.min(end.1),
+                            "width":width.max(1.),"height":height.max(1.)})
+                    } else {
+                        json!({"shape":self.board_shape,"x":origin.0-80.,"y":origin.1-80.})
+                    };
+                    self.create_board_tool("board.shape", args);
+                    return;
+                }
                 if (origin.0 - end.0).abs() + (origin.1 - end.1).abs() > 3. {
                     self.create_node(tool, origin, end, None);
                 }
             }
+            Drag::PenHandle { point, end, .. } => self.add_pen_point(point, end),
+            Drag::VectorTrace {
+                points,
+                tool: tool @ (Tool::Pencil | Tool::Marker | Tool::Highlighter),
+            } => self.finish_vector_trace(&points, tool),
+            Drag::VectorTrace {
+                points,
+                tool: Tool::Eraser,
+            } => self.finish_eraser(&points),
+            Drag::VectorTrace {
+                points,
+                tool: Tool::ShapeBuilder,
+            } => self.finish_shape_builder(points),
+            Drag::VectorTrace { .. } => {}
+
             Drag::Move {
                 positions, delta, ..
             } => {
@@ -2174,6 +3080,9 @@ impl App {
 
     fn wheel(&mut self, delta: MouseScrollDelta, scale: f64, phase: TouchPhase) -> bool {
         let (dx, dy) = scroll_delta(delta, scale, self.modifiers.shift_key());
+        if self.scroll_dev_comparison(dy) {
+            return true;
+        }
         if self.prototype_frame.is_some()
             && self.canvas_rect().contains(self.cursor.0, self.cursor.1)
         {
@@ -2214,7 +3123,17 @@ impl App {
                 return next != current;
             }
             ScrollTarget::Canvas if self.drag.is_none() => {
-                if self.modifiers.control_key() || self.modifiers.super_key() {
+                self.stop_following_collaboration_view();
+                let command = self.modifiers.control_key() || self.modifiers.super_key();
+                let wheel_zoom = self.automation.view.prefs.wheel_zoom
+                    && matches!(delta, MouseScrollDelta::LineDelta(_, _));
+                if dy != 0.
+                    && if wheel_zoom {
+                        !command && !self.modifiers.shift_key()
+                    } else {
+                        command
+                    }
+                {
                     self.pan_view = false;
                     self.camera.zoom_at(
                         (dy * 0.005).exp(),
@@ -2249,6 +3168,9 @@ impl App {
         }
         let command = self.modifiers.control_key() || self.modifiers.super_key();
         if self.prototype_frame.is_some() {
+            if self.prototype_key(key) {
+                return;
+            }
             match *key {
                 Key::Named(NamedKey::Escape) => {
                     self.action(Action::PrototypeExit);
@@ -2272,13 +3194,14 @@ impl App {
         if let Some(edit) = &mut self.editing {
             match key {
                 Key::Named(NamedKey::Escape) => {
-                    self.editing = None;
+                    let target = self.editing.take().unwrap().target;
+                    self.discard_path_text_preview(&target);
                     return;
                 }
                 Key::Named(NamedKey::Enter) if !edit.buffer.composing => {
-                    if self.modifiers.shift_key() && matches!(edit.target, EditTarget::Text { .. })
-                    {
+                    if self.modifiers.shift_key() && edit.target.is_canvas_text() {
                         edit.buffer.insert("\n");
+                        self.refresh_path_text_scene();
                     } else {
                         self.commit_edit();
                     }
@@ -2323,6 +3246,16 @@ impl App {
                     }
                 }
             }
+            self.refresh_path_text_scene();
+            return;
+        }
+        if self.library_dialog_key(key) || self.plugin_manager_key(key) {
+            return;
+        }
+        if !command
+            && matches!(key, Key::Character(value) if value == "/")
+            && self.open_cursor_chat()
+        {
             return;
         }
         if self.modifiers.control_key()
@@ -2346,6 +3279,8 @@ impl App {
             if let Key::Character(key) = key {
                 match key.to_lowercase().as_str() {
                     "n" => self.action(Action::New),
+                    "," => self.action(Action::Utility(UtilityPopup::Preferences)),
+                    "k" => self.action(Action::Utility(UtilityPopup::Actions)),
                     "s" => self.action(Action::Save),
                     "z" => self.action(if self.modifiers.shift_key() {
                         Action::Redo
@@ -2365,7 +3300,39 @@ impl App {
             }
             return;
         }
+        if self.tool == Tool::Pen && !self.pen_vertices.is_empty() {
+            match key {
+                Key::Named(NamedKey::Enter) => {
+                    self.finish_pen(false);
+                    return;
+                }
+                Key::Named(NamedKey::Escape) => {
+                    self.pen_vertices.clear();
+                    self.drag = None;
+                    return;
+                }
+                Key::Named(NamedKey::Backspace) => {
+                    self.pen_vertices.pop();
+                    return;
+                }
+                _ => {}
+            }
+        }
         match key {
+            Key::Named(NamedKey::F10) if self.modifiers.shift_key() => self.open_layer_context(),
+            Key::Named(NamedKey::Escape) if self.popup.is_some() => {
+                self.popup = None;
+            }
+            Key::Named(NamedKey::Escape) if self.tool == Tool::Eyedropper => {
+                self.tool = Tool::Select;
+            }
+            Key::Named(NamedKey::Escape) if self.dev_comparison.is_some() => {
+                self.close_dev_comparison();
+            }
+            Key::Named(NamedKey::Escape) if self.escape_comments() => {}
+            Key::Named(NamedKey::Escape) if self.dev_focus_active() => {
+                self.escape_dev_focus();
+            }
             Key::Named(NamedKey::Escape) => {
                 self.popup = None;
                 self.drag = None;
@@ -2383,7 +3350,12 @@ impl App {
                 | NamedKey::ArrowUp
                 | NamedKey::ArrowDown),
             ) => {
-                let step = if self.modifiers.shift_key() { 10. } else { 1. };
+                let prefs = &self.automation.view.prefs;
+                let step = if self.modifiers.shift_key() {
+                    prefs.nudge_big
+                } else {
+                    prefs.nudge_small
+                };
                 let delta = match arrow {
                     NamedKey::ArrowLeft => (-step, 0.),
                     NamedKey::ArrowRight => (step, 0.),
@@ -2399,6 +3371,7 @@ impl App {
                     self.nudge_selection(delta);
                 }
             }
+            Key::Named(NamedKey::F6) => self.step_focus_region(self.modifiers.shift_key()),
             Key::Named(NamedKey::Tab) => {
                 self.keyboard_focus_visible = true;
                 let current = self
@@ -2429,16 +3402,76 @@ impl App {
                 }
             }
             Key::Character(key) => match key.to_lowercase().as_str() {
+                "c" if self.modifiers.shift_key() => {
+                    self.toggle_comments(None);
+                }
+                "c" => {
+                    if let Err(error) = self.enable_comment_tool() {
+                        self.error = Some(error);
+                    }
+                }
                 "v" => self.action(Action::Tool(Tool::Select)),
                 "f" => self.action(Action::Tool(Tool::Frame)),
+                "k" => self.action(Action::Tool(Tool::Scale)),
+                "b" if self.document().is_some_and(|doc| {
+                    doc.metadata.get("boardDocument") == Some(&Value::Bool(true))
+                }) =>
+                {
+                    self.action(Action::Tool(Tool::BoardShape))
+                }
+                "s" if self.modifiers.shift_key() => self.action(Action::Tool(Tool::Section)),
+                "s" => self.action(Action::Tool(Tool::Slice)),
                 "r" => self.action(Action::Tool(Tool::Rect)),
                 "o" => self.action(Action::Tool(Tool::Ellipse)),
+                "l" => self.action(Action::Tool(if self.modifiers.shift_key() {
+                    Tool::Arrow
+                } else {
+                    Tool::Line
+                })),
                 "t" => self.action(Action::Tool(Tool::Text)),
+                "p" => self.action(Action::Tool(if self.modifiers.shift_key() {
+                    Tool::Pencil
+                } else {
+                    Tool::Pen
+                })),
+                "m" if self.modifiers.shift_key() => self.action(Action::Tool(Tool::ShapeBuilder)),
+                "m" => self.action(Action::Tool(Tool::Marker)),
+                "u" => self.action(Action::Tool(Tool::Highlighter)),
+                "e" => self.action(Action::Tool(Tool::Eraser)),
+                "q" => self.action(Action::Tool(Tool::Sticky)),
+                "x" => self.action(Action::Tool(Tool::Connector)),
+                "w" => self.action(Action::Tool(Tool::Stamp)),
                 "h" => self.action(Action::Tool(Tool::Pan)),
+                "i" => self.action(Action::Tool(Tool::Eyedropper)),
+                digit
+                    if digit.len() == 1
+                        && digit.as_bytes()[0].is_ascii_digit()
+                        && self.automation.view.prefs.number_keys_opacity
+                        && !self.selected.is_empty() =>
+                {
+                    self.apply_opacity_digit(digit.as_bytes()[0]);
+                }
                 "1" => self.camera = Camera::default(),
                 _ => {}
             },
             _ => {}
+        }
+    }
+    fn apply_opacity_digit(&mut self, digit: u8) {
+        let opacity = if digit == b'0' {
+            1.
+        } else {
+            f64::from(digit - b'0') / 10.
+        };
+        let root = self.current_root();
+        let commands: Vec<_> = self
+            .selected
+            .iter()
+            .filter(|id| self.layer_transformable(id) && Some(*id) != root.as_ref())
+            .map(|id| json!({"type":"node.set","nodeId":id,"properties":{"opacity":opacity}}))
+            .collect();
+        if !commands.is_empty() {
+            self.mutate(json!({"type":"batch","commands":commands}), "opacity");
         }
     }
     fn nudge_selection(&mut self, delta: (f64, f64)) {
@@ -2478,6 +3511,13 @@ impl App {
             _ => None,
         };
         match response {
+            Response::PluginManager {
+                ticket,
+                operation,
+                result,
+            } => {
+                self.finish_plugin_manager(ticket, operation, result);
+            }
             Response::Collaboration { action, result } => {
                 if action != "cursor" {
                     self.collaboration_pending = false;
@@ -2514,6 +3554,7 @@ impl App {
                             }
                         } else {
                             self.collaboration = state;
+                            self.follow_collaboration_view();
                         }
                     }
                     Err(error) if action != "cursor" => self.error = Some(error),
@@ -2525,6 +3566,29 @@ impl App {
                 self.error = None;
                 self.status = "Ready".into();
                 self.send(Request::Refresh);
+            }
+            Response::CanvasMutation {
+                document,
+                selected,
+                edit_label,
+            } => {
+                let is_current = self.active.as_ref() == Some(&document.id);
+                let waiting = self.automation.waiting.take();
+                self.handle_response(Response::Snapshot {
+                    document,
+                    mutation: true,
+                    activate: false,
+                });
+                self.automation.waiting = waiting;
+                if is_current {
+                    self.selected = selected.into_iter().collect();
+                    if !self.automation.view.prefs.keep_tool {
+                        self.tool = Tool::Select;
+                    }
+                    if let Some(label) = edit_label {
+                        self.begin_text(label);
+                    }
+                }
             }
             Response::Documents(documents) => {
                 self.documents = documents;
@@ -2577,6 +3641,7 @@ impl App {
                         id: id.clone(),
                         title: document.title.clone(),
                         archived: false,
+                        thumbnail: None,
                     });
                 }
                 self.snapshots.insert(id.clone(), Arc::new(document));
@@ -2585,6 +3650,9 @@ impl App {
                 }
                 if self.active.as_ref() == Some(&id) && changed {
                     self.schedule_scene();
+                }
+                if activate {
+                    self.finish_workspace_tab(&id, Some(true), None);
                 }
             }
             Response::TextAnchors {
@@ -2606,8 +3674,11 @@ impl App {
                 self.tabs.retain(|tab| tab != &id);
                 self.snapshots.remove(&id);
                 if self.active.as_ref() == Some(&id) {
+                    self.exit_dev_focus(false);
+                    self.finish_dev_focus_reply(Some("The focused document was closed.".into()));
                     self.active = None;
                     self.scene = None;
+                    self.proof_scene = None;
                     self.scene_cache.get_mut().clear();
                     self.pan_cache.get_mut().clear();
                     self.pan_view = false;
@@ -2615,6 +3686,11 @@ impl App {
                         self.switch(id);
                     }
                 }
+                self.finish_workspace_tab(&id, Some(false), None);
+            }
+            Response::TabError { id, message } => {
+                self.finish_workspace_tab(&id, None, Some(&message));
+                self.error = Some(message);
             }
             Response::FileOperation { message } => {
                 self.pending = false;
@@ -2701,6 +3777,7 @@ impl ApplicationHandler<Event> for App {
         let attrs = Window::default_attributes()
             .with_title("Oh My Canvas — native preview")
             .with_visible(false)
+            .with_active(!self.background)
             .with_inner_size(LogicalSize::new(size.0, size.1))
             .with_min_inner_size(LogicalSize::new(760., 520.));
         #[cfg(target_os = "macos")]
@@ -2716,7 +3793,9 @@ impl ApplicationHandler<Event> for App {
             Err(e) => {
                 eprintln!("Native window failed: {e}");
                 self.smoke_failed = true;
-                event_loop.exit();
+                if self.proxy.id == 1 {
+                    event_loop.exit();
+                }
                 return;
             }
         };
@@ -2741,7 +3820,9 @@ impl ApplicationHandler<Event> for App {
                 Err(e) => {
                     eprintln!("Native surface context failed: {e}");
                     self.smoke_failed = true;
-                    event_loop.exit();
+                    if self.proxy.id == 1 {
+                        event_loop.exit();
+                    }
                     return;
                 }
             };
@@ -2750,7 +3831,9 @@ impl ApplicationHandler<Event> for App {
                 Err(e) => {
                     eprintln!("Native surface failed: {e}");
                     self.smoke_failed = true;
-                    event_loop.exit();
+                    if self.proxy.id == 1 {
+                        event_loop.exit();
+                    }
                     return;
                 }
             };
@@ -2758,22 +3841,31 @@ impl ApplicationHandler<Event> for App {
         self.access = Some(accesskit_winit::Adapter::with_event_loop_proxy(
             event_loop,
             &window,
-            self.proxy.clone(),
+            self.proxy.raw.clone(),
         ));
         window.set_ime_allowed(false);
-        window.set_visible(true);
+        window.set_theme(self.theme_preference());
+        self.apply_window_motion(&window);
+        if !self.background {
+            window.set_visible(true);
+        }
+        self.update_window_metrics(&window, window.inner_size());
         window.request_redraw();
         self.window = Some(window);
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
+            Event::WindowScoped(..) => unreachable!("Desktop window events must be routed first"),
             Event::Service(Response::Shutdown) => event_loop.exit(),
             Event::Service(response) => self.handle_response(response),
             Event::Automation(job, reply) => self.handle_automation(job, reply),
+            Event::AutomationQuit => self.shutdown(),
             Event::Scene(reply) => {
                 self.scene_pending = false;
                 if self.active.as_ref() == Some(&reply.id)
                     && self.page == reply.page
+                    && self.proof_enabled() == reply.proof
+                    && self.automation.preview_generation == reply.preview_generation
                     && self
                         .document()
                         .is_some_and(|d| d.epoch == reply.epoch && d.sequence == reply.sequence)
@@ -2793,6 +3885,17 @@ impl ApplicationHandler<Event> for App {
                             self.pan_view = false;
                             self.scene_generation = self.scene_generation.wrapping_add(1);
                             self.scene = Some(Arc::new(scene));
+                            self.proof_scene = reply.proof_scene;
+                            let focus_lost = self.dev_focus_active()
+                                && self
+                                    .scene
+                                    .as_ref()
+                                    .is_some_and(|scene| self.focused_scene_index(scene).is_none());
+                            if focus_lost {
+                                self.exit_dev_focus(true);
+                            } else {
+                                self.fit_dev_focus();
+                            }
                             if let Some(id) = self.prototype_frame.clone()
                                 && !self.show_prototype_frame(id)
                             {
@@ -2804,8 +3907,15 @@ impl ApplicationHandler<Event> for App {
                             }
                             self.layers = reply.layers;
                             self.refresh_visible_layers();
+                            self.finish_text_preview(reply.preview_generation, None);
+                            self.finish_dev_focus_reply(
+                                focus_lost.then(|| "The focused layer is unavailable.".into()),
+                            );
                         }
                         Err(error) => {
+                            self.finish_text_preview(reply.preview_generation, Some(error.clone()));
+                            self.finish_dev_focus_reply(Some(error.clone()));
+                            self.clear_text_preview();
                             self.pending_move = None;
                             self.move_cache.get_mut().clear();
                             self.error = Some(error);
@@ -2847,23 +3957,21 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             WindowEvent::Resized(size) => {
-                let scale = window.scale_factor();
-                self.width = size.width as f64 / scale;
-                self.height = size.height as f64 / scale;
+                self.update_window_metrics(&window, size);
+                self.finish_automation_resize();
                 if let Some(id) = self.prototype_frame.clone() {
                     self.show_prototype_frame(id);
                 }
                 self.schedule_scene();
             }
             WindowEvent::ScaleFactorChanged { .. } => {
-                let size = window.inner_size();
-                let scale = window.scale_factor();
-                self.width = size.width as f64 / scale;
-                self.height = size.height as f64 / scale;
+                self.update_window_metrics(&window, window.inner_size());
+                self.schedule_scene();
             }
+            WindowEvent::ThemeChanged(_) => self.invalidate_chrome_theme(),
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::CursorMoved { position, .. } => {
-                let scale = window.scale_factor();
+                let scale = window.scale_factor() * self.ui_scale();
                 let previous = self.cursor;
                 if self.automation.gesture.is_none() {
                     self.pointer_move(position.x / scale, position.y / scale);
@@ -2874,6 +3982,10 @@ impl ApplicationHandler<Event> for App {
                     _ => {}
                 }
                 needs_redraw = self.drag.is_some()
+                    || self.hovered_canvas_item_at(previous).map(|item| &item.id)
+                        != self
+                            .hovered_canvas_item_at(self.cursor)
+                            .map(|item| &item.id)
                     || self.controls.iter().any(|control| {
                         control.rect.contains(previous.0, previous.1)
                             != control.rect.contains(self.cursor.0, self.cursor.1)
@@ -2884,6 +3996,14 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
+                    if self.version_preview_active() {
+                        return;
+                    }
+                    if self.automation.text_preview.is_some() {
+                        self.clear_text_preview();
+                        self.redraw();
+                        return;
+                    }
                     self.cancel_automation_gesture();
                     if self.drag_button.is_none() {
                         self.pointer_down(button, false);
@@ -2897,7 +4017,7 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             WindowEvent::MouseWheel { delta, phase, .. } => {
-                needs_redraw = self.wheel(delta, window.scale_factor(), phase);
+                needs_redraw = self.wheel(delta, window.scale_factor() * self.ui_scale(), phase);
                 if needs_redraw && self.canvas_rect().contains(self.cursor.0, self.cursor.1) {
                     self.trace_input(if matches!(delta, MouseScrollDelta::PixelDelta(_)) {
                         "precise-scroll"
@@ -2925,7 +4045,17 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
+                if self.version_preview_active() {
+                    if event.state == ElementState::Pressed
+                        && event.logical_key == Key::Named(NamedKey::Escape)
+                    {
+                        self.clear_text_preview();
+                        self.redraw();
+                    }
+                    return;
+                }
                 if event.state == ElementState::Pressed {
+                    self.clear_text_preview();
                     self.cancel_automation_gesture();
                 }
                 self.keyboard(&event);
@@ -2937,11 +4067,13 @@ impl ApplicationHandler<Event> for App {
                 if let Some(edit) = &mut self.editing {
                     edit.buffer.set_preedit(text, range);
                 }
+                self.refresh_path_text_scene();
             }
             WindowEvent::Ime(Ime::Commit(text)) => {
                 if let Some(edit) = &mut self.editing {
                     edit.buffer.commit_ime(&text);
                 }
+                self.refresh_path_text_scene();
                 if self.ime_selection.is_some() || self.ime_capture_pending {
                     self.ime_commit = Some(text);
                     if self.ime_selection.is_some() {
@@ -2953,9 +4085,11 @@ impl ApplicationHandler<Event> for App {
                 if let Some(edit) = &mut self.editing {
                     edit.buffer.set_preedit(String::new(), None);
                 }
+                self.refresh_path_text_scene();
             }
             WindowEvent::Focused(false) => {
                 self.cancel_automation_gesture();
+                self.cancel_prototype_pointer();
                 self.drag = None;
                 self.drag_button = None;
                 self.scroll_target = None;
@@ -3005,19 +4139,21 @@ impl ApplicationHandler<Event> for App {
                     if let Some(caret) =
                         crate::text_ui::prepare(&edit.buffer, area, size).and_then(|p| p.caret())
                     {
+                        let interface = self.ui_scale();
                         window.set_ime_cursor_area(
                             LogicalPosition::new(
-                                caret.x,
-                                caret.y.clamp(area.y, area.y + area.height),
+                                caret.x * interface,
+                                caret.y.clamp(area.y, area.y + area.height) * interface,
                             ),
-                            LogicalSize::new(2., caret.height),
+                            LogicalSize::new(2. * interface, caret.height * interface),
                         );
                     }
                 }
             }
             _ => {}
         }
-        if self.closing
+        if self.proxy.id == 1
+            && self.closing
             && self
                 .close_started
                 .is_some_and(|at| at.elapsed() > Duration::from_secs(5))
@@ -3025,7 +4161,7 @@ impl ApplicationHandler<Event> for App {
             event_loop.exit();
         }
         if matches!(self.drag, Some(Drag::Pan { .. }))
-            || self.tool == Tool::Pan
+            || matches!(self.tool, Tool::Pan | Tool::TextOnPath | Tool::Eyedropper)
             || self.space_pan
             || self.cursor_icon != CursorIcon::Default
         {
@@ -3041,6 +4177,15 @@ impl ApplicationHandler<Event> for App {
                     .is_some_and(|area| area.contains(self.cursor.0, self.cursor.1))
             {
                 CursorIcon::Grab
+            } else if self.tool == Tool::Eyedropper
+                && self.canvas_rect().contains(self.cursor.0, self.cursor.1)
+            {
+                CursorIcon::Crosshair
+            } else if self.tool == Tool::TextOnPath
+                && self.canvas_rect().contains(self.cursor.0, self.cursor.1)
+                && self.over_text_path(self.world(self.cursor.0, self.cursor.1))
+            {
+                CursorIcon::Text
             } else {
                 CursorIcon::Default
             };
@@ -3054,12 +4199,33 @@ impl ApplicationHandler<Event> for App {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let prototype_tick = self.prototype_tick();
         self.expire_automation_gesture();
+        if self.font_scan_at.elapsed() >= Duration::from_secs(2) {
+            self.font_scan_at = Instant::now();
+            let language = crate::localization::chosen(&self.profile);
+            if language != self.interface_language {
+                self.interface_language = language;
+                self.redraw();
+            }
+            let board_grid = crate::layout_grids::board_preferences(&self.profile);
+            if board_grid != self.board_grid {
+                self.board_grid = board_grid;
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            let generation = omc_text::profile_font_generation(&self.profile);
+            if generation != self.font_generation {
+                self.font_generation = generation;
+                self.schedule_scene();
+            }
+        }
         if self
             .smoke
             .is_some_and(|duration| self.start.elapsed() >= duration)
         {
-            if !self.presented {
+            if !self.presented && !self.background {
                 self.smoke_failed = true;
             }
             if let Some(path) = self.screenshot.take()
@@ -3075,9 +4241,10 @@ impl ApplicationHandler<Event> for App {
             return;
         }
         if self.closing {
-            if self
-                .close_started
-                .is_some_and(|at| at.elapsed() > Duration::from_secs(5))
+            if self.proxy.id == 1
+                && self
+                    .close_started
+                    .is_some_and(|at| at.elapsed() > Duration::from_secs(5))
             {
                 event_loop.exit();
             }
@@ -3111,7 +4278,7 @@ impl ApplicationHandler<Event> for App {
             };
             let _ = self.bridge.send(Request::Collaboration {
                 action: "cursor",
-                args: json!({"documentId":id,"cursor":cursor}),
+                args: json!({"documentId":id,"cursor":cursor,"viewport":self.collaboration_viewport(id)}),
             });
         }
         if !self.poll_pending
@@ -3124,8 +4291,9 @@ impl ApplicationHandler<Event> for App {
             self.last_poll = Instant::now();
             self.send(Request::Snapshot { id: id.clone() });
         }
+        let idle = Instant::now() + Duration::from_millis(100);
         event_loop.set_control_flow(ControlFlow::WaitUntil(
-            Instant::now() + Duration::from_millis(100),
+            prototype_tick.map_or(idle, |at| at.min(idle)),
         ));
     }
 }

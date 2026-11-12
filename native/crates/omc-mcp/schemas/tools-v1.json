@@ -4237,6 +4237,9 @@
             "copy"
           ]
         },
+        "strict": {
+          "type": "boolean"
+        },
         "payload": {
           "type": "string"
         },
@@ -4263,7 +4266,7 @@
   },
   {
     "name": "export_document",
-    "description": "Export a targeted canvas to typed content or an explicit absolute file path. Existing files are preserved unless overwrite is explicitly true.",
+    "description": "Export a targeted canvas to typed content or an explicit absolute file path. For OMC, mode merge exports the native causal history. Existing files are preserved unless overwrite is explicitly true.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4293,6 +4296,10 @@
         },
         "overwrite": {
           "type": "boolean"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["merge", "copy"]
         },
         "ids": {
           "type": "array",

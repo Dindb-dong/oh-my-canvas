@@ -25,7 +25,7 @@ fn bounds(r: Rect, scale: f64) -> AxRect {
 }
 
 pub fn tree(app: &App) -> TreeUpdate {
-    let scale = app.window.as_ref().map_or(1., |w| w.scale_factor());
+    let scale = app.window.as_ref().map_or(1., |w| w.scale_factor()) * app.ui_scale();
     let mut root = Node::new(Role::Window);
     root.set_label("Oh My Canvas");
     root.set_bounds(AxRect::new(0., 0., app.width * scale, app.height * scale));
@@ -36,12 +36,12 @@ pub fn tree(app: &App) -> TreeUpdate {
         children.push(id);
         let layer_toggle = matches!(
             control.action,
-            Action::LayerVisibility(_) | Action::LayerLock(_)
+            Action::LayerVisibility(_) | Action::LayerLock(_) | Action::ToggleFontDownloads
         );
         let mut node = Node::new(
             if matches!(
                 control.action,
-                Action::Field(_) | Action::EditCatalog { .. }
+                Action::Field(_) | Action::EditCatalog { .. } | Action::EditLibraryDescription
             ) && control.field_value.is_some()
             {
                 Role::TextInput
@@ -63,7 +63,11 @@ pub fn tree(app: &App) -> TreeUpdate {
         }
         if let Some(value) = &control.field_value {
             node.set_value(value.clone());
-            if matches!(control.action, Action::Field(_)) && app.action_available(&control.action) {
+            if matches!(
+                control.action,
+                Action::Field(_) | Action::EditLibraryDescription
+            ) && app.action_available(&control.action)
+            {
                 node.add_action(AxAction::SetValue);
             }
         }
@@ -85,13 +89,16 @@ pub fn tree(app: &App) -> TreeUpdate {
     let focus = if let Some(edit) = &app.editing
         && let Some(r) = crate::text_ui::editor_rect(app)
     {
-        let mut node = Node::new(if matches!(edit.target, EditTarget::Text { .. }) {
+        let mut node = Node::new(if edit.target.is_canvas_text() {
             Role::MultilineTextInput
         } else {
             Role::TextInput
         });
         node.set_label(match &edit.target {
-            EditTarget::Text { .. } => "Canvas text",
+            EditTarget::Text { .. } | EditTarget::TextOnPath { .. } => "Canvas text",
+            EditTarget::LibraryDescription => "Library description",
+            EditTarget::CursorChat => "Cursor chat",
+            EditTarget::CanvasComment { .. } => "Canvas comment",
             EditTarget::Title => "Document name",
             EditTarget::Page { .. } => "Page name",
             EditTarget::Catalog { property, .. } => property,
@@ -214,6 +221,7 @@ pub fn handle(app: &mut App, event: accesskit_winit::Event) {
                         _ => {}
                     }
                 }
+                app.refresh_path_text_scene();
             } else if let Some(control) = app
                 .controls
                 .iter()
@@ -227,7 +235,10 @@ pub fn handle(app: &mut App, event: accesskit_winit::Event) {
                     }
                     (AxAction::Click, _) => app.action(control.action),
                     (AxAction::SetValue, Some(ActionData::Value(value))) => {
-                        if matches!(control.action, Action::Field(_)) {
+                        if matches!(
+                            control.action,
+                            Action::Field(_) | Action::EditLibraryDescription
+                        ) {
                             app.action(control.action);
                             if let Some(edit) = &mut app.editing {
                                 edit.buffer.select_all();

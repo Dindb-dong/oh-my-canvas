@@ -2,6 +2,8 @@ use super::*;
 use omc_model::{DocumentSnapshot, Node, NodeKind};
 use serde_json::{Value, json};
 
+mod electron_canvas;
+
 pub fn import_json(source: &str, options: &ImportOptions) -> Result<ImportResult, ImportError> {
     validate_input(source.as_bytes(), options)?;
     let value: Value =
@@ -95,6 +97,9 @@ pub fn import_json(source: &str, options: &ImportOptions) -> Result<ImportResult
         };
         remap(&mut result);
         return finish(result, options);
+    }
+    if value.get("editorPages").is_some() || value.get("editorRootLayers").is_some() {
+        return electron_canvas::import(&value, options);
     }
     legacy(value, options)
 }

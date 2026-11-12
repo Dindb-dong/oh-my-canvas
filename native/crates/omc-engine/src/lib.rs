@@ -251,13 +251,69 @@ impl DocumentEngine {
                 "requested future revision",
             ));
         }
-        let catalog = self.store.catalog(Some(sequence))?;
-        let (title, mut pages, mut metadata) = catalog.project();
+        self.project_snapshot(sequence, None)
+    }
+
+    /// Prepare the same CRDT operations as a normal edit, project them in memory, then discard them.
+    pub fn preview(
+        &self,
+        context: &RequestContext,
+        envelope: &CommandEnvelope,
+    ) -> Result<DocumentSnapshot> {
+        fn allowed(command: &Command) -> bool {
+            match command {
+                Command::NodeSet { .. }
+                | Command::NodeUnset { .. }
+                | Command::TextMark { .. }
+                | Command::CatalogSet { .. } => true,
+                Command::Batch { commands } => commands.iter().all(allowed),
+                _ => false,
+            }
+        }
+
+        envelope.validate()?;
+        if envelope.document_id != self.meta.id || envelope.target_epoch != self.meta.epoch {
+            return Err(EngineError::new(
+                "stale_revision",
+                "preview document changed",
+            ));
+        }
+        if !allowed(&envelope.command) {
+            return Err(EngineError::invalid(
+                "command cannot be used in a text preview",
+            ));
+        }
+        self.check_preconditions(&envelope.preconditions)?;
+        let mut candidate = self.candidate(&context.author_id)?;
+        self.prepare_command(
+            &mut candidate,
+            &envelope.command,
+            matches!(envelope.preconditions, Preconditions::Revision { .. }),
+            0,
+        )?;
+        self.validate_candidate(&candidate, false, &BTreeSet::new())?;
+        self.project_snapshot(self.meta.sequence, Some(&candidate))
+    }
+
+    fn project_snapshot(
+        &self,
+        sequence: u64,
+        candidate: Option<&Candidate>,
+    ) -> Result<DocumentSnapshot> {
+        let (title, mut pages, mut metadata) = if let Some(candidate) = candidate {
+            candidate.catalog.project()
+        } else {
+            self.store.catalog(Some(sequence))?.project()
+        };
         let mut nodes = BTreeMap::new();
         let mut all = BTreeMap::new();
         let mut stamps = BTreeMap::new();
         for id in self.store.node_ids(Some(sequence))? {
-            if let Some(state) = self.store.node_state(&id, Some(sequence))? {
+            let state = match candidate.and_then(|candidate| candidate.nodes.get(&id)) {
+                Some(state) => Some(state.clone()),
+                None => self.store.node_state(&id, Some(sequence))?,
+            };
+            if let Some(state) = state {
                 stamps.insert(id.clone(), state.placement_stamp());
                 all.insert(id.clone(), state.project()?);
             }
@@ -356,6 +412,15 @@ impl DocumentEngine {
         })
     }
 
+    pub fn reset_local_history(&mut self, revision: &Revision) -> Result<()> {
+        self.check_preconditions(&Preconditions::Revision {
+            revision: revision.clone(),
+        })?;
+        self.undo.clear();
+        self.redo.clear();
+        Ok(())
+    }
+
     pub fn execute(
         &mut self,
         context: &RequestContext,
@@ -452,7 +517,17 @@ impl DocumentEngine {
                 0,
             )?,
         }
-        self.validate_candidate(&candidate, false)?;
+        let rehidden: BTreeSet<&str> = history_action
+            .as_ref()
+            .filter(|(redo, _)| !redo)
+            .into_iter()
+            .flat_map(|(_, group)| &group.operations)
+            .filter_map(|operation| match &operation.action {
+                Action::RestoreNode { node_id, .. } => Some(node_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        self.validate_candidate(&candidate, false, &rehidden)?;
         if started.elapsed().as_millis() > envelope.deadline_ms.unwrap_or(30_000) as u128 {
             return Err(EngineError::new(
                 "deadline_exceeded",
@@ -666,6 +741,244 @@ impl DocumentEngine {
         Ok(())
     }
 
+    fn restore_component_main(
+        &self,
+        candidate: &mut Candidate,
+        instance_id: &str,
+        strict_revision: bool,
+        depth: usize,
+    ) -> Result<()> {
+        let instance = self.live_node(candidate, instance_id)?;
+        let main = instance
+            .string("componentId")
+            .filter(|_| {
+                instance.kind == NodeKind::Instance
+                    && !instance.properties.contains_key("slotContentFor")
+            })
+            .ok_or_else(|| EngineError::invalid("select an outer linked instance"))?;
+        let state = self
+            .state(candidate, main)?
+            .ok_or_else(|| EngineError::invalid("the component has no local history to restore"))?;
+        if state.project()?.is_some() {
+            return Err(EngineError::invalid("the main component still exists"));
+        }
+        let deletions = state.active_deletions();
+        let mut cut = None;
+        for id in &deletions {
+            let sequence = self.store.operation_sequence(id)?.ok_or_else(|| {
+                EngineError::invalid("restore requires a previously committed deletion")
+            })?;
+            cut = Some(cut.map_or(sequence, |old: u64| old.min(sequence)));
+        }
+        let sequence = cut
+            .and_then(|sequence| sequence.checked_sub(1))
+            .ok_or_else(|| EngineError::invalid("component deletion history is unavailable"))?;
+        let snapshot = self.snapshot_at(sequence)?;
+        let source = snapshot
+            .nodes
+            .get(main)
+            .filter(|node| node.kind == NodeKind::Component)
+            .ok_or_else(|| {
+                EngineError::invalid("component definition was missing before deletion")
+            })?;
+        if source.properties.contains_key("libraryId") {
+            return Err(EngineError::invalid(
+                "restore the component in its library document",
+            ));
+        }
+        let parent = instance
+            .parent_id
+            .as_ref()
+            .ok_or_else(|| EngineError::invalid("instance has no parent"))?;
+        let mut ancestor = Some(parent.clone());
+        while let Some(id) = ancestor {
+            let node = self.live_node(candidate, &id)?;
+            if node.kind == NodeKind::Instance {
+                return Err(EngineError::invalid("select the outer instance"));
+            }
+            ancestor = node.parent_id;
+        }
+        let mut by_parent = BTreeMap::<&str, Vec<&str>>::new();
+        for node in snapshot.nodes.values() {
+            if let Some(parent) = node.parent_id.as_deref() {
+                by_parent.entry(parent).or_default().push(&node.id);
+            }
+        }
+        self.append(
+            candidate,
+            Action::RestoreNode {
+                node_id: main.into(),
+                deletions,
+            },
+        )?;
+        let mut pending = vec![main];
+        let mut restored = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            restored.insert(id);
+            if restored.len() > 4096 {
+                return Err(EngineError::new(
+                    "resource_limit",
+                    "component restoration exceeds 4096 layers",
+                ));
+            }
+            if id != main
+                && let Some(state) = self.state(candidate, id)?
+            {
+                let mut matching = Vec::new();
+                for deletion in state.active_deletions() {
+                    if self.store.operation_sequence(&deletion)? == Some(sequence + 1) {
+                        matching.push(deletion);
+                    }
+                }
+                if !matching.is_empty() {
+                    self.append(
+                        candidate,
+                        Action::RestoreNode {
+                            node_id: id.into(),
+                            deletions: matching,
+                        },
+                    )?;
+                }
+            }
+            if let Some(children) = by_parent.get(id) {
+                pending.extend(children.iter().copied());
+            }
+        }
+        self.prepare_command(
+            candidate,
+            &Command::NodeMove {
+                node_id: main.into(),
+                parent_id: Some(parent.clone()),
+                rank: instance.rank.clone(),
+            },
+            strict_revision,
+            depth + 1,
+        )?;
+        let carries = |key: &str| {
+            omc_model::component_push_field(key)
+                || matches!(
+                    key,
+                    "x" | "y" | "width" | "height" | "rotation" | "transform"
+                )
+        };
+        let paint_overrides = |patch: &mut Properties| {
+            for (scalar, stack) in [("fill", "fills"), ("stroke", "strokes")] {
+                if patch.contains_key(scalar) && !patch.contains_key(stack) {
+                    patch.insert(stack.into(), Value::Null);
+                }
+            }
+        };
+        let mut root = instance
+            .properties
+            .iter()
+            .filter(|(key, _)| carries(key) && !matches!(key.as_str(), "text" | "textRuns"))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<Properties>();
+        if let Some(rows) = instance
+            .properties
+            .get("overrides")
+            .and_then(Value::as_object)
+        {
+            for (id, values) in rows {
+                if !restored.contains(id.as_str()) || self.live_node(candidate, id).is_err() {
+                    continue;
+                }
+                let Some(values) = values.as_object() else {
+                    continue;
+                };
+                let mut patch = values
+                    .iter()
+                    .filter(|(key, _)| carries(key))
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect::<Properties>();
+                if id == main {
+                    patch.extend(root);
+                    root = patch;
+                } else {
+                    paint_overrides(&mut patch);
+                    for command in omc_protocol::node_override_commands(id, &patch)? {
+                        self.prepare_command(candidate, &command, strict_revision, depth + 1)?;
+                    }
+                }
+            }
+        }
+        paint_overrides(&mut root);
+        for command in omc_protocol::node_override_commands(main, &root)? {
+            self.prepare_command(candidate, &command, strict_revision, depth + 1)?;
+        }
+        let mut deleted = vec![instance.id.clone()];
+        if let Some(replacements) = instance
+            .properties
+            .get("slotReplacements")
+            .and_then(Value::as_object)
+        {
+            for (slot, replacing) in replacements {
+                if replacing != &Value::Bool(true) {
+                    continue;
+                }
+                if slot.contains('/') {
+                    return Err(EngineError::new(
+                        "unsupported_feature",
+                        "Reset customized slots in nested instances before restoring the main",
+                    ));
+                }
+                if !restored.contains(slot.as_str()) || self.live_node(candidate, slot).is_err() {
+                    return Err(EngineError::invalid(
+                        "the original component slot is unavailable",
+                    ));
+                }
+                for id in by_parent.get(slot.as_str()).into_iter().flatten() {
+                    if self
+                        .live_node(candidate, id)
+                        .is_ok_and(|node| node.parent_id.as_ref() == Some(slot))
+                    {
+                        deleted.push((*id).into());
+                    }
+                }
+            }
+        }
+        for child in self.store.child_ids(&instance.id)? {
+            let node = self.live_node(candidate, &child)?;
+            let slot = node
+                .string("slotContentFor")
+                .filter(|slot| restored.contains(slot))
+                .ok_or_else(|| {
+                    EngineError::invalid("instance content has no recoverable component slot")
+                })?;
+            if node.properties.contains_key("slotInstanceFor") {
+                return Err(EngineError::new(
+                    "unsupported_feature",
+                    "Reset customized slots in nested instances before restoring the main",
+                ));
+            }
+            self.prepare_command(
+                candidate,
+                &Command::NodeMove {
+                    node_id: child.clone(),
+                    parent_id: Some(slot.into()),
+                    rank: node.rank,
+                },
+                strict_revision,
+                depth + 1,
+            )?;
+            self.prepare_command(
+                candidate,
+                &Command::NodeUnset {
+                    node_id: child,
+                    properties: vec!["slotContentFor".into()],
+                },
+                strict_revision,
+                depth + 1,
+            )?;
+        }
+        self.prepare_command(
+            candidate,
+            &Command::NodeDelete { node_ids: deleted },
+            strict_revision,
+            depth + 1,
+        )
+    }
+
     fn prepare_command(
         &self,
         candidate: &mut Candidate,
@@ -694,6 +1007,22 @@ impl DocumentEngine {
                     ));
                 }
                 self.append(candidate, Action::CreateNode { node: node.clone() })?;
+            }
+            Command::NodeCreateMany { nodes } => {
+                if nodes.is_empty() || nodes.len() > 16_000 {
+                    return Err(EngineError::new(
+                        "resource_limit",
+                        "createMany requires 1–16000 nodes",
+                    ));
+                }
+                for node in nodes {
+                    self.prepare_command(
+                        candidate,
+                        &Command::NodeCreate { node: node.clone() },
+                        strict_revision,
+                        depth + 1,
+                    )?;
+                }
             }
             Command::NodeSet {
                 node_id,
@@ -767,6 +1096,9 @@ impl DocumentEngine {
                     }
                     self.append(candidate, Action::DeleteNode { node_id: id })?;
                 }
+            }
+            Command::ComponentRestoreMain { instance_id } => {
+                self.restore_component_main(candidate, instance_id, strict_revision, depth)?;
             }
             Command::NodeRebalance { parent_id } => {
                 self.live_node(candidate, parent_id)?;
@@ -1132,7 +1464,12 @@ impl DocumentEngine {
         )
     }
 
-    fn validate_candidate(&self, candidate: &Candidate, remote: bool) -> Result<()> {
+    fn validate_candidate(
+        &self,
+        candidate: &Candidate,
+        remote: bool,
+        rehidden: &BTreeSet<&str>,
+    ) -> Result<()> {
         let pages = candidate.catalog.current_pages();
         let roots: BTreeSet<_> = pages.iter().map(|page| page.root_node_id.clone()).collect();
         for id in &candidate.changed {
@@ -1163,7 +1500,7 @@ impl DocumentEngine {
                     ));
                 };
                 let Some(parent_node) = parent_state.project()? else {
-                    if remote {
+                    if remote || rehidden.contains(parent.as_str()) {
                         break;
                     }
                     return Err(EngineError::new("conflict", "parent was deleted"));
@@ -1222,6 +1559,42 @@ impl DocumentEngine {
     pub fn export_transactions(&self, after_sequence: u64) -> Result<Vec<RemoteTransaction>> {
         self.store.transactions(after_sequence)
     }
+    pub fn collaboration_changes(
+        &self,
+        author: &str,
+        session: &str,
+        saved: Option<u64>,
+    ) -> Result<Value> {
+        let changes = if let Some(saved) = saved {
+            self.store
+                .transactions_bounded(saved, 4 * 1024 * 1024)?
+                .into_iter()
+                .flat_map(|tx| tx.operations)
+                .collect()
+        } else {
+            self.undo
+                .get(&(
+                    author.to_owned(),
+                    session.to_owned(),
+                    HistoryChannel::Design,
+                ))
+                .and_then(|groups| groups.last())
+                .map(|group| group.operations.clone())
+                .unwrap_or_default()
+        };
+        let bytes = serde_json::to_vec(&changes)
+            .map_err(|error| EngineError::invalid(error.to_string()))?
+            .len();
+        if bytes > 4 * 1024 * 1024 {
+            return Err(EngineError::new(
+                "resource_limit",
+                "collaboration diff exceeds 4 MiB",
+            ));
+        }
+        Ok(
+            serde_json::json!({"count":changes.len(),"bytes":bytes,"changes":changes,"encoding":"omc-native-json"}),
+        )
+    }
     pub fn replica_package(&self) -> Result<ReplicaPackage> {
         Ok(ReplicaPackage {
             profile: omc_protocol::CRDT_PROFILE.into(),
@@ -1230,6 +1603,16 @@ impl DocumentEngine {
             genesis: self.store.genesis()?,
             transactions: self.store.transactions(0)?,
         })
+    }
+
+    pub fn portable_replica_package(&self) -> Result<ReplicaPackage> {
+        if self.store.replica_history_size()? > 64 * 1024 * 1024 {
+            return Err(EngineError::new(
+                "resource_limit",
+                "replica history exceeds 64 MiB",
+            ));
+        }
+        self.replica_package()
     }
     pub fn fork_replica(path: impl AsRef<Path>, package: ReplicaPackage) -> Result<Self> {
         if package.profile != omc_protocol::CRDT_PROFILE
@@ -1260,16 +1643,59 @@ impl DocumentEngine {
             &package.genesis,
         )?;
         let mut engine = Self::from_store(store)?;
-        for transaction in package.transactions {
-            engine.receive_transaction(transaction)?;
-        }
-        if !engine.store.staged_transactions()?.is_empty() {
+        engine.merge_replica(package)?;
+        Ok(engine)
+    }
+
+    /// Applies a verified peer history in one SQLite transaction. The caller
+    /// can retry the whole package without duplicating operations.
+    pub fn merge_replica(&mut self, package: ReplicaPackage) -> Result<DocumentMetadata> {
+        if package.profile != omc_protocol::CRDT_PROFILE
+            || package.document_id != self.meta.id
+            || package.epoch != self.meta.epoch
+            || package.genesis != self.store.genesis()?
+        {
             return Err(EngineError::new(
-                "dependency_unavailable",
-                "replica package is not a closed causal cut",
+                "protocol_mismatch",
+                "replica package does not share this document generation and genesis",
             ));
         }
-        Ok(engine)
+        let mut expected = BTreeMap::<String, u64>::new();
+        for transaction in &package.transactions {
+            transaction.validate()?;
+            if transaction.document_id != self.meta.id || transaction.epoch != self.meta.epoch {
+                return Err(EngineError::invalid(
+                    "package contains another document generation",
+                ));
+            }
+            let counter = expected.entry(transaction.replica_id.clone()).or_default();
+            *counter = (*counter).max(transaction.counter);
+        }
+        let original = (self.meta.clone(), Arc::clone(&self.catalog));
+        self.store.begin_replica_merge()?;
+        let applied = (|| {
+            for transaction in package.transactions {
+                self.receive_transaction(transaction)?;
+            }
+            let actual = self.store.frontiers()?;
+            if expected
+                .iter()
+                .any(|(replica, counter)| actual.get(replica).unwrap_or(&0) < counter)
+            {
+                return Err(EngineError::new(
+                    "dependency_unavailable",
+                    "replica package does not contain a complete causal history",
+                ));
+            }
+            self.store.finish_replica_merge(true)?;
+            Ok(self.meta.clone())
+        })();
+        if applied.is_err() {
+            let rollback = self.store.finish_replica_merge(false);
+            (self.meta, self.catalog) = original;
+            rollback?;
+        }
+        applied
     }
 
     pub fn receive_transaction(&mut self, transaction: RemoteTransaction) -> Result<ReceiveResult> {
@@ -1365,7 +1791,7 @@ impl DocumentEngine {
                     for operation in &transaction.operations {
                         self.apply_operation(&mut candidate, operation.clone())?;
                     }
-                    self.validate_candidate(&candidate, true)?;
+                    self.validate_candidate(&candidate, true, &BTreeSet::new())?;
                     Ok::<Candidate, EngineError>(candidate)
                 })();
                 let candidate = match prepared {

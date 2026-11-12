@@ -65,6 +65,20 @@ pub fn layout(body: &str, size: f32, color: Color, width: f64) -> Option<Rc<Text
 
 pub fn editor_rect(app: &App) -> Option<Rect> {
     let edit = app.editing.as_ref()?;
+    if matches!(edit.target, EditTarget::LibraryDescription) {
+        return app
+            .controls
+            .iter()
+            .find(|control| matches!(control.action, crate::app::Action::EditLibraryDescription))
+            .map(|control| {
+                Rect::new(
+                    control.rect.x + 9.,
+                    control.rect.y + 7.,
+                    control.rect.width - 18.,
+                    control.rect.height - 14.,
+                )
+            });
+    }
     if let EditTarget::Property { property, .. } = &edit.target {
         return app
             .controls
@@ -203,7 +217,7 @@ pub fn prepare(buffer: &EditBuffer, area: Rect, size: f32) -> Option<Prepared> {
     let layout = layout(
         &display[start..end],
         size,
-        Color::from_rgb(32, 38, 50),
+        crate::theme::color(Color::from_rgb(32, 38, 50)),
         area.width.max(1.),
     )?;
     let vertical = layout

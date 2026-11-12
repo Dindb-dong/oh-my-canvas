@@ -1,5 +1,6 @@
 //! The desktop is a protocol client. All authored state and durable writes belong
 //! to omc-service; this module deliberately has no engine/storage dependency.
+use crate::WindowProxy;
 use base64::Engine as _;
 use omc_model::DocumentSnapshot;
 use serde::Deserialize;
@@ -14,7 +15,6 @@ use std::{
     time::{Duration, Instant},
 };
 use uuid::Uuid;
-use winit::event_loop::EventLoopProxy;
 
 const MAX_REPLY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_EXPORT_REPLY_BYTES: usize = 96 * 1024 * 1024;
@@ -29,6 +29,19 @@ pub struct DocumentEntry {
     pub title: String,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default, deserialize_with = "deserialize_thumbnail")]
+    pub thumbnail: Option<skia_safe::Image>,
+}
+
+fn deserialize_thumbnail<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<skia_safe::Image>, D::Error> {
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value
+        .and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok())
+        .and_then(|bytes| {
+            skia_safe::images::deferred_from_encoded_data(skia_safe::Data::new_copy(&bytes), None)
+        }))
 }
 
 #[derive(Debug)]
@@ -41,6 +54,9 @@ pub enum Request {
         id: String,
     },
     Import,
+    OpenPath {
+        path: String,
+    },
     ImportHtml {
         html: String,
     },
@@ -51,6 +67,23 @@ pub enum Request {
     },
     Snapshot {
         id: String,
+    },
+    ShapeBuilder {
+        id: String,
+        epoch: String,
+        sequence: u64,
+        page: String,
+        layers: Vec<String>,
+        points: Vec<(f64, f64)>,
+        remove: bool,
+    },
+    BoardTool {
+        id: String,
+        epoch: String,
+        sequence: u64,
+        page: String,
+        command: &'static str,
+        params: Value,
     },
     Command {
         id: String,
@@ -81,12 +114,23 @@ pub enum Request {
     Save {
         id: String,
     },
+    PublishLibrary {
+        id: String,
+        revision: omc_model::Revision,
+        description: String,
+    },
     Close {
         id: String,
     },
     Collaboration {
         action: &'static str,
         args: Value,
+    },
+    PluginManager {
+        window: u64,
+        ticket: u64,
+        operation: &'static str,
+        arguments: Value,
     },
     Shutdown,
 }
@@ -98,7 +142,17 @@ pub enum Response {
         action: &'static str,
         result: Result<(Value, Option<DocumentSnapshot>), String>,
     },
+    PluginManager {
+        ticket: u64,
+        operation: &'static str,
+        result: Result<Value, String>,
+    },
     Documents(Vec<DocumentEntry>),
+    CanvasMutation {
+        document: DocumentSnapshot,
+        selected: Vec<String>,
+        edit_label: Option<String>,
+    },
     Snapshot {
         document: DocumentSnapshot,
         mutation: bool,
@@ -114,6 +168,10 @@ pub enum Response {
     },
     Closed {
         id: String,
+    },
+    TabError {
+        id: String,
+        message: String,
     },
     FileOperation {
         message: String,
@@ -218,12 +276,13 @@ mod tests {
     }
 }
 
+#[derive(Clone)]
 pub struct Bridge {
     pub sender: SyncSender<Request>,
 }
 
 impl Bridge {
-    pub fn start(profile: PathBuf, proxy: EventLoopProxy<crate::Event>) -> Self {
+    pub fn start(profile: PathBuf, proxy: WindowProxy) -> Self {
         let (sender, receiver) = mpsc::sync_channel::<Request>(32);
         thread::spawn(move || {
             let mut client = match Client::connect(&profile) {
@@ -237,9 +296,11 @@ impl Bridge {
                 }
             };
             let _ = proxy.send_event(crate::Event::Service(Response::Connected));
-            let automation = client.clone();
-            let automation_proxy = proxy.clone();
-            thread::spawn(move || automation.poll_automation(automation_proxy));
+            if proxy.id == 1 {
+                let automation = client.clone();
+                let automation_proxy = proxy.clone();
+                thread::spawn(move || automation.poll_automation(automation_proxy));
+            }
             let mut leases = BTreeSet::new();
             while let Ok(request) = receiver.recv() {
                 if matches!(request, Request::Shutdown) {
@@ -253,16 +314,33 @@ impl Bridge {
                 let mutation = matches!(
                     request,
                     Request::Command { .. }
+                        | Request::ShapeBuilder { .. }
+                        | Request::BoardTool { .. }
                         | Request::Undo { .. }
                         | Request::Splice { .. }
+                        | Request::PublishLibrary { .. }
                         | Request::Import
                         | Request::ImportHtml { .. }
                         | Request::Export { .. }
                 );
+                let tab = match &request {
+                    Request::Open { id } | Request::Close { id } => Some(id.clone()),
+                    _ => None,
+                };
+                let target = match &request {
+                    Request::PluginManager { window, .. } => WindowProxy {
+                        id: *window,
+                        raw: proxy.raw.clone(),
+                    },
+                    _ => proxy.clone(),
+                };
                 let response = client
                     .handle(request, &mut leases)
-                    .unwrap_or_else(|message| Response::Error { message, mutation });
-                if proxy.send_event(crate::Event::Service(response)).is_err() {
+                    .unwrap_or_else(|message| match tab {
+                        Some(id) => Response::TabError { id, message },
+                        None => Response::Error { message, mutation },
+                    });
+                if target.send_event(crate::Event::Service(response)).is_err() {
                     break;
                 }
             }
@@ -292,7 +370,7 @@ struct Client {
 }
 
 impl Client {
-    fn poll_automation(&self, proxy: EventLoopProxy<crate::Event>) {
+    fn poll_automation(&self, proxy: WindowProxy) {
         loop {
             let value = match self.call("desktop.poll", json!({})) {
                 Ok(value) => value,
@@ -320,11 +398,18 @@ impl Client {
                 }
                 Err(error) => Err(format!("Invalid desktop request: {error}")),
             };
+            let quitting = result
+                .as_ref()
+                .is_ok_and(|result| result["quitting"] == true);
             let complete = match result {
                 Ok(result) => json!({"id":id,"result":result}),
                 Err(error) => json!({"id":id,"error":error}),
             };
             if self.call("desktop.complete", complete).is_err() {
+                break;
+            }
+            if quitting {
+                let _ = proxy.send_event(crate::Event::AutomationQuit);
                 break;
             }
         }
@@ -488,6 +573,33 @@ impl Client {
         leases: &mut BTreeSet<String>,
     ) -> Result<Response, String> {
         match request {
+            Request::PluginManager {
+                window: _,
+                ticket,
+                operation,
+                mut arguments,
+            } => {
+                let result = (|| {
+                    if operation == "import" {
+                        let Some(path) = rfd::FileDialog::new()
+                            .set_title("Choose figcraft-plugin.json")
+                            .add_filter("Plugin manifest", &["json"])
+                            .pick_file()
+                        else {
+                            return Ok(Value::Null);
+                        };
+                        arguments["path"] =
+                            json!(path.to_str().ok_or("Plugin manifest path must be UTF-8.")?);
+                    }
+                    arguments["operation"] = json!(operation);
+                    self.call("desktop.plugins", arguments)
+                })();
+                Ok(Response::PluginManager {
+                    ticket,
+                    operation,
+                    result,
+                })
+            }
             Request::Collaboration { action, mut args } => {
                 args["action"] = if action == "host-lan" { "host" } else { action }.into();
                 let result = (|| {
@@ -504,7 +616,13 @@ impl Client {
                         }
                         args["address"] = address.to_string().into();
                     }
+                    let id = args["documentId"].clone();
                     let state = self.call("collaboration", args)?;
+                    let state = if matches!(action, "chat" | "follow") {
+                        self.call("collaboration", json!({"documentId":id,"action":"status"}))?
+                    } else {
+                        state
+                    };
                     let document = if action == "join" {
                         let id = state["documentId"]
                             .as_str()
@@ -526,7 +644,7 @@ impl Client {
                 Ok(Response::Collaboration { action, result })
             }
             Request::Refresh => {
-                let value = self.call("workspace.list", json!({}))?;
+                let value = self.call("workspace.list", json!({"thumbnails":true}))?;
                 let documents = serde_json::from_value(
                     value.get("documents").cloned().unwrap_or_else(|| json!([])),
                 )
@@ -548,6 +666,17 @@ impl Client {
                 let value = self.call("workspace.open", json!({"documentId":id}))?;
                 let document = serde_json::from_value(value).map_err(|e| e.to_string())?;
                 leases.insert(id);
+                Ok(Response::Snapshot {
+                    document,
+                    mutation: false,
+                    activate: true,
+                })
+            }
+            Request::OpenPath { path } => {
+                let value = self.call("desktop.openPath", json!({"path":path}))?;
+                let document: DocumentSnapshot =
+                    serde_json::from_value(value).map_err(|e| e.to_string())?;
+                leases.insert(document.id.clone());
                 Ok(Response::Snapshot {
                     document,
                     mutation: false,
@@ -705,6 +834,64 @@ impl Client {
                 })
             }
             Request::Snapshot { id } => self.snapshot(&id, false),
+            Request::PublishLibrary {
+                id,
+                revision,
+                description,
+            } => {
+                self.call(
+                    "document.publish_library",
+                    json!({"documentId":id,"revision":revision,"description":description}),
+                )?;
+                self.snapshot(&id, true)
+            }
+            Request::ShapeBuilder {
+                id,
+                epoch,
+                sequence,
+                page,
+                layers,
+                points,
+                remove,
+            } => {
+                let result = self.call(
+                    "document.shapeBuilder",
+                    json!({"documentId":id,"epoch":epoch,"sequence":sequence.to_string(),
+                    "page":page,"layers":layers,"points":points,"remove":remove}),
+                )?;
+                let document = self.call("document.snapshot", json!({"documentId":id}))?;
+                Ok(Response::CanvasMutation {
+                    document: serde_json::from_value(document)
+                        .map_err(|error| error.to_string())?,
+                    selected: serde_json::from_value(result["nativeSelection"].clone())
+                        .map_err(|error| error.to_string())?,
+                    edit_label: None,
+                })
+            }
+            Request::BoardTool {
+                id,
+                epoch,
+                sequence,
+                page,
+                command,
+                params,
+            } => {
+                let result = self.call(
+                    "document.boardTool",
+                    json!({
+                        "documentId":id,"epoch":epoch,"sequence":sequence.to_string(),
+                        "page":page,"command":command,"params":params,
+                    }),
+                )?;
+                let document = self.call("document.snapshot", json!({"documentId":id}))?;
+                Ok(Response::CanvasMutation {
+                    document: serde_json::from_value(document)
+                        .map_err(|error| error.to_string())?,
+                    selected: serde_json::from_value(result["nativeSelection"].clone())
+                        .map_err(|error| error.to_string())?,
+                    edit_label: result["editLabel"].as_str().map(str::to_owned),
+                })
+            }
             Request::Command {
                 id,
                 epoch,
@@ -712,8 +899,42 @@ impl Client {
                 command,
                 undo_group,
             } => {
-                let envelope = json!({"protocol":"omc.engine/1","requestId":Uuid::new_v4().to_string(),"documentId":id,"targetEpoch":epoch,"idempotencyKey":Uuid::new_v4().to_string(),"preconditions":{"revision":{"epoch":epoch,"sequence":sequence.to_string()}},"undoGroup":undo_group,"command":command});
-                self.call("document.command", json!({"envelope":envelope}))?;
+                let mut envelope = json!({"protocol":"omc.engine/1","requestId":Uuid::new_v4().to_string(),"documentId":id,"targetEpoch":epoch,"idempotencyKey":Uuid::new_v4().to_string(),"preconditions":{"revision":{"epoch":epoch,"sequence":sequence.to_string()}},"undoGroup":undo_group,"command":command});
+                let first = self.call("document.command", json!({"envelope":envelope}));
+                if let Err(error) = first {
+                    let properties = &command["properties"];
+                    let is_new_comment = command["type"] == "catalog.set"
+                        && command["namespace"] == "comments"
+                        && properties["body"].is_string()
+                        && properties["createdAt"].is_number()
+                        && properties["threadId"].is_null();
+                    if !is_new_comment || !error.starts_with("stale_revision:") {
+                        return Err(error);
+                    }
+                    let live = self.call("document.snapshot", json!({"documentId":id}))?;
+                    let comment = command["entityId"]
+                        .as_str()
+                        .ok_or("Comment ID is missing.")?;
+                    let page = properties["pageId"]
+                        .as_str()
+                        .ok_or("Comment page is missing.")?;
+                    if live["epoch"] != epoch
+                        || !live["pages"]
+                            .as_array()
+                            .is_some_and(|pages| pages.iter().any(|entry| entry["id"] == page))
+                        || live["metadata"]
+                            .get(format!("comments/{comment}/createdAt"))
+                            .is_some()
+                    {
+                        return Err(error);
+                    }
+                    let revision = live["sequence"]
+                        .as_u64()
+                        .or_else(|| live["sequence"].as_str()?.parse().ok())
+                        .ok_or("Comment document revision is missing.")?;
+                    envelope["preconditions"]["revision"]["sequence"] = json!(revision.to_string());
+                    self.call("document.command", json!({"envelope":envelope}))?;
+                }
                 self.snapshot(&id, true)
             }
             Request::Undo { id, epoch, redo } => {

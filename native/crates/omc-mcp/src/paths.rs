@@ -3,10 +3,10 @@ use omc_scene::{Affine, Scene, SceneOptions};
 use std::fmt::Write;
 use svgtypes::{SimplePathSegment, SimplifyingPathParser};
 
-type Point = (f64, f64);
+pub(super) type Point = (f64, f64);
 
 #[derive(Clone, Copy)]
-enum Edge {
+pub(super) enum Edge {
     Move,
     Line,
     Cubic(Point, Point),
@@ -14,14 +14,14 @@ enum Edge {
 }
 
 #[derive(Clone)]
-struct Segment {
-    edge: Edge,
-    end: Point,
-    mode: Option<String>,
+pub(super) struct Segment {
+    pub(super) edge: Edge,
+    pub(super) end: Point,
+    pub(super) mode: Option<String>,
 }
 
 impl Segment {
-    fn new(edge: Edge, end: Point) -> Self {
+    pub(super) fn new(edge: Edge, end: Point) -> Self {
         Self {
             edge,
             end,
@@ -29,7 +29,7 @@ impl Segment {
         }
     }
 
-    fn transform(&mut self, transform: Affine) {
+    pub(super) fn transform(&mut self, transform: Affine) {
         let point = |(x, y)| transform.point(x, y);
         self.end = point(self.end);
         if let Edge::Cubic(first, second) = self.edge {
@@ -53,7 +53,7 @@ fn lerp(a: Point, b: Point, t: f64) -> Point {
     (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
 }
 
-fn geometry(node: &Node) -> Result<Vec<Segment>> {
+pub(super) fn geometry(node: &Node) -> Result<Vec<Segment>> {
     if node.kind != omc_model::NodeKind::Path {
         return Err(EngineError::invalid("choose an editable vector path"));
     }
@@ -94,6 +94,17 @@ fn geometry(node: &Node) -> Result<Vec<Segment>> {
             }
             SimplePathSegment::ClosePath => (Edge::Close, (0., 0.)),
         };
+        if matches!(edge, Edge::Close)
+            && let Some(start) = segments
+                .iter()
+                .rfind(|segment| matches!(segment.edge, Edge::Move))
+                .map(|s| s.end)
+            && segments
+                .last()
+                .is_some_and(|segment| matches!(segment.edge, Edge::Line) && segment.end == start)
+        {
+            segments.pop();
+        }
         let mut segment = Segment::new(edge, end);
         segment.mode = node
             .properties
@@ -228,6 +239,33 @@ pub(super) fn edit(
         return Err(EngineError::invalid("unknown path node index"));
     }
     match action {
+        "reverse" => {
+            let contour = args["contour"].as_u64().map(|index| index as usize);
+            let mut starts = segments
+                .iter()
+                .enumerate()
+                .filter_map(|(index, segment)| matches!(segment.edge, Edge::Move).then_some(index))
+                .collect::<Vec<_>>();
+            if contour.is_some_and(|index| index >= starts.len()) {
+                return Err(EngineError::invalid("unknown vector loop"));
+            }
+            starts.push(segments.len());
+            let mut output = Vec::with_capacity(segments.len());
+            for (index, range) in starts.windows(2).enumerate() {
+                let source = &segments[range[0]..range[1]];
+                if contour.is_none_or(|n| n == index) {
+                    let closed = matches!(source.last().unwrap().edge, Edge::Close);
+                    let len = source.len() - usize::from(closed);
+                    output.extend(reverse(source[..len].to_vec()));
+                    if closed {
+                        output.push(source[len].clone());
+                    }
+                } else {
+                    output.extend_from_slice(source);
+                }
+            }
+            segments = output;
+        }
         "move_nodes" => {
             let (x, y) = inverse.point(args["dx"].as_f64().unwrap(), args["dy"].as_f64().unwrap());
             let (origin_x, origin_y) = inverse.point(0., 0.);
@@ -413,6 +451,7 @@ pub(super) fn edit(
                 if args["secondEnd"] == true {
                     other_segments = reverse(other_segments);
                 }
+                let join = segments.len() - 1;
                 let end = segments.last_mut().unwrap();
                 let start = other_segments[0].end;
                 if action == "merge" || (end.end.0 - start.0).hypot(end.end.1 - start.1) < 1e-6 {
@@ -422,10 +461,36 @@ pub(super) fn edit(
                     other_segments[0].edge = Edge::Line;
                 }
                 segments.extend(other_segments);
+                if args["smooth"] == true {
+                    for index in [join, join + 1] {
+                        smooth_join(&mut segments, index);
+                    }
+                }
             } else {
                 if action == "merge" && segments.len() > 2 {
                     let end = segments.pop().unwrap().end;
                     segments[0].end = lerp(segments[0].end, end, 0.5);
+                }
+                if args["smooth"] == true {
+                    let first = segments[0].end;
+                    let last = segments.last().unwrap().end;
+                    let before = segments[segments.len() - 2].end;
+                    let after = segments[1].end;
+                    segments.push(Segment::new(
+                        Edge::Cubic(
+                            lerp(
+                                last,
+                                (2. * last.0 - before.0, 2. * last.1 - before.1),
+                                1. / 3.,
+                            ),
+                            lerp(
+                                first,
+                                (2. * first.0 - after.0, 2. * first.1 - after.1),
+                                1. / 3.,
+                            ),
+                        ),
+                        first,
+                    ));
                 }
                 segments.push(Segment::new(Edge::Close, (0., 0.)));
             }
@@ -477,8 +542,26 @@ pub(super) fn edit(
         }
         _ => return Err(EngineError::invalid("unknown path operation")),
     }
+    let mut commands = vec![path_command(id, &segments)?];
+    if let Some(other) = other {
+        commands.push(Command::NodeDelete {
+            node_ids: vec![other.into()],
+        });
+    }
+    Ok(commands)
+}
+
+pub(super) fn path_command(id: &str, segments: &[Segment]) -> Result<Command> {
     let mut path = String::new();
-    for segment in &segments {
+    for segment in segments {
+        let valid = |(x, y): Point| x.is_finite() && y.is_finite() && x.abs().max(y.abs()) <= 1e9;
+        if !valid(segment.end)
+            || matches!(segment.edge, Edge::Cubic(first, second) if !valid(first) || !valid(second))
+        {
+            return Err(EngineError::invalid(
+                "vector coordinates exceed supported range",
+            ));
+        }
         let (x, y) = segment.end;
         match segment.edge {
             Edge::Move => write!(path, "M {x} {y} "),
@@ -493,7 +576,7 @@ pub(super) fn edit(
             "a vector must retain at least one node",
         ));
     }
-    let mut commands = vec![Command::NodeSet {
+    Ok(Command::NodeSet {
         node_id: id.into(),
         properties: Properties::from([
             ("path".into(), json!(path.trim())),
@@ -508,13 +591,22 @@ pub(super) fn edit(
             ),
             ("primitive".into(), Value::Null),
         ]),
-    }];
-    if let Some(other) = other {
-        commands.push(Command::NodeDelete {
-            node_ids: vec![other.into()],
-        });
+    })
+}
+
+fn smooth_join(segments: &mut [Segment], index: usize) {
+    if index == 0 || index + 1 >= segments.len() {
+        return;
     }
-    Ok(commands)
+    let before = segments[index - 1].end;
+    let anchor = segments[index].end;
+    let after = segments[index + 1].end;
+    let (dx, dy) = ((after.0 - before.0) / 6., (after.1 - before.1) / 6.);
+    let (incoming, _) = segments[index].controls(before);
+    let (_, outgoing) = segments[index + 1].controls(anchor);
+    segments[index].edge = Edge::Cubic(incoming, (anchor.0 - dx, anchor.1 - dy));
+    segments[index].mode = Some("smooth".into());
+    segments[index + 1].edge = Edge::Cubic((anchor.0 + dx, anchor.1 + dy), outgoing);
 }
 
 fn reverse(path: Vec<Segment>) -> Vec<Segment> {

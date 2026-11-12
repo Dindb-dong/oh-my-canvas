@@ -1,5 +1,9 @@
 //! Browser-free Skia rendering shared by desktop, screenshots and PDF exports.
+mod image_paint;
 mod paints;
+mod pattern;
+mod variable_stroke;
+mod vector_point_stroke;
 pub use paints::stroke_outlines;
 mod resources;
 
@@ -13,7 +17,7 @@ use skia_safe::{
     ImageInfo, Matrix, Paint, Path, Rect, Shader, Surface, TileMode, canvas::SaveLayerRec,
     paint::Style,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RenderError {
@@ -96,7 +100,7 @@ fn surface(
         (width as i32, height as i32),
         ColorType::RGBA8888,
         AlphaType::Premul,
-        ColorSpace::new_srgb(),
+        (scene.color_profile == omc_style::ColorProfile::Srgb).then(ColorSpace::new_srgb),
     );
     let mut surface = skia_safe::surfaces::raster(&info, None, None)
         .ok_or_else(|| RenderError::Backend("CPU surface allocation failed".into()))?;
@@ -108,7 +112,9 @@ fn surface(
             .unwrap_or(Color4f::new(0., 0., 0., 0.)),
     );
     canvas.scale((options.scale as f32, options.scale as f32));
-    let diagnostics = paint_scene(canvas, scene, &cached_resources)?;
+    let diagnostics = resources::with_raster_profile(scene.color_profile, || {
+        paint_scene(canvas, scene, &cached_resources)
+    })?;
     Ok((surface, diagnostics))
 }
 
@@ -150,7 +156,19 @@ pub fn render_rgba(
         AlphaType::Unpremul,
         ColorSpace::new_srgb(),
     );
-    if !surface.read_pixels(&info, &mut pixels, width as usize * 4, (0, 0)) {
+    let row_bytes = width as usize * 4;
+    let read = if scene.color_profile == omc_style::ColorProfile::Srgb {
+        surface.read_pixels(&info, &mut pixels, row_bytes, (0, 0))
+    } else {
+        snapshot_with_color_profile(&mut surface, scene.color_profile)?.read_pixels(
+            &info,
+            &mut pixels,
+            row_bytes,
+            (0, 0),
+            skia_safe::image::CachingHint::Disallow,
+        )
+    };
+    if !read {
         return Err(RenderError::Backend("RGBA readback failed".into()));
     }
     Ok(RenderedImage {
@@ -178,11 +196,33 @@ pub fn render_encoded_with_diagnostics(
     format: RasterFormat,
     quality: u32,
 ) -> Result<(Vec<u8>, Vec<Diagnostic>), RenderError> {
+    render_encoded_with_profile(scene, options, resources, format, quality, false)
+}
+
+pub fn render_encoded_with_profile(
+    scene: &Scene,
+    options: &RenderOptions,
+    resources: &dyn ResourceProvider,
+    format: RasterFormat,
+    quality: u32,
+    display_p3: bool,
+) -> Result<(Vec<u8>, Vec<Diagnostic>), RenderError> {
     if quality > 100 {
         return Err(RenderError::Unsupported("quality must be 0..100".into()));
     }
     let (mut surface, diagnostics) = surface(scene, options, resources)?;
-    let image = surface.image_snapshot();
+    let mut image = snapshot_with_color_profile(&mut surface, scene.color_profile)?;
+    let source_is_p3 = scene.color_profile == omc_style::ColorProfile::DisplayP3;
+    if display_p3 != source_is_p3 {
+        let color_space = if display_p3 {
+            display_p3_space()?
+        } else {
+            ColorSpace::new_srgb()
+        };
+        image = image
+            .make_color_space(None, color_space, Default::default())
+            .ok_or_else(|| RenderError::Backend("Image color profile conversion failed".into()))?;
+    }
     let format = match format {
         RasterFormat::Png => EncodedImageFormat::PNG,
         RasterFormat::Jpeg => EncodedImageFormat::JPEG,
@@ -194,6 +234,29 @@ pub fn render_encoded_with_diagnostics(
         .ok_or_else(|| RenderError::Backend("image encoder failed".into()))?;
     Ok((bytes, diagnostics))
 }
+
+fn display_p3_space() -> Result<ColorSpace, RenderError> {
+    ColorSpace::new_cicp(
+        skia_safe::named_primaries::CicpId::SMPTE_EG_432_1,
+        skia_safe::named_transfer_fn::CicpId::SRGB,
+    )
+    .ok_or_else(|| RenderError::Backend("Display P3 color profile is unavailable".into()))
+}
+
+fn snapshot_with_color_profile(
+    surface: &mut Surface,
+    profile: omc_style::ColorProfile,
+) -> Result<Image, RenderError> {
+    let image = surface.image_snapshot();
+    if profile == omc_style::ColorProfile::DisplayP3 {
+        image
+            .reinterpret_color_space(display_p3_space()?)
+            .ok_or_else(|| RenderError::Backend("Display P3 raster tagging failed".into()))
+    } else {
+        Ok(image)
+    }
+}
+
 pub fn render_png(
     scene: &Scene,
     options: &RenderOptions,
@@ -239,12 +302,59 @@ pub fn paint_scene(
     paint_scene_preview(canvas, scene, resources, &BTreeMap::new())
 }
 
+/// Paints the requested subtree roots in document coordinates.
+pub fn paint_scene_layers(
+    canvas: &Canvas,
+    scene: &Scene,
+    layers: &[usize],
+    resources: &dyn ResourceProvider,
+) -> Result<Vec<Diagnostic>, RenderError> {
+    let mut diagnostics = scene.diagnostics.clone();
+    let preview = BTreeMap::new();
+    for &index in layers {
+        let item = scene
+            .items
+            .get(index)
+            .ok_or_else(|| RenderError::Backend("Requested layer is unavailable".into()))?;
+        let saved = canvas.save();
+        if let Some(parent) = item.parent {
+            canvas.concat(&skia_matrix(scene.items[parent].world));
+        }
+        let result = paint_item(
+            canvas,
+            scene,
+            index,
+            resources,
+            &mut diagnostics,
+            &preview,
+            None,
+            0,
+            None,
+            None,
+        );
+        canvas.restore_to_count(saved);
+        result?;
+    }
+    Ok(diagnostics)
+}
+
 /// Paints one prototype frame in scene coordinates, clipped to its own bounds.
 pub fn paint_scene_frame(
     canvas: &Canvas,
     scene: &Scene,
     frame_id: &str,
     resources: &dyn ResourceProvider,
+) -> Result<Vec<Diagnostic>, RenderError> {
+    paint_scene_frame_pose(canvas, scene, frame_id, resources, &BTreeMap::new())
+}
+
+/// Paints a prototype frame using temporary local transforms for matched layers.
+pub fn paint_scene_frame_pose(
+    canvas: &Canvas,
+    scene: &Scene,
+    frame_id: &str,
+    resources: &dyn ResourceProvider,
+    poses: &BTreeMap<String, Affine>,
 ) -> Result<Vec<Diagnostic>, RenderError> {
     let index = scene
         .items
@@ -268,6 +378,9 @@ pub fn paint_scene_frame(
         &mut diagnostics,
         &BTreeMap::new(),
         None,
+        0,
+        None,
+        (!poses.is_empty()).then_some(poses),
     );
     canvas.restore_to_count(saved);
     result.map(|()| diagnostics)
@@ -278,6 +391,21 @@ fn skia_matrix(affine: Affine) -> Matrix {
     Matrix::new_all(a, c, x, b, d, y, 0., 0., 1.)
 }
 
+/// Paints with the scene's working channels on an untagged canvas so a proof shader
+/// can inspect the composited Display P3 samples before gamut conversion.
+pub fn paint_scene_proof_source(
+    canvas: &Canvas,
+    scene: &Scene,
+    resources: &dyn ResourceProvider,
+    translations: &BTreeMap<String, (f64, f64)>,
+    focused: Option<usize>,
+) -> Result<Vec<Diagnostic>, RenderError> {
+    resources::with_raster_profile(scene.color_profile, || match focused {
+        Some(index) => paint_scene_layers(canvas, scene, &[index], resources),
+        None => paint_scene_preview(canvas, scene, resources, translations),
+    })
+}
+
 /// Non-authoritative gesture preview. Offscreen/export callers use paint_scene
 /// without overrides, so editor overlays never change the committed output.
 pub fn paint_scene_preview(
@@ -285,6 +413,23 @@ pub fn paint_scene_preview(
     scene: &Scene,
     resources: &dyn ResourceProvider,
     translations: &BTreeMap<String, (f64, f64)>,
+) -> Result<Vec<Diagnostic>, RenderError> {
+    paint_scene_editor(canvas, scene, resources, translations, None)
+}
+
+#[derive(Clone, Copy)]
+pub struct SelectionOutline<'a> {
+    pub ids: &'a BTreeSet<String>,
+    pub color: skia_safe::Color,
+    pub object_bounds: bool,
+}
+
+pub fn paint_scene_editor(
+    canvas: &Canvas,
+    scene: &Scene,
+    resources: &dyn ResourceProvider,
+    translations: &BTreeMap<String, (f64, f64)>,
+    outline: Option<SelectionOutline<'_>>,
 ) -> Result<Vec<Diagnostic>, RenderError> {
     if translations
         .values()
@@ -301,6 +446,9 @@ pub fn paint_scene_preview(
             resources,
             &mut diagnostics,
             translations,
+            None,
+            0,
+            outline,
             None,
         )?;
     }
@@ -411,6 +559,9 @@ impl MovePaintPlan {
             &mut Vec::new(),
             translations,
             Some((self, pass)),
+            0,
+            None,
+            None,
         )
     }
 }
@@ -423,9 +574,15 @@ fn paint_item(
     diagnostics: &mut Vec<Diagnostic>,
     translations: &BTreeMap<String, (f64, f64)>,
     pass: Option<(&MovePaintPlan, usize)>,
+    pattern_depth: usize,
+    outline: Option<SelectionOutline<'_>>,
+    poses: Option<&BTreeMap<String, Affine>>,
 ) -> Result<(), RenderError> {
     let item = &scene.items[index];
-    if item.hidden {
+    if item.hidden
+        || item.is_slice()
+        || pattern_depth == 0 && item.properties.get("patternOnly") == Some(&Value::Bool(true))
+    {
         return Ok(());
     }
     let own = match pass {
@@ -443,7 +600,12 @@ fn paint_item(
         if let Some((x, y)) = translations.get(&item.id) {
             canvas.translate((*x as f32, *y as f32));
         }
-        canvas.concat(&skia_matrix(item.local));
+        canvas.concat(&skia_matrix(
+            poses
+                .and_then(|poses| poses.get(&item.id))
+                .copied()
+                .unwrap_or(item.local),
+        ));
         let opacity = item.style.number("opacity", 1.).clamp(0., 1.) as f32;
         let blend = blend_mode(
             item.style
@@ -477,12 +639,33 @@ fn paint_item(
                 }
             }
         }
+        let shape = shape_path(item)?;
+        let selected_outline = outline.filter(|outline| own && outline.ids.contains(&item.id));
+        if own && selected_outline.is_none() {
+            paints::backdrop(canvas, item, &shape);
+        }
         let grouped = opacity < 1. || blend != BlendMode::SrcOver || layer.image_filter().is_some();
         if grouped {
             canvas.save_layer(&SaveLayerRec::default().paint(&layer));
         }
-        let shape = shape_path(item)?;
-        if own {
+        if let Some(outline) = selected_outline {
+            let mut paint = Paint::default();
+            paint
+                .set_color(outline.color)
+                .set_style(Style::Stroke)
+                .set_anti_alias(true);
+            let glyphs = item.text_outline().ok();
+            canvas.draw_path(glyphs.as_ref().unwrap_or(&shape), &paint);
+            if outline.object_bounds
+                && let Some(inverse) = item.world.inverse()
+            {
+                let [x, y, w, h] = item.bounds.map(|coordinate| coordinate as f32);
+                let saved = canvas.save();
+                canvas.concat(&skia_matrix(inverse));
+                canvas.draw_rect(Rect::from_xywh(x, y, w, h), &paint);
+                canvas.restore_to_count(saved);
+            }
+        } else if own {
             for key in ["shader", "effect", "shaderEffect"] {
                 if let Some(value) = item.properties.get(key) {
                     diagnose(
@@ -494,7 +677,7 @@ fn paint_item(
                     )?;
                 }
             }
-            paints::shadows(canvas, scene, item, &shape, diagnostics)?;
+            paints::shadows(canvas, scene, item, &shape, diagnostics, false)?;
             let mut fill = Paint::default();
             fill.set_anti_alias(true);
             let has_fills = if item.kind == NodeKind::Text {
@@ -515,7 +698,27 @@ fn paint_item(
                 }
                 false
             } else {
-                paints::stack(canvas, scene, item, &shape, "fills", diagnostics)?
+                paints::stack(
+                    canvas,
+                    scene,
+                    item,
+                    &shape,
+                    "fills",
+                    diagnostics,
+                    resources,
+                    |paint, diagnostics| {
+                        pattern::draw(
+                            canvas,
+                            scene,
+                            item,
+                            &shape,
+                            paint,
+                            resources,
+                            diagnostics,
+                            pattern_depth,
+                        )
+                    },
+                )?
             };
             if let Some(background) = item
                 .style
@@ -581,7 +784,24 @@ fn paint_item(
                     }
                 }
             }
-            let has_strokes = paints::stack(canvas, scene, item, &shape, "strokes", diagnostics)?;
+            let has_strokes = paints::stack(
+                canvas,
+                scene,
+                item,
+                &shape,
+                "strokes",
+                diagnostics,
+                resources,
+                |_, diagnostics| {
+                    diagnose(
+                        scene,
+                        item,
+                        "stroke.pattern",
+                        "pattern strokes are not supported",
+                        diagnostics,
+                    )
+                },
+            )?;
             if let Some(stroke) = item.style.color("border-color").filter(|_| !has_strokes) {
                 let width = item
                     .style
@@ -595,9 +815,10 @@ fn paint_item(
                         .set_style(Style::Stroke)
                         .set_stroke_width(width as f32)
                         .set_color4f(Color4f::new(stroke.r, stroke.g, stroke.b, stroke.a), None);
-                    canvas.draw_path(&shape, &paint);
+                    paints::draw_authored_stroke(canvas, item, &shape, &mut paint);
                 }
             }
+            paints::shadows(canvas, scene, item, &shape, diagnostics, true)?;
         }
         if item.clip {
             canvas.clip_path(&shape, None, true);
@@ -655,6 +876,9 @@ fn paint_item(
                             diagnostics,
                             translations,
                             pass,
+                            pattern_depth,
+                            outline,
+                            poses,
                         )?;
                     }
                     let mut mask_paint = Paint::default();
@@ -671,13 +895,21 @@ fn paint_item(
                         diagnostics,
                         translations,
                         pass,
+                        pattern_depth,
+                        None,
+                        poses,
                     )?;
                     canvas.restore();
                     canvas.restore();
                 }
                 "vector" => {
                     let mut path = shape_path(&scene.items[mask])?;
-                    let a = scene.items[mask].local.0;
+                    let mask = &scene.items[mask];
+                    let a = poses
+                        .and_then(|poses| poses.get(&mask.id))
+                        .copied()
+                        .unwrap_or(mask.local)
+                        .0;
                     path.transform(&Matrix::new_all(
                         a[0] as f32,
                         a[2] as f32,
@@ -689,7 +921,7 @@ fn paint_item(
                         0.,
                         1.,
                     ));
-                    if !scene.items[mask].children.is_empty() {
+                    if !mask.children.is_empty() {
                         diagnose(
                             scene,
                             item,
@@ -708,6 +940,9 @@ fn paint_item(
                             diagnostics,
                             translations,
                             pass,
+                            pattern_depth,
+                            outline,
+                            poses,
                         )?;
                     }
                 }
@@ -722,6 +957,9 @@ fn paint_item(
                             diagnostics,
                             translations,
                             pass,
+                            pattern_depth,
+                            outline,
+                            poses,
                         )?;
                     }
                 }
@@ -743,6 +981,9 @@ fn paint_item(
                     diagnostics,
                     translations,
                     pass,
+                    pattern_depth,
+                    outline,
+                    poses,
                 )?;
             }
         }
@@ -788,12 +1029,33 @@ fn draw_image(
         Ok(image) => {
             let mut dst = Rect::from_xywh(0., 0., item.width as f32, item.height as f32);
             let mut src = Rect::from_wh(image.width() as f32, image.height() as f32);
+            let crop = item
+                .properties
+                .get("imageCrop")
+                .and_then(|value| image_paint::crop_rect(value, item));
+            if let Some([x, y, width, height]) = crop {
+                dst = Rect::from_xywh(x as f32, y as f32, width as f32, height as f32);
+            }
             match item
                 .style
                 .get("object-fit")
                 .or_else(|| item.properties.get("imageFit").and_then(Value::as_str))
                 .unwrap_or("cover")
             {
+                "tile" if crop.is_some() => {
+                    let mut paint = Paint::default();
+                    paint.set_shader(image_paint::shader(
+                        &serde_json::json!({"assetHash":hash,"mode":"crop","crop":item.properties["imageCrop"],"cropSampling":"repeat"}),
+                        item,
+                        resources,
+                    )?);
+                    if let Some(filters) = item.properties.get("imageFilters") {
+                        image_paint::filters(&mut paint, filters);
+                    }
+                    canvas.draw_path(&shape_path(item)?, &paint);
+                    return Ok(());
+                }
+                _ if crop.is_some() => (),
                 "contain" => {
                     let scale = (item.width / image.width() as f64)
                         .min(item.height / image.height() as f64);
@@ -826,16 +1088,38 @@ fn draw_image(
                         );
                     }
                 }
+                "tile" => {
+                    let mut paint = Paint::default();
+                    paint.set_shader(image_paint::shader(
+                        &serde_json::json!({"assetHash":hash,"mode":"tile"}),
+                        item,
+                        resources,
+                    )?);
+                    if let Some(filters) = item.properties.get("imageFilters") {
+                        image_paint::filters(&mut paint, filters);
+                    }
+                    canvas.draw_path(&shape_path(item)?, &paint);
+                    return Ok(());
+                }
                 "fill" => (),
                 value => return Err(RenderError::Unsupported(format!("image fit {value}"))),
             }
+            let mut paint = Paint::default();
+            image_paint::filters(
+                &mut paint,
+                &item
+                    .properties
+                    .get("imageFilters")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            );
             let saved = canvas.save();
             canvas.clip_path(&shape_path(item)?, None, true);
             canvas.draw_image_rect(
                 &image,
                 Some((&src, skia_safe::canvas::SrcRectConstraint::Strict)),
                 dst,
-                &Paint::default(),
+                &paint,
             );
             canvas.restore_to_count(saved);
             Ok(())

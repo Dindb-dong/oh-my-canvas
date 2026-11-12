@@ -1,7 +1,10 @@
 use omc_protocol::{EngineError, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
-use std::path::Path;
+use std::{
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 pub struct Catalog {
     pub connection: Connection,
@@ -16,12 +19,29 @@ impl Catalog {
         omc_storage::verify_sqlite(&connection)?;
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA wal_autocheckpoint=0; PRAGMA busy_timeout=50;
          CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-         CREATE TABLE IF NOT EXISTS documents(id TEXT PRIMARY KEY,title TEXT NOT NULL,epoch TEXT NOT NULL,sequence TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0,starred INTEGER NOT NULL DEFAULT 0,folder_id TEXT,trashed INTEGER NOT NULL DEFAULT 0);
+         CREATE TABLE IF NOT EXISTS documents(id TEXT PRIMARY KEY,title TEXT NOT NULL,epoch TEXT NOT NULL,sequence TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0,starred INTEGER NOT NULL DEFAULT 0,folder_id TEXT,trashed INTEGER NOT NULL DEFAULT 0,updated_ms INTEGER NOT NULL DEFAULT 0);
          CREATE TABLE IF NOT EXISTS folders(id TEXT PRIMARY KEY,title TEXT NOT NULL,parent_id TEXT REFERENCES folders(id));
          CREATE TABLE IF NOT EXISTS principals(id TEXT PRIMARY KEY,credential_hash TEXT NOT NULL,scope TEXT NOT NULL,revoked INTEGER NOT NULL DEFAULT 0);
          CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,kind TEXT NOT NULL,state TEXT NOT NULL,details TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS adapter_intents(principal TEXT NOT NULL,document_id TEXT NOT NULL,epoch TEXT NOT NULL,operation_key TEXT NOT NULL,request_digest TEXT NOT NULL,envelope TEXT NOT NULL,output TEXT NOT NULL,integrity_digest TEXT NOT NULL,PRIMARY KEY(principal,document_id,epoch,operation_key));
          UPDATE jobs SET state='interrupted' WHERE state IN ('queued','running','cancelling');").map_err(sql_error)?;
+        let has_update_time = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('documents') WHERE name='updated_ms')",
+            [], |row| row.get::<_, bool>(0),
+        ).map_err(sql_error)?;
+        if !has_update_time {
+            connection
+                .execute_batch(
+                    "ALTER TABLE documents ADD COLUMN updated_ms INTEGER NOT NULL DEFAULT 0;",
+                )
+                .map_err(sql_error)?;
+        }
+        connection
+            .execute_batch(super::catalog_versions::SCHEMA)
+            .map_err(sql_error)?;
+        connection
+            .execute_batch(super::catalog_branches::SCHEMA)
+            .map_err(sql_error)?;
         let mode: String = connection
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .map_err(sql_error)?;
@@ -51,6 +71,22 @@ impl Catalog {
         Ok(Self { connection, epoch })
     }
     pub fn record(&self, id: &str, meta: &Value) -> Result<()> {
+        self.record_at(id, meta, clock_ms(SystemTime::now()), true)
+    }
+    pub(super) fn document_stamp(database: &Path) -> i64 {
+        [
+            database.to_owned(),
+            database.with_file_name("document.sqlite-wal"),
+        ]
+        .iter()
+        .filter_map(|path| std::fs::metadata(path).ok()?.modified().ok())
+        .max()
+        .map_or(0, clock_ms)
+    }
+    pub(super) fn record_discovered(&self, id: &str, meta: &Value, updated: i64) -> Result<()> {
+        self.record_at(id, meta, updated, false)
+    }
+    fn record_at(&self, id: &str, meta: &Value, updated: i64, modified: bool) -> Result<()> {
         let title = meta["title"].as_str().unwrap_or("Untitled");
         let epoch = meta["epoch"]
             .as_str()
@@ -59,12 +95,50 @@ impl Catalog {
             .as_str()
             .map(str::to_owned)
             .unwrap_or_else(|| meta["sequence"].to_string());
-        self.connection.execute("INSERT INTO documents(id,title,epoch,sequence) VALUES(?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET title=excluded.title,epoch=excluded.epoch,sequence=excluded.sequence",params![id,title,epoch,sequence]).map_err(sql_error)?;
+        self.connection.execute(
+            "INSERT INTO documents(id,title,epoch,sequence,updated_ms) VALUES(?1,?2,?3,?4,?5)
+             ON CONFLICT(id) DO UPDATE SET title=excluded.title,epoch=excluded.epoch,sequence=excluded.sequence,
+             updated_ms=CASE WHEN documents.updated_ms=0 OR documents.epoch<>excluded.epoch
+                    OR documents.sequence<>excluded.sequence OR ?6
+                 THEN max(documents.updated_ms,excluded.updated_ms) ELSE documents.updated_ms END",
+            params![id, title, epoch, sequence, updated, modified],
+        ).map_err(sql_error)?;
+        Ok(())
+    }
+    pub(super) fn touch(&self, id: &str, revision: &Value) -> Result<()> {
+        let Some(sequence) = revision["sequence"].as_str() else {
+            return Ok(());
+        };
+        self.connection
+            .execute(
+                "UPDATE documents SET updated_ms=max(updated_ms,?2),sequence=?3
+                 WHERE id=?1 AND epoch=?4 AND (length(sequence)<length(?3)
+                    OR (length(sequence)=length(?3) AND sequence<?3))",
+                params![
+                    id,
+                    clock_ms(SystemTime::now()),
+                    sequence,
+                    revision["epoch"].as_str()
+                ],
+            )
+            .map_err(sql_error)?;
         Ok(())
     }
     pub fn list(&self, include_archived: bool) -> Result<Vec<Value>> {
-        let mut statement=self.connection.prepare("SELECT id,title,epoch,sequence,archived,starred,folder_id FROM documents WHERE trashed=0 AND (?1 OR archived=0) ORDER BY lower(title),id").map_err(sql_error)?;
-        let rows=statement.query_map([include_archived],|r|Ok(json!({"id":r.get::<_,String>(0)?,"title":r.get::<_,String>(1)?,"epoch":r.get::<_,String>(2)?,"sequence":r.get::<_,String>(3)?,"archived":r.get::<_,bool>(4)?,"starred":r.get::<_,bool>(5)?,"folderId":r.get::<_,Option<String>>(6)?}))).map_err(sql_error)?;
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT id,title,epoch,sequence,archived,starred,folder_id,updated_ms,
+                strftime('%Y-%m-%dT%H:%M:%fZ',updated_ms/1000.0,'unixepoch')
+             FROM documents WHERE trashed=0 AND (?1 OR archived=0) ORDER BY lower(title),id",
+            )
+            .map_err(sql_error)?;
+        let rows = statement.query_map([include_archived], |r| Ok(json!({
+            "id":r.get::<_,String>(0)?,"title":r.get::<_,String>(1)?,"epoch":r.get::<_,String>(2)?,
+            "sequence":r.get::<_,String>(3)?,"archived":r.get::<_,bool>(4)?,"starred":r.get::<_,bool>(5)?,
+            "folderId":r.get::<_,Option<String>>(6)?,"updatedAtMs":r.get::<_,i64>(7)?,
+            "updatedAt":r.get::<_,Option<String>>(8)?,
+        }))).map_err(sql_error)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(sql_error)
     }
@@ -205,4 +279,11 @@ impl Catalog {
 fn string<'a>(v: &'a Value, k: &str) -> Result<&'a str> {
     v[k].as_str()
         .ok_or_else(|| EngineError::invalid(format!("{k} required")))
+}
+
+fn clock_ms(time: SystemTime) -> i64 {
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+        .unwrap_or_default()
 }

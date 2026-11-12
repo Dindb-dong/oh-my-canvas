@@ -1,12 +1,89 @@
 //! A compatibility surface for FigCraft calls on the native OMC document authority.
+mod advanced;
+mod starters;
+pub(crate) use advanced::{dev_diff, dev_status, prototype_settings};
+mod branches;
+pub(super) mod clipboard;
 mod core;
+mod data;
+pub(super) mod defaults;
+mod design;
+mod editing;
+pub(super) mod font_download;
+mod geometry;
+mod images;
+mod inspect;
+pub(super) mod plugins;
+pub(super) mod preview;
+mod preferences;
+pub(crate) mod publish_server;
+mod selection_paint;
+mod tabs;
+pub(super) mod text;
+mod versions;
 
 use super::*;
 use base64::Engine;
+pub(crate) use design::export::normalize_fig_export_setting;
 use omc_model::{NodeKind, rank_between};
 
 const COMMANDS: &[(&str, &str, bool, &str)] = &[
+    (
+        "edit.setDefaultProperties",
+        "Set default properties",
+        false,
+        "id?",
+    ),
+    ("edit.repeat", "Repeat last command", true, ""),
+    (
+        "data.fill",
+        "Fill copies with data",
+        true,
+        "id, rows, gap?, formats?, dir?, format?, scale?",
+    ),
+    ("collab.host", "Start live session", false, "port?, bind?"),
+    ("collab.registerLinks", "Open native invite links in Oh My Canvas", false, "on?"),
+    ("collab.share", "Share with a join code", false, "via?, access?, bind?, port?, name?"),
+    ("collab.join", "Join live session", false, "link | code"),
+    ("collab.peers", "People in this file", false, ""),
+    ("collab.publish", "Publish to server", false, "server, key?, name?"),
+    ("collab.files", "Your online files", false, "refresh?"),
+    ("collab.manageFile", "Manage published file", false, "file, server?, owner?, action, access?, label?, link?, name?"),
+    ("collab.openFile", "Open online file", false, "file, server?"),
+    ("collab.forgetFile", "Forget online file", false, "file, server?"),
+    ("collab.report", "Report file to server operator", false, "reason"),
+    ("collab.recoverFile", "Recover online file", false, "path, file, server?, session, client, seq, secret?"),
+    ("collab.serverInfo", "Server info", false, "server"),
+    ("pref.publishServer", "Server for online sharing", false, "url?"),
+    ("collab.diff", "Show sync changes", false, "against?"),
+    ("collab.reconnect", "Reconnect live session", false, ""),
+    (
+        "collab.removePerson",
+        "Remove from session",
+        false,
+        "client",
+    ),
+    ("collab.cursor", "Show cursor", false, "x?, y?"),
+    ("collab.cursorChat", "Cursor chat", false, "text?"),
+    ("collab.follow", "Follow", false, "client?"),
+    ("collab.spotlight", "Spotlight me", false, "on?"),
+    ("collab.leave", "Leave live session", false, ""),
+    ("collab.stop", "Stop live session", false, ""),
+    (
+        "command.batch",
+        "Run several commands",
+        true,
+        "label?, onError?, commands",
+    ),
     ("doc.list", "List documents", false, ""),
+    ("template.list", "List templates", false, ""),
+    (
+        "file.newFromTemplate",
+        "New from template",
+        false,
+        "template?, name?",
+    ),
+    ("file.newBoard", "New board", false, "name?"),
     ("file.new", "New document", false, "name?"),
     ("file.open", "Open document", false, "path"),
     ("file.save", "Save document", false, "path?, overwrite?"),
@@ -19,6 +96,12 @@ const COMMANDS: &[(&str, &str, bool, &str)] = &[
     ),
     ("node.set", "Set layer properties", true, "ids?, props"),
     ("select.set", "Select layers", false, "ids"),
+    (
+        "selection.setPaint",
+        "Change selection color",
+        true,
+        "targets, paint",
+    ),
     ("select.none", "Clear selection", false, ""),
     ("edit.undo", "Undo", false, ""),
     ("edit.redo", "Redo", false, ""),
@@ -101,6 +184,29 @@ const COMMANDS: &[(&str, &str, bool, &str)] = &[
     ),
 ];
 
+fn commands() -> impl Iterator<Item = &'static (&'static str, &'static str, bool, &'static str)> {
+    COMMANDS
+        .iter()
+        .chain(core::COMMANDS)
+        .chain(editing::COMMANDS)
+        .chain(advanced::COMMANDS)
+        .chain(geometry::COMMANDS)
+        .chain(tabs::COMMANDS)
+        .chain(clipboard::COMMANDS)
+        .chain(design::COMMANDS)
+        .chain(crate::desktop_commands::FIGCRAFT_COMMANDS)
+        .chain(text::COMMANDS)
+        .chain(versions::COMMANDS)
+        .chain(preferences::COMMANDS)
+        .chain(branches::COMMANDS)
+        .chain(images::COMMANDS)
+        .chain(inspect::COMMANDS)
+        .chain(plugins::COMMANDS)
+        .chain(plugins::widgets::COMMANDS)
+        .chain(super::figcraft_file::FILE_COMMANDS)
+        .chain(super::figcraft_catalog::COMMANDS)
+}
+
 pub fn tools() -> Vec<Value> {
     let tool = |name: &str, description: &str, mut props: Value, required: &[&str]| {
         props["document"] = json!({"type":"string","description":"Native document ID; defaults to this MCP session's document."});
@@ -123,8 +229,8 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "batch",
-            "Run an atomic batch of node.create and node.set steps. Earlier results can be referenced by name or index.",
-            json!({"commands":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"object"}},"label":{"type":"string"},"onError":{"type":"string","enum":["abort"]}}),
+            "Run editable steps as one undo operation. Earlier results can be referenced by name or index.",
+            json!({"commands":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"object"}},"label":{"type":"string"},"onError":{"type":"string","enum":["abort","continue"]}}),
             &["commands"],
         ),
         tool(
@@ -234,8 +340,76 @@ pub fn tools() -> Vec<Value> {
 }
 
 impl ToolRouter {
+    pub fn fig_bind_collaboration_tab(&self, session: &str, document: &str) -> Result<()> {
+        let id = native_id(document)?;
+        self.workspace.bind(session, &id)?;
+        self.context(session, &id)?;
+        self.fig_record_tab(session, json!({"document":document}))?;
+        Ok(())
+    }
+    pub fn native_shape_builder(&self, session: &str, args: &Value) -> Result<Value> {
+        let document = self.workspace.target(session, Some(string(args, "documentId")?))?;
+        let snapshot = self.workspace.snapshot(&document)?;
+        let sequence = string(args, "sequence")?.parse::<u64>()
+            .map_err(|_| EngineError::invalid("sequence must be a native revision number"))?;
+        if string(args, "epoch")? != snapshot.epoch || sequence != snapshot.sequence {
+            return Err(EngineError::new("stale_revision", "The selected shapes changed during the gesture"));
+        }
+        let page = snapshot.pages.iter().find(|page| page.id == args["page"])
+            .ok_or_else(|| EngineError::invalid("shape builder page is unavailable"))?;
+        self.context_from(session, &snapshot)?;
+        let mut state = self.state(session, &document)?;
+        state.page_id = page.id.clone();
+        state.root = page.root_node_id.clone();
+        let layers = args["layers"].as_array().filter(|items| (1..=24).contains(&items.len()))
+            .ok_or_else(|| EngineError::invalid("select 1–24 layers"))?;
+        let aliases = layers.iter().map(|layer| {
+            let raw = layer.as_str().filter(|id| snapshot.nodes.contains_key(*id))
+                .ok_or_else(|| EngineError::invalid("selected shape no longer exists"))?;
+            Ok(json!(self.fig_alias(session, &document, raw)))
+        }).collect::<Result<Vec<_>>>()?;
+        let command = if args["remove"] == true { "shapeBuilder.remove" } else { "shapeBuilder.merge" };
+        let mut result = self.fig_geometry_command(session, &snapshot, &state, &aliases, command,
+            &json!({"points":args["points"]}))?;
+        let current = self.workspace.snapshot(&document)?;
+        let selected = result.get("id").map(|id| vec![id.clone()])
+            .or_else(|| result["changed"].as_array().cloned()).unwrap_or_default();
+        result["nativeSelection"] = json!(self.fig_layers(session, &current, &selected)?);
+        Ok(result)
+    }
+
+    pub fn fig_collaboration_page(&self, session: &str, document: &str) -> Result<String> {
+        if self.state(session, document).is_err() {
+            self.context(session, document)?;
+        }
+        Ok(self.state(session, document)?.page_id)
+    }
     pub fn call_figcraft(&self, session: &str, tool: &str, args: Value) -> Result<Value> {
+        let command = if tool == "run_command" {
+            args["command"].as_str().unwrap_or("")
+        } else {
+            tool
+        };
+        let repeatable = !preview::active()
+            && !matches!(command, "edit.repeat" | "edit.undo" | "edit.redo")
+            && (matches!(tool, "create_node" | "set_properties" | "batch")
+                || commands()
+                    .find(|definition| definition.0 == command)
+                    .is_some_and(|definition| definition.2));
+        let last = repeatable.then(|| (tool.to_owned(), args.clone()));
+        let result = self.fig_execute(session, tool, args)?;
+        if let Some(last) = last {
+            self.fig_repeat
+                .lock()
+                .unwrap()
+                .insert(session.to_owned(), last);
+        }
+        Ok(result)
+    }
+
+    fn fig_execute(&self, session: &str, tool: &str, args: Value) -> Result<Value> {
         self.workspace.session(session)?;
+        let _session_fonts = self.fig_font_scope(session);
         let definition = tools()
             .into_iter()
             .find(|definition| definition["name"] == tool)
@@ -246,12 +420,14 @@ impl ToolRouter {
                 )
             })?;
         schema::check(&definition["inputSchema"], &args, "args")?;
+        if !preview::active() && !preview::preserves_preview(tool, &args) {
+            self.take_fig_preview(session);
+        }
         if tool == "list_commands" {
             let filter = args["filter"].as_str().unwrap_or("").to_lowercase();
-            return Ok(json!(COMMANDS.iter().chain(core::COMMANDS)
-                .chain(super::figcraft_file::FILE_COMMANDS)
-                .chain(super::figcraft_catalog::COMMANDS)
-                .filter(|(id,label,_,params)| [id,label,params].iter().any(|s| s.to_lowercase().contains(&filter)))
+            let mut seen = std::collections::BTreeSet::new();
+            return Ok(json!(commands()
+                .filter(|(id,label,_,params)| seen.insert(*id) && [id,label,params].iter().any(|s| s.to_lowercase().contains(&filter)))
                 .map(|(id,label,undoable,params)| json!({"id":id,"label":label,"undoable":undoable,"params":params}))
                 .collect::<Vec<_>>()));
         }
@@ -264,26 +440,98 @@ impl ToolRouter {
         } else {
             (tool, &args)
         };
+        if plugins::COMMANDS.iter().any(|command| command.0 == name) {
+            return self.fig_plugins_command(session, name, &args, params);
+        }
+        if plugins::widgets::COMMANDS
+            .iter()
+            .any(|command| command.0 == name)
+        {
+            return self.fig_widget_command(session, name, &args, params);
+        }
         match name {
-            "open_file" | "file.open" => return self.fig_open_file(session, params),
-            "file.openRecent" => return self.fig_open_recent(session, params),
-            "file.recover" => return self.fig_recover_file(session, params),
-            "doc.list" => {
-                let listing = self.workspace.list(false)?;
-                return Ok(json!(listing["documents"].as_array().unwrap().iter().enumerate().map(|(index, doc)| {
-                    json!({"id":external_id(doc["id"].as_str().unwrap()),"name":doc["title"],"index":index})
-                }).collect::<Vec<_>>()));
+            "pref.autoSave" | "pref.language" | "pref.userName" => {
+                return self.fig_profile_preference(name, params);
             }
-            "file.new" => {
-                let doc = self.workspace.create(
-                    session,
-                    params["name"].as_str().unwrap_or("Untitled"),
-                    None,
+            "pref.renameDuplicates" => return self.fig_rename_duplicates(params),
+            "pref.publishServer" => return self.fig_set_publish_server(params),
+            "edit.repeat" => {
+                schema::check(
+                    &json!({"type":"object","additionalProperties":false}),
+                    params,
+                    "params",
                 )?;
+                let (previous, mut arguments) = self
+                    .fig_repeat
+                    .lock()
+                    .unwrap()
+                    .get(session)
+                    .cloned()
+                    .ok_or_else(|| EngineError::invalid("nothing to repeat"))?;
+                if let Some(document) = args.get("document") {
+                    arguments["document"] = document.clone();
+                } else if let Some(arguments) = arguments.as_object_mut() {
+                    arguments.remove("document");
+                }
+                return self.fig_execute(session, &previous, arguments);
+            }
+            "open_file" | "file.open" => {
+                return self.fig_record_tab(session, self.fig_open_file(session, params)?);
+            }
+            "file.openRecent" => {
+                return self.fig_record_tab(session, self.fig_open_recent(session, params)?);
+            }
+            "file.recover" => {
+                return self.fig_record_tab(session, self.fig_recover_file(session, params)?);
+            }
+            "doc.list" | "doc.switch" | "doc.nextTab" | "doc.previousTab" | "file.moveTab"
+            | "file.close" => {
+                return self.fig_tabs_command(session, name, params);
+            }
+            "template.list" | "file.newFromTemplate" => {
+                return self.fig_starter_command(session, name, params);
+            }
+            "file.new" | "file.newBoard" => {
+                let board = name == "file.newBoard";
+                let title = params["name"].as_str().unwrap_or(if board {
+                    "Untitled board"
+                } else {
+                    "Untitled"
+                });
+                let content = if board {
+                    let mut content = DocumentContent::empty(title);
+                    content.metadata.insert("boardDocument".into(), json!(true));
+                    content
+                        .nodes
+                        .get_mut(&content.pages[0].root_node_id)
+                        .unwrap()
+                        .properties
+                        .insert("fill".into(), json!("#fbfaf8"));
+                    Some(content)
+                } else {
+                    None
+                };
+                let doc = self.workspace.create(session, title, content)?;
                 self.context_from(session, &doc)?;
-                return Ok(json!({"id":external_id(&doc.id),"name":doc.title}));
+                return self
+                    .fig_record_tab(session, json!({"id":external_id(&doc.id),"name":doc.title}));
             }
             _ => {}
+        }
+        if name == "text.endPreview" {
+            return Ok(json!({"ended":self.take_fig_preview(session).is_some()}));
+        }
+        if name == "text.fonts" {
+            return self.fig_font_inventory(session, params);
+        }
+        if name == "font.downloads" {
+            return Ok(self.fig_font_downloads.list(&self.workspace.profile));
+        }
+        if matches!(name, "text.loadFont" | "text.rescanFonts" | "font.download")
+            && args.get("document").is_none()
+            && self.workspace.session(session)?.binding.is_none()
+        {
+            return self.fig_font_command(session, None, name, params);
         }
         let create_type = match name {
             "frame.create" => Some("frame"),
@@ -303,6 +551,9 @@ impl ToolRouter {
             if let Some(characters) = normalized.as_object_mut().unwrap().remove("characters") {
                 normalized["text"] = characters;
             }
+            if name == "frame.create" {
+                design::apply_frame_preset(&mut normalized)?;
+            }
             normalized["type"] = kind.into();
             Some(normalized)
         } else {
@@ -314,6 +565,12 @@ impl ToolRouter {
         let target = args["document"].as_str().map(native_id).transpose()?;
         let id = self.workspace.target(session, target.as_deref())?;
         let mut snapshot = self.workspace.snapshot(&id)?;
+        if name == "text.preview" {
+            return self.fig_preview(session, &snapshot, params);
+        }
+        let preview = (name == "screenshot")
+            .then(|| self.fig_preview_for(session, &snapshot))
+            .flatten();
         let state_key = (session.into(), id.clone());
         let current = self.states.lock().unwrap().get(&state_key).cloned();
         if current.as_ref().is_none_or(|state| {
@@ -323,7 +580,16 @@ impl ToolRouter {
             self.context_from(session, &snapshot)?;
         }
         let state = self.state(session, &id)?;
+        if name == "data.fill" {
+            return self.fig_data_fill(session, &snapshot, &state, params);
+        }
+        if name == "selection.setPaint" {
+            return self.fig_selection_set_paint(session, &snapshot, params);
+        }
         if let Some(result) = self.fig_file_command(session, &snapshot, &state, name, params) {
+            if name == "file.duplicate" {
+                return self.fig_record_tab(session, result?);
+            }
             return result;
         }
         if name.starts_with("page.") && COMMANDS.iter().any(|command| command.0 == name) {
@@ -335,8 +601,45 @@ impl ToolRouter {
             .cloned()
             .unwrap_or_default();
         selection.retain(|alias| self.fig_layer(session, &snapshot, alias).is_ok());
+        if name == "edit.setDefaultProperties" {
+            return self.fig_creation_defaults(session, &snapshot, &state, &selection, params);
+        }
+        if defaults::headless_tool_command(name) {
+            return self.fig_headless_tool(session, &snapshot, &state, name, params);
+        }
         if core::COMMANDS.iter().any(|command| command.0 == name) {
             return self.fig_core_command(session, &snapshot, &state, &selection, name, params);
+        }
+        if editing::COMMANDS.iter().any(|command| command.0 == name) {
+            return self.fig_editing_command(session, &snapshot, &state, &selection, name, params);
+        }
+        if advanced::COMMANDS.iter().any(|command| command.0 == name) {
+            return self.fig_advanced_command(session, &snapshot, &state, &selection, name, params);
+        }
+        if geometry::COMMANDS.iter().any(|command| command.0 == name) {
+            return self.fig_geometry_command(session, &snapshot, &state, &selection, name, params);
+        }
+        if text::COMMANDS.iter().any(|command| command.0 == name) {
+            return self.fig_text_command(session, &snapshot, &state, &selection, name, params);
+        }
+        if clipboard::COMMANDS.iter().any(|command| command.0 == name) {
+            return self
+                .fig_clipboard_command(session, &snapshot, &state, &selection, name, params);
+        }
+        if design::COMMANDS.iter().any(|command| command.0 == name) {
+            return self.fig_design_command(session, &snapshot, &state, &selection, name, params);
+        }
+        if branches::COMMANDS.iter().any(|command| command.0 == name) {
+            return self.fig_branch_command(session, &snapshot, name, params);
+        }
+        if versions::COMMANDS.iter().any(|command| command.0 == name) {
+            return self.fig_versions_command(session, &snapshot, &state, name, params);
+        }
+        if images::COMMANDS.iter().any(|command| command.0 == name) {
+            return self.fig_images_command(session, &snapshot, &state, &selection, name, params);
+        }
+        if inspect::COMMANDS.iter().any(|command| command.0 == name) {
+            return self.fig_inspect_command(session, &snapshot, &state, &selection, name, params);
         }
         if super::figcraft_catalog::COMMANDS
             .iter()
@@ -351,6 +654,22 @@ impl ToolRouter {
             "save_file" | "file.save" | "file.saveAs" => {
                 self.fig_save_file(session, &snapshot, &state, params, name == "file.saveAs")
             }
+            "collab.diff" => {
+                schema::check(
+                    &json!({"type":"object","additionalProperties":false,"properties":{"against":{"type":"string","enum":["undo","saved"]}}}),
+                    params,
+                    "params",
+                )?;
+                let saved =
+                    (params["against"] == "saved").then(|| state.fig_saved_revision.unwrap_or(0));
+                let caller = self.workspace.session(session)?;
+                let path = self.workspace.document_path(&snapshot.id)?;
+                self.workspace.workers.call(
+                    &path,
+                    "collaboration_changes",
+                    json!({"author":caller.author,"session":session,"saved":saved}),
+                )
+            }
             "inspect_document" => {
                 let mut budget = 300;
                 let tree = children(&snapshot, &state.root)
@@ -361,15 +680,26 @@ impl ToolRouter {
                 Ok(
                     json!({"id":external_id(&id),"name":snapshot.title,"currentPage":self.fig_alias(session,&id,&state.root),
                     "pages":snapshot.pages.iter().map(|p|json!({"id":self.fig_alias(session,&id,&p.root_node_id),"name":p.title})).collect::<Vec<_>>(),
+                    "colorProfile":omc_style::ColorProfile::from_metadata(&snapshot.metadata).name(),
                     "selection":selection,"layers":tree,"revision":snapshot.sequence,"truncated":budget==0,
                     "path":state.fig_file.as_ref().map(|file| &file.path),
                     "dirty":state.fig_saved_revision != Some(snapshot.sequence)}),
                 )
             }
             "get_node" | "node.get" => {
-                let layer = self.fig_layer(session, &snapshot, &params["id"])?;
+                let layer = self.fig_layer(session, &snapshot, &params["id"]);
+                let project = layer
+                    .as_ref()
+                    .ok()
+                    .is_none_or(|id| snapshot.nodes[id].kind == NodeKind::Instance);
+                let projection =
+                    project.then(|| omc_scene::resolve_components(&snapshot, Some(&state.page_id)));
+                let snapshot = projection
+                    .as_ref()
+                    .map_or(&snapshot, |projected| projected.snapshot.as_ref());
+                let layer = self.fig_layer(session, snapshot, &params["id"])?;
                 let mut node =
-                    self.fig_node(session, &snapshot, &snapshot.nodes[&layer], depth, &mut 300);
+                    self.fig_node(session, snapshot, &snapshot.nodes[&layer], depth, &mut 300);
                 if let Some(fields) = params.get("fields") {
                     let fields = fields
                         .as_array()
@@ -406,17 +736,34 @@ impl ToolRouter {
                 )?;
                 Ok(json!({"ok":true}))
             }
-            "create_node" | "node.create" | "set_properties" | "node.set" | "batch" => {
+            "create_node" | "node.create" | "set_properties" | "node.set" | "batch"
+            | "command.batch" => {
                 let sequence = snapshot.sequence;
                 let mut commands = Vec::new();
                 let node_command = |name: &str| match name {
                     "create_node" | "node.create" => "node.create",
                     _ => "node.set",
                 };
-                let result = if name == "batch" {
+                let result = if matches!(name, "batch" | "command.batch") {
+                    let definition = tools()
+                        .into_iter()
+                        .find(|tool| tool["name"] == "batch")
+                        .unwrap();
+                    schema::check(&definition["inputSchema"], params, "batch")?;
+                    let steps = params["commands"].as_array().unwrap();
+                    let continue_on_error = params["onError"] == "continue";
+                    if continue_on_error
+                        && snapshot.nodes.len().saturating_mul(steps.len()) > 500_000
+                    {
+                        return Err(EngineError::new(
+                            "resource_limit",
+                            "continuing batch exceeds the document step budget",
+                        ));
+                    }
                     let mut results = Vec::new();
+                    let mut outcomes = Vec::new();
                     let mut named = BTreeMap::new();
-                    for (index, step) in params["commands"].as_array().unwrap().iter().enumerate() {
+                    for (index, step) in steps.iter().enumerate() {
                         let command = string(step, "command")?;
                         if step.as_object().is_none_or(|step| {
                             step.keys()
@@ -424,39 +771,61 @@ impl ToolRouter {
                         }) {
                             return Err(EngineError::invalid("unknown batch step property"));
                         }
-                        let mut step_params =
-                            step.get("params").cloned().unwrap_or_else(|| json!({}));
-                        references(&mut step_params, &results, &named, 0)?;
-                        let result = self
-                            .fig_edit(
-                                session,
-                                &state.root,
-                                &mut snapshot,
-                                &mut selection,
-                                &mut commands,
-                                command,
-                                &step_params,
-                            )
-                            .map_err(|e| {
-                                EngineError::new(
-                                    e.code,
-                                    format!("Step {index} ({command}): {}", e.message),
-                                )
-                            })?;
                         if let Some(label) = step.get("as") {
                             let label = label.as_str().ok_or_else(|| {
                                 EngineError::invalid("batch step name must be a string")
                             })?;
-                            if label.is_empty() || named.insert(label.to_string(), index).is_some()
-                            {
+                            if label.is_empty() || named.insert(label.to_owned(), index).is_some() {
                                 return Err(EngineError::invalid(
                                     "batch step names must be non-empty and unique",
                                 ));
                             }
                         }
-                        results.push(result);
+                        let mut step_params =
+                            step.get("params").cloned().unwrap_or_else(|| json!({}));
+                        let checkpoint = continue_on_error
+                            .then(|| (snapshot.clone(), selection.clone(), commands.len()));
+                        let applied =
+                            references(&mut step_params, &results, &named, 0).and_then(|_| {
+                                self.fig_edit(
+                                    session,
+                                    &state.root,
+                                    &mut snapshot,
+                                    &mut selection,
+                                    &mut commands,
+                                    command,
+                                    &step_params,
+                                )
+                            });
+                        match applied {
+                            Ok(value) => {
+                                if continue_on_error {
+                                    outcomes.push(json!({"step":index,"command":command,"ok":true,"result":value}));
+                                }
+                                results.push(value);
+                            }
+                            Err(error) => {
+                                let Some((saved_snapshot, saved_selection, command_count)) =
+                                    checkpoint
+                                else {
+                                    return Err(EngineError::new(
+                                        error.code,
+                                        format!("Step {index} ({command}): {}", error.message),
+                                    ));
+                                };
+                                snapshot = saved_snapshot;
+                                selection = saved_selection;
+                                commands.truncate(command_count);
+                                outcomes.push(json!({"step":index,"command":command,"ok":false,"error":error.message}));
+                                results.push(Value::Null);
+                            }
+                        }
                     }
-                    json!(results)
+                    if continue_on_error {
+                        json!(outcomes)
+                    } else {
+                        json!(results)
+                    }
                 } else {
                     self.fig_edit(
                         session,
@@ -474,7 +843,9 @@ impl ToolRouter {
                 {
                     command = commands.pop().unwrap();
                 }
-                self.submit(session, &id, command, &Value::Null, Some(sequence))?;
+                if command.operation_count() > 0 {
+                    self.submit(session, &id, command, &Value::Null, Some(sequence))?;
+                }
                 self.fig_selection(&state_key, &selection);
                 Ok(result)
             }
@@ -490,57 +861,82 @@ impl ToolRouter {
                 &Value::Null,
             ),
             "export" | "file.export" | "file.exportSvg" | "screenshot" => {
-                for key in [
-                    "bleed",
-                    "cropMarks",
-                    "bleedMarks",
-                    "cmyk",
-                    "contentsOnly",
-                    "includeBoundingBox",
-                    "svgOutlineText",
-                    "svgSimplifyStroke",
-                    "svgIdAttribute",
-                    "vdCompat",
-                    "colorProfile",
-                ] {
-                    if params.get(key).is_some() {
-                        return Err(EngineError::new(
-                            "unsupported_feature",
-                            format!("FigCraft export option {key} is not implemented"),
-                        ));
-                    }
-                }
                 let defaults = if name == "screenshot" {
                     &[][..]
                 } else {
                     &selection
                 };
                 let raw = self.fig_layers(session, &snapshot, fig_ids(params, defaults)?)?;
-                let ids = if raw.is_empty() {
-                    vec![state.root]
+                let ids = if raw.is_empty() && matches!(name, "file.export" | "file.exportSvg") {
+                    let mut children = children(&snapshot, &state.root)
+                        .into_iter()
+                        .map(|node| node.id.clone())
+                        .collect::<Vec<_>>();
+                    if children.is_empty() {
+                        children.push(state.root.clone());
+                    }
+                    children
+                } else if raw.is_empty() {
+                    vec![state.root.clone()]
                 } else {
                     raw
                 };
+                let path_format = params["path"]
+                    .as_str()
+                    .and_then(|path| std::path::Path::new(path).extension())
+                    .and_then(|extension| extension.to_str())
+                    .filter(|extension| {
+                        matches!(
+                            *extension,
+                            "png" | "jpg" | "jpeg" | "pdf" | "svg" | "webp" | "xml"
+                        )
+                    });
                 let format = if name == "file.exportSvg" {
                     "svg"
                 } else {
-                    params["format"].as_str().unwrap_or("png")
+                    params["format"].as_str().or(path_format).unwrap_or("png")
+                };
+                let format = format.to_ascii_lowercase();
+                let format = if format == "jpeg" {
+                    "jpg"
+                } else {
+                    format.as_str()
                 };
                 let scale = params["scale"].as_f64().unwrap_or(1.);
-                let mut args =
-                    json!({"documentId":external_id(&id),"ids":ids,"format":format,"scale":scale});
+                let mut args = json!({
+                    "documentId":external_id(&id), "ids":ids,
+                    "format":if format == "xml" { "svg" } else { format },
+                    "scale":scale,
+                });
                 schema::validate("export_selection", &args)?;
+                args["format"] = json!(format);
+                let mut options = params.clone();
+                if let Some(options) = options.as_object_mut() {
+                    options.remove("format");
+                    options
+                        .entry("svgOutlineText")
+                        .or_insert(Value::Bool(false));
+                }
+                let setting = normalize_fig_export_setting(&options)?;
+                design::export::apply_export_options(
+                    &snapshot,
+                    &state.page_id,
+                    &ids,
+                    format,
+                    &setting,
+                    &mut args,
+                )?;
                 if let Some(path) = params.get("path") {
                     args["filePath"] = json!(
                         path.as_str()
                             .ok_or_else(|| EngineError::invalid("path must be a string"))?
                     );
                 }
-                if let Some(size) = params.get("size") {
+                if params.get("size").is_some_and(|size| !size.is_null()) {
                     if params.get("scale").is_some() {
                         return Err(EngineError::invalid("choose either size or scale"));
                     }
-                    args["constraint"] = fig_export_size(size)?;
+                    args["constraint"] = fig_export_size(&setting["size"])?;
                 }
                 if name == "screenshot" {
                     args["maxSize"] = json!(params["maxSize"].as_u64().unwrap_or(1600));
@@ -554,7 +950,13 @@ impl ToolRouter {
                             / 100.
                     );
                 }
-                let mut result = self.export_tool(session, &id, "export_selection", args)?;
+                let mut result = if let Some(preview) = preview {
+                    args["pageId"] = json!(state.page_id);
+                    let artifact = self.export_snapshot_native((*preview).clone(), &args)?;
+                    self.deliver_export(session, &args, artifact)?
+                } else {
+                    self.export_tool(session, &id, "export_selection", args)?
+                };
                 if let Some(path) = result.get("filePath") {
                     result["path"] = path.clone();
                 } else if name != "screenshot" {
@@ -567,6 +969,21 @@ impl ToolRouter {
                 }
                 if result.get("byteLength").is_some() {
                     result["bytes"] = result["byteLength"].clone();
+                }
+                if format == "xml" {
+                    let warnings = result["diagnostics"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|diagnostic| {
+                            diagnostic["code"] == "vector_drawable_compatibility"
+                                || (setting["vdCompat"] != "ignore"
+                                    && diagnostic["fidelityLost"] == true)
+                        })
+                        .filter_map(|diagnostic| diagnostic["original"].as_str())
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>();
+                    result["warnings"] = json!(warnings);
                 }
                 Ok(result)
             }
@@ -584,6 +1001,20 @@ impl ToolRouter {
         input: bool,
         bind: bool,
     ) -> Result<Value> {
+        if let Some(windows) = result.get_mut("windows").and_then(Value::as_array_mut) {
+            for window in windows {
+                if let Some(id) = window["active"].as_str() {
+                    window["active"] = json!(external_id(id));
+                }
+                if let Some(files) = window["files"].as_array_mut() {
+                    for file in files {
+                        if let Some(id) = file["id"].as_str() {
+                            file["id"] = json!(external_id(id));
+                        }
+                    }
+                }
+            }
+        }
         let Some(document) = result["documentId"].as_str().map(native_id).transpose()? else {
             return Ok(result);
         };
@@ -626,17 +1057,27 @@ impl ToolRouter {
             result["selection"] = json!(selection);
         }
         result["documentId"] = json!(external_id(&document));
-        if let Some(windows) = result["windows"].as_array_mut() {
-            for window in windows {
-                if let Some(id) = window["active"].as_str() {
-                    window["active"] = json!(external_id(id));
+        if let Some(start) = result
+            .as_object_mut()
+            .and_then(|result| result.remove("prototypeStart"))
+            .and_then(|start| start.as_str().map(str::to_owned))
+            .filter(|start| snapshot.nodes.contains_key(start))
+        {
+            result["start"] = json!(self.fig_alias(session, &document, &start));
+        }
+        if let Some(fields) = result.as_object_mut() {
+            let layer = fields.remove("devFocusLayer");
+            let page = fields.remove("devFocusPageRoot");
+            let exited = fields.remove("devFocusExit");
+            if layer.is_some() || exited.is_some() {
+                fields.remove("documentId");
+                fields.remove("pageId");
+                fields.remove("selection");
+                if let Some(id) = layer.as_ref().and_then(Value::as_str) {
+                    fields.insert("id".into(), json!(self.fig_alias(session, &document, id)));
                 }
-                if let Some(files) = window["files"].as_array_mut() {
-                    for file in files {
-                        if let Some(id) = file["id"].as_str() {
-                            file["id"] = json!(external_id(id));
-                        }
-                    }
+                if let Some(id) = page.as_ref().and_then(Value::as_str) {
+                    fields.insert("page".into(), json!(self.fig_alias(session, &document, id)));
                 }
             }
         }
@@ -894,11 +1335,23 @@ impl ToolRouter {
             "opacity",
             "visible",
             "locked",
+            "devStatus",
             "fontFamily",
             "fontSize",
             "cornerRadius",
             "textAlign",
             "textDecoration",
+            "textCase",
+            "textWrapStyle",
+            "textPath",
+            "textDirection",
+            "textMaxLines",
+            "fontFeatures",
+            "fontVariations",
+            "textDecorationStyle",
+            "textDecorationColor",
+            "textDecorationThickness",
+            "textRuns",
             "fontWeight",
             "fontStyle",
             "lineHeight",
@@ -910,10 +1363,43 @@ impl ToolRouter {
             "innerRadius",
             "isMask",
             "isMaskGroup",
+            "path",
+            "fillRule",
+            "transform",
+            "booleanOperation",
+            "arrowHead",
+            "strokeBrush",
+            "widthProfile",
+            "slotName",
+            "slotPropertyId",
+            "imageFit",
+            "imageCrop",
+            "imageFilters",
+            "assetHash",
+            "layout",
+            "layoutGrids",
+            "guides",
+            "exports",
+            "effects",
+            "shadows",
+            "booleanOperandOperation",
+            "sectionContentsHidden",
         ] {
             if let Some(value) = node.properties.get(property) {
                 out[property] = value.clone();
             }
+        }
+        let interactions = advanced::prototype_actions::stored(node);
+        if !interactions.is_empty() {
+            let mut data = json!(interactions);
+            advanced::prototype_actions::wire_ids(&mut data, &|id| {
+                if snapshot.nodes.contains_key(id) {
+                    json!(self.fig_alias(session, &snapshot.id, id))
+                } else {
+                    Value::Null
+                }
+            });
+            out["interactions"] = data;
         }
         for (property, key) in [("strokeWeight", "strokeWidth"), ("clip", "clipContent")] {
             if let Some(value) = node.properties.get(key) {
@@ -955,6 +1441,7 @@ impl ToolRouter {
                 state.view = json!({});
             }
             state.view["selection"] = json!(selection);
+            state.view["guide"] = Value::Null;
         }
     }
 
@@ -1048,8 +1535,28 @@ impl ToolRouter {
                 if params["select"] != false {
                     *selection = vec![json!(id)];
                 }
-                commands.push(Command::NodeCreate { node: node.clone() });
                 snapshot.nodes.insert(node.id.clone(), node.clone());
+                if node.properties.contains_key(advanced::dev_status::STATUS) {
+                    if !advanced::dev_status::can_mark(snapshot, &node.id) {
+                        return Err(EngineError::invalid(
+                            "Choose a top-level frame, component or section for devStatus",
+                        ));
+                    }
+                    if node.string(advanced::dev_status::STATUS) == Some("readyForDev") {
+                        let tree = advanced::dev_status::Tree::new(&snapshot.nodes);
+                        node.properties.insert(
+                            advanced::dev_status::BASELINE.into(),
+                            json!(tree.hash(&node.id)),
+                        );
+                        node.properties.insert(
+                            advanced::dev_diff::SNAPSHOT.into(),
+                            advanced::dev_diff::Baseline::build(&tree, &node.id).value(),
+                        );
+
+                        snapshot.nodes.insert(node.id.clone(), node.clone());
+                    }
+                }
+                commands.push(Command::NodeCreate { node: node.clone() });
                 Ok(json!({"id":id,"node":self.fig_node(session,snapshot,&node,0,&mut 1)}))
             }
             "node.set" => {
@@ -1066,10 +1573,38 @@ impl ToolRouter {
                     return Err(EngineError::invalid("no layers selected"));
                 }
                 let mut nodes = Vec::new();
+                let mut marked = Vec::new();
                 for alias in ids {
-                    let id = self.fig_layer(session, snapshot, alias)?;
-                    let node = snapshot.nodes.get_mut(&id).unwrap();
+                    let id = match self.fig_layer(session, snapshot, alias) {
+                        Ok(id) => id,
+                        Err(_) => {
+                            nodes.push(self.fig_set_component_override(
+                                session, root, snapshot, alias, &values, commands,
+                            )?);
+                            continue;
+                        }
+                    };
+                    let node = &snapshot.nodes[&id];
+                    if node.string("libraryId").is_some() && node.string("sourceNodeId").is_some() {
+                        return Err(EngineError::invalid(
+                            "Linked library definitions are read-only",
+                        ));
+                    }
                     let mut patch = values.clone();
+                    if let Some(status) = patch.get(advanced::dev_status::STATUS) {
+                        if !advanced::dev_status::can_mark(snapshot, &id) {
+                            return Err(EngineError::invalid(
+                                "Choose a top-level frame, component or section for devStatus",
+                            ));
+                        }
+                        if status == "readyForDev" {
+                            marked.push(id.clone());
+                        } else {
+                            patch.insert(advanced::dev_status::BASELINE.into(), Value::Null);
+                            patch.insert(advanced::dev_diff::SNAPSHOT.into(), Value::Null);
+                        }
+                    }
+                    let node = snapshot.nodes.get_mut(&id).unwrap();
                     if let Some(text) = patch.remove("text") {
                         let text = text
                             .as_str()
@@ -1120,6 +1655,33 @@ impl ToolRouter {
                     }
                     nodes.push(self.fig_node(session, snapshot, &node, 0, &mut 1));
                 }
+                if !marked.is_empty() {
+                    let tree = advanced::dev_status::Tree::new(&snapshot.nodes);
+                    let hashes = marked
+                        .into_iter()
+                        .map(|id| {
+                            let hash = tree.hash(&id);
+                            let baseline = advanced::dev_diff::Baseline::build(&tree, &id).value();
+                            (id, hash, baseline)
+                        })
+                        .collect::<Vec<_>>();
+                    for (id, hash, baseline) in hashes {
+                        let properties = Properties::from([
+                            (advanced::dev_status::BASELINE.into(), json!(hash)),
+                            (advanced::dev_diff::SNAPSHOT.into(), baseline),
+                        ]);
+                        snapshot
+                            .nodes
+                            .get_mut(&id)
+                            .unwrap()
+                            .properties
+                            .extend(properties.clone());
+                        commands.push(Command::NodeSet {
+                            node_id: id,
+                            properties,
+                        });
+                    }
+                }
                 Ok(json!({"ok":true,"nodes":nodes}))
             }
             _ => Err(EngineError::new(
@@ -1131,13 +1693,20 @@ impl ToolRouter {
 }
 
 fn layer_type(node: &Node) -> &'static str {
-    match node.kind {
+    match node.effective_kind() {
+        NodeKind::Rect if node.string("primitive") == Some("slice") => "SLICE",
         NodeKind::Rect => "RECTANGLE",
         NodeKind::Path => match node.string("primitive") {
             Some("polygon") => "POLYGON",
             Some("star") => "STAR",
             _ => "VECTOR",
         },
+        NodeKind::Frame if node.properties.get("isVariantSet") == Some(&json!(true)) => {
+            "COMPONENT_SET"
+        }
+        NodeKind::Frame if node.properties.get("isSection") == Some(&Value::Bool(true)) => {
+            "SECTION"
+        }
         NodeKind::Frame => "FRAME",
         NodeKind::Group => "GROUP",
         NodeKind::Ellipse => "ELLIPSE",
@@ -1233,6 +1802,10 @@ fn fig_properties(value: &Value) -> Result<Properties> {
     for (property, value) in object {
         let (key, value) = match property.as_str() {
             "characters" => ("text", value.clone()),
+            "devStatus" => (
+                advanced::dev_status::STATUS,
+                advanced::dev_status::parse(value)?,
+            ),
             "strokeWeight" => ("strokeWidth", value.clone()),
             "clip" if value.is_boolean() => ("clipContent", value.clone()),
             "opacity" if value.is_string() => {
@@ -1396,4 +1969,36 @@ fn references(
         _ => {}
     }
     Ok(())
+}
+
+impl ToolRouter {
+    pub fn fig_online_document(&self, session: &str, args: &Value) -> Result<(String, String)> {
+        let explicit = args["document"].as_str().map(native_id).transpose()?;
+        let document = self.workspace.target(session, explicit.as_deref())?;
+        self.context(session, &document)?;
+        let page = self.states.lock().unwrap()[&(session.into(), document.clone())].page_id.clone();
+        Ok((document, page))
+    }
+
+    pub fn fig_online_apply(
+        &self,
+        session: &str,
+        mirror: &str,
+        current: &DocumentSnapshot,
+        content: &omc_model::DocumentContent,
+    ) -> Result<omc_model::Revision> {
+        let commands = branches::edit::commands(&current.content(), content)?;
+        if commands.is_empty() {
+            return Ok(current.revision());
+        }
+        let mut envelope = CommandEnvelope::new(
+            &current.id, &current.epoch, Command::Batch { commands },
+        );
+        envelope.preconditions = omc_protocol::Preconditions::Revision {
+            revision: current.revision(),
+        };
+        let result = self.workspace.execute_online(session, envelope, mirror)?;
+        serde_json::from_value(result["revision"].clone())
+            .map_err(|error| EngineError::new("corrupt_state",error.to_string()))
+    }
 }

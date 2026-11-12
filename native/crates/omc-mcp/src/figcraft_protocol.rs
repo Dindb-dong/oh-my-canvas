@@ -129,6 +129,9 @@ impl ToolRouter {
     }
 
     pub fn execute_observed(&self, session: &str, envelope: CommandEnvelope) -> Result<Value> {
+        if let Some(result) = super::figcraft::preview::capture(&envelope) {
+            return Ok(result);
+        }
         let mut changes = Vec::new();
         comment_changes(&envelope.command, &mut changes);
         let document = envelope.document_id.clone();
@@ -173,7 +176,8 @@ impl ToolRouter {
                     _ => "delete",
                 };
                 let root = thread.unwrap_or(&id);
-                let mut data = json!({"command":format!("comment.{action}"),"commentId":figcraft_catalog::comment_id(root)});
+                let wire = context.metadata.get(&format!("comments/{root}/wireCommentId")).and_then(Value::as_u64);
+                let mut data = json!({"command":format!("comment.{action}"),"commentId":figcraft_catalog::comment_alias(root, wire)});
                 if let Some(thread) = thread {
                     let comments = resources::catalogs(&context.metadata, "comments");
                     if let Some(index) = figcraft_catalog::comment_replies(&comments, thread)

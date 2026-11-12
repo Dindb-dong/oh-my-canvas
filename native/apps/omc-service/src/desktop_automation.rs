@@ -21,6 +21,7 @@ pub struct DesktopAutomation {
 struct State {
     owner: Option<(String, Instant)>,
     pending: Option<Pending>,
+    plugin_manager: Option<(String, String)>,
 }
 
 struct Pending {
@@ -37,6 +38,48 @@ impl DesktopAutomation {
             .owner
             .as_ref()
             .is_some_and(|(_, last_poll)| last_poll.elapsed() < OWNER_TIMEOUT)
+    }
+
+    pub fn detach(&self, session: &str) {
+        let mut state = self.state.lock().unwrap();
+        if state.plugin_manager.as_ref().is_some_and(|(_, manager)| manager == session) {
+            state.plugin_manager = None;
+        }
+        if state
+            .owner
+            .as_ref()
+            .is_some_and(|(owner, _)| owner == session)
+        {
+            state.owner = None;
+            state.plugin_manager = None;
+            if let Some(pending) = state.pending.take() {
+                let _ = pending.reply.send(Err(EngineError::new(
+                    "desktop_unavailable",
+                    "The desktop disconnected",
+                )));
+            }
+            self.ready.notify_one();
+        }
+    }
+
+    pub fn set_plugin_manager(&self, lease: String, session: &str) {
+        self.state.lock().unwrap().plugin_manager = Some((lease, session.into()));
+    }
+
+    pub fn plugin_manager_session(&self, desktop: &str, lease: Option<&str>) -> Result<String> {
+        let state = self.state.lock().unwrap();
+        if !state.owner.as_ref().is_some_and(|(owner, at)| {
+            owner == desktop && at.elapsed() < OWNER_TIMEOUT
+        }) {
+            return Err(EngineError::new("authentication_failed", "Desktop broker session required"));
+        }
+        match lease {
+            None => Ok(desktop.into()),
+            Some(lease) => state.plugin_manager.as_ref()
+                .filter(|(active, _)| active == lease)
+                .map(|(_, session)| session.clone())
+                .ok_or_else(|| EngineError::new("authentication_failed", "Plugin manager is no longer open")),
+        }
     }
 
     pub async fn call(&self, session: &str, method: &str, args: Value) -> Result<Value> {
@@ -116,6 +159,7 @@ impl DesktopAutomation {
         if method == "desktop.poll" {
             {
                 let mut state = self.state.lock().unwrap();
+                workspace.session(session)?;
                 if state.owner.as_ref().is_some_and(|(owner, at)| {
                     owner != session
                         && (at.elapsed() < OWNER_TIMEOUT
@@ -133,6 +177,7 @@ impl DesktopAutomation {
                     .as_ref()
                     .is_some_and(|(owner, _)| owner != session)
                 {
+                    state.plugin_manager = None;
                     if let Some(previous) = state.pending.take() {
                         let _ = previous.reply.send(Err(EngineError::new(
                             "desktop_unavailable",

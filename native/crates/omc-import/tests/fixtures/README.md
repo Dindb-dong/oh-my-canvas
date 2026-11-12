@@ -5,3 +5,5 @@
 The Rust import test reads the binary through the production archive/chunk/schema/message/conversion path. The encoder is test fixture preparation only; importing and rendering do not use Node.js, a browser or a generated JavaScript decoder.
 
 This small fixture checks the wire format and conversion. It does not replace the large FIG compatibility and fidelity qualification described in the native engine plan.
+
+`electron-canvas-ui-kit.json` is the output of the Electron `exportCanvasJson()` adapter on the tracked `docs/design/oh-my-canvas-ui-kit.omc` document. The native MCP regression uses this exported JSON and checks the original Yjs package stays intact.

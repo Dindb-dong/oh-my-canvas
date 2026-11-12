@@ -47,6 +47,10 @@ impl<'a> ReferenceContext<'a> {
         }
     }
 
+    pub fn resolve_value(&self, value: &Value, node: Option<&Node>) -> Result<Value, String> {
+        self.resolve(value, node, &mut BTreeSet::new(), 0)
+    }
+
     pub fn token_variables(&self) -> (BTreeMap<String, String>, Vec<Diagnostic>) {
         let mut variables = BTreeMap::new();
         let mut diagnostics = Vec::new();
@@ -148,15 +152,51 @@ impl<'a> ReferenceContext<'a> {
             .and_then(Value::as_object)
         {
             for (field, reference) in bindings {
+                if field == "text"
+                    && node.kind == omc_model::NodeKind::Text
+                    && reference.get("$token").is_some()
+                {
+                    match self.resolve(reference, Some(node), &mut BTreeSet::new(), 0) {
+                        Ok(Value::String(text)) => {
+                            if properties.get("text").and_then(Value::as_str) != Some(&text) {
+                                properties.remove("textRuns");
+                            }
+                            properties.insert("text".into(), json!(text));
+                        }
+                        Ok(_) => diagnostics.push(reference_diagnostic(
+                            Some(&node.id),
+                            "text",
+                            &reference.to_string(),
+                            "Text field resolved to a nontext value",
+                        )),
+                        Err(reason) => diagnostics.push(reference_diagnostic(
+                            Some(&node.id),
+                            "text",
+                            &reference.to_string(),
+                            &reason,
+                        )),
+                    }
+                }
                 if matches!(
                     field.as_str(),
-                    "width" | "height" | "fontSize" | "strokeWidth" | "opacity"
+                    "width"
+                        | "height"
+                        | "fontSize"
+                        | "strokeWidth"
+                        | "opacity"
+                        | "cornerRadius"
+                        | "fontWeight"
+                        | "lineHeight"
+                        | "letterSpacing"
+                        | "wordSpacing"
                 ) && reference.get("$token").is_some()
                 {
                     match self.resolve(reference, Some(node), &mut BTreeSet::new(), 0) {
                         Ok(value) if value.is_number() => {
                             let value = if field == "opacity" {
                                 json!((value.as_f64().unwrap() / 100.).clamp(0., 1.))
+                            } else if matches!(field.as_str(), "letterSpacing" | "wordSpacing") {
+                                value
                             } else {
                                 json!(value.as_f64().unwrap().max(0.))
                             };
@@ -189,7 +229,7 @@ impl<'a> ReferenceContext<'a> {
                 )),
             }
         }
-        normalize(&mut properties, &node.id, &mut diagnostics);
+        normalize(&mut properties);
         (properties, diagnostics)
     }
 
@@ -257,6 +297,39 @@ impl<'a> ReferenceContext<'a> {
         if let Some(id) = value.get("$token").and_then(Value::as_str) {
             return self.token(id, node, seen, depth + 1);
         }
+        let color = |value: &Value| {
+            value
+                .as_str()
+                .and_then(crate::parse_color)
+                .ok_or_else(|| "Color variable calculation resolved to a non-color".to_owned())
+        };
+        let fraction = |value: &Value| {
+            value
+                .as_f64()
+                .filter(|f| (0. ..=1.).contains(f))
+                .map(|f| f as f32)
+                .ok_or_else(|| "Invalid color variable fraction".to_owned())
+        };
+        if let Some(alpha) = value.get("$colorAlpha") {
+            let mut color = color(&self.resolve(&alpha["color"], node, seen, depth + 1)?)?;
+            color.a = fraction(&alpha["opacity"])?;
+            return Ok(json!(color.hex()));
+        }
+        if let Some(mix) = value.get("$colorMix") {
+            let a = color(&self.resolve(&mix["from"], node, seen, depth + 1)?)?;
+            let b = color(&self.resolve(&mix["to"], node, seen, depth + 1)?)?;
+            let t = fraction(&mix["t"])?;
+            let blend = |a: f32, b: f32| (b - a) * t + a;
+            return Ok(json!(
+                crate::Color {
+                    r: blend(a.r, b.r),
+                    g: blend(a.g, b.g),
+                    b: blend(a.b, b.b),
+                    a: blend(a.a, b.a),
+                }
+                .hex()
+            ));
+        }
         match value {
             Value::Array(values) => values
                 .iter()
@@ -290,7 +363,31 @@ fn reference_diagnostic(
     }
 }
 
-fn normalize(properties: &mut Properties, id: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn normalize(properties: &mut Properties) {
+    if properties.get("figcraftBoundEffects") == Some(&Value::Bool(true))
+        && let Some(effects) = properties.get("effects").and_then(Value::as_array)
+    {
+        let shadows = effects
+            .iter()
+            .filter(|effect| matches!(effect["type"].as_str(), Some("dropShadow" | "innerShadow")))
+            .cloned()
+            .collect::<Vec<_>>();
+        let blur = |kind: &str| {
+            effects
+                .iter()
+                .filter(|effect| effect["type"] == kind && effect["visible"] != false)
+                .filter_map(|effect| effect["radius"].as_f64())
+                .map(|radius| radius * radius)
+                .sum::<f64>()
+                .sqrt()
+                .min(256.)
+        };
+        let layer = blur("layerBlur");
+        let background = blur("backgroundBlur");
+        properties.insert("shadows".into(), json!(shadows));
+        properties.insert("blur".into(), json!(layer));
+        properties.insert("backgroundBlur".into(), json!(background));
+    }
     if properties.get("hidden") == Some(&Value::Bool(true)) {
         properties.insert("visible".into(), json!(false));
     }
@@ -434,18 +531,6 @@ fn normalize(properties: &mut Properties, id: &str, diagnostics: &mut Vec<Diagno
                 .entry("filter")
                 .or_insert(json!(format!("blur({blur}px)")));
         }
-    }
-    if properties
-        .get("backgroundBlur")
-        .and_then(Value::as_f64)
-        .is_some_and(|v| v > 0.)
-        && properties.get("backgroundBlurHidden") != Some(&Value::Bool(true))
-    {
-        diagnostics.push(Diagnostic::unsupported(
-            Some(id),
-            Some("backgroundBlur"),
-            "Backdrop blur requires a backdrop-dependent render group",
-        ));
     }
     if !style.is_empty() {
         properties.insert("style".into(), Value::Object(style));

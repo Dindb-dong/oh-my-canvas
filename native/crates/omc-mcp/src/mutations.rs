@@ -1,4 +1,5 @@
 use super::*;
+mod typed_properties;
 mod variants;
 use omc_model::{NodeKind, Page, new_id, rank_between};
 use std::collections::BTreeSet;
@@ -8,6 +9,7 @@ struct Draft {
     commands: Vec<Command>,
     created: Vec<String>,
     affected: BTreeSet<String>,
+    result: Properties,
 }
 impl Draft {
     fn apply(&mut self, command: Command) -> Result<()> {
@@ -252,10 +254,15 @@ impl ToolRouter {
             commands: Vec::new(),
             created: Vec::new(),
             affected: BTreeSet::new(),
+            result: Properties::new(),
         };
         self.build_mutation(session, id, name, args, &mut draft)?;
         if draft.commands.is_empty() {
-            return Ok(json!({"ok":true,"revision":sequence,"changed":false}));
+            let mut result = json!(draft.result);
+            result["ok"] = true.into();
+            result["revision"] = sequence.into();
+            result["changed"] = false.into();
+            return Ok(result);
         }
         if draft.commands.len() > 100 {
             return Err(EngineError::new(
@@ -271,7 +278,8 @@ impl ToolRouter {
                 commands: draft.commands,
             }
         };
-        let mut result = self.submit(session, id, command, meta, revision)?;
+        let mut result =
+            self.submit_with_output(session, id, command, meta, revision, draft.result)?;
 
         result["changedIds"] = json!(draft.affected);
         if name == "edit_path" {
@@ -295,6 +303,41 @@ impl ToolRouter {
             result["context"] = context;
         }
         Ok(result)
+    }
+    pub(crate) fn component_definition_commands(
+        &self,
+        session: &str,
+        snapshot: &DocumentSnapshot,
+        requests: &[Value],
+    ) -> Result<Vec<Command>> {
+        let mut draft = Draft {
+            snapshot: snapshot.clone(),
+            commands: Vec::new(),
+            created: Vec::new(),
+            affected: BTreeSet::new(),
+            result: Properties::new(),
+        };
+        for request in requests {
+            self.component_property_mutation(session, &snapshot.id, request, &mut draft)?;
+        }
+        Ok(draft.commands)
+    }
+    pub(crate) fn preview_component_operations(
+        &self,
+        session: &str,
+        snapshot: DocumentSnapshot,
+        ops: Vec<Value>,
+    ) -> Result<DocumentSnapshot> {
+        let id = snapshot.id.clone();
+        let mut draft = Draft {
+            snapshot,
+            commands: Vec::new(),
+            created: Vec::new(),
+            affected: BTreeSet::new(),
+            result: Properties::new(),
+        };
+        self.build_mutation(session, &id, "batch", &json!({"ops":ops}), &mut draft)?;
+        Ok(draft.snapshot)
     }
     fn build_mutation(
         &self,
@@ -1003,6 +1046,9 @@ impl ToolRouter {
             "add_variant" | "combine" | "variant" | "axes" => {
                 self.variant_mutation(session, id, args, draft)
             }
+            "property" | "bind" | "edit_property" | "set_property" | "remove_property" => {
+                self.component_property_mutation(session, id, args, draft)
+            }
             "create" => {
                 let raw = self.resolve(
                     session,
@@ -1012,7 +1058,7 @@ impl ToolRouter {
                         .or_else(|| args["ids"].get(0).and_then(Value::as_str))
                         .ok_or_else(|| EngineError::invalid("component source required"))?,
                 )?;
-                let mut source = draft.node(&raw)?.clone();
+                let source = draft.node(&raw)?;
                 let parent = source
                     .parent_id
                     .clone()
@@ -1028,8 +1074,6 @@ impl ToolRouter {
                     })
                     .cloned()
                     .unwrap();
-                source = draft.snapshot.nodes[&root].clone();
-                source.kind = NodeKind::Component;
                 draft.snapshot.nodes.get_mut(&root).unwrap().kind = NodeKind::Component;
                 for command in &mut draft.commands {
                     if let Command::NodeCreate { node } = command {
@@ -1038,20 +1082,25 @@ impl ToolRouter {
                         }
                     }
                 }
-                source
-                    .properties
-                    .insert("componentDefinition".into(), json!(true));
-                source.properties.insert(
-                    "name".into(),
-                    args.get("name").cloned().unwrap_or(json!("Component")),
-                );
+                typed_properties::selection(draft, &root, &root);
                 draft.apply(Command::NodeSet {
                     node_id: root,
-                    properties: source.properties,
+                    properties: Properties::from([
+                        ("componentDefinition".into(), json!(true)),
+                        (
+                            "name".into(),
+                            args.get("name").cloned().unwrap_or(json!("Component")),
+                        ),
+                    ]),
                 })
             }
             "instance" => {
                 let source = self.resolve(session, id, string(args, "source")?)?;
+                if draft.node(&source)?.kind != NodeKind::Component {
+                    return Err(EngineError::invalid(
+                        "source must be a component definition",
+                    ));
+                }
                 let parent = args["parent"]
                     .as_str()
                     .map(|p| self.resolve(session, id, p))
@@ -1062,6 +1111,7 @@ impl ToolRouter {
                 node.parent_id = Some(parent.clone());
                 node.rank = draft.last_rank(&parent)?;
                 node.properties.insert("componentId".into(), json!(source));
+                typed_properties::selection(draft, &node.id, &source);
                 for key in ["x", "y"] {
                     node.properties
                         .insert(key.into(), args.get(key).cloned().unwrap_or(json!(0)));
@@ -1070,13 +1120,29 @@ impl ToolRouter {
             }
             "reset" => {
                 let raw = self.resolve(session, id, string(args, "id")?)?;
+                let node = draft.node(&raw)?;
+                let source = node
+                    .string("componentId")
+                    .filter(|_| node.kind == NodeKind::Instance)
+                    .ok_or_else(|| EngineError::invalid("choose an instance"))?
+                    .to_owned();
+                typed_properties::selection(draft, &raw, &source);
                 draft.apply(Command::NodeUnset {
                     node_id: raw,
-                    properties: vec!["overrides".into()],
+                    properties: vec![
+                        "overrides".into(),
+                        "componentProperties".into(),
+                        "propertyValues".into(),
+                    ],
                 })
             }
             "detach" => {
                 let raw = self.resolve(session, id, string(args, "id")?)?;
+                if draft.node(&raw)?.kind != NodeKind::Instance
+                    || draft.node(&raw)?.string("componentId").is_none()
+                {
+                    return Err(EngineError::invalid("choose an instance"));
+                }
                 let projection = omc_scene::resolve_components(&draft.snapshot, Some(&raw));
                 if projection.diagnostics.iter().any(|d| d.fidelity_lost) {
                     return Err(EngineError::new(
@@ -1090,7 +1156,17 @@ impl ToolRouter {
                     .get(&raw)
                     .ok_or_else(|| EngineError::invalid("instance not found"))?;
                 let mut patch = node.properties.clone();
-                for key in ["componentId", "overrides", "sourceComponentId", "libraryId"] {
+                let instance_keys = [
+                    "componentId",
+                    "overrides",
+                    "sourceComponentId",
+                    "libraryId",
+                    "componentPropertyDefinitions",
+                    "componentPropertyRefs",
+                    "componentProperties",
+                    "propertyValues",
+                ];
+                for key in instance_keys {
                     patch.remove(key);
                 }
                 draft.apply(Command::NodeSet {
@@ -1099,12 +1175,7 @@ impl ToolRouter {
                 })?;
                 draft.apply(Command::NodeUnset {
                     node_id: raw.clone(),
-                    properties: vec![
-                        "componentId".into(),
-                        "overrides".into(),
-                        "sourceComponentId".into(),
-                        "libraryId".into(),
-                    ],
+                    properties: instance_keys.into_iter().map(str::to_owned).collect(),
                 })?;
                 let mut pending = children(&resolved, &raw)
                     .iter()
@@ -1114,7 +1185,15 @@ impl ToolRouter {
                     let mut child = resolved.nodes[&id].clone();
                     pending.extend(children(&resolved, &id).iter().map(|n| n.id.clone()));
                     if !draft.snapshot.nodes.contains_key(&id) {
-                        for key in ["sourceNodeId", "instanceId", "libraryId"] {
+                        for key in [
+                            "sourceNodeId",
+                            "instanceId",
+                            "libraryId",
+                            "componentPropertyRefs",
+                            "componentPropertyDefinitions",
+                            "componentProperties",
+                            "propertyValues",
+                        ] {
                             child.properties.remove(key);
                         }
                         draft.apply(Command::NodeCreate { node: child })?;

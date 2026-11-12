@@ -298,7 +298,7 @@ fn outline(
     Ok(commands)
 }
 
-fn solid_fills(item: &SceneItem) -> Result<Vec<Value>> {
+pub(super) fn solid_fills(item: &SceneItem) -> Result<Vec<Value>> {
     if item
         .style
         .get("background-image")
@@ -326,7 +326,7 @@ fn solid_fills(item: &SceneItem) -> Result<Vec<Value>> {
         .collect())
 }
 
-fn copy_boolean_paint(source: &SceneItem, target: &mut Node) {
+pub(super) fn copy_boolean_paint(source: &SceneItem, target: &mut Node) {
     for key in ["fills", "strokes"] {
         if let Some(value) = source.properties.get(key) {
             target.properties.insert(key.into(), value.clone());
@@ -344,7 +344,7 @@ fn copy_boolean_paint(source: &SceneItem, target: &mut Node) {
     }
 }
 
-fn copy_effects(source: &SceneItem, target: &mut Node) {
+pub(super) fn copy_effects(source: &SceneItem, target: &mut Node) {
     for key in ["blendMode", "effects", "shadows", "blur"] {
         if let Some(value) = source.properties.get(key) {
             target.properties.insert(key.into(), value.clone());
@@ -355,7 +355,7 @@ fn copy_effects(source: &SceneItem, target: &mut Node) {
         .insert("opacity".into(), json!(source.style.number("opacity", 1.)));
 }
 
-fn sibling(
+pub(super) fn sibling(
     snapshot: &DocumentSnapshot,
     source: &SceneItem,
     parent: &SceneItem,
@@ -382,51 +382,9 @@ fn inverse(item: &SceneItem) -> Result<Affine> {
         .ok_or_else(|| EngineError::invalid("parent transform is not invertible"))
 }
 
-pub(super) fn absolute_placement(item: &SceneItem, transform: Affine) -> Properties {
-    let [a, b, c, d, x, y] = transform.0;
-    let mut properties = Properties::new();
-    set_position(&mut properties, x, y, item.width, item.height);
-    properties.insert("transform".into(), json!([a, b, c, d, 0., 0.]));
-    let mut style = match item.properties.get("style") {
-        Some(Value::Object(style)) => style.clone(),
-        Some(Value::String(style)) => omc_style::parse_declarations(style)
-            .into_iter()
-            .map(|declaration| {
-                let value = if declaration.important {
-                    format!("{} !important", declaration.value)
-                } else {
-                    declaration.value
-                };
-                (declaration.name, Value::String(value))
-            })
-            .collect(),
-        _ => Default::default(),
-    };
-    for key in [
-        "left",
-        "top",
-        "right",
-        "bottom",
-        "width",
-        "height",
-        "min-width",
-        "max-width",
-        "min-height",
-        "max-height",
-        "margin",
-        "margin-left",
-        "margin-right",
-        "margin-top",
-        "margin-bottom",
-    ] {
-        style.remove(key);
-    }
-    style.insert("position".into(), json!("absolute"));
-    properties.insert("style".into(), Value::Object(style));
-    properties
-}
+pub(super) use omc_scene::absolute_placement;
 
-fn set_position(properties: &mut Properties, x: f64, y: f64, width: f64, height: f64) {
+pub(super) fn set_position(properties: &mut Properties, x: f64, y: f64, width: f64, height: f64) {
     properties.extend([
         ("x".into(), json!(x)),
         ("y".into(), json!(y)),
@@ -435,12 +393,12 @@ fn set_position(properties: &mut Properties, x: f64, y: f64, width: f64, height:
     ]);
 }
 
-fn set_path(properties: &mut Properties, svg: String, fill_rule: &str) {
+pub(super) fn set_path(properties: &mut Properties, svg: String, fill_rule: &str) {
     properties.insert("path".into(), json!(svg));
     properties.insert("fillRule".into(), json!(fill_rule));
 }
 
-fn hide(id: &str) -> Command {
+pub(super) fn hide(id: &str) -> Command {
     Command::NodeSet {
         node_id: id.into(),
         properties: Properties::from([("visible".into(), json!(false))]),

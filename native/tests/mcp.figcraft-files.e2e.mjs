@@ -119,6 +119,26 @@ test('FigCraft file and page commands persist edits and keep imported layers edi
     assert.ok((await fig.callTool({
       name: 'screenshot', arguments: { ids: [artwork.id] },
     })).content.some((item) => item.type === 'image' && item.mimeType === 'image/png'));
+    const tile=await run('image.place',{data:png,x:15,y:20,width:40,height:40,mode:'tile'});
+    const image=async id=>(await call('screenshot',{ids:[id]})).base64;
+    const red=await image(tile.id);
+    assert.equal((await run('image.presets')).builtIn.length,7);
+    assert.equal((await run('image.adjust',{ids:[tile.id],preset:'blackAndWhite'})).changed,1);
+    assert.notEqual(await image(tile.id),red);
+    await run('image.savePreset',{ids:[tile.id],name:'Custom monochrome'});
+    assert.equal((await run('image.presets')).saved[0].filters.saturation,-1);
+    const black='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS9sAAAAASUVORK5CYII=';
+    const previous=(await get(tile.id)).assetHash;
+    assert.equal((await run('image.replace',{ids:[tile.id],data:black})).changed,1);
+    assert.notEqual((await get(tile.id)).assetHash,previous);
+    assert.equal((await get(tile.id)).imageFilters.saturation,-1);
+    await run('image.deletePreset',{name:'Custom monochrome'});
+    assert.equal((await run('image.presets')).saved.length,0);
+    const target=await run('shape.rectangle',{x:80,y:30,width:40,height:20,props:{fill:'#006699'}});
+    const beforeFill=await image(target.id);
+    assert.equal((await run('image.place',{data:png,target:target.id,mode:'fit'})).id,target.id);
+    assert.notEqual(await image(target.id),beforeFill);
+    assert.equal((await get(target.id)).fills.at(-1).type,'image');
     const opened = await run('file.open', { name: 'Inline SVG.svg', data: svg });
     assert.notEqual(opened.document, original.id);
     assert.ok((await inspect()).layers.length);
@@ -152,6 +172,22 @@ test('FigCraft file and page commands persist edits and keep imported layers edi
       assert.equal(reopened.flatMap((layer) => layer.children).find((layer) => layer.type === 'TEXT').characters, '저장 후 다시 열기');
       assert.match((await run('file.exportSvg', { ids: [reopened.find((layer) => layer.type === 'LINE').id] })).content, /<svg/);
     }
+    const originalArchive = join(profile, 'original-portable.figcraft');
+    const portableBytes = await readFile(fixturePath ?? path);
+    await writeFile(originalArchive, portableBytes);
+    await run('file.open', { path: originalArchive });
+    const { id: collection } = await run('variable.createCollection', { name: 'Native palette' });
+    await run('variable.create', { collection, name: 'Native ink', type: 'color', value: '#345678' });
+    await assert.rejects(run('file.save'), /use file.saveAs with a new .omc path/);
+    await assert.rejects(run('file.saveAs', { path: originalArchive, overwrite: true }), /preserve the original FigCraft archive/);
+    assert.deepEqual(await readFile(originalArchive), portableBytes);
+    const nativeCopy = join(profile, 'native-copy.omc');
+    await run('file.saveAs', { path: nativeCopy });
+    const nativeBytes = await readFile(nativeCopy);
+    await run('file.open', { name: 'Reopened native.omc', data: nativeBytes.toString('base64') });
+    const { collections, variables } = await run('variable.list');
+    assert.ok(collections.some(({ name }) => name === 'Native palette'));
+    assert.ok(variables.some(({ name, value }) => name === 'Native ink' && value === '#345678'));
     const bare = Buffer.from(JSON.stringify({
       format: 'figcraft', version: 1, name: 'Bare file', pages: [1], current_page: 1,
       nodes: { 1: { id: 1, name: 'Bare page', type: 'page' } },
@@ -169,6 +205,36 @@ test('FigCraft file and page commands persist edits and keep imported layers edi
     const pdfPath = join(profile, 'frames.pdf');
     assert.equal((await run('file.exportFramesPdf', { path: pdfPath })).pages, 2);
     assert.match((await readFile(pdfPath)).toString('latin1'), /\/Count 2/);
+    const versionsDoc=await run('file.new',{name:'Version history fixture'});
+    assert.equal((await run('version.autosave')).saved,false);
+    const historic=await call('create_node',{type:'text',name:'Historical label',text:'이전 버전'});
+    const historicalShape=await run('shape.rectangle',{x:70,y:20,width:40,height:30,name:'Historical rectangle'});
+    const saved=await run('file.saveVersion',{name:'Initial',description:'First design'});
+    assert.equal((await run('file.versionHistory'))[0].description,'First design');
+    assert.equal((await run('version.autosave')).saved,false);
+    await run('node.set',{ids:[historic.id],props:{characters:'현재 버전'}});
+    await run('edit.delete',{ids:[historicalShape.id]});
+    const auto=await run('version.autosave');
+    assert.equal(auto.saved,true);
+    assert.equal((await run('version.autosave')).saved,false);
+    await run('version.rename',{id:auto.version.id,name:'Current'});
+    assert.equal((await run('version.list'))[1].auto,false);
+    const versionCopy=await run('version.duplicate',{index:0});
+    assert.equal((await inspect()).id,versionCopy.id);
+    assert.equal((await inspect()).layers[0].characters,'이전 버전');
+    const index=(await run('doc.list')).find(entry=>entry.id===versionsDoc.id).index;
+    await run('doc.switch',{index});
+    assert.equal((await inspect()).layers[0].characters,'현재 버전');
+    const restore=await run('version.restore',{id:saved.id});
+    assert.equal(restore.restored,true);
+    const restored=(await inspect()).layers;
+    assert.equal(restored[0].characters,'이전 버전');
+    assert.equal(restored[1].name,'Historical rectangle');
+    assert.notEqual(restored[1].id,historicalShape.id);
+    await call('undo');
+    assert.deepEqual((await inspect()).layers.map(layer=>layer.characters),['현재 버전']);
+    await run('version.delete',{id:saved.id});
+    assert.deepEqual((await run('version.list')).map(v=>v.name),['Current','Before restoring']);
   } finally {
     await fig.close();
     if (child.exitCode === null && child.signalCode === null) {

@@ -1,13 +1,22 @@
 //! Authored CSS remains separate from its viewport-dependent computed projection.
 //! This module never reads files, loads URLs, or invokes a browser.
+mod board_color;
+pub use board_color::{board_ink_color, board_stamp_name};
 mod color;
+mod color_profile;
 mod css;
+mod drawing_defaults;
+pub use drawing_defaults::{copy_appearance_keys, drawing_defaults, is_appearance_key};
 mod length;
 mod references;
+pub mod prototype;
 mod selectors;
 pub use references::{ReferenceContext, catalog_entities};
 
 pub use color::{Color, parse_color};
+pub use color_profile::{
+    ColorProfile, convert_color_catalog_entry, convert_color_property, convert_style_color,
+};
 pub use css::{Declaration, Rule, StyleSheet, parse_declarations, parse_stylesheet};
 pub use length::{LengthContext, resolve_length};
 
@@ -251,6 +260,19 @@ fn compute_one(
             "fontWeight" => "font-weight",
             "fontStyle" => "font-style",
             "textDecoration" => "text-decoration",
+            "textDecorationStyle" => "text-decoration-style",
+            "textDecorationThickness" => "text-decoration-thickness",
+            "textDecorationColor" => "text-decoration-color",
+            "textDirection" => "direction",
+            "textMaxLines" => "omc-max-lines",
+            "fontFeatures" => "omc-font-features",
+            "fontVariations" => "omc-font-variations",
+            "textCase" => "text-transform",
+            "textWrapStyle" => "omc-wrap-style",
+            "textListStyle" => "omc-list-style",
+            "textListDepth" => "omc-list-depth",
+            "textParagraphIndent" => "text-indent",
+            "textParagraphSpacing" => "omc-paragraph-spacing",
             "textAlign" => "text-align",
             "lineHeight" => "line-height",
             "letterSpacing" => "letter-spacing",
@@ -261,7 +283,13 @@ fn compute_one(
             "width" | "height" | "opacity" | "color" | "display" => key,
             _ => continue,
         };
-        if let Some(value) = css_value(value) {
+        let value =
+            if matches!(name, "omc-font-features" | "omc-font-variations") && value.is_object() {
+                Some(value.to_string())
+            } else {
+                css_value(value)
+            };
+        if let Some(value) = value {
             declarations.push(Declaration {
                 name: name.into(),
                 value,

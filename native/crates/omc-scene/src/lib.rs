@@ -1,5 +1,9 @@
 //! A coherent native display list and its exact shared hit-test coordinate chain.
+mod board;
 mod components;
+pub mod measurement;
+mod placement;
+pub use placement::absolute_placement;
 mod vectors;
 pub use components::{ComponentProjection, resolve_components};
 use omc_model::{DocumentSnapshot, NodeKind};
@@ -114,6 +118,7 @@ pub struct SceneItem {
 }
 pub struct Scene {
     pub items: Vec<SceneItem>,
+    pub slices: Vec<usize>,
     pub root: usize,
     pub width: f64,
     pub height: f64,
@@ -122,6 +127,7 @@ pub struct Scene {
     pub epoch: String,
     pub sequence: u64,
     pub strict: bool,
+    pub color_profile: omc_style::ColorProfile,
 }
 impl Scene {
     pub fn item(&self, id: &str) -> Option<&SceneItem> {
@@ -131,11 +137,15 @@ impl Scene {
         self.item(id).map(|item| item.bounds)
     }
     pub fn hit_test(&self, x: f64, y: f64) -> Option<&SceneItem> {
+        self.hit_test_filter(x, y, |_| true)
+    }
+
+    pub fn hit_test_filter(&self, x: f64, y: f64, accepts: impl Fn(&SceneItem) -> bool) -> Option<&SceneItem> {
         if !x.is_finite() || !y.is_finite() {
             return None;
         }
         for item in self.items.iter().rev() {
-            if item.hidden || item.locked || !item.contains(x, y) {
+            if item.hidden || item.locked || !item.contains(x, y) || !accepts(item) {
                 continue;
             }
             let mut ancestor = item.parent;
@@ -160,7 +170,13 @@ impl Scene {
     }
 }
 impl SceneItem {
+    pub fn is_slice(&self) -> bool {
+        self.properties.get("primitive").and_then(Value::as_str) == Some("slice")
+    }
     pub fn text_origin(&self, text: &omc_text::TextLayout) -> (f64, f64) {
+        if self.properties.contains_key("textPath") {
+            return (0., 0.);
+        }
         let extra = (self.height - self.text_offset.1 - text.height).max(0.);
         let offset = match self
             .properties
@@ -179,6 +195,11 @@ impl SceneItem {
             .text
             .as_ref()
             .ok_or_else(|| SceneError::Text("choose a text layer".into()))?;
+        if self.properties.contains_key("textPath") {
+            return layout
+                .path_outline()
+                .ok_or_else(|| SceneError::Text("Text path has no outline".into()));
+        }
         let text = self
             .properties
             .get("text")
@@ -264,11 +285,20 @@ pub fn build_scene(
     snapshot: &DocumentSnapshot,
     options: &SceneOptions,
 ) -> Result<Scene, SceneError> {
+    build_scene_in_color_profile(snapshot, options, omc_style::ColorProfile::Srgb)
+}
+
+pub fn build_scene_in_color_profile(
+    snapshot: &DocumentSnapshot,
+    options: &SceneOptions,
+    color_profile: omc_style::ColorProfile,
+) -> Result<Scene, SceneError> {
     if !options.time_ms.is_finite() {
         return Err(SceneError::Transform("nonfinite time sample".into()));
     }
     let projection = resolve_components(snapshot, options.page_id.as_deref());
     let snapshot = projection.snapshot.as_ref();
+    let source_profile = omc_style::ColorProfile::from_metadata(&snapshot.metadata);
     let references = omc_style::ReferenceContext::new(snapshot);
     let mut layout = omc_layout::layout(
         snapshot,
@@ -282,8 +312,21 @@ pub fn build_scene(
     for id in &layout.order {
         let mut node = snapshot.nodes[id].clone();
         node.properties = references.properties(&node).0;
+        node.kind = node.effective_kind();
         let b = layout.boxes[id];
-        let style = layout.styles.remove(id).unwrap_or_default();
+        let mut style = layout.styles.remove(id).unwrap_or_default();
+        if source_profile != color_profile {
+            for (key, value) in &mut node.properties {
+                omc_style::convert_color_property(key, value, source_profile, color_profile);
+            }
+            for (key, value) in &mut style.values {
+                if let Some(color) =
+                    omc_style::convert_style_color(key, value, source_profile, color_profile)
+                {
+                    *value = color;
+                }
+            }
+        }
         let parent = node
             .parent_id
             .as_ref()
@@ -310,22 +353,54 @@ pub fn build_scene(
                 fidelity_lost: false,
             });
         }
+        let section_hidden = node.properties.get("isSection") == Some(&Value::Bool(true))
+            && node.properties.get("sectionContentsHidden") == Some(&Value::Bool(true));
+        if section_hidden {
+            node.properties
+                .insert("fills".into(), Value::Array(Vec::new()));
+            style.values.remove("background-image");
+            if style
+                .color("border-color")
+                .is_none_or(|color| color.a <= 0.)
+            {
+                style.values.insert("border-color".into(), "#777777".into());
+                style.values.insert("border-width".into(), "1".into());
+            }
+        }
         let hidden = node.properties.get("visible") == Some(&Value::Bool(false))
             || style.get("display") == Some("none")
-            || style.get("visibility") == Some("hidden");
+            || style.get("visibility") == Some("hidden")
+            || parent.is_some_and(|index| {
+                let ancestor = &items[index];
+                ancestor.hidden
+                    || ancestor.properties.get("isSection") == Some(&Value::Bool(true))
+                        && ancestor.properties.get("sectionContentsHidden")
+                            == Some(&Value::Bool(true))
+            });
         let locked = node.properties.get("locked") == Some(&Value::Bool(true));
         let clip = matches!(style.get("overflow"), Some("hidden" | "clip"))
             || node.properties.get("clipContent") == Some(&Value::Bool(true));
         let text = if node.kind == NodeKind::Text {
-            let mut text = omc_text::shape_runs(
-                node.properties
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or(""),
-                node.properties.get("textRuns"),
-                &style,
-                b.content_width,
-            )
+            let source = node.string("text").unwrap_or_default();
+            let runs = node.properties.get("textRuns");
+            let text_path = node.properties.get("textPath");
+            let mut text = if let Some(path) = text_path {
+                let svg = path["path"]
+                    .as_str()
+                    .ok_or_else(|| SceneError::Text("Text path data is missing".into()))?;
+                let curve = skia_safe::Path::from_svg(svg)
+                    .ok_or_else(|| SceneError::Text("Text path is malformed".into()))?;
+                omc_text::shape_on_path(
+                    source,
+                    runs,
+                    &style,
+                    &curve,
+                    path["start"].as_f64().unwrap_or(0.),
+                    path["flip"] == true,
+                )
+            } else {
+                omc_text::shape_runs(source, runs, &style, b.content_width)
+            }
             .map_err(|e| SceneError::Text(e.to_string()))?;
             for d in &mut text.diagnostics {
                 d.node_id = Some(id.clone());
@@ -380,7 +455,21 @@ pub fn build_scene(
             text,
             text_offset: (b.content_x, b.content_y),
         });
+        if node.kind == NodeKind::Line
+            && items[index].properties.get("arrowHead") == Some(&Value::Bool(true))
+            && let Some(mut path) = shape_path(&items[index])
+        {
+            path.transform(&vectors::matrix(world));
+            let r = path.compute_tight_bounds();
+            items[index].bounds = [
+                r.left as f64,
+                r.top as f64,
+                r.width() as f64,
+                r.height() as f64,
+            ];
+        }
     }
+    board::derive(&mut items, &indices);
     for index in (0..items.len()).rev() {
         if let Some(operation) = items[index].boolean_operation() {
             let item = &items[index];
@@ -389,11 +478,9 @@ pub fn build_scene(
                 .iter()
                 .map(|&index| &items[index])
                 .filter(|child| !child.hidden);
-            if let Some(path) = item
-                .world
-                .inverse()
-                .and_then(|inverse| combine_paths(operands, &items, inverse, operation))
-            {
+            if let Some(path) = item.world.inverse().and_then(|inverse| {
+                vectors::combine_boolean_operands(operands, &items, inverse, operation)
+            }) {
                 let (svg, _, fill_rule) = path_geometry(&path);
                 let mut world_path = path;
                 world_path.transform(&vectors::matrix(item.world));
@@ -428,6 +515,7 @@ pub fn build_scene(
     }
     Ok(Scene {
         root: 0,
+        slices: items.iter().enumerate().filter_map(|(index, item)| item.is_slice().then_some(index)).collect(),
         width: options.width,
         height: options.height,
         time_ms: options.time_ms,
@@ -436,6 +524,7 @@ pub fn build_scene(
         epoch: snapshot.epoch.clone(),
         sequence: snapshot.sequence,
         strict: options.strict,
+        color_profile,
     })
 }
 

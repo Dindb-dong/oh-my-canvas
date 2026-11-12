@@ -1,4 +1,11 @@
 //! FigCraft catalog commands backed by the native document authority.
+pub(crate) mod library_archive;
+mod library_ops;
+mod library_swap;
+pub(crate) mod library_team;
+mod variable_io;
+pub(crate) mod variable_ops;
+
 use super::*;
 use omc_model::{NodeKind, new_id, rank_between};
 use std::collections::BTreeSet;
@@ -58,6 +65,32 @@ pub(super) const COMMANDS: &[(&str, &str, bool, &str)] = &[
         "{ids?, collection, mode}",
     ),
     ("variable.list", "List variables", false, "{}"),
+    ("variable.import", "Import variables", true, "{variables}"),
+    (
+        "variable.export",
+        "Export variables",
+        false,
+        "{collections?, format?, path?}",
+    ),
+    ("variable.delete", "Delete variable", true, "{variable}"),
+    (
+        "variable.extendCollection",
+        "Extend variable collection",
+        true,
+        "{collection, name?}",
+    ),
+    (
+        "variable.resetOverride",
+        "Reset variable override",
+        true,
+        "{variable, mode?}",
+    ),
+    (
+        "variable.deleteCollection",
+        "Delete variable collection",
+        true,
+        "{collection}",
+    ),
     (
         "variable.createCollection",
         "Create variable collection",
@@ -98,7 +131,7 @@ pub(super) const COMMANDS: &[(&str, &str, bool, &str)] = &[
         "variable.update",
         "Edit variable",
         true,
-        "{variable, name?, description?}",
+        "{variable, name?, description?, scopes?, hiddenFromPublishing?, codeSyntax?}",
     ),
     (
         "variable.duplicate",
@@ -135,6 +168,99 @@ pub(super) const COMMANDS: &[(&str, &str, bool, &str)] = &[
         "{component, x?, y?, parent?}",
     ),
     ("instance.swap", "Swap component", true, "{ids?, component}"),
+    (
+        "instance.place",
+        "Place component at a point",
+        true,
+        "{component, x, y}",
+    ),
+    (
+        "instance.swapAt",
+        "Swap instance at a point",
+        true,
+        "{component, x, y}",
+    ),
+    (
+        "library.publish",
+        "Publish library",
+        true,
+        "{description?, include?, exclude?}",
+    ),
+    ("library.add", "Add library", true, "{path}"),
+    (
+        "library.import",
+        "Import linked library component",
+        true,
+        "{library, component}",
+    ),
+    (
+        "library.applyStyle",
+        "Apply linked library style",
+        true,
+        "{library, style, ids?, target?}",
+    ),
+    (
+        "library.importVariable",
+        "Import linked library variable",
+        true,
+        "{library, variable}",
+    ),
+    (
+        "library.bindVariable",
+        "Bind linked library variable",
+        true,
+        "{library, variable, field, ids?}",
+    ),
+    (
+        "library.aliasVariable",
+        "Alias linked library variable",
+        true,
+        "{library, alias, variable, mode?}",
+    ),
+    (
+        "library.setVariableMode",
+        "Set linked library variable mode",
+        true,
+        "{library, collection, mode, ids?}",
+    ),
+    (
+        "library.extendCollection",
+        "Extend linked variable collection",
+        true,
+        "{library, collection, name?}",
+    ),
+    ("library.swap", "Swap linked libraries", true, "{from, to}"),
+    (
+        "library.swapAt",
+        "Swap instance at a point",
+        true,
+        "{library, component, x, y}",
+    ),
+    ("library.updates", "List library updates", false, "{}"),
+    (
+        "library.check",
+        "Check team library updates",
+        false,
+        "{library?}",
+    ),
+    (
+        "library.publishToServer",
+        "Publish a team library",
+        true,
+        "{server?, key?, include?, exclude?, description?}",
+    ),
+    (
+        "library.usage",
+        "Inspect local library usage",
+        false,
+        "{library?, days?}",
+    ),
+    (
+        "library.acceptUpdates",
+        "Accept library updates",
+        true,
+        "{ids?}",
+    ),
     (
         "library.list",
         "List embedded libraries",
@@ -182,7 +308,7 @@ pub(super) const COMMANDS: &[(&str, &str, bool, &str)] = &[
 
 type Entries = BTreeMap<String, Value>;
 
-fn entry<'a>(entries: &'a Entries, reference: &str) -> Result<&'a Value> {
+pub(super) fn entry<'a>(entries: &'a Entries, reference: &str) -> Result<&'a Value> {
     if let Some(value) = entries.get(reference) {
         return Ok(value);
     }
@@ -198,7 +324,7 @@ fn entry<'a>(entries: &'a Entries, reference: &str) -> Result<&'a Value> {
     Ok(found)
 }
 
-fn catalog(namespace: &str, id: &str, patch: Value) -> Result<Command> {
+pub(super) fn catalog(namespace: &str, id: &str, patch: Value) -> Result<Command> {
     let mut patch = properties(&patch)?;
     patch.remove("id");
     Ok(Command::CatalogSet {
@@ -253,6 +379,29 @@ fn style_fields(which: &str) -> Result<&'static [&'static str]> {
 
 fn style_link(which: &str) -> String {
     format!("{which}StyleId")
+}
+
+pub(super) fn paint_style<'a>(
+    snapshot: &DocumentSnapshot,
+    styles: &'a Entries,
+    style: &str,
+    library: Option<&str>,
+) -> Result<&'a Value> {
+    let found = if let Some(library) = library {
+        let libraries = resources::catalogs(&snapshot.metadata, "libraries");
+        let library = library_ops::library(&libraries, library)?;
+        let (key, _) = library_ops::asset(library, "styles", style)?;
+        let id = library["styleMap"][key]
+            .as_str()
+            .ok_or_else(|| EngineError::invalid("Linked style is not installed"))?;
+        entry(styles, id)?
+    } else {
+        entry(styles, style)?
+    };
+    if found["type"] != "paint" {
+        return Err(EngineError::invalid("a color style is required"));
+    }
+    Ok(found)
 }
 
 fn style_target(kind: &str, target: Option<&str>) -> Result<&'static str> {
@@ -314,7 +463,9 @@ impl ToolRouter {
             "component" | "instance" => {
                 self.fig_component_command(session, snapshot, state, selection, command, params)
             }
-            "library" => self.fig_library_command(session, snapshot, action, params),
+            "library" => {
+                self.fig_library_command(session, snapshot, state, selection, action, params)
+            }
             "comment" => self.fig_comment_command(session, snapshot, state, action, params),
             _ => Err(unsupported("Unknown catalog command")),
         }
@@ -630,7 +781,7 @@ fn ordered_styles(entries: &Entries) -> Vec<(&String, &Value)> {
     styles
 }
 
-fn append_style_apply(
+pub(super) fn append_style_apply(
     commands: &mut Vec<Command>,
     node_id: String,
     id: &str,
@@ -765,37 +916,66 @@ fn mode_id<'a>(modes: &'a [Value], value: &str) -> Result<&'a str> {
 }
 
 fn token_value(entries: &Entries, kind: &str, value: &Value, id: &str) -> Result<Value> {
-    if let Some(alias) = value["alias"]
-        .as_str()
-        .filter(|_| value.as_object().is_some_and(|map| map.len() == 1))
-    {
-        let variable = entry(entries, alias)?;
-        if variable["type"] != kind {
-            return Err(EngineError::invalid(
-                "Variable alias must use the same type",
-            ));
-        }
-        let alias = string(variable, "id")?;
-        let mut checked = BTreeSet::new();
-        let mut pending = vec![alias];
-        while let Some(next) = pending.pop() {
-            if next == id {
-                return Err(EngineError::invalid("Variable alias cycle"));
+    if let Some(fields) = value.as_object().filter(|fields| fields.len() == 1) {
+        let reference = |alias: &str| -> Result<Value> {
+            let variable = entry(entries, alias)?;
+            if variable["type"] != kind {
+                return Err(EngineError::invalid(
+                    "Variable alias must use the same type",
+                ));
             }
-            if checked.insert(next) {
-                if let Some(token) = entries.get(next) {
-                    pending.extend(
-                        token["modes"]
-                            .as_object()
-                            .into_iter()
-                            .flat_map(|values| values.values())
-                            .chain([&token["value"]])
-                            .filter_map(|v| v["$token"].as_str()),
-                    );
+            let alias = string(variable, "id")?;
+            let mut checked = BTreeSet::new();
+            let mut pending = vec![alias];
+            while let Some(next) = pending.pop() {
+                if next == id {
+                    return Err(EngineError::invalid("Variable alias cycle"));
+                }
+                if checked.insert(next)
+                    && let Some(token) = entries.get(next)
+                {
+                    variable_ops::references(&token["value"], &mut pending);
+                    variable_ops::references(&token["modes"], &mut pending);
                 }
             }
+            Ok(json!({"$token":alias}))
+        };
+        if let Some(alias) = fields.get("alias").and_then(Value::as_str) {
+            return reference(alias);
         }
-        return Ok(json!({"$token":alias}));
+        if kind == "color" {
+            let fraction = |value: &Value| {
+                value
+                    .as_f64()
+                    .filter(|number| (0. ..=1.).contains(number))
+                    .ok_or_else(|| {
+                        EngineError::invalid("Color calculation fractions must be in 0..1")
+                    })
+            };
+            if let Some(alpha) = fields.get("alpha") {
+                return Ok(json!({"$colorAlpha":{
+                    "color":reference(string(alpha,"variable")?)?,
+                    "opacity":fraction(&alpha["opacity"])?,
+                }}));
+            }
+            if let Some(mix) = fields.get("mix") {
+                let operand = |value: &Value| {
+                    if value.as_object().is_none_or(|fields| fields.len() != 1) {
+                        return Err(EngineError::invalid(
+                            "Color mix needs variable or literal operands",
+                        ));
+                    }
+                    if let Some(variable) = value["variable"].as_str() {
+                        reference(variable)
+                    } else {
+                        token_value(entries, "color", &value["literal"], id)
+                    }
+                };
+                return Ok(json!({"$colorMix":{
+                    "from":operand(&mix["from"])?,"to":operand(&mix["to"])?,"t":fraction(&mix["t"])?,
+                }}));
+            }
+        }
     }
     let valid = match kind {
         "color" => value.as_str().is_some_and(|color| {
@@ -819,6 +999,17 @@ fn token_value(entries: &Entries, kind: &str, value: &Value, id: &str) -> Result
 }
 
 fn fig_token_value(value: &Value) -> Value {
+    if let Some(alpha) = value.get("$colorAlpha") {
+        return json!({"alpha":{"variable":alpha["color"]["$token"],"opacity":alpha["opacity"]}});
+    }
+    if let Some(mix) = value.get("$colorMix") {
+        let operand = |value: &Value| {
+            value
+                .get("$token")
+                .map_or_else(|| json!({"literal":value}), |id| json!({"variable":id}))
+        };
+        return json!({"mix":{"from":operand(&mix["from"]),"to":operand(&mix["to"]),"t":mix["t"]}});
+    }
     value["$token"]
         .as_str()
         .map_or_else(|| value.clone(), |id| json!({"alias":id}))
@@ -837,6 +1028,10 @@ impl ToolRouter {
         let tokens = resources::catalogs(&snapshot.metadata, "tokens");
         let mut commands = Vec::new();
         let result = match action {
+            "import" => {
+                variable_io::import(&collections, &tokens, &params["variables"], &mut commands)?
+            }
+            "export" => return variable_io::export(snapshot, &collections, &tokens, params),
             "list" => {
                 let variables: Vec<Value> = tokens
                     .values()
@@ -891,6 +1086,13 @@ impl ToolRouter {
                 let current = entry(&collections, string(params, "collection")?)?;
                 let collection = string(current, "id")?;
                 let next_name = name(params)?;
+                if current["libraryId"].is_string()
+                    || action != "renameCollection" && current["extendsCollection"].is_string()
+                {
+                    return Err(EngineError::invalid(
+                        "Inherited or linked modes are read-only",
+                    ));
+                }
                 if action == "renameCollection" {
                     commands.push(collection_patch(collection, &json!({"name":next_name}))?);
                     json!({"ok":true})
@@ -938,6 +1140,11 @@ impl ToolRouter {
             }
             "moveMode" | "removeMode" => {
                 let current = entry(&collections, string(params, "collection")?)?;
+                if current["libraryId"].is_string() || current["extendsCollection"].is_string() {
+                    return Err(EngineError::invalid(
+                        "Inherited or linked modes are read-only",
+                    ));
+                }
                 let id = string(current, "id")?;
                 let mut modes = current["modes"]
                     .as_array()
@@ -980,6 +1187,10 @@ impl ToolRouter {
             }
             "create" => {
                 let current = entry(&collections, string(params, "collection")?)?;
+                if current["libraryId"].is_string() {
+                    return Err(EngineError::invalid("Linked collections are read-only"));
+                }
+
                 let modes = current["modes"]
                     .as_array()
                     .ok_or_else(|| EngineError::invalid("Collection has no modes"))?;
@@ -1003,6 +1214,77 @@ impl ToolRouter {
                 commands.push(catalog("tokens", &id, json!({"collectionId":current["id"],"name":name(params)?,"type":kind,"description":params["description"],"value":values[default],"modes":values}))?);
                 json!({"id":id})
             }
+            "extendCollection" => {
+                let source = entry(&collections, string(params, "collection")?)?;
+                if source["libraryId"].is_string() {
+                    return Err(EngineError::invalid(
+                        "Use library.extendCollection for a linked collection",
+                    ));
+                }
+                variable_ops::extension(&collections, source, params, &mut commands)?
+            }
+            "resetOverride" => {
+                let token = entry(&tokens, string(params, "variable")?)?;
+                if !token["extendsVariable"].is_string() {
+                    return Err(EngineError::invalid(
+                        "Only inherited variables have overrides",
+                    ));
+                }
+                let mut overrides: BTreeSet<_> = token["overrideModes"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .collect();
+                if let Some(mode) = params["mode"].as_str() {
+                    let collection = entry(&collections, string(token, "collectionId")?)?;
+                    let modes = collection["modes"]
+                        .as_array()
+                        .ok_or_else(|| EngineError::invalid("Collection has no modes"))?;
+                    overrides.remove(mode_id(modes, mode)?);
+                } else {
+                    overrides.clear();
+                }
+                commands.push(catalog(
+                    "tokens",
+                    string(token, "id")?,
+                    json!({"overrideModes":overrides}),
+                )?);
+                json!({"ok":true})
+            }
+            "delete" | "deleteCollection" => {
+                let collection;
+                let mut gone = BTreeSet::new();
+                if action == "delete" {
+                    let token = entry(&tokens, string(params, "variable")?)?;
+                    if token["libraryId"].is_string() {
+                        return Err(EngineError::invalid("Library variables are read-only"));
+                    }
+                    collection = None;
+                    gone.insert(string(token, "id")?);
+                } else {
+                    let token_collection = entry(&collections, string(params, "collection")?)?;
+                    if token_collection["libraryId"].is_string() {
+                        return Err(EngineError::invalid(
+                            "Library variable collections are read-only",
+                        ));
+                    }
+                    let id = string(token_collection, "id")?;
+                    collection = Some(id);
+                    gone.extend(
+                        tokens
+                            .iter()
+                            .filter(|(_, token)| token["collectionId"] == id)
+                            .map(|(id, _)| id.as_str()),
+                    );
+                }
+                variable_ops::delete(snapshot, &tokens, &gone, collection, &mut commands)?;
+                if collection.is_some() {
+                    json!({"deletedVariables":gone.len()})
+                } else {
+                    json!({"ok":true})
+                }
+            }
             "set" | "update" | "duplicate" => {
                 let token = entry(&tokens, string(params, "variable")?)?;
                 let id = string(token, "id")?;
@@ -1012,6 +1294,9 @@ impl ToolRouter {
                 if action == "duplicate" {
                     let mut patch = token.clone();
                     patch["name"] = json!(format!("{} copy", name(token)?));
+                    patch["extendsVariable"] = Value::Null;
+                    patch["overrideModes"] = json!([]);
+
                     let id = new_id("token");
                     commands.push(catalog("tokens", &id, patch)?);
                     json!({"id":id})
@@ -1019,20 +1304,17 @@ impl ToolRouter {
                     let mut patch = json!({});
                     if action == "update" {
                         if params.get("name").is_some() {
+                            if token["extendsVariable"].is_string() {
+                                return Err(EngineError::invalid(
+                                    "Inherited variable names are read-only",
+                                ));
+                            }
                             patch["name"] = json!(name(params)?);
                         }
                         if let Some(description) = params.get("description") {
                             patch["description"] = description.clone();
                         }
-                        if params.as_object().is_some_and(|params| {
-                            params.keys().any(|key| {
-                                !matches!(key.as_str(), "variable" | "name" | "description")
-                            })
-                        }) {
-                            return Err(unsupported(
-                                "Only variable name and description can be changed by variable.update",
-                            ));
-                        }
+                        variable_ops::append_update(token, params, &mut patch)?;
                     } else {
                         let value = params
                             .get("value")
@@ -1054,6 +1336,16 @@ impl ToolRouter {
                             let mut values = token["modes"].clone();
                             values[mode] = value.clone();
                             patch["modes"] = values;
+                            if token["extendsVariable"].is_string() {
+                                let mut overrides: BTreeSet<_> = token["overrideModes"]
+                                    .as_array()
+                                    .into_iter()
+                                    .flatten()
+                                    .filter_map(Value::as_str)
+                                    .collect();
+                                overrides.insert(mode);
+                                patch["overrideModes"] = json!(overrides);
+                            }
                             if mode == default {
                                 patch["value"] = value;
                             }
@@ -1119,13 +1411,17 @@ impl ToolRouter {
                 json!({"ok":true})
             }
             "bind" => {
-                let (field, kind) = match string(params, "field")? {
+                let requested = string(params, "field")?;
+                let (field, kind) = match requested {
                     field @ ("fill" | "stroke" | "color") => (field, "color"),
                     field @ ("fontFamily" | "fontStyle") => (field, "string"),
                     "characters" => ("text", "string"),
                     "visible" => ("visible", "boolean"),
-                    field @ ("width" | "height" | "fontSize" | "strokeWidth" | "opacity") => {
-                        (field, "number")
+                    field @ ("width" | "height" | "fontSize" | "strokeWidth" | "opacity"
+                    | "cornerRadius" | "fontWeight" | "lineHeight" | "letterSpacing"
+                    | "wordSpacing") => (field, "number"),
+                    field if variable_ops::path_type(field).is_some() => {
+                        (field, variable_ops::path_type(field).unwrap())
                     }
                     _ => {
                         return Err(unsupported(
@@ -1153,7 +1449,21 @@ impl ToolRouter {
                 let references = omc_style::ReferenceContext::new(snapshot);
                 for node_id in self.catalog_targets(session, snapshot, params, selection)? {
                     let node = &snapshot.nodes[&node_id];
-                    if kind == "number" {
+                    if let Some(properties) =
+                        variable_ops::nested_binding(&references, node, requested, value.as_ref())?
+                    {
+                        commands.push(Command::NodeSet {
+                            node_id,
+                            properties,
+                        });
+                        continue;
+                    }
+                    if field == "text" && node.kind != NodeKind::Text {
+                        return Err(EngineError::invalid(
+                            "Only a text layer can bind characters",
+                        ));
+                    }
+                    if kind == "number" || field == "text" {
                         let mut bindings = node
                             .properties
                             .get("figcraftVariableBindings")
@@ -1164,8 +1474,24 @@ impl ToolRouter {
                         if let Some(value) = &value {
                             bindings.insert(field.into(), value.clone());
                         } else if bindings.remove(field).is_some() {
-                            let (effective, _) = references.properties(node);
-                            if let Some(value) = effective.get(field) {
+                            let (effective, diagnostics) = references.properties(node);
+                            if field == "text" {
+                                if diagnostics.iter().any(|diagnostic| {
+                                    diagnostic.property.as_deref() == Some("text")
+                                }) {
+                                    return Err(EngineError::invalid(
+                                        "Cannot unbind an unresolved text variable",
+                                    ));
+                                }
+                                if let Some(text) = effective.get(field).and_then(Value::as_str)
+                                    && node.string("text") != Some(text)
+                                {
+                                    commands.push(Command::TextReplace {
+                                        node_id: node_id.clone(),
+                                        text: text.into(),
+                                    });
+                                }
+                            } else if let Some(value) = effective.get(field) {
                                 properties.insert(field.into(), value.clone());
                             }
                         }
@@ -1177,13 +1503,6 @@ impl ToolRouter {
                         continue;
                     }
                     let new_value = if let Some(value) = &value {
-                        if matches!(field, "fill" | "stroke")
-                            && node.properties.contains_key(&format!("{field}s"))
-                        {
-                            return Err(unsupported(
-                                "Binding an individual paint in a native paint stack is unavailable",
-                            ));
-                        }
                         Some(value.clone())
                     } else if node
                         .properties
@@ -1211,12 +1530,13 @@ impl ToolRouter {
             }
             _ => return Err(unsupported("Unknown variable command")),
         };
+        variable_ops::sync_extensions(snapshot, &mut commands)?;
         self.catalog_commit(session, snapshot, commands)?;
         Ok(result)
     }
 }
 
-fn node_page<'a>(snapshot: &'a DocumentSnapshot, id: &str) -> Option<&'a omc_model::Page> {
+pub(super) fn node_page<'a>(snapshot: &'a DocumentSnapshot, id: &str) -> Option<&'a omc_model::Page> {
     let mut node = snapshot.nodes.get(id)?;
     while let Some(parent) = &node.parent_id {
         node = snapshot.nodes.get(parent)?;
@@ -1351,8 +1671,63 @@ impl ToolRouter {
             }).collect();
             return Ok(json!(items));
         }
+        if matches!(command, "instance.place" | "instance.swapAt") {
+            let mut component = self.fig_layer(session, snapshot, &params["component"])?;
+            if snapshot.nodes[&component].properties.get("isVariantSet") == Some(&Value::Bool(true))
+            {
+                component = children(snapshot, &component)
+                    .into_iter()
+                    .find(|node| node.kind == NodeKind::Component)
+                    .map(|node| node.id.clone())
+                    .ok_or_else(|| EngineError::invalid("The component set has no variants"))?;
+            }
+            if snapshot.nodes[&component].kind != NodeKind::Component {
+                return Err(EngineError::invalid("Expected a component definition"));
+            }
+            let point = |key| {
+                params[key]
+                    .as_f64()
+                    .filter(|value| value.is_finite())
+                    .ok_or_else(|| EngineError::invalid(format!("{key} required")))
+            };
+            let (x, y) = (point("x")?, point("y")?);
+            let (raw, edit) = if command == "instance.place" {
+                let node = library_swap::place(snapshot, state, &component, x, y, None)?;
+                (node.id.clone(), Command::NodeCreate { node })
+            } else {
+                let node = library_swap::at_point(snapshot, state, &component, x, y)?;
+                let mut properties =
+                    library_swap::instance_patch(snapshot, node, &component, true)?;
+                if node.string("libraryId").is_some()
+                    || snapshot.nodes[&component].string("libraryId").is_some()
+                {
+                    properties.insert(
+                        "libraryId".into(),
+                        json!(snapshot.nodes[&component].string("libraryId")),
+                    );
+                }
+                (
+                    node.id.clone(),
+                    Command::NodeSet {
+                        node_id: node.id.clone(),
+                        properties,
+                    },
+                )
+            };
+            self.catalog_commit(session, snapshot, vec![edit])?;
+            let id = json!(self.fig_alias(session, document, &raw));
+            self.fig_selection(&key, &[id.clone()]);
+            return Ok(json!({"id":id}));
+        }
         if command == "instance.create" {
-            let source = self.fig_layer(session, snapshot, &params["component"])?;
+            let mut source = self.fig_layer(session, snapshot, &params["component"])?;
+            if snapshot.nodes[&source].properties.get("isVariantSet") == Some(&Value::Bool(true)) {
+                source = children(snapshot, &source)
+                    .into_iter()
+                    .find(|node| node.kind == NodeKind::Component)
+                    .map(|node| node.id.clone())
+                    .ok_or_else(|| EngineError::invalid("The component set has no variants"))?;
+            }
             let component = &snapshot.nodes[&source];
             if component.kind != NodeKind::Component {
                 return Err(EngineError::invalid("component must be a component layer"));
@@ -1517,75 +1892,348 @@ impl ToolRouter {
         Ok(json!({"ok":true}))
     }
 
+    fn fig_attach_library(
+        &self,
+        session: &str,
+        snapshot: &DocumentSnapshot,
+        path: &str,
+        publication: Value,
+    ) -> Result<Value> {
+        let libraries = resources::catalogs(&snapshot.metadata, "libraries");
+        let id = string(&publication, "id")?;
+        if library_ops::published(&snapshot.metadata).is_some_and(|ours| ours["id"] == id) {
+            return Err(EngineError::invalid("This file is the published library"));
+        }
+        let existing = libraries.get(id);
+        if let Some(existing) = existing {
+            if existing["path"] != path || existing["enabled"] != true {
+                self.catalog_commit(
+                    session,
+                    snapshot,
+                    vec![catalog(
+                        "libraries",
+                        id,
+                        json!({"path":path,"enabled":true}),
+                    )?],
+                )?;
+            }
+        } else {
+            self.library_tool(
+                session,
+                &snapshot.id,
+                json!({
+                    "action":"add","id":id,"_path":path,"snapshot":publication,
+                }),
+                Value::Null,
+            )?;
+        }
+        let mut response = library_ops::summary(&publication)["assets"].clone();
+        for key in ["id", "name", "version"] {
+            response[key] = publication[key].clone();
+        }
+        response["path"] = json!(library_team::display_path(path));
+        Ok(response)
+    }
+
     fn fig_library_command(
         &self,
         session: &str,
         snapshot: &DocumentSnapshot,
+        state: &ViewState,
+        selection: &[Value],
         action: &str,
         params: &Value,
     ) -> Result<Value> {
         let libraries = resources::catalogs(&snapshot.metadata, "libraries");
+        if action == "usage" {
+            return self.fig_local_library_usage(snapshot, params);
+        }
+        if action == "publish" {
+            let mut request = params.clone();
+            for key in ["include", "exclude"] {
+                if let Some(ids) = request.get_mut(key).and_then(Value::as_array_mut) {
+                    for id in ids {
+                        if id.is_u64() {
+                            *id = json!(self.fig_layer(session, snapshot, id)?);
+                        }
+                    }
+                }
+            }
+            let (publication, command) = library_ops::publication(snapshot, &request)?;
+            self.catalog_commit(session, snapshot, vec![command])?;
+            let mut summary = library_ops::summary(&publication);
+            summary.as_object_mut().unwrap().remove("assets");
+            return Ok(summary);
+        }
+        if action == "add" {
+            let (path, publication) = self.fig_library_source(string(params, "path")?, true)?;
+            return self.fig_attach_library(session, snapshot, &path, publication);
+        }
         if action == "list" {
             let entries: Vec<_> = libraries.values().filter(|library| library["enabled"] != false).map(|library| {
-                let mut info = json!({"id":library["id"],"name":library["name"],"path":library["path"],"server":false,
+                let mut info = json!({"id":library["id"],"name":library["name"],
+                    "path":library["path"].as_str().map(library_team::display_path),
+                    "server":library["path"].as_str().is_some_and(library_team::is_link),
                     "seenVersion":library["version"],"version":library["version"],"description":library["snapshot"]["description"]});
                 if params["assets"] == true {
+                    let summary = library_ops::summary(&library["snapshot"]);
                     for key in ["components", "styles", "variables", "collections"] {
-                        info[key] = library["snapshot"][key].clone();
+                        info[key] = if library["path"].is_string() { summary["assets"][key].clone() }
+                            else { library["snapshot"][key].clone() };
+                    }
+                }
+                if let Some(path) = library["path"].as_str() {
+                    match self.fig_library_source(path, false) {
+                        Ok((_, publication)) if publication["id"] == library["id"] => {
+                            info["version"] = publication["version"].clone();
+                            info["updates"] = json!(publication["version"] != library["version"]);
+                        }
+                        Ok(_) => info["error"] = json!("The file now holds another library"),
+                        Err(error) => info["error"] = json!(error.message),
                     }
                 }
                 info
             }).collect();
-            return Ok(json!({"libraries":entries,"published":null}));
-        }
-        let reference = string(params, "library")?;
-        let library = libraries
-            .values()
-            .find(|library| library["path"] == reference)
-            .map_or_else(|| entry(&libraries, reference), Ok)?;
-        let id = string(library, "id")?;
-        if action == "remove" {
-            self.catalog_commit(
-                session,
-                snapshot,
-                vec![catalog(
-                    "libraries",
-                    id,
-                    json!({"deleted":true,"enabled":false}),
-                )?],
-            )?;
-            return Ok(json!({"ok":true}));
-        }
-        let requested = params["component"]
-            .as_str()
-            .map(str::to_owned)
-            .or_else(|| params["component"].as_u64().map(|id| id.to_string()))
-            .ok_or_else(|| EngineError::invalid("Component ID or name required"))?;
-        let components = library["snapshot"]["components"]
-            .as_object()
-            .ok_or_else(|| EngineError::invalid("Library has no components"))?;
-        let component = if components.contains_key(&requested) {
-            &requested
-        } else {
-            let mut matches = components
-                .iter()
-                .filter(|(_, component)| component["name"] == requested);
-            let (id, _) = matches
-                .next()
-                .ok_or_else(|| EngineError::invalid("Library component unavailable"))?;
-            if matches.next().is_some() {
-                return Err(EngineError::invalid("Library component name is ambiguous"));
+            let publication = library_ops::published(&snapshot.metadata).map(|library| {
+                let mut summary = library_ops::summary(library);
+                if params["assets"] != true {
+                    summary.as_object_mut().unwrap().remove("assets");
+                }
+                summary
+            });
+            let mut result = json!({"libraries":entries,"published":publication});
+            if params["assets"] == true {
+                result["publishable"] = library_ops::publishable(snapshot);
             }
-            id
-        };
-        let result = self.library_tool(session, &snapshot.id, json!({"action":"insert","id":id,"componentId":component,"x":params["x"],"y":params["y"]}), Value::Null)?;
-        let raw = result["rawIds"]
-            .get(0)
-            .and_then(Value::as_str)
-            .ok_or_else(|| EngineError::invalid("No instance was created"))?;
-        let alias = json!(self.fig_alias(session, &snapshot.id, raw));
-        self.fig_selection(&(session.into(), snapshot.id.clone()), &[alias.clone()]);
-        Ok(json!({"id":alias}))
+            return Ok(result);
+        }
+        if matches!(action, "updates" | "acceptUpdates") {
+            let requested = params["ids"]
+                .as_array()
+                .map(|ids| {
+                    ids.iter()
+                        .map(|id| {
+                            let id = id
+                                .as_str()
+                                .ok_or_else(|| EngineError::invalid("Expected library IDs"))?;
+                            library_ops::library(&libraries, id)
+                        })
+                        .collect::<Result<Vec<_>>>()
+                })
+                .transpose()?;
+            let entries = requested.clone().unwrap_or_else(|| {
+                libraries
+                    .values()
+                    .filter(|library| library["enabled"] != false)
+                    .collect()
+            });
+            let mut changes = Vec::new();
+            let mut errors = Vec::new();
+            let mut counts = [0; 4];
+            for library in entries {
+                let Some(path) = library["path"].as_str() else {
+                    continue;
+                };
+                let publication = match self.fig_library_source(path, action == "acceptUpdates") {
+                    Ok((_, published)) if published["id"] == library["id"] => published,
+                    Ok(_) => {
+                        errors.push(json!({"id":library["id"],"error":"The file now holds another library"}));
+                        continue;
+                    }
+                    Err(error) if requested.is_none() => {
+                        errors.push(json!({"id":library["id"],"error":error.message}));
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                };
+                if publication["version"].as_u64() <= library["version"].as_u64() {
+                    continue;
+                }
+                let mut item = json!({"id":library["id"],"name":library["name"],"version":publication["version"]});
+                for (index, (asset, mapping)) in [
+                    ("components", "componentMap"),
+                    ("styles", "styleMap"),
+                    ("collections", "collectionMap"),
+                    ("variables", "variableMap"),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let rows:Vec<_> = publication[asset].as_object().into_iter().flatten()
+                        .filter(|(id,row)| library["snapshot"][asset].get(*id) != Some(*row))
+                        .map(|(id,row)| json!({"id":library[mapping][id],"key":id,"name":row["name"]})).collect();
+                    counts[index] += rows.len();
+                    item[asset] = json!(rows);
+                }
+                if action == "acceptUpdates" {
+                    self.library_tool(session, &snapshot.id, json!({
+                        "action":"update","id":library["id"],"_path":path,"snapshot":publication,
+                    }), Value::Null)?;
+                }
+                changes.push(item);
+            }
+            return Ok(if action == "updates" {
+                json!({"count":counts.iter().sum::<usize>(),"libraries":changes,"errors":errors})
+            } else {
+                json!({"components":counts[0],"styles":counts[1],"collections":counts[2],"variables":counts[3],"skipped":errors})
+            });
+        }
+        if action == "swap" {
+            let source = library_ops::library(&libraries, string(params, "from")?)?;
+            let destination = library_ops::library(&libraries, string(params, "to")?)?;
+            let mut commands = Vec::new();
+            let result = library_swap::swap(snapshot, source, destination, &mut commands)?;
+            variable_ops::sync_extensions(snapshot, &mut commands)?;
+            self.catalog_commit(session, snapshot, commands)?;
+            return Ok(result);
+        }
+        let reference = params["library"]
+            .as_str()
+            .or_else(|| params["id"].as_str())
+            .ok_or_else(|| EngineError::invalid("Library ID, name or path required"))?;
+        let library = library_ops::library(&libraries, reference)?;
+        let id = string(library, "id")?;
+        match action {
+            "remove" => {
+                self.catalog_commit(
+                    session,
+                    snapshot,
+                    vec![catalog(
+                        "libraries",
+                        id,
+                        json!({"deleted":true,"enabled":false}),
+                    )?],
+                )?;
+                Ok(json!({"ok":true}))
+            }
+            "applyStyle" => {
+                let (key, style) = library_ops::asset(library, "styles", string(params, "style")?)?;
+                let local = library["styleMap"][key]
+                    .as_str()
+                    .ok_or_else(|| EngineError::invalid("Linked style is not installed"))?;
+                let target = style_target(string(style, "type")?, params["target"].as_str())?;
+                let mut commands = Vec::new();
+                for node_id in self.catalog_targets(session, snapshot, params, selection)? {
+                    if target == "text" && snapshot.nodes[&node_id].kind != NodeKind::Text {
+                        return Err(EngineError::invalid("A text style requires a text layer"));
+                    }
+                    append_style_apply(&mut commands, node_id, local, target)?;
+                }
+                self.catalog_commit(session, snapshot, commands)?;
+                Ok(json!({"style":local}))
+            }
+            "importVariable" | "bindVariable" | "aliasVariable" => {
+                let name = string(
+                    params,
+                    if action == "aliasVariable" {
+                        "alias"
+                    } else {
+                        "variable"
+                    },
+                )?;
+                let (key, _) = library_ops::asset(library, "variables", name)?;
+                let local = library["variableMap"][key]
+                    .as_str()
+                    .ok_or_else(|| EngineError::invalid("Linked variable is not installed"))?;
+                if action == "bindVariable" {
+                    let mut request = params.clone();
+                    request["variable"] = json!(local);
+                    self.fig_variable_command(session, snapshot, selection, "bind", &request)?;
+                } else if action == "aliasVariable" {
+                    let mut request = params.clone();
+                    request["value"] = json!({"alias":local});
+                    self.fig_variable_command(session, snapshot, selection, "set", &request)?;
+                }
+                Ok(json!({"variable":local}))
+            }
+            "extendCollection" => {
+                let (key, _) =
+                    library_ops::asset(library, "collections", string(params, "collection")?)?;
+                let local = library["collectionMap"][key]
+                    .as_str()
+                    .ok_or_else(|| EngineError::invalid("Linked collection is not installed"))?;
+                let collections = resources::catalogs(&snapshot.metadata, "figcraftCollections");
+                let source = entry(&collections, local)?;
+                let mut commands = Vec::new();
+                let result = variable_ops::extension(&collections, source, params, &mut commands)?;
+                variable_ops::sync_extensions(snapshot, &mut commands)?;
+                self.catalog_commit(session, snapshot, commands)?;
+                Ok(result)
+            }
+            "setVariableMode" => {
+                let (key, _) =
+                    library_ops::asset(library, "collections", string(params, "collection")?)?;
+                let local = library["collectionMap"][key]
+                    .as_str()
+                    .ok_or_else(|| EngineError::invalid("Linked collection is not installed"))?;
+                let mut request = params.clone();
+                request["collection"] = json!(local);
+                self.fig_variable_command(session, snapshot, &[], "setMode", &request)?;
+                Ok(json!({"collection":local}))
+            }
+            "place" | "import" | "swapAt" => {
+                let requested = params["component"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .or_else(|| params["component"].as_u64().map(|id| id.to_string()))
+                    .ok_or_else(|| EngineError::invalid("Component ID or name required"))?;
+                let (key, _) = library_ops::asset(library, "components", &requested)?;
+                let raw = library["componentMap"][key]
+                    .as_str()
+                    .ok_or_else(|| EngineError::invalid("Linked component is not installed"))?;
+                let component = self.fig_alias(session, &snapshot.id, raw);
+                if action == "import" {
+                    return Ok(json!({"component":component}));
+                }
+                if action == "swapAt" {
+                    let number = |key| {
+                        params[key]
+                            .as_f64()
+                            .filter(|number| number.is_finite())
+                            .ok_or_else(|| EngineError::invalid(format!("{key} is required")))
+                    };
+                    let node =
+                        library_swap::at_point(snapshot, state, raw, number("x")?, number("y")?)?;
+                    let mut patch = library_swap::instance_patch(snapshot, node, raw, true)?;
+                    patch.insert("libraryId".into(), json!(id));
+                    self.catalog_commit(
+                        session,
+                        snapshot,
+                        vec![Command::NodeSet {
+                            node_id: node.id.clone(),
+                            properties: patch,
+                        }],
+                    )?;
+                    let alias = json!(self.fig_alias(session, &snapshot.id, &node.id));
+                    self.fig_selection(&(session.into(), snapshot.id.clone()), &[alias.clone()]);
+                    return Ok(json!({"id":alias,"component":component}));
+                }
+                let x = params["x"]
+                    .as_f64()
+                    .or_else(|| state.view["x"].as_f64())
+                    .unwrap_or(0.);
+                let y = params["y"]
+                    .as_f64()
+                    .or_else(|| state.view["y"].as_f64())
+                    .unwrap_or(0.);
+                let result = self.library_tool(
+                    session,
+                    &snapshot.id,
+                    json!({
+                        "action":"insert","id":id,"componentId":key,"x":x,"y":y,
+                    }),
+                    Value::Null,
+                )?;
+                let raw = result["rawIds"]
+                    .get(0)
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| EngineError::invalid("No instance was created"))?;
+                let alias = json!(self.fig_alias(session, &snapshot.id, raw));
+                self.fig_selection(&(session.into(), snapshot.id.clone()), &[alias.clone()]);
+                Ok(json!({"id":alias,"component":component}))
+            }
+            _ => Err(unsupported("Unknown library command")),
+        }
     }
 }
 
@@ -1594,6 +2242,11 @@ pub(super) fn comment_id(raw: &str) -> u64 {
     let hash = Sha256::digest(raw);
     // Numeric aliases stay stable across MCP sessions and fit exactly in JavaScript numbers.
     u64::from_le_bytes(hash[..8].try_into().unwrap()) & ((1 << 53) - 1)
+}
+
+pub(super) fn comment_alias(raw: &str, wire: Option<u64>) -> u64 {
+    wire.filter(|id| *id <= (1u64 << 53) - 1)
+        .unwrap_or_else(|| comment_id(raw))
 }
 
 fn comment_link(id: u64) -> String {
@@ -1611,14 +2264,17 @@ pub(super) fn comment_replies<'a>(entries: &'a Entries, thread: &str) -> Vec<&'a
         .values()
         .filter(|reply| reply["threadId"] == thread)
         .collect();
-    replies.sort_by_key(|reply| {
-        (
-            reply["createdAt"].as_u64().unwrap_or(0),
-            reply["replyOrder"].as_u64().unwrap_or(0),
-            reply["id"].as_str().unwrap_or(""),
-        )
-    });
+    replies.sort_by_key(|reply| comment_reply_order(reply));
     replies
+}
+
+pub(super) fn comment_reply_order(reply: &Value) -> (u64, u64, u64, &str) {
+    (
+        reply["wireReplyOrder"].as_u64().unwrap_or(u64::MAX),
+        reply["createdAt"].as_u64().unwrap_or(0),
+        reply["replyOrder"].as_u64().unwrap_or(0),
+        reply["id"].as_str().unwrap_or(""),
+    )
 }
 
 fn comment_text(params: &Value) -> Result<&str> {
@@ -1636,9 +2292,19 @@ fn comment_message(entry: &Value, people: &BTreeSet<&str>) -> Value {
         .filter(|name| !name.is_empty())
         .map(|name| json!({"name":name,"known":people.iter().any(|person| person.eq_ignore_ascii_case(name))}))
         .collect::<Vec<_>>();
-    json!({"author":entry["authorName"].as_str().or(entry["authorId"].as_str()),"agent":true,
+    let mut reactions = entry["reactions"].as_array().cloned().unwrap_or_default();
+    for reaction in &mut reactions {
+        if let Some(users) = reaction["users"].as_array_mut() {
+            for user in users {
+                if let Some(name) = user.as_str().and_then(|id| entry["reactionNames"][id].as_str()) {
+                    *user = json!(name);
+                }
+            }
+        }
+    }
+    json!({"author":entry["authorName"].as_str().or(entry["authorId"].as_str()),"agent":entry["agent"].as_bool().unwrap_or(true),
         "text":body,"created":entry["createdAt"].as_u64().unwrap_or(0),"edited":entry["editedAt"].as_u64().unwrap_or(0),
-        "reactions":entry["reactions"].as_array().cloned().unwrap_or_default(),"mentions":mentions})
+        "reactions":reactions,"mentions":mentions})
 }
 
 fn comment_scene(snapshot: &DocumentSnapshot, page: &str) -> Result<omc_scene::Scene> {
@@ -1673,6 +2339,30 @@ impl ToolRouter {
     ) -> Result<Value> {
         let entries = resources::catalogs(&snapshot.metadata, "comments");
         let author = self.workspace.session(session)?.author;
+        let preference = self.workspace.preferences().user_name;
+        let display = if preference.is_empty() {
+            "You"
+        } else {
+            &preference
+        };
+        let who = params["author"].as_str().unwrap_or(display);
+        let author_id = params["author"].as_str().unwrap_or(&author);
+        let authored = |entry: &Value| {
+            if params["author"].is_string() {
+                entry["authorName"] == who || entry["authorId"] == author_id
+            } else {
+                entry["authorId"]
+                    .as_str()
+                    .map_or(entry["authorName"] == who, |id| id == author_id)
+            }
+        };
+        let unread = |entry: &Value| {
+            entry["readBy"]
+                .get(author_id)
+                .or_else(|| entry["readBy"].get(who))
+                .and_then(Value::as_bool)
+                .map_or_else(|| entry["wireReadByAll"].as_bool().map_or(!authored(entry), |all| !all), |read| !read)
+        };
         let resolve_page = |default: &str| -> Result<&omc_model::Page> {
             let root = params
                 .get("page")
@@ -1687,12 +2377,38 @@ impl ToolRouter {
                 })
                 .ok_or_else(|| EngineError::invalid("Comment page not found"))
         };
-        let people: BTreeSet<_> = entries
+        let mut people: BTreeSet<_> = entries
             .values()
             .filter_map(|entry| entry["authorName"].as_str().or(entry["authorId"].as_str()))
             .collect();
         if action == "people" {
-            return Ok(json!({"people":people}));
+            for entry in entries.values() {
+                for reaction in entry["reactions"].as_array().into_iter().flatten() {
+                    people.extend(
+                        reaction["users"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(Value::as_str)
+                            .map(|id| entry["reactionNames"][id].as_str().unwrap_or(id)),
+                    );
+                }
+                for word in entry["body"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .split_whitespace()
+                {
+                    if let Some(name) = word.strip_prefix('@') {
+                        let name = name.trim_end_matches(|character: char| {
+                            !character.is_alphanumeric() && character != '_'
+                        });
+                        if !name.is_empty() {
+                            people.insert(name);
+                        }
+                    }
+                }
+            }
+            return Ok(json!({"people":people,"you":who}));
         }
         if action == "list" {
             let page = if params["page"] == "all" {
@@ -1702,18 +2418,34 @@ impl ToolRouter {
             };
             let query = params["query"].as_str().unwrap_or("").to_lowercase();
             let filter = params["filter"].as_str().unwrap_or("all");
-            if !matches!(filter, "all" | "open" | "resolved" | "mine") {
+            if !matches!(filter, "all" | "open" | "resolved" | "mine" | "unread") {
                 return Err(unsupported("Unsupported comment filter"));
             }
             let sort = params["sort"].as_str().unwrap_or("date");
             if !matches!(sort, "date" | "page") {
                 return Err(EngineError::invalid("sort must be date or page"));
             }
-            if params.get("frame").is_some() || params.get("mentions").is_some() {
-                return Err(unsupported(
-                    "Frame and mention comment filters are unavailable",
-                ));
-            }
+            let frame_filter = params
+                .get("frame")
+                .map(|id| self.fig_layer(session, snapshot, id))
+                .transpose()?;
+            let mentions = params
+                .get("mentions")
+                .map(|_| string(params, "mentions"))
+                .transpose()?;
+            let mentions_name = |entry: &Value, name: &str| {
+                entry["body"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .split_whitespace()
+                    .filter_map(|word| word.strip_prefix('@'))
+                    .map(|word| {
+                        word.trim_end_matches(|character: char| {
+                            !character.is_alphanumeric() && character != '_'
+                        })
+                    })
+                    .any(|mention| mention.eq_ignore_ascii_case(name))
+            };
             let mut scene_by_page = BTreeMap::new();
             let mut list = Vec::new();
             for (raw, entry) in entries
@@ -1731,7 +2463,13 @@ impl ToolRouter {
                 let resolved = entry["resolved"] == true;
                 if (filter == "open" || params["resolved"] == false) && resolved
                     || filter == "resolved" && !resolved
-                    || filter == "mine" && !thread.clone().any(|entry| entry["authorId"] == author)
+                    || filter == "unread" && !unread(entry)
+                    || filter == "mine"
+                        && !thread
+                            .clone()
+                            .any(|entry| authored(entry) || mentions_name(entry, who))
+                    || mentions
+                        .is_some_and(|name| !thread.clone().any(|entry| mentions_name(entry, name)))
                     || !query.is_empty()
                         && !thread.clone().any(|entry| {
                             ["body", "authorName", "authorId"].iter().any(|key| {
@@ -1765,10 +2503,54 @@ impl ToolRouter {
                         (x, y) = item.world.point(lx, ly);
                     }
                 }
-                let id = comment_id(raw);
+                let top_frame = |id: &str| -> Option<&Node> {
+                    let mut node = snapshot.nodes.get(id)?;
+                    loop {
+                        let parent = node.parent_id.as_deref()?;
+                        if parent == thread_page.root_node_id {
+                            break;
+                        }
+                        node = snapshot.nodes.get(parent)?;
+                    }
+                    matches!(
+                        node.kind,
+                        NodeKind::Frame | NodeKind::Component | NodeKind::Instance
+                    )
+                    .then_some(node)
+                };
+                let frame = if let Some(frame) = node.and_then(top_frame) {
+                    Some(frame)
+                } else {
+                    if !scene_by_page.contains_key(&thread_page.id) {
+                        scene_by_page.insert(
+                            thread_page.id.clone(),
+                            comment_scene(snapshot, &thread_page.id)?,
+                        );
+                    }
+                    let scene = &scene_by_page[&thread_page.id];
+                    scene.items[scene.root]
+                        .children
+                        .iter()
+                        .rev()
+                        .map(|index| &scene.items[*index])
+                        .filter(|item| !item.hidden && item.contains(x, y))
+                        .find_map(|item| top_frame(&item.id))
+                };
+                if frame_filter
+                    .as_ref()
+                    .is_some_and(|raw| frame.is_none_or(|frame| &frame.id != raw))
+                {
+                    continue;
+                }
+                let wire = entry["wireCommentId"].as_u64();
+                let id = comment_alias(raw, wire);
                 let mut value = comment_message(entry, &people);
+                value["unread"] = json!(unread(entry));
+                value["frame"] =
+                    json!(frame.map(|node| self.fig_alias(session, &snapshot.id, &node.id)));
+                value["frameName"] = json!(frame.and_then(|node| node.string("name")));
                 value["id"] = json!(id);
-                value["link"] = json!(comment_link(id));
+                value["link"] = json!(comment_link(wire.unwrap_or(id)));
                 value["page"] =
                     json!(self.fig_alias(session, &snapshot.id, &thread_page.root_node_id));
                 value["pageName"] = json!(thread_page.title);
@@ -1829,7 +2611,10 @@ impl ToolRouter {
                 .ok_or_else(|| EngineError::invalid("Invalid comment id or link"))?;
             let mut found = entries
                 .iter()
-                .filter(|(raw, comment)| comment["threadId"].is_null() && comment_id(raw) == id);
+                .filter(|(raw, comment)| {
+                    let wire = comment["wireCommentId"].as_u64();
+                    comment["threadId"].is_null() && (wire == Some(id) || comment_alias(raw, wire) == id)
+                });
             let (_, comment) = found
                 .next()
                 .ok_or_else(|| EngineError::invalid("Comment thread not found"))?;
@@ -1841,6 +2626,43 @@ impl ToolRouter {
             }
             Ok(comment)
         };
+        if action == "markRead" {
+            let read = params
+                .get("read")
+                .map(|value| {
+                    value
+                        .as_bool()
+                        .ok_or_else(|| EngineError::invalid("read must be boolean"))
+                })
+                .transpose()?
+                .unwrap_or(true);
+            let only = if params.get("id").is_some() || params.get("link").is_some() {
+                Some(string(find_thread()?, "id")?)
+            } else {
+                None
+            };
+            let mut commands = Vec::new();
+            for (raw, entry) in entries.iter().filter(|(raw, entry)| {
+                entry["threadId"].is_null()
+                    && only.is_none_or(|id| id == *raw)
+                    && unread(entry) == read
+            }) {
+                let mut readers = entry["readBy"].as_object().cloned().unwrap_or_default();
+                if readers.len() >= 200 && !readers.contains_key(author_id) {
+                    return Err(EngineError::new(
+                        "resource_limit",
+                        "Comment read state has too many readers",
+                    ));
+                }
+                readers.insert(author_id.into(), json!(read));
+                let mut names = entry["readerNames"].as_object().cloned().unwrap_or_default();
+                names.insert(author_id.into(), json!(who));
+                commands.push(catalog("comments", raw, json!({"readBy":readers,"readerNames":names}))?);
+            }
+            let changed = commands.len();
+            self.catalog_commit(session, snapshot, commands)?;
+            return Ok(json!({"changed":changed}));
+        }
         let thread = if action == "add" {
             None
         } else {
@@ -1851,11 +2673,11 @@ impl ToolRouter {
             .transpose()?
             .unwrap_or("");
         if action == "link" {
-            return Ok(json!({"link":comment_link(comment_id(thread_id))}));
+            let wire = thread.and_then(|thread| thread["wireCommentId"].as_u64());
+            return Ok(json!({"link":comment_link(wire.unwrap_or_else(|| comment_id(thread_id)))}));
         }
         let mut commands = Vec::new();
         let mut result = json!({"ok":true});
-        let who = params["author"].as_str().unwrap_or(&author);
         if matches!(action, "add" | "move") {
             let page = resolve_page(
                 thread
@@ -1991,7 +2813,15 @@ impl ToolRouter {
                         if !users.is_empty() {
                             reactions.push(json!({"emoji":emoji,"users":users}));
                         }
-                        commands.push(catalog("comments", id, json!({"reactions":reactions}))?);
+                        let mut names = message["reactionNames"].as_object().cloned().unwrap_or_default();
+                        if on {
+                            names.insert(author.clone(), json!(who));
+                        } else if !reactions.iter().any(|reaction| reaction["users"].as_array()
+                            .is_some_and(|users| users.iter().any(|user| user == &author)))
+                        {
+                            names.remove(&author);
+                        }
+                        commands.push(catalog("comments", id, json!({"reactions":reactions,"reactionNames":names}))?);
                     }
                     result = json!({"on":on});
                 }
