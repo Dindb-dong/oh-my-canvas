@@ -37,6 +37,8 @@ const FILE_ACTIONS: [(u64, &str, Action); 5] = [
 ];
 
 const TAB_BG: Color = Color::from_rgb(232, 232, 232);
+const TAB_LABEL_X: f64 = 35.;
+const TAB_LABEL_RIGHT_PAD: f64 = 2.;
 const POPUP_FIRST: u64 = 2_000_000;
 
 fn sidebar_top() -> f64 {
@@ -54,7 +56,8 @@ fn tabs(app: &App) -> (tab_strip::TabLayout, f64) {
                     .map(|c| if c.is_ascii() { 7. } else { 13. })
                     .sum::<f64>()
             });
-            (64. + title_width).clamp(tab_strip::MIN_TAB_WIDTH, 220.)
+            (TAB_LABEL_X + TAB_LABEL_RIGHT_PAD + tab_strip::CLOSE_WIDTH + title_width)
+                .clamp(tab_strip::MIN_TAB_WIDTH, 220.)
         })
         .collect();
     let x = tab_strip::HOME_X + tab_strip::HOME_WIDTH;
@@ -619,7 +622,12 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                     );
                     control_text(
                         canvas,
-                        Rect::new(r.x + 35., r.y, (r.width - 37.).max(0.), r.height),
+                        Rect::new(
+                            r.x + TAB_LABEL_X,
+                            r.y,
+                            (r.width - TAB_LABEL_X - TAB_LABEL_RIGHT_PAD).max(0.),
+                            r.height,
+                        ),
                         &control.label,
                         0.,
                         r.y + 24.,
