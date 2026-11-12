@@ -38,15 +38,21 @@ pub fn tree(app: &App) -> TreeUpdate {
             control.action,
             Action::LayerVisibility(_) | Action::LayerLock(_)
         );
-        let mut node = Node::new(if control.field_value.is_some() {
-            Role::TextInput
-        } else if layer_toggle {
-            Role::CheckBox
-        } else if control.rect.y < HEADER && matches!(control.action, Action::Open(_)) {
-            Role::Tab
-        } else {
-            Role::Button
-        });
+        let mut node = Node::new(
+            if matches!(
+                control.action,
+                Action::Field(_) | Action::EditCatalog { .. }
+            ) && control.field_value.is_some()
+            {
+                Role::TextInput
+            } else if layer_toggle {
+                Role::CheckBox
+            } else if control.rect.y < HEADER && matches!(control.action, Action::Open(_)) {
+                Role::Tab
+            } else {
+                Role::Button
+            },
+        );
         node.set_label(control.label.clone());
         node.set_bounds(bounds(control.rect, scale));
         if !app.action_available(&control.action) {
@@ -57,7 +63,9 @@ pub fn tree(app: &App) -> TreeUpdate {
         }
         if let Some(value) = &control.field_value {
             node.set_value(value.clone());
-            node.add_action(AxAction::SetValue);
+            if matches!(control.action, Action::Field(_)) && app.action_available(&control.action) {
+                node.add_action(AxAction::SetValue);
+            }
         }
         if layer_toggle {
             node.set_toggled(Toggled::from(control.selected));

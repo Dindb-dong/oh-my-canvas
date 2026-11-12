@@ -75,7 +75,9 @@ fn tabs(app: &App) -> (tab_strip::TabLayout, f64) {
 fn popup_rect(app: &App) -> Option<Rect> {
     match app.popup? {
         Popup::Files => Some(FILE_MENU),
-        Popup::InspectorZoom => crate::inspector::popup_rect(app),
+        Popup::InspectorZoom | Popup::InspectorLayer | Popup::InspectorBlend => {
+            crate::inspector::popup_rect(app)
+        }
         Popup::Tabs => {
             let (layout, x) = tabs(app);
             let hidden = app.tabs.len() - layout.widths.len();
@@ -486,7 +488,7 @@ pub fn controls(app: &App) -> Vec<Control> {
     }
     if let Some(menu) = popup_rect(app) {
         match app.popup {
-            Some(Popup::InspectorZoom) => {
+            Some(Popup::InspectorZoom | Popup::InspectorLayer | Popup::InspectorBlend) => {
                 for control in crate::inspector::popup_controls(app, POPUP_FIRST) {
                     add(
                         control.id,
@@ -638,6 +640,17 @@ fn control_text(
 }
 
 fn mark(canvas: &Canvas, r: Rect, source: &'static str, color: Color) {
+    draw_mark(canvas, r, source, color, PaintStyle::Stroke, 1.35);
+}
+
+fn draw_mark(
+    canvas: &Canvas,
+    r: Rect,
+    source: &'static str,
+    color: Color,
+    style: PaintStyle,
+    stroke_width: f32,
+) {
     thread_local! {
         static MARKS: std::cell::RefCell<std::collections::HashMap<&'static str, skia_safe::Path>> =
             std::cell::RefCell::new(std::collections::HashMap::new());
@@ -645,8 +658,8 @@ fn mark(canvas: &Canvas, r: Rect, source: &'static str, color: Color) {
     let mut paint = Paint::default();
     paint.set_anti_alias(true);
     paint.set_color(color);
-    paint.set_style(PaintStyle::Stroke);
-    paint.set_stroke_width(1.35);
+    paint.set_style(style);
+    paint.set_stroke_width(stroke_width);
     paint.set_stroke_cap(skia_safe::paint::Cap::Round);
     paint.set_stroke_join(skia_safe::paint::Join::Round);
     canvas.save();
@@ -661,6 +674,131 @@ fn mark(canvas: &Canvas, r: Rect, source: &'static str, color: Color) {
             .or_insert_with(|| skia_safe::Path::from_svg(source).unwrap_or_default());
         canvas.draw_path(path, &paint);
     });
+    canvas.restore();
+}
+
+// Geometry adapted from FigCraft v0.17.0 icons/draw.rs (MIT).
+fn inspector_glyph(canvas: &Canvas, r: Rect, name: &str, color: Color) {
+    let (path, filled) = match name {
+        "align-left" => ("M2 2H3V14H2ZM4 4H13V7H4ZM4 9H9V12H4Z", true),
+        "align-center" => ("M7 2H8V14H7ZM2 4H13V7H2ZM4 9H11V12H4Z", true),
+        "align-right" => ("M13 2H14V14H13ZM3 4H12V7H3ZM7 9H12V12H7Z", true),
+        "align-top" => ("M2 2H14V3H2ZM4 4H7V13H4ZM9 4H12V9H9Z", true),
+        "align-middle" => ("M2 7H14V8H2ZM4 2H7V13H4ZM9 4H12V11H9Z", true),
+        "align-bottom" => ("M2 13H14V14H2ZM4 3H7V12H4ZM9 7H12V12H9Z", true),
+        "component" => (
+            "M8 0.5l3 3-3 3-3-3zM3.5 5l3 3-3 3-3-3zM12.5 5l3 3-3 3-3-3zM8 9.5l3 3-3 3-3-3z",
+            true,
+        ),
+        "mask" | "opacity" => ("M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13", false),
+        "boolean" => ("M2 2h8v4h4v8H6v-4H2zM6 6h4v4H6z", false),
+        "constraints" => ("M2 2h12v12H2zM6 2v6h8M6 6h4v4H6z", false),
+        "rotate" => ("M4 4H1.5V7M2 5a5.5 5.5 0 1 0 4-2.5", false),
+        "flip-x" => (
+            "M8 1v2m0 2v2m0 2v2m0 2v2M5.5 3 1.5 13h4zM10.5 3l4 10h-4z",
+            false,
+        ),
+        "flip-y" => (
+            "M1 8h2m2 0h2m2 0h2m2 0h2M3 5.5l10-4v4zM3 10.5l10 4v-4z",
+            false,
+        ),
+        "link" => (
+            "M7 11l-2 2a2.5 2.5 0 0 1-3.5-3.5l2-2m5-2 2-2a2.5 2.5 0 0 1 3.5 3.5l-2 2M6 10l4-4",
+            false,
+        ),
+        "link-off" => (
+            "M6.5 11l-2 2A2.5 2.5 0 0 1 1 9.5l2-2m6.5-2.5 2-2A2.5 2.5 0 0 1 15 6.5l-2 2M3 3l1.5 1.5M11.5 11.5 13 13",
+            false,
+        ),
+        "eye" | "eye-off" | "eye-small" | "eye-off-small" => (
+            "M1 8c4-5.5 10-5.5 14 0-4 5.5-10 5.5-14 0Zm9 0a2 2 0 1 0-4 0 2 2 0 1 0 4 0Z",
+            false,
+        ),
+        "variable" => (
+            "M8 1.5l5.5 3.25v6.5L8 14.5l-5.5-3.25v-6.5zM8 7a1 1 0 1 0 0 2a1 1 0 1 0 0-2z",
+            false,
+        ),
+        "blend" => (
+            "M10 8a4 4 0 1 0-8 0 4 4 0 1 0 8 0ZM14 8a4 4 0 1 0-8 0 4 4 0 1 0 8 0Z",
+            false,
+        ),
+        "styles" => (
+            "M6.5 4.5a2 2 0 1 1-4 0 2 2 0 1 1 4 0ZM13.5 4.5a2 2 0 1 1-4 0 2 2 0 1 1 4 0ZM6.5 11.5a2 2 0 1 1-4 0 2 2 0 1 1 4 0ZM13.5 11.5a2 2 0 1 1-4 0 2 2 0 1 1 4 0Z",
+            true,
+        ),
+        "chevron" => ("M5 6.5l3 3 3-3", false),
+        "hug" => ("M2 5l3 3-3 3M14 5l-3 3 3 3M5 8h6", false),
+        "fixed" => ("M2 4v8m12-8v8M2 8h12", false),
+        "text-height" => (
+            "M3 3h10a1 1 0 0 1 1 1v2H2V4a1 1 0 0 1 1-1Zm0 7h10a1 1 0 0 1 1 1v2H2v-2a1 1 0 0 1 1-1Z",
+            true,
+        ),
+        "paragraph" | "text-justify" => ("M2 3.5h12M2 6.5h12M2 9.5h12M2 12.5h12", false),
+        "text-left" => ("M2 3.5h12M2 6.5h8M2 9.5h12M2 12.5h7", false),
+        "text-center" => ("M2 3.5h12M4 6.5h8M2 9.5h12M5 12.5h6", false),
+        "text-right" => ("M2 3.5h12M6 6.5h8M2 9.5h12M7 12.5h7", false),
+        "text-top" => ("M2 2.5h12M8 5v9M5 8l3-3 3 3", false),
+        "text-middle" => ("M2 8h12M8 1v4m-2-2 2 2 2-2M8 15v-4m-2 2 2-2 2 2", false),
+        "text-bottom" => ("M2 13.5h12M8 2v9M5 8l3 3 3-3", false),
+        "line-height" => ("M2 2h12M2 14h12M5 11l3-6 3 6M6 9h4", false),
+        "letter-spacing" => ("M1.5 2v12m13-12v12M5 11l3-6 3 6M6 9h4", false),
+        "angle" => ("M13 2 3 13h11M6 9l3 4", false),
+        "more" => (
+            "M5 8a1.2 1.2 0 1 1-2.4 0 1.2 1.2 0 1 1 2.4 0ZM9.2 8a1.2 1.2 0 1 1-2.4 0 1.2 1.2 0 1 1 2.4 0ZM13.4 8a1.2 1.2 0 1 1-2.4 0 1.2 1.2 0 1 1 2.4 0Z",
+            true,
+        ),
+        "plus" => ("M8 2v12M2 8h12", false),
+        "minus" => ("M2 8h12", false),
+        "effect" => ("M8 1l2 5 5 2-5 2-2 5-2-5-5-2 5-2z", false),
+        _ => return,
+    };
+    let scale = match name {
+        "eye-small" | "eye-off-small" => 0.58,
+        "component" | "mask" | "constraints" | "boolean" => 0.86,
+        "variable" | "blend" | "styles" | "chevron" | "rotate" | "flip-x" | "flip-y" => 0.78,
+        "eye" | "eye-off" | "text-left" | "text-right" | "text-center" | "text-justify" => 0.87,
+        _ => 1.,
+    };
+    let line = if name == "plus" || name == "chevron" {
+        0.6
+    } else {
+        1.0
+    };
+    let center = (r.x + r.width / 2., r.y + r.height / 2.);
+    canvas.save();
+    canvas.translate((center.0 as f32, center.1 as f32));
+    canvas.scale((scale, scale));
+    let local = Rect::new(-r.width / 2., -r.height / 2., r.width, r.height);
+    draw_mark(
+        canvas,
+        local,
+        path,
+        color,
+        if filled {
+            PaintStyle::Fill
+        } else {
+            PaintStyle::Stroke
+        },
+        line,
+    );
+    if name == "mask" || name == "opacity" {
+        let half = if name == "opacity" {
+            "M8 1.5a6.5 6.5 0 0 0 0 13z"
+        } else {
+            "M8 1.5a6.5 6.5 0 0 1 0 13z"
+        };
+        draw_mark(canvas, local, half, color, PaintStyle::Fill, line);
+    }
+    if matches!(name, "eye-off" | "eye-off-small") {
+        draw_mark(
+            canvas,
+            local,
+            "M2.5 13l11-10",
+            color,
+            PaintStyle::Stroke,
+            line,
+        );
+    }
     canvas.restore();
 }
 
@@ -814,6 +952,84 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         }
         return;
     }
+    if matches!(control.action, Action::InspectorLayerMenu) {
+        if app.focus == control.id && app.keyboard_focus_visible {
+            stroke(canvas, r, SELECTED_INK, 1.35);
+        }
+        return;
+    }
+    if let Action::InspectorIcon(name, _) = &control.action {
+        if control.selected || hovered {
+            let frame = Rect::new(r.x + 2., r.y + 2., r.width - 4., r.height - 4.);
+            round(canvas, frame, Color::WHITE, 4.);
+            if control.selected {
+                stroke(canvas, frame, LINE, 1.);
+            }
+        }
+        let secondary = name.starts_with("align-")
+            || matches!(
+                *name,
+                "rotate"
+                    | "flip-x"
+                    | "flip-y"
+                    | "chevron"
+                    | "text-height"
+                    | "fixed"
+                    | "text-left"
+                    | "text-center"
+                    | "text-right"
+                    | "text-justify"
+                    | "text-top"
+                    | "text-middle"
+                    | "text-bottom"
+            );
+        let ink = if !control.selected && (secondary || !app.action_available(&control.action)) {
+            MUTED
+        } else {
+            INK
+        };
+        inspector_glyph(canvas, r, name, ink);
+        if app.focus == control.id && app.keyboard_focus_visible {
+            stroke(canvas, r, SELECTED_INK, 1.35);
+        }
+        return;
+    }
+    if let Action::InspectorChoice(name, _) = &control.action {
+        round(canvas, r, Color::from_rgb(242, 242, 242), 6.);
+        inspector_glyph(canvas, Rect::new(r.x + 5., r.y, 18., r.height), name, MUTED);
+        if let Some(value) = control.field_value.as_deref() {
+            control_text(
+                canvas,
+                Rect::new(r.x + 26., r.y, r.width - 42., r.height),
+                value,
+                0.,
+                r.y + 16.,
+                11.,
+                INK,
+                font,
+            );
+        } else {
+            control_text(
+                canvas,
+                Rect::new(r.x + 26., r.y, r.width - 29., r.height),
+                &control.label,
+                0.,
+                r.y + 16.,
+                11.,
+                INK,
+                font,
+            );
+        }
+        if *name == "hug" {
+            inspector_glyph(
+                canvas,
+                Rect::new(r.x + r.width - 19., r.y, 17., r.height),
+                "chevron",
+                MUTED,
+            );
+        }
+        return;
+    }
     let tool = match control.action {
         Action::Tool(tool) => Some(tool),
         _ => None,
@@ -823,7 +1039,11 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
     } else if matches!(control.action, Action::Layer(_)) {
         control.selected.then_some(SELECTED)
     } else if control.selected || hovered || control.field_value.is_some() {
-        Some(WORKSPACE)
+        Some(if control.id >= 660_000 && control.field_value.is_some() {
+            Color::from_rgb(242, 242, 242)
+        } else {
+            WORKSPACE
+        })
     } else {
         None
     };
@@ -948,13 +1168,21 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                 _ => "",
             };
             let lead = crate::inspector::field_lead(property);
-            let displayed = crate::inspector::display_value(property, value);
+            let indexed_paint = property.contains(':');
+            let displayed = crate::inspector::display_value(
+                if property.ends_with(":opacity") {
+                    "opacity"
+                } else {
+                    property
+                },
+                value,
+            );
             let mut value: &str = displayed.as_ref();
             let baseline = r.y + r.height * 0.5 + 4.;
-            if matches!(property, "fill" | "stroke")
+            if (matches!(property, "fill" | "stroke") || property.ends_with(":color"))
                 && let Some(color) = omc_style::parse_color(value)
             {
-                let swatch = Rect::new(r.x + 5., r.y + (r.height - 16.) * 0.5, 16., 16.);
+                let swatch = Rect::new(r.x + 4., r.y + (r.height - 16.) * 0.5, 16., 16.);
                 let rgba = [color.r, color.g, color.b, color.a]
                     .map(|channel| (channel * 255.).round() as u8);
                 round(
@@ -981,14 +1209,45 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
             if value.is_empty() {
                 value = "—";
             }
-            if let Some(lead) = lead {
+            if indexed_paint {
+                fill(
+                    canvas,
+                    Rect::new(r.x, r.y + 4., 1., r.height - 8.),
+                    Color::WHITE,
+                );
+            }
+            let glyph = match property {
+                "opacity" => Some("opacity"),
+                "rotation" => Some("angle"),
+                "lineHeight" => Some("line-height"),
+                "letterSpacing" => Some("letter-spacing"),
+                _ => None,
+            };
+            if let Some(glyph) = glyph {
+                inspector_glyph(
+                    canvas,
+                    Rect::new(r.x + 4., r.y, 18., r.height),
+                    glyph,
+                    MUTED,
+                );
+                control_text(
+                    canvas,
+                    Rect::new(r.x + 25., r.y, r.width - 27., r.height),
+                    value,
+                    0.,
+                    baseline,
+                    11.,
+                    INK,
+                    font,
+                );
+            } else if let Some(lead) = lead {
                 let width = if lead.is_ascii() {
                     lead.len() as f64 * 6.5
                 } else {
                     lead.chars().count() as f64 * 10.
                 };
                 text(canvas, lead, r.x + 8., baseline, 11., MUTED, font);
-                let start = 14. + width;
+                let start = (14. + width).max(24.);
                 control_text(
                     canvas,
                     Rect::new(r.x + start, r.y, (r.width - start).max(0.), r.height),
@@ -1000,7 +1259,21 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                     font,
                 );
             } else {
-                control_text(canvas, r, value, 8., baseline, 12., INK, font);
+                let reserved = if matches!(property, "fontFamily" | "fontWeight") {
+                    20.
+                } else {
+                    0.
+                };
+                control_text(
+                    canvas,
+                    Rect::new(r.x, r.y, r.width - reserved, r.height),
+                    value,
+                    8.,
+                    baseline,
+                    11.,
+                    INK,
+                    font,
+                );
             }
         }
         return;
@@ -1018,6 +1291,10 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         (Action::Inspector(Inspector::Tokens), _) => "변수",
         _ => &control.label,
     };
+    if (600_000..600_002).contains(&control.id) {
+        text(canvas, label, r.x + 8., r.y + 16., 11., INK, font);
+        return;
+    }
     let mut title = font.clone();
     if control.id == 35 || matches!(control.action, Action::Page(_)) && control.selected {
         title.set_embolden(true);
@@ -1256,7 +1533,7 @@ fn render_to_canvas(
     }
     if app.inspector_visible() {
         let panel_x = app.width - RIGHT;
-        let x = panel_x + 16.;
+        let x = panel_x + 12.;
         fill(
             canvas,
             Rect::new(panel_x, HEADER, 1., app.height - HEADER),
@@ -1279,9 +1556,44 @@ fn render_to_canvas(
                     omc_model::NodeKind::Instance => "인스턴스",
                     _ => "레이어",
                 };
-                text(canvas, label, x, HEADER + 119., 14., INK, &font);
+                text(canvas, label, x, HEADER + 119., 12., INK, &font);
             } else if app.inspector == Inspector::Prototype {
                 text(canvas, "프로토타입", x, HEADER + 119., 14., INK, &font);
+            }
+            if let Some(layout) = crate::inspector::design_layout(app) {
+                use crate::inspector_design::Decoration;
+                let top = crate::inspector::design_body_top(app);
+                canvas.save();
+                canvas.clip_rect(
+                    rect(Rect::new(
+                        panel_x,
+                        top,
+                        RIGHT,
+                        (app.height - FOOTER - top).max(0.),
+                    )),
+                    None,
+                    Some(false),
+                );
+                for item in layout.decorations {
+                    match item {
+                        Decoration::Rule(y) => fill(canvas, Rect::new(panel_x, y, RIGHT, 1.), LINE),
+                        Decoration::Text(bounds, title, muted) => {
+                            text(
+                                canvas,
+                                title,
+                                bounds.x,
+                                bounds.y + 12.,
+                                if muted { 10. } else { 11. },
+                                if muted { MUTED } else { INK },
+                                &font,
+                            );
+                        }
+                        Decoration::Segment(r) => {
+                            round(canvas, r, Color::from_rgb(242, 242, 242), 6.)
+                        }
+                    }
+                }
+                canvas.restore();
             }
             for (label, y) in crate::inspector::sections(app) {
                 fill(

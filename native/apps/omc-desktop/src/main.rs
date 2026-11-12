@@ -7,6 +7,7 @@ mod geometry;
 #[cfg(target_os = "macos")]
 mod gpu_presenter;
 mod inspector;
+mod inspector_design;
 mod move_cache;
 mod paint;
 mod pan_cache;

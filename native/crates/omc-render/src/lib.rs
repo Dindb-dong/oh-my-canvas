@@ -550,7 +550,44 @@ fn paint_item(
                 draw_image(canvas, item, resources, scene.strict, diagnostics)?;
             }
             if let Some(text) = &item.text {
-                text.paint(canvas, item.text_offset.0, item.text_offset.1);
+                let paint = item
+                    .properties
+                    .get("fills")
+                    .and_then(Value::as_array)
+                    .filter(|fills| fills.len() == 1)
+                    .and_then(|fills| fills.first());
+                let alpha = paint.map_or(1., |paint| {
+                    if paint.get("hidden") == Some(&Value::Bool(true))
+                        || paint.get("visible") == Some(&Value::Bool(false))
+                    {
+                        0.
+                    } else {
+                        paint
+                            .get("opacity")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(1.)
+                            .clamp(0., 1.)
+                    }
+                });
+                if alpha > 0. {
+                    if alpha < 1. {
+                        canvas.save_layer_alpha_f(None, alpha as f32);
+                    }
+                    let extra = (item.height - item.text_offset.1 - text.height).max(0.);
+                    let offset = match item
+                        .properties
+                        .get("textVerticalAlign")
+                        .and_then(Value::as_str)
+                    {
+                        Some("middle") => extra * 0.5,
+                        Some("bottom") => extra,
+                        _ => 0.,
+                    };
+                    text.paint(canvas, item.text_offset.0, item.text_offset.1 + offset);
+                    if alpha < 1. {
+                        canvas.restore();
+                    }
+                }
             }
             let has_strokes = paints::stack(canvas, scene, item, &shape, "strokes", diagnostics)?;
             if let Some(stroke) = item.style.color("border-color").filter(|_| !has_strokes) {

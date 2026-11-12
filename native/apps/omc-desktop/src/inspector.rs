@@ -39,94 +39,17 @@ const ROW_H: f64 = 32.;
 const FIELD_H: f64 = 24.;
 const PAD: f64 = 16.;
 const PAD_RIGHT: f64 = 8.;
-const GUTTER: f64 = 8.;
 const SECTION_H: f64 = 40.;
 const TAB_BAR_BOTTOM: f64 = HEADER + 90.;
 const SELECTION_HEADER_H: f64 = 46.;
-const DESIGN_ACTION_ROWS: usize = 4;
 const ZOOM_ID: u64 = 600_002;
 const ZOOM_CHOICES: [f64; 3] = [0.5, 1., 2.];
 
 // FigCraft v0.17.0 panels/right.rs puts Design and Prototype before the zoom menu.
 const TABS: [(&str, Inspector, f64); 2] = [
-    ("Design", Inspector::Design, 54.),
-    ("Prototype", Inspector::Prototype, 82.),
+    ("Design", Inspector::Design, 45.),
+    ("Prototype", Inspector::Prototype, 72.),
 ];
-
-fn col_width(w: f64) -> f64 {
-    ((w - PAD - PAD_RIGHT - GUTTER * 2. - 24.) / 2.).max(40.)
-}
-
-type Field = (&'static str, &'static str);
-type Row = (Field, Option<Field>);
-
-struct Section {
-    title: &'static str,
-    rows: &'static [Row],
-}
-
-const POSITION: Section = Section {
-    title: "위치",
-    rows: &[
-        (("x", "X"), Some(("y", "Y"))),
-        (("rotation", "Rotation"), None),
-    ],
-};
-const LAYOUT: Section = Section {
-    title: "레이아웃",
-    rows: &[(("width", "Width"), Some(("height", "Height")))],
-};
-const APPEARANCE: Section = Section {
-    title: "모양",
-    rows: &[(("opacity", "Opacity (0–1)"), None)],
-};
-const SHAPE_APPEARANCE: Section = Section {
-    title: "모양",
-    rows: &[(
-        ("opacity", "Opacity (0–1)"),
-        Some(("cornerRadius", "Corner radius")),
-    )],
-};
-// FigCraft's panels/typography/fields.rs supplies the font and paragraph row order.
-const TYPOGRAPHY: Section = Section {
-    title: "타이포그래피",
-    rows: &[
-        (("fontFamily", "Font family"), None),
-        (("fontWeight", "Weight"), Some(("fontSize", "Font size"))),
-        (
-            ("lineHeight", "Line height"),
-            Some(("letterSpacing", "Letter spacing")),
-        ),
-        (("textAlign", "Align: left / center / right"), None),
-    ],
-};
-const FILL: Section = Section {
-    title: "채우기",
-    rows: &[(("fill", "Fill"), None)],
-};
-const TEXT_FILL: Section = Section {
-    title: "채우기",
-    rows: &[(("fill", "Text color"), None)],
-};
-const STROKE: Section = Section {
-    title: "선",
-    rows: &[(("stroke", "Stroke"), Some(("strokeWidth", "Stroke width")))],
-};
-const NAME: Section = Section {
-    title: "레이어",
-    rows: &[(("name", "Name"), None)],
-};
-
-// Port of FigCraft crates/ui-egui/src/panels/right.rs::design's section ordering.
-fn body_sections(tab: Inspector, kind: NodeKind) -> &'static [Section] {
-    match (tab, kind) {
-        (Inspector::Design, NodeKind::Text) => &[
-            POSITION, LAYOUT, APPEARANCE, TYPOGRAPHY, TEXT_FILL, STROKE, NAME,
-        ],
-        (Inspector::Design, _) => &[POSITION, LAYOUT, SHAPE_APPEARANCE, FILL, STROKE, NAME],
-        _ => &[],
-    }
-}
 
 pub fn field_lead(property: &str) -> Option<&'static str> {
     match property {
@@ -200,23 +123,11 @@ fn body_top(app: &App) -> f64 {
     }
 }
 
-fn section_height(section: &Section) -> f64 {
-    SECTION_H + section.rows.len() as f64 * ROW_H + GUTTER
-}
-
 fn catalog_namespace(tab: Inspector) -> Option<&'static str> {
     match tab {
         Inspector::Assets => Some("styles"),
         Inspector::Tokens => Some("tokens"),
         _ => None,
-    }
-}
-
-fn design_action_rows(tab: Inspector, kind: NodeKind) -> usize {
-    if tab == Inspector::Design {
-        DESIGN_ACTION_ROWS + usize::from(matches!(kind, NodeKind::Component | NodeKind::Instance))
-    } else {
-        0
     }
 }
 
@@ -227,12 +138,8 @@ fn scroll_extent(app: &App) -> f64 {
     let height = if let Some(namespace) = catalog_namespace(app.inspector) {
         let entities = omc_style::catalog_entities(doc, namespace);
         SECTION_H + (1. + 2. * entities.len() as f64) * ROW_H
-    } else if app.inspector == Inspector::Design
-        && let Some(node) = app.node()
-    {
-        let sections = body_sections(app.inspector, node.kind);
-        sections.iter().map(section_height).sum::<f64>()
-            + design_action_rows(app.inspector, node.kind) as f64 * ROW_H
+    } else if app.inspector == Inspector::Design && app.node().is_some() {
+        crate::inspector_design::compose(app, 0., 0.).map_or(0., |layout| layout.height)
     } else {
         section_height_for_rows(detail_rows(app).len())
     };
@@ -264,7 +171,7 @@ pub fn sections(app: &App) -> Vec<(&'static str, f64)> {
         return Vec::new();
     }
     let top = body_top(app);
-    let mut y = body_y(app);
+    let y = body_y(app);
     if matches!(app.inspector, Inspector::Assets | Inspector::Tokens) {
         let label = if app.inspector == Inspector::Assets {
             "로컬 스타일"
@@ -273,30 +180,28 @@ pub fn sections(app: &App) -> Vec<(&'static str, f64)> {
         };
         return (y >= top).then_some((label, y + 22.)).into_iter().collect();
     }
-    let Some(node) = app.node().filter(|_| app.inspector == Inspector::Design) else {
-        let label = match app.inspector {
-            Inspector::Design => "페이지",
-            Inspector::Prototype => "인터랙션",
-            Inspector::Inspect => "속성",
-            _ => return Vec::new(),
-        };
-        return (y >= top && y + SECTION_H <= app.height - FOOTER)
-            .then_some((label, y + 22.))
-            .into_iter()
-            .collect();
+    let label = match app.inspector {
+        Inspector::Design if app.node().is_none() => "페이지",
+        Inspector::Prototype => "인터랙션",
+        Inspector::Inspect => "속성",
+        _ => return Vec::new(),
     };
-    body_sections(app.inspector, node.kind)
-        .iter()
-        .filter_map(|section| {
-            let start = y;
-            y += section_height(section);
-            (start >= top && start + SECTION_H <= app.height - FOOTER)
-                .then_some((section.title, start + 22.))
-        })
+    (y >= top && y + SECTION_H <= app.height - FOOTER)
+        .then_some((label, y + 22.))
+        .into_iter()
         .collect()
 }
 
-fn field_value(
+pub fn design_layout(app: &App) -> Option<crate::inspector_design::Layout> {
+    (app.inspector_visible() && app.inspector == Inspector::Design)
+        .then(|| crate::inspector_design::compose(app, body_y(app), TAB_BAR_BOTTOM + 12.))?
+}
+
+pub fn design_body_top(app: &App) -> f64 {
+    body_top(app)
+}
+
+pub(crate) fn field_value(
     node: &omc_model::Node,
     item: Option<&omc_scene::SceneItem>,
     property: &str,
@@ -512,57 +417,128 @@ fn zoom_button_rect(width: f64) -> Rect {
     Rect::new(width - 64., HEADER + 58., 56., FIELD_H)
 }
 
+fn popup_entries(app: &App) -> Vec<(String, Action, bool)> {
+    match app.popup {
+        Some(Popup::InspectorLayer) => {
+            let Some(node) = app.node() else {
+                return vec![];
+            };
+            let mut entries = vec![
+                ("레이어 이름".into(), Action::Field("name".into()), false),
+                ("뒤로 보내기".into(), Action::Reorder(false), false),
+                ("앞으로 가져오기".into(), Action::Reorder(true), false),
+                (
+                    "잠금 전환".into(),
+                    Action::ToggleProperty("locked".into()),
+                    false,
+                ),
+                ("그룹".into(), Action::Group(false), false),
+            ];
+            match node.kind {
+                NodeKind::Group => entries.push(("그룹 해제".into(), Action::Ungroup, false)),
+                NodeKind::Component => {
+                    entries.push(("인스턴스 추가".into(), Action::Instance, false))
+                }
+                NodeKind::Instance => entries.push(("인스턴스 분리".into(), Action::Detach, false)),
+                _ => {}
+            }
+            entries
+        }
+        Some(Popup::InspectorBlend) => {
+            let current = app
+                .node()
+                .and_then(|node| node.properties.get("blendMode"))
+                .and_then(Value::as_str)
+                .unwrap_or("normal");
+            [
+                ("표준", "normal"),
+                ("곱하기", "multiply"),
+                ("스크린", "screen"),
+                ("오버레이", "overlay"),
+            ]
+            .into_iter()
+            .map(|(label, value)| {
+                (
+                    label.into(),
+                    Action::InspectorIcon(
+                        "blend",
+                        crate::inspector_design::Command::Set("blendMode", value),
+                    ),
+                    current == value,
+                )
+            })
+            .collect()
+        }
+        Some(Popup::InspectorZoom) => [
+            (
+                "확대".into(),
+                Action::ZoomPercent(app.camera.zoom * 1.25),
+                false,
+            ),
+            (
+                "축소".into(),
+                Action::ZoomPercent(app.camera.zoom / 1.25),
+                false,
+            ),
+            ("화면에 맞추기".into(), Action::Fit, false),
+        ]
+        .into_iter()
+        .chain(ZOOM_CHOICES.into_iter().map(|zoom| {
+            (
+                format!("{:.0}%", zoom * 100.),
+                Action::ZoomPercent(zoom),
+                (app.camera.zoom - zoom).abs() < 0.001,
+            )
+        }))
+        .collect(),
+        _ => vec![],
+    }
+}
+
 pub fn popup_rect(app: &App) -> Option<Rect> {
-    (app.popup == Some(Popup::InspectorZoom) && app.inspector_visible()).then(|| {
-        Rect::new(
-            app.width - 170.,
-            HEADER + 91.,
-            162.,
-            12. + 28. * (ZOOM_CHOICES.len() + 3) as f64,
-        )
-    })
+    let entries = popup_entries(app);
+    if entries.is_empty() || !app.inspector_visible() {
+        return None;
+    }
+    let height = 12. + 28. * entries.len() as f64;
+    let anchor = match app.popup {
+        Some(Popup::InspectorLayer) => TAB_BAR_BOTTOM + 41.,
+        Some(Popup::InspectorBlend) => app
+            .controls
+            .iter()
+            .find(|c| c.label == "Blend mode")
+            .map_or(TAB_BAR_BOTTOM + 91., |c| c.rect.y + c.rect.height),
+        _ => HEADER + 91.,
+    };
+    Some(Rect::new(
+        app.width - 170.,
+        anchor.min(app.height - height - 8.),
+        162.,
+        height,
+    ))
 }
 
 pub fn popup_controls(app: &App, first_id: u64) -> Vec<Control> {
     let Some(menu) = popup_rect(app) else {
         return vec![];
     };
-    [
-        (
-            "확대".into(),
-            Action::ZoomPercent(app.camera.zoom * 1.25),
-            false,
-        ),
-        (
-            "축소".into(),
-            Action::ZoomPercent(app.camera.zoom / 1.25),
-            false,
-        ),
-        ("화면에 맞추기".into(), Action::Fit, false),
-    ]
-    .into_iter()
-    .chain(ZOOM_CHOICES.into_iter().map(|zoom| {
-        (
-            format!("{:.0}%", zoom * 100.),
-            Action::ZoomPercent(zoom),
-            (app.camera.zoom - zoom).abs() < 0.001,
-        )
-    }))
-    .enumerate()
-    .map(|(index, (label, action, selected))| Control {
-        id: first_id + index as u64,
-        rect: Rect::new(
-            menu.x + 6.,
-            menu.y + 6. + index as f64 * 28.,
-            menu.width - 12.,
-            28.,
-        ),
-        label,
-        action,
-        selected,
-        field_value: None,
-    })
-    .collect()
+    popup_entries(app)
+        .into_iter()
+        .enumerate()
+        .map(|(index, (label, action, selected))| Control {
+            id: first_id + index as u64,
+            rect: Rect::new(
+                menu.x + 6.,
+                menu.y + 6. + index as f64 * 28.,
+                menu.width - 12.,
+                28.,
+            ),
+            label,
+            action,
+            selected,
+            field_value: None,
+        })
+        .collect()
 }
 
 pub fn controls(app: &App) -> Vec<Control> {
@@ -571,9 +547,8 @@ pub fn controls(app: &App) -> Vec<Control> {
     };
     let x = app.width - RIGHT + PAD;
     let wide = RIGHT - PAD - PAD_RIGHT;
-    let col = col_width(RIGHT);
     let mut controls = vec![];
-    let mut tab_x = x - 8.;
+    let mut tab_x = app.width - RIGHT + 4.;
     for (index, (label, tab, width)) in TABS.into_iter().enumerate() {
         controls.push(Control {
             id: 600_000 + index as u64,
@@ -670,7 +645,11 @@ pub fn controls(app: &App) -> Vec<Control> {
         }
         return controls;
     }
-    let Some(node) = app.node().filter(|_| app.inspector == Inspector::Design) else {
+    if let Some(layout) = design_layout(app) {
+        controls.extend(layout.controls.into_iter().filter(|control| {
+            control.rect.y < body_top(app) && control.id < 660_004 || row_visible(app, control.rect)
+        }));
+    } else {
         for (index, row) in detail_rows(app).into_iter().enumerate() {
             let DetailRow::Button(label, action, selected) = row else {
                 continue;
@@ -687,100 +666,6 @@ pub fn controls(app: &App) -> Vec<Control> {
                 });
             }
         }
-        return controls;
-    };
-    let item = app.scene.as_ref().and_then(|scene| scene.item(&node.id));
-    let mut field_id = 500;
-    for section in body_sections(app.inspector, node.kind) {
-        y += SECTION_H;
-        for (first, second) in section.rows {
-            let (property, label) = first;
-            let field_width = if second.is_some() || matches!(*property, "rotation" | "opacity") {
-                col
-            } else {
-                wide
-            };
-            add(
-                field_id,
-                Rect::new(x, y, field_width, FIELD_H),
-                (*label).into(),
-                Action::Field((*property).into()),
-                Some(field_value(node, item, property)),
-            );
-            field_id += 1;
-            if let Some((property, label)) = second {
-                add(
-                    field_id,
-                    Rect::new(x + col + GUTTER, y, col, FIELD_H),
-                    (*label).into(),
-                    Action::Field((*property).into()),
-                    Some(field_value(node, item, property)),
-                );
-                field_id += 1;
-            }
-            y += ROW_H;
-        }
-        y += GUTTER;
-    }
-    if app.inspector == Inspector::Design {
-        let pairs = [
-            (
-                ("Backward", Action::Reorder(false)),
-                ("Forward", Action::Reorder(true)),
-            ),
-            (
-                ("Hide / show", Action::ToggleProperty("hidden".into())),
-                ("Lock / unlock", Action::ToggleProperty("locked".into())),
-            ),
-            (
-                ("Group", Action::Group(false)),
-                ("Ungroup", Action::Ungroup),
-            ),
-        ];
-        debug_assert_eq!(pairs.len() + 1, DESIGN_ACTION_ROWS);
-        for (index, (left, right)) in pairs.into_iter().enumerate() {
-            add(
-                600 + index as u64 * 2,
-                Rect::new(x, y, col, FIELD_H),
-                left.0.into(),
-                left.1,
-                None,
-            );
-            add(
-                601 + index as u64 * 2,
-                Rect::new(x + col + GUTTER, y, col, FIELD_H),
-                right.0.into(),
-                right.1,
-                None,
-            );
-            y += ROW_H;
-        }
-        add(
-            610,
-            Rect::new(x, y, wide, FIELD_H),
-            "Make component".into(),
-            Action::Group(true),
-            None,
-        );
-        y += ROW_H;
-        if node.kind == NodeKind::Component {
-            add(
-                611,
-                Rect::new(x, y, wide, FIELD_H),
-                "Add instance".into(),
-                Action::Instance,
-                None,
-            );
-        }
-        if node.kind == NodeKind::Instance {
-            add(
-                612,
-                Rect::new(x, y, wide, FIELD_H),
-                "Detach instance".into(),
-                Action::Detach,
-                None,
-            );
-        }
     }
     controls
 }
@@ -790,38 +675,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn figcraft_grid_keeps_text_sections_and_reserves_the_icon_column() {
-        assert_eq!(col_width(240.), 88.);
-        assert_eq!(FIELD_H + GUTTER, ROW_H);
-        let design = body_sections(Inspector::Design, NodeKind::Text);
-        let labels: Vec<_> = design.iter().map(|section| section.title).collect();
-        assert_eq!(
-            labels,
-            [
-                "위치",
-                "레이아웃",
-                "모양",
-                "타이포그래피",
-                "채우기",
-                "선",
-                "레이어"
-            ]
-        );
-        assert_eq!(
-            design[3].rows[1],
-            (("fontWeight", "Weight"), Some(("fontSize", "Font size")))
-        );
-    }
-
-    #[test]
     fn final_scroll_step_stops_at_the_exact_content_edge() {
         assert_eq!(scroll_offset(-10., 91.), 0.);
         assert_eq!(scroll_offset(0.5, 91.), 0.5);
         assert_eq!(scroll_offset(92., 91.), 91.);
         assert_eq!(scroll_offset(200., 91.), 91.);
         assert_eq!(scroll_offset(1., 0.), 0.);
-        assert_eq!(design_action_rows(Inspector::Design, NodeKind::Instance), 5);
-        assert_eq!(design_action_rows(Inspector::Inspect, NodeKind::Text), 0);
     }
 
     #[test]

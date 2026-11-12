@@ -117,6 +117,9 @@ pub enum Action {
     Delete,
     Inspector(Inspector),
     InspectorZoom,
+    InspectorLayerMenu,
+    InspectorIcon(&'static str, crate::inspector_design::Command),
+    InspectorChoice(&'static str, crate::inspector_design::Command),
     ZoomPercent(f64),
     CopyInspectorCss,
     PrototypeTarget(Option<String>),
@@ -155,6 +158,8 @@ pub enum Popup {
     Files,
     Tabs,
     InspectorZoom,
+    InspectorLayer,
+    InspectorBlend,
     Tools(crate::figcraft_chrome::DockGroup),
 }
 #[derive(Clone, Debug)]
@@ -764,7 +769,13 @@ impl App {
         }
     }
     pub fn action_available(&self, action: &Action) -> bool {
-        if self.closing {
+        if self.closing
+            || matches!(
+                action,
+                Action::InspectorIcon(_, crate::inspector_design::Command::Disabled)
+                    | Action::InspectorChoice(_, crate::inspector_design::Command::Disabled)
+            )
+        {
             return false;
         }
         if self.prototype_frame.is_some() {
@@ -858,6 +869,31 @@ impl App {
                     self.inspector = tab;
                     self.inspector_scroll = 0.;
                 }
+            }
+            Action::InspectorIcon(_, command) | Action::InspectorChoice(_, command) => {
+                use crate::inspector_design::Command;
+                match command {
+                    Command::Disabled => {}
+                    Command::Catalog(tab) => self.action(Action::Inspector(tab)),
+                    Command::Export => self.action(Action::Export),
+                    Command::Edit("blendMode") => {
+                        self.popup = (previous_popup != Some(Popup::InspectorBlend))
+                            .then_some(Popup::InspectorBlend);
+                    }
+                    Command::Edit(key) => self.begin_property(key.into()),
+                    Command::Component => self.action(Action::Group(true)),
+                    Command::Toggle(key) => self.action(Action::ToggleProperty(key.into())),
+                    _ if self.editing.is_none() && self.selected.len() == 1 => {
+                        if let Some(mutation) = crate::inspector_design::mutation(self, command) {
+                            self.mutate(mutation, "inspector");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Action::InspectorLayerMenu => {
+                self.popup = (previous_popup != Some(Popup::InspectorLayer))
+                    .then_some(Popup::InspectorLayer);
             }
             Action::InspectorZoom => {
                 self.popup =
@@ -1221,7 +1257,12 @@ impl App {
                 self.pan_view = false;
                 self.schedule_scene();
             }
-            Action::Field(property) => self.begin_property(property),
+            Action::Field(property) => {
+                if property == "name" && previous_popup == Some(Popup::InspectorLayer) {
+                    self.popup = previous_popup;
+                }
+                self.begin_property(property);
+            }
             Action::RenameDocument => {
                 if let Some(doc) = self.document() {
                     self.editing = Some(Editing {
@@ -1407,35 +1448,87 @@ impl App {
             }
             EditTarget::Title => json!({"type":"document.rename","title":edit.buffer.text}),
             EditTarget::Property { node_id, property } => {
-                let value = if matches!(
-                    property.as_str(),
-                    "x" | "y"
-                        | "width"
-                        | "height"
-                        | "fontSize"
-                        | "opacity"
-                        | "rotation"
-                        | "strokeWidth"
-                        | "cornerRadius"
-                        | "fontWeight"
-                        | "lineHeight"
-                        | "letterSpacing"
-                ) {
-                    match edit.buffer.text.parse::<f64>() {
-                        Ok(n) if n.is_finite() => json!(n),
-                        _ => {
-                            self.error = Some("Enter a finite number for this property.".into());
+                if let Some(plan) = self
+                    .document()
+                    .and_then(|doc| doc.nodes.get(node_id))
+                    .and_then(|node| {
+                        crate::inspector_design::paint_command(
+                            node,
+                            self.scene.as_ref().and_then(|scene| scene.item(node_id)),
+                            property,
+                            &edit.buffer.text,
+                        )
+                    })
+                {
+                    match plan {
+                        Ok(command) => command,
+                        Err(error) => {
+                            self.error = Some(error);
                             self.editing = Some(edit);
                             return;
                         }
                     }
                 } else {
-                    json!(edit.buffer.text)
-                };
-                if property == "fill" || property == "stroke" {
-                    json!({"type":"batch","commands":[{"type":"node.unset","nodeId":node_id,"properties":[if property=="fill"{"fills"}else{"strokes"}]},{"type":"node.set","nodeId":node_id,"properties":{property:value}}]})
-                } else {
-                    json!({"type":"node.set","nodeId":node_id,"properties":{property:value}})
+                    let value = if property == "opacity" {
+                        match crate::inspector_design::percent(&edit.buffer.text) {
+                            Ok(value) => json!(value),
+                            Err(error) => {
+                                self.error = Some(error);
+                                self.editing = Some(edit);
+                                return;
+                            }
+                        }
+                    } else if matches!(
+                        property.as_str(),
+                        "x" | "y"
+                            | "width"
+                            | "height"
+                            | "fontSize"
+                            | "opacity"
+                            | "rotation"
+                            | "strokeWidth"
+                            | "cornerRadius"
+                            | "fontWeight"
+                            | "lineHeight"
+                            | "letterSpacing"
+                    ) {
+                        match edit.buffer.text.parse::<f64>() {
+                            Ok(n) if n.is_finite() => json!(n),
+                            _ => {
+                                self.error =
+                                    Some("Enter a finite number for this property.".into());
+                                self.editing = Some(edit);
+                                return;
+                            }
+                        }
+                    } else {
+                        json!(edit.buffer.text)
+                    };
+                    if property == "fill" || property == "stroke" {
+                        json!({"type":"batch","commands":[{"type":"node.unset","nodeId":node_id,"properties":[if property=="fill"{"fills"}else{"strokes"}]},{"type":"node.set","nodeId":node_id,"properties":{property:value}}]})
+                    } else {
+                        let mut properties = json!({property:value});
+                        if matches!(property.as_str(), "width" | "height")
+                            && let Some(node) =
+                                self.document().and_then(|doc| doc.nodes.get(node_id))
+                            && node.properties.get("inspectorAspectRatio")
+                                == Some(&Value::Bool(true))
+                            && let Some(item) =
+                                self.scene.as_ref().and_then(|scene| scene.item(node_id))
+                        {
+                            let (other, before, other_before) = if property == "width" {
+                                ("height", item.width, item.height)
+                            } else {
+                                ("width", item.height, item.width)
+                            };
+                            if before > 0.
+                                && let Some(value) = value.as_f64()
+                            {
+                                properties[other] = json!(value * other_before / before);
+                            }
+                        }
+                        json!({"type":"node.set","nodeId":node_id,"properties":properties})
+                    }
                 }
             }
             EditTarget::Text { node_id } => {

@@ -8,7 +8,7 @@ use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 pub const RAIL_WIDTH: f64 = 52.;
 pub const SIDEBAR_WIDTH: f64 = 240.;
-pub const INSPECTOR_WIDTH: f64 = 236.;
+pub const INSPECTOR_WIDTH: f64 = 232.;
 
 const GLYPH: f64 = 18.;
 const CARET: f64 = 14.;
