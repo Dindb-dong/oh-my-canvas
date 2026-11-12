@@ -14,6 +14,8 @@ The native editor adapts code from [FigCraft v0.17.0](https://github.com/storyto
 
 ## Fonts and assets
 
+The native Design inspector embeds Inter Regular from the [craft-fonts revision used by FigCraft v0.17.0](https://github.com/storytold/craft-fonts/tree/37827adc41fd165f9a9234ac40f94dbad353aa69/fonts/inter), with its [OFL 1.1 license](native/apps/omc-desktop/fonts/OFL.txt).
+
 Runtime IBM Plex Sans and Noto Sans KR remain OFL-1.1 with license copies in `public/fonts/`. The five unchanged Pretendard/Noto Sans KR test-fixture files retain [their notices](fixtures/fonts/THIRD_PARTY_FONT_NOTICES.md), full OFL text, source URLs and hashes. Noto Color Emoji comes from its OFL-licensed development package. Font rights are not replaced by the project MIT grant.
 
 The user confirmed on 2026-11-03 that the supplied app icon was directly created/generated and may be publicly redistributed. Project design-system data was authored for this app. Current screenshots show the independent engine, including the real component library and rendered Assets previews; earlier private-baseline screenshots are not current verification evidence.

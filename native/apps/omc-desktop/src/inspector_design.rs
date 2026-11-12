@@ -230,9 +230,9 @@ pub fn compose(app: &App, y: f64, header_y: f64) -> Option<Layout> {
         when(editable, Command::Component),
         false,
     );
-    p.trailing(header, 1, "mask", "Use as mask", Command::Disabled);
+    p.trailing(header + 2., 1, "mask", "Use as mask", Command::Disabled);
     p.trailing(
-        header,
+        header + 2.,
         0,
         "boolean",
         "Boolean operations",
@@ -501,12 +501,14 @@ pub fn compose(app: &App, y: f64, header_y: f64) -> Option<Layout> {
                 ),
             ],
         );
-        p.trailing(
+        p.icon(
+            RIGHT - 35.,
             y + 172.5,
-            0,
+            FIELD,
             "more",
             "Advanced typography",
             Command::Disabled,
+            false,
         );
         y += 201.5;
     }

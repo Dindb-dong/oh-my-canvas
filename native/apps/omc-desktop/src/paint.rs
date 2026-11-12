@@ -22,6 +22,7 @@ const SELECTED: Color = Color::from_rgb(213, 249, 238);
 const SELECTED_INK: Color = Color::from_rgb(0, 105, 72);
 const COMPONENT: Color = Color::from_rgb(144, 51, 236);
 const WORKSPACE: Color = Color::from_rgb(242, 242, 242);
+const INSPECTOR_FIELD: Color = Color::from_rgb(245, 245, 245);
 
 const FILE_MENU: Rect = Rect {
     x: RAIL_WIDTH + 4.,
@@ -160,6 +161,57 @@ fn text(canvas: &Canvas, body: &str, x: f64, y: f64, size: f32, color: Color, fo
     f.set_size(size);
     canvas.draw_str(body, (x as f32, y as f32), &f, &p);
 }
+// FigCraft's desktop UI uses the bundled Inter Regular face and a system Hangul fallback.
+fn inspector_font() -> Option<Font> {
+    thread_local! {
+        static INTER: Option<Font> = FontMgr::default()
+            .new_from_data(include_bytes!("../fonts/Inter-Regular.ttf"), None)
+            .map(inspector_typeface);
+    }
+    INTER.with(Clone::clone)
+}
+
+fn inspector_typeface(face: skia_safe::Typeface) -> Font {
+    let mut font = Font::from_typeface(face, 11.);
+    font.set_hinting(skia_safe::FontHinting::None);
+    font.set_subpixel(true);
+    font
+}
+
+fn inspector_label(
+    canvas: &Canvas,
+    body: &str,
+    x: f64,
+    y: f64,
+    size: f32,
+    color: Color,
+    font: &Font,
+) {
+    thread_local! {
+        static HANGUL: Option<Font> = {
+            let manager = FontMgr::default();
+            ["Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans CJK KR", "Noto Sans KR", "NanumGothic"]
+                .iter()
+                .find_map(|name| manager.match_family_style(name, FontStyle::normal()))
+                .map(inspector_typeface)
+        };
+    }
+    if body
+        .chars()
+        .all(|ch| ch == ' ' || ('가'..='힣').contains(&ch))
+        && let Some(mut hangul) = HANGUL.with(Clone::clone)
+        && hangul.str_to_glyphs_vec(body).iter().all(|&id| id != 0)
+    {
+        let mut paint = Paint::default();
+        paint.set_color(color);
+        paint.set_anti_alias(true);
+        hangul.set_size(size);
+        canvas.draw_str(body, (x as f32, y as f32), &hangul, &paint);
+    } else {
+        text(canvas, body, x, y, size, color, font);
+    }
+}
+
 fn shortened(s: &str, n: usize) -> String {
     let mut result: String = s.chars().take(n).collect();
     if s.chars().count() > n {
@@ -687,50 +739,50 @@ fn inspector_glyph(canvas: &Canvas, r: Rect, name: &str, color: Color) {
         "align-middle" => ("M2 7H14V8H2ZM4 2H7V13H4ZM9 4H12V11H9Z", true),
         "align-bottom" => ("M2 13H14V14H2ZM4 3H7V12H4ZM9 7H12V12H9Z", true),
         "component" => (
-            "M8 0.5l3 3-3 3-3-3zM3.5 5l3 3-3 3-3-3zM12.5 5l3 3-3 3-3-3zM8 9.5l3 3-3 3-3-3z",
+            "M8 1.7l2.5 2.5L8 6.7 5.5 4.2ZM11.8 5.5l2.5 2.5-2.5 2.5L9.3 8ZM8 9.3l2.5 2.5L8 14.3l-2.5-2.5ZM4.2 5.5 6.7 8l-2.5 2.5L1.7 8Z",
             true,
         ),
-        "mask" | "opacity" => ("M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13", false),
-        "boolean" => ("M2 2h8v4h4v8H6v-4H2zM6 6h4v4H6z", false),
-        "constraints" => ("M2 2h12v12H2zM6 2v6h8M6 6h4v4H6z", false),
-        "rotate" => ("M4 4H1.5V7M2 5a5.5 5.5 0 1 0 4-2.5", false),
-        "flip-x" => (
-            "M8 1v2m0 2v2m0 2v2m0 2v2M5.5 3 1.5 13h4zM10.5 3l4 10h-4z",
+        "mask" | "opacity" => ("M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11", false),
+        "boolean" => ("M2.5 2.5h7v4h4v7h-7v-4h-4Z", false),
+        "constraints" => (
+            "M3.5 2.5h9q1 0 1 1v9q0 1-1 1h-9q-1 0-1-1v-9q0-1 1-1ZM10 7.5h3M7.5 3v3",
             false,
         ),
-        "flip-y" => (
-            "M1 8h2m2 0h2m2 0h2m2 0h2M3 5.5l10-4v4zM3 10.5l10 4v-4z",
+        "rotate" => (
+            "M7.218 3.562A5 5 0 1 1 4.464 4.964M4.464 8.15V4.964H1.28",
             false,
         ),
+        "flip-x" => ("M7.5 1v2m0 2v2m0 2v2m0 2v2M5.5 3.5v9h-4Z", false),
+        "flip-y" => ("M1 7.5h2m2 0h2m2 0h2m2 0h2M3.5 5.5h9v-4Z", false),
         "link" => (
             "M7 11l-2 2a2.5 2.5 0 0 1-3.5-3.5l2-2m5-2 2-2a2.5 2.5 0 0 1 3.5 3.5l-2 2M6 10l4-4",
             false,
         ),
         "link-off" => (
-            "M6.5 11l-2 2A2.5 2.5 0 0 1 1 9.5l2-2m6.5-2.5 2-2A2.5 2.5 0 0 1 15 6.5l-2 2M3 3l1.5 1.5M11.5 11.5 13 13",
+            "M1.944 10.944l2-2a2.2 2.2 0 0 1 3.112 3.112l-2 2a2.2 2.2 0 0 1-3.112-3.112ZM8.944 3.944l2-2a2.2 2.2 0 0 1 3.112 3.112l-2 2a2.2 2.2 0 0 1-3.112-3.112ZM9.5 12v2M12 9.5h2M2 6.5h2M6.5 2v2",
             false,
         ),
-        "eye" | "eye-off" | "eye-small" | "eye-off-small" => (
-            "M1 8c4-5.5 10-5.5 14 0-4 5.5-10 5.5-14 0Zm9 0a2 2 0 1 0-4 0 2 2 0 1 0 4 0Z",
+        "eye" | "eye-small" => (
+            "M2.5 7.5a7 7 0 0 1 11 0 7 7 0 0 1-11 0ZM10 7.5a2 2 0 1 0-4 0 2 2 0 1 0 4 0Z",
             false,
         ),
-        "variable" => (
-            "M8 1.5l5.5 3.25v6.5L8 14.5l-5.5-3.25v-6.5zM8 7a1 1 0 1 0 0 2a1 1 0 1 0 0-2z",
-            false,
-        ),
+        "eye-off" | "eye-off-small" => {
+            ("M2.5 7.5a7 7 0 0 1 11 0 7 7 0 0 1-11 0ZM3 13l10-11", false)
+        }
+        "variable" => ("M8 1.5l5.5 3.25v6.5L8 14.5l-5.5-3.25v-6.5Z", false),
         "blend" => (
             "M10 8a4 4 0 1 0-8 0 4 4 0 1 0 8 0ZM14 8a4 4 0 1 0-8 0 4 4 0 1 0 8 0Z",
             false,
         ),
         "styles" => (
-            "M6.5 4.5a2 2 0 1 1-4 0 2 2 0 1 1 4 0ZM13.5 4.5a2 2 0 1 1-4 0 2 2 0 1 1 4 0ZM6.5 11.5a2 2 0 1 1-4 0 2 2 0 1 1 4 0ZM13.5 11.5a2 2 0 1 1-4 0 2 2 0 1 1 4 0Z",
+            "M7.2 5a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 1 1 4.4 0ZM13.2 5a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 1 1 4.4 0ZM7.2 11a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 1 1 4.4 0ZM13.2 11a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 1 1 4.4 0Z",
             true,
         ),
-        "chevron" => ("M5 6.5l3 3 3-3", false),
+        "chevron" => ("M4.5 6l3.5 3.5L11.5 6", false),
         "hug" => ("M2 5l3 3-3 3M14 5l-3 3 3 3M5 8h6", false),
         "fixed" => ("M2 4v8m12-8v8M2 8h12", false),
         "text-height" => (
-            "M3 3h10a1 1 0 0 1 1 1v2H2V4a1 1 0 0 1 1-1Zm0 7h10a1 1 0 0 1 1 1v2H2v-2a1 1 0 0 1 1-1Z",
+            "M4.5 3h7a1.5 1.5 0 0 1 1.5 1.5v1A1.5 1.5 0 0 1 11.5 7h-7A1.5 1.5 0 0 1 3 5.5v-1A1.5 1.5 0 0 1 4.5 3Zm0 6h7a1.5 1.5 0 0 1 1.5 1.5v1a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 11.5v-1A1.5 1.5 0 0 1 4.5 9Z",
             true,
         ),
         "paragraph" | "text-justify" => ("M2 3.5h12M2 6.5h12M2 9.5h12M2 12.5h12", false),
@@ -744,31 +796,74 @@ fn inspector_glyph(canvas: &Canvas, r: Rect, name: &str, color: Color) {
         "letter-spacing" => ("M1.5 2v12m13-12v12M5 11l3-6 3 6M6 9h4", false),
         "angle" => ("M13 2 3 13h11M6 9l3 4", false),
         "more" => (
-            "M5 8a1.2 1.2 0 1 1-2.4 0 1.2 1.2 0 1 1 2.4 0ZM9.2 8a1.2 1.2 0 1 1-2.4 0 1.2 1.2 0 1 1 2.4 0ZM13.4 8a1.2 1.2 0 1 1-2.4 0 1.2 1.2 0 1 1 2.4 0Z",
+            "M4.75 8a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 1 1 2.5 0ZM9.25 8a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 1 1 2.5 0ZM13.75 8a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 1 1 2.5 0Z",
             true,
         ),
-        "plus" => ("M8 2v12M2 8h12", false),
+        "plus" => ("M8 3v10M3 8h10", false),
         "minus" => ("M2 8h12", false),
         "effect" => ("M8 1l2 5 5 2-5 2-2 5-2-5-5-2 5-2z", false),
         _ => return,
     };
-    let scale = match name {
-        "eye-small" | "eye-off-small" => 0.58,
-        "component" | "mask" | "constraints" | "boolean" => 0.86,
-        "variable" | "blend" | "styles" | "chevron" | "rotate" | "flip-x" | "flip-y" => 0.78,
-        "eye" | "eye-off" | "text-left" | "text-right" | "text-center" | "text-justify" => 0.87,
-        _ => 1.,
+    let extent = match name {
+        "plus" | "chevron" | "eye-small" | "eye-off-small" | "styles" | "variable" | "blend" => 12.,
+        "more" | "component" | "rotate" | "flip-x" | "flip-y" | "angle" | "hug" | "fixed"
+        | "text-height" | "paragraph" | "line-height" | "letter-spacing" | "text-left"
+        | "text-right" | "text-center" | "text-justify" | "text-top" | "text-middle"
+        | "text-bottom" | "link" | "link-off" => 14.,
+        "eye" | "eye-off" => 16.,
+        _ => 16.,
     };
-    let line = if name == "plus" || name == "chevron" {
-        0.6
+    // FigCraft's 16-unit glyph grid quantizes the scale and snaps the origin at device resolution.
+    let matrix = canvas.local_to_device_as_3x3();
+    let pixels_per_point = matrix.scale_x();
+    let k = extent * pixels_per_point / 16.;
+    let k = if k >= 1. { (k * 4.).floor() / 4. } else { k };
+    let scale = k / pixels_per_point;
+    let snap =
+        |v: f32, origin: f32| ((v * pixels_per_point + origin).round() - origin) / pixels_per_point;
+    let x = snap(
+        (r.x + r.width / 2.) as f32 - 8. * scale,
+        matrix.translate_x(),
+    );
+    let y = snap(
+        (r.y + r.height / 2.) as f32 - 8. * scale,
+        matrix.translate_y(),
+    );
+    if name == "plus" {
+        // One opaque device pixel, centered on the pixel just like the upstream plus mesh.
+        let hairline = 1. / f64::from(pixels_per_point);
+        let half = hairline / 2.;
+        let x = f64::from(snap((r.x + r.width / 2.) as f32, matrix.translate_x())) + half;
+        let y = f64::from(snap(
+            (r.y + r.height / 2. + 1.) as f32,
+            matrix.translate_y(),
+        )) + half;
+        let reach = f64::from((k * 5.).round()) * hairline + half;
+        fill(
+            canvas,
+            Rect::new(x - reach, y - half, reach * 2., hairline),
+            color,
+        );
+        fill(
+            canvas,
+            Rect::new(x - half, y - reach, hairline, reach * 2.),
+            color,
+        );
+        return;
+    }
+    let line = if name == "chevron" {
+        1. / k
     } else {
-        1.0
+        (k * 0.9).round().max(1.) / k
     };
-    let center = (r.x + r.width / 2., r.y + r.height / 2.);
     canvas.save();
-    canvas.translate((center.0 as f32, center.1 as f32));
+    canvas.translate((x, y));
     canvas.scale((scale, scale));
-    let local = Rect::new(-r.width / 2., -r.height / 2., r.width, r.height);
+    let local = Rect::new(0., 0., 16., 16.);
+    if name == "boolean" {
+        let soft = Color::from_argb(102, color.r(), color.g(), color.b());
+        draw_mark(canvas, local, path, soft, PaintStyle::Fill, line);
+    }
     draw_mark(
         canvas,
         local,
@@ -781,23 +876,16 @@ fn inspector_glyph(canvas: &Canvas, r: Rect, name: &str, color: Color) {
         },
         line,
     );
-    if name == "mask" || name == "opacity" {
-        let half = if name == "opacity" {
-            "M8 1.5a6.5 6.5 0 0 0 0 13z"
-        } else {
-            "M8 1.5a6.5 6.5 0 0 1 0 13z"
-        };
-        draw_mark(canvas, local, half, color, PaintStyle::Fill, line);
-    }
-    if matches!(name, "eye-off" | "eye-off-small") {
-        draw_mark(
-            canvas,
-            local,
-            "M2.5 13l11-10",
-            color,
-            PaintStyle::Stroke,
-            line,
-        );
+    if let Some(overlay) = match name {
+        "mask" => Some("M8 2.5a5.5 5.5 0 0 1 0 11z"),
+        "opacity" => Some("M8 2.5a5.5 5.5 0 0 0 0 11z"),
+        "constraints" => Some("M6 6h4v4H6Z"),
+        "flip-x" => Some("M9 3l5 10H9Z"),
+        "flip-y" => Some("M3 9h10v5Z"),
+        "variable" => Some("M9.35 8a1.35 1.35 0 1 0-2.7 0 1.35 1.35 0 1 0 2.7 0Z"),
+        _ => None,
+    } {
+        draw_mark(canvas, local, overlay, color, PaintStyle::Fill, line);
     }
     canvas.restore();
 }
@@ -963,7 +1051,14 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
             let frame = Rect::new(r.x + 2., r.y + 2., r.width - 4., r.height - 4.);
             round(canvas, frame, Color::WHITE, 4.);
             if control.selected {
-                stroke(canvas, frame, LINE, 1.);
+                let mut border = Paint::default();
+                border.set_anti_alias(true);
+                border.set_color(LINE);
+                border.set_style(PaintStyle::Stroke);
+                border.set_stroke_width(1.);
+                let mut inside = rect(frame);
+                inside.inset((0.5, 0.5));
+                canvas.draw_round_rect(inside, 3.5, 3.5, &border);
             }
         }
         let secondary = name.starts_with("align-")
@@ -983,7 +1078,11 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                     | "text-middle"
                     | "text-bottom"
             );
-        let ink = if !control.selected && (secondary || !app.action_available(&control.action)) {
+        let ink = if !control.selected
+            && (secondary
+                || !app.action_available(&control.action)
+                    && !matches!(*name, "mask" | "boolean" | "constraints" | "more" | "plus"))
+        {
             MUTED
         } else {
             INK
@@ -995,7 +1094,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         return;
     }
     if let Action::InspectorChoice(name, _) = &control.action {
-        round(canvas, r, Color::from_rgb(242, 242, 242), 6.);
+        round(canvas, r, INSPECTOR_FIELD, 6.);
         inspector_glyph(canvas, Rect::new(r.x + 5., r.y, 18., r.height), name, MUTED);
         if let Some(value) = control.field_value.as_deref() {
             control_text(
@@ -1009,16 +1108,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                 font,
             );
         } else {
-            control_text(
-                canvas,
-                Rect::new(r.x + 26., r.y, r.width - 29., r.height),
-                &control.label,
-                0.,
-                r.y + 16.,
-                11.,
-                INK,
-                font,
-            );
+            inspector_label(canvas, &control.label, r.x + 26., r.y + 16., 11., INK, font);
         }
         if *name == "hug" {
             inspector_glyph(
@@ -1040,7 +1130,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         control.selected.then_some(SELECTED)
     } else if control.selected || hovered || control.field_value.is_some() {
         Some(if control.id >= 660_000 && control.field_value.is_some() {
-            Color::from_rgb(242, 242, 242)
+            INSPECTOR_FIELD
         } else {
             WORKSPACE
         })
@@ -1074,15 +1164,16 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                 .label
                 .strip_prefix("Zoom ")
                 .unwrap_or(&control.label),
-            5.,
-            r.y + 16.,
+            9.,
+            r.y + 17.,
             11.,
             INK,
             font,
         );
-        figcraft_chrome::paint_dock_chevron(
+        inspector_glyph(
             canvas,
-            Rect::new(r.x + r.width - 16., r.y, 16., r.height),
+            Rect::new(r.x + r.width - 14., r.y, 16., r.height),
+            "chevron",
             MUTED,
         );
         return;
@@ -1178,7 +1269,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                 value,
             );
             let mut value: &str = displayed.as_ref();
-            let baseline = r.y + r.height * 0.5 + 4.;
+            let baseline = r.y + r.height * 0.5 + if control.id >= 660_000 { 5. } else { 4. };
             if (matches!(property, "fill" | "stroke") || property.ends_with(":color"))
                 && let Some(color) = omc_style::parse_color(value)
             {
@@ -1200,7 +1291,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                     &hex,
                     0.,
                     baseline,
-                    12.,
+                    if control.id >= 660_000 { 11. } else { 12. },
                     INK,
                     font,
                 );
@@ -1224,6 +1315,11 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                 _ => None,
             };
             if let Some(glyph) = glyph {
+                let value_start = if matches!(property, "opacity" | "rotation") {
+                    23.
+                } else {
+                    25.
+                };
                 inspector_glyph(
                     canvas,
                     Rect::new(r.x + 4., r.y, 18., r.height),
@@ -1232,7 +1328,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                 );
                 control_text(
                     canvas,
-                    Rect::new(r.x + 25., r.y, r.width - 27., r.height),
+                    Rect::new(r.x + value_start, r.y, r.width - value_start - 2., r.height),
                     value,
                     0.,
                     baseline,
@@ -1254,7 +1350,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                     value,
                     0.,
                     baseline,
-                    12.,
+                    if control.id >= 660_000 { 11. } else { 12. },
                     INK,
                     font,
                 );
@@ -1292,7 +1388,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         _ => &control.label,
     };
     if (600_000..600_002).contains(&control.id) {
-        text(canvas, label, r.x + 8., r.y + 16., 11., INK, font);
+        inspector_label(canvas, label, r.x + 8., r.y + 16., 11., INK, font);
         return;
     }
     let mut title = font.clone();
@@ -1465,6 +1561,7 @@ fn render_to_canvas(
     let font = UI_FONT
         .with(Clone::clone)
         .ok_or("No native UI font is available.")?;
+    let design_font = inspector_font().unwrap_or_else(|| font.clone());
     let viewport = app.canvas_rect();
     fill(canvas, viewport, WORKSPACE);
     fill(canvas, Rect::new(0., 0., app.width, HEADER), TAB_BG);
@@ -1556,7 +1653,7 @@ fn render_to_canvas(
                     omc_model::NodeKind::Instance => "인스턴스",
                     _ => "레이어",
                 };
-                text(canvas, label, x, HEADER + 119., 12., INK, &font);
+                inspector_label(canvas, label, x, HEADER + 120., 12., INK, &design_font);
             } else if app.inspector == Inspector::Prototype {
                 text(canvas, "프로토타입", x, HEADER + 119., 14., INK, &font);
             }
@@ -1578,19 +1675,17 @@ fn render_to_canvas(
                     match item {
                         Decoration::Rule(y) => fill(canvas, Rect::new(panel_x, y, RIGHT, 1.), LINE),
                         Decoration::Text(bounds, title, muted) => {
-                            text(
+                            inspector_label(
                                 canvas,
                                 title,
                                 bounds.x,
-                                bounds.y + 12.,
+                                bounds.y + 12.5,
                                 if muted { 10. } else { 11. },
                                 if muted { MUTED } else { INK },
-                                &font,
+                                &design_font,
                             );
                         }
-                        Decoration::Segment(r) => {
-                            round(canvas, r, Color::from_rgb(242, 242, 242), 6.)
-                        }
+                        Decoration::Segment(r) => round(canvas, r, INSPECTOR_FIELD, 6.),
                     }
                 }
                 canvas.restore();
@@ -1826,7 +1921,14 @@ fn render_to_canvas(
     }
     for control in &app.controls {
         if control.id < POPUP_FIRST {
-            draw_control(canvas, app, control, &font);
+            let font = if (600_000..600_003).contains(&control.id)
+                || (660_000..LAYER_FIRST).contains(&control.id)
+            {
+                &design_font
+            } else {
+                &font
+            };
+            draw_control(canvas, app, control, font);
         }
     }
     if let Some(thumb) = crate::inspector::scrollbar(app) {
