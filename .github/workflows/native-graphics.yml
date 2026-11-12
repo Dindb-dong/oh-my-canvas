@@ -30,12 +30,19 @@ jobs:
         with:
           node-version: 22
       - name: Official MCP SDK test dependency
-        run: npm install --prefix "${{ runner.temp }}/omc-mcp-sdk" --ignore-scripts --no-audit --no-fund "@modelcontextprotocol/sdk@1.32.2"
+        run: npm install --prefix "${{ runner.temp }}/omc-mcp-sdk" --ignore-scripts --no-audit --no-fund "@modelcontextprotocol/sdk@1.32.2" "ws@8.21.0"
       - name: Official MCP client contracts
         env:
           OMC_TEST_SDK_ROOT: ${{ runner.temp }}/omc-mcp-sdk/node_modules/@modelcontextprotocol/sdk
         run: >-
-          node --test native/tests/mcp.e2e.mjs
+          node --test --test-concurrency=2 native/tests/mcp.e2e.mjs
+          native/tests/mcp-replica-import.e2e.mjs
           native/tests/figcraft-core.e2e.mjs
+          native/tests/figcraft-branches.e2e.mjs
           native/tests/figcraft-catalog.e2e.mjs
+          native/tests/figcraft-advanced.e2e.mjs
+          native/tests/figcraft-design.e2e.mjs
+          native/tests/figcraft-geometry.e2e.mjs
+          native/tests/figcraft-text.e2e.mjs
+          native/tests/figcraft-server.e2e.mjs
           native/tests/mcp.figcraft-files.e2e.mjs
