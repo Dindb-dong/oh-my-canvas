@@ -2,12 +2,14 @@ use crate::{
     Event,
     client::{Bridge, DocumentEntry, Request, Response},
     geometry::{Camera, Rect},
+    scene_cache::SceneCache,
     text::EditBuffer,
 };
 use omc_model::{DocumentSnapshot, Node, NodeKind};
 use omc_scene::{Scene, SceneOptions, build_scene};
 use serde_json::{Value, json};
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     rc::Rc,
@@ -28,7 +30,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-pub const HEADER: f64 = 94.0;
+pub const HEADER: f64 = 52.0;
 pub const LEFT: f64 = 228.0;
 pub const RIGHT: f64 = 240.0;
 pub const FOOTER: f64 = 30.0;
@@ -176,6 +178,7 @@ pub struct LayerRow {
 }
 pub struct SceneReply {
     id: String,
+    epoch: String,
     sequence: u64,
     page: Option<String>,
     result: Result<Scene, String>,
@@ -249,6 +252,8 @@ pub struct App {
     pub active: Option<String>,
     pub page: Option<String>,
     pub scene: Option<Scene>,
+    pub scene_generation: u64,
+    pub scene_cache: RefCell<SceneCache>,
     pub resources: BTreeMap<String, Vec<u8>>,
     pub camera: Camera,
     pub cameras: BTreeMap<(String, String), Camera>,
@@ -284,6 +289,7 @@ pub struct App {
     close_started: Option<Instant>,
     start: Instant,
     smoke: Option<Duration>,
+    smoke_size: Option<(u32, u32)>,
     pub smoke_failed: bool,
     pub presented: bool,
     screenshot: Option<PathBuf>,
@@ -296,6 +302,7 @@ impl App {
         proxy: EventLoopProxy<Event>,
         smoke: Option<Duration>,
         screenshot: Option<PathBuf>,
+        smoke_size: Option<(u32, u32)>,
     ) -> Self {
         let resource_profile = profile.clone();
         let bridge = Bridge::start(profile, proxy.clone());
@@ -354,6 +361,7 @@ impl App {
                 if scene_proxy
                     .send_event(Event::Scene(SceneReply {
                         id: request.document.id.clone(),
+                        epoch: request.document.epoch.clone(),
                         sequence: request.document.sequence,
                         page: request.page,
                         result,
@@ -381,6 +389,8 @@ impl App {
             active: None,
             page: None,
             scene: None,
+            scene_generation: 0,
+            scene_cache: RefCell::default(),
             resources: BTreeMap::new(),
             camera: Camera::default(),
             cameras: BTreeMap::new(),
@@ -416,6 +426,7 @@ impl App {
             close_started: None,
             start: Instant::now(),
             smoke,
+            smoke_size,
             smoke_failed: false,
             presented: false,
             screenshot,
@@ -470,8 +481,11 @@ impl App {
         let id = self.selected.iter().next()?;
         self.document()?.nodes.get(id)
     }
+    pub fn inspector_visible(&self) -> bool {
+        self.width >= 960.
+    }
     pub fn canvas_rect(&self) -> Rect {
-        let right = if self.width >= 1050. { RIGHT } else { 0. };
+        let right = if self.inspector_visible() { RIGHT } else { 0. };
         Rect::new(
             LEFT,
             HEADER,
@@ -559,6 +573,7 @@ impl App {
             .copied()
             .unwrap_or_default();
         self.scene = None;
+        self.scene_cache.get_mut().clear();
         self.schedule_scene();
     }
     pub fn refresh_visible_layers(&mut self) {
@@ -865,6 +880,7 @@ impl App {
                     .copied()
                     .unwrap_or_default();
                 self.scene = None;
+                self.scene_cache.get_mut().clear();
                 self.schedule_scene();
             }
             Action::Field(property) => self.begin_property(property),
@@ -1275,6 +1291,9 @@ impl App {
                 self.action(control.action);
                 return;
             }
+        }
+        if crate::paint::palette_rect(self).is_some_and(|area| area.contains(x, y)) {
+            return;
         }
         if !self.canvas_rect().contains(x, y) {
             self.commit_edit();
@@ -1718,6 +1737,7 @@ impl App {
                 if self.active.as_ref() == Some(&id) {
                     self.active = None;
                     self.scene = None;
+                    self.scene_cache.get_mut().clear();
                     if let Some(id) = self.tabs.last().cloned() {
                         self.switch(id);
                     }
@@ -1797,6 +1817,9 @@ impl ApplicationHandler<Event> for App {
                 )
             })
             .unwrap_or((1440., 900.));
+        let size = self.smoke_size.map_or(size, |(width, height)| {
+            (f64::from(width), f64::from(height))
+        });
         let attrs = Window::default_attributes()
             .with_title("Oh My Canvas — native preview")
             .with_visible(false)
@@ -1849,10 +1872,12 @@ impl ApplicationHandler<Event> for App {
                     && self.page == reply.page
                     && self
                         .document()
-                        .is_some_and(|d| d.sequence == reply.sequence)
+                        .is_some_and(|d| d.epoch == reply.epoch && d.sequence == reply.sequence)
                 {
                     match reply.result {
                         Ok(scene) => {
+                            self.scene_cache.get_mut().clear();
+                            self.scene_generation = self.scene_generation.wrapping_add(1);
                             self.scene = Some(scene);
                             self.resources = reply.resources;
                             if let Some(error) = reply.resource_errors.first() {
@@ -1926,7 +1951,7 @@ impl ApplicationHandler<Event> for App {
                     } else {
                         self.layer_scroll = self.layer_scroll.saturating_sub(3);
                     }
-                } else if self.width >= 1050. && self.cursor.0 >= self.width - RIGHT {
+                } else if self.inspector_visible() && self.cursor.0 >= self.width - RIGHT {
                     if dy < 0. {
                         self.inspector_scroll = (self.inspector_scroll + 1).min(200);
                     } else {

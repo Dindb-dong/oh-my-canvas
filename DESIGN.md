@@ -102,3 +102,5 @@ The implementation maps to `editor/ui/index.ts` and `editor/ui/style.ts`. Compar
 ### Rust native editor shell (2026-11-12)
 
 See the [native editor shell and retained canvas contract](docs/native-engine/EDITOR_SHELL.md) for the Rust preview composition, responsive rules and interaction acceptance.
+
+The editable design reference is **Oh My Canvas · Native editor shell · FigCraft study**, with a component board and 1440 × 900 / 960 × 640 layouts. The native shell uses a 52 px document strip, 228 px pages/layers, and a 240 px inspector shown at 960 px and wider. The six-tool palette floats at the bottom of the canvas and yields its space to the inline text editor. OMC blue marks selection, focus and active tools. Use shared control geometry for painting, pointer input and accessibility. The runtime uses icon controls and draws a compact dimensions badge from scene bounds.

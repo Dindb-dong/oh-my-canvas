@@ -6,7 +6,7 @@ use omc_model::NodeKind;
 use serde_json::Value;
 
 pub fn controls(app: &App) -> Vec<Control> {
-    if app.width < 1050. || app.document().is_none() {
+    if !app.inspector_visible() || app.document().is_none() {
         return vec![];
     }
     let x = app.width - RIGHT + 16.;
@@ -21,21 +21,21 @@ pub fn controls(app: &App) -> Vec<Control> {
     {
         controls.push(Control {
             id: 600_000 + index as u64,
-            rect: Rect::new(x + index as f64 * 70., HEADER + 37., 66., 28.),
+            rect: Rect::new(x + index as f64 * 70., HEADER + 12., 66., 30.),
             label: label.into(),
             action: Action::Inspector(tab),
             selected: app.inspector == tab,
             field_value: None,
         });
     }
-    let mut y = HEADER + 100. - app.inspector_scroll as f64 * 54.;
+    let mut y = HEADER + 128. - app.inspector_scroll as f64 * 54.;
     let mut add = |id: u64,
                    rect: Rect,
                    label: String,
                    action: Action,
                    value: Option<String>,
                    selected: bool| {
-        if rect.y >= HEADER + 88. && rect.y + rect.height < app.height - FOOTER - 8. {
+        if rect.y >= HEADER + 119. && rect.y + rect.height < app.height - FOOTER - 8. {
             controls.push(Control {
                 id,
                 rect,
@@ -126,7 +126,7 @@ pub fn controls(app: &App) -> Vec<Control> {
         &[
             ("fontFamily", "Font family"),
             ("fontSize", "Font size"),
-            ("fontWeight", "Weight (100–900)"),
+            ("fontWeight", "Weight"),
             ("lineHeight", "Line height"),
             ("letterSpacing", "Letter spacing"),
             ("textAlign", "Align: left / center / right"),
@@ -148,6 +148,17 @@ pub fn controls(app: &App) -> Vec<Control> {
         ]
     };
     for (i, (property, label)) in fields.iter().enumerate() {
+        let column = if app.inspector == Inspector::Text {
+            match i {
+                1 | 3 => Some(0),
+                2 | 4 => Some(1),
+                _ => None,
+            }
+        } else if i == 0 {
+            None
+        } else {
+            Some((i - 1) % 2)
+        };
         let value = node.properties.get(*property).or_else(|| {
             app.scene
                 .as_ref()
@@ -170,13 +181,18 @@ pub fn controls(app: &App) -> Vec<Control> {
             });
         add(
             500 + i as u64,
-            Rect::new(x, y, 208., 34.),
+            match column {
+                Some(column) => Rect::new(x + column as f64 * 108., y, 100., 32.),
+                None => Rect::new(x, y, 208., 32.),
+            },
             (*label).into(),
             Action::Field((*property).into()),
             Some(value),
             false,
         );
-        y += 56.;
+        if column != Some(0) {
+            y += 54.;
+        }
     }
     if app.inspector == Inspector::Design {
         for (index, (left, right)) in [

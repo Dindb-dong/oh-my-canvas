@@ -1,7 +1,7 @@
 //! A real native accessibility tree for controls and the active text buffer.
 //! OS screen-reader journeys remain separate platform qualification gates.
 use crate::{
-    app::{Action, App, EditTarget, HEADER},
+    app::{Action, App, EditTarget, FOOTER},
     geometry::Rect,
 };
 use accesskit::{
@@ -51,14 +51,9 @@ pub fn tree(app: &App) -> TreeUpdate {
         }
         nodes.push((id, node));
     }
-    let focus = if let Some(edit) = &app.editing {
-        let viewport = app.canvas_rect();
-        let r = Rect::new(
-            viewport.x + 24.,
-            viewport.y + viewport.height - 118.,
-            (viewport.width - 48.).max(100.),
-            88.,
-        );
+    let focus = if let Some(edit) = &app.editing
+        && let Some(r) = crate::text_ui::editor_rect(app)
+    {
         let mut node = Node::new(if matches!(edit.target, EditTarget::Text { .. }) {
             Role::MultilineTextInput
         } else {
@@ -109,10 +104,7 @@ pub fn tree(app: &App) -> TreeUpdate {
                 .map(|c| c.len_utf8() as u8)
                 .collect::<Vec<_>>(),
         );
-        run.set_bounds(bounds(
-            Rect::new(r.x + 13., r.y + 29., r.width - 26., 28.),
-            scale,
-        ));
+        run.set_bounds(bounds(r, scale));
         nodes.push((EDITOR, node));
         nodes.push((TEXT_RUN, run));
         children.push(EDITOR);
@@ -124,7 +116,10 @@ pub fn tree(app: &App) -> TreeUpdate {
     };
     let mut status = Node::new(Role::Label);
     status.set_label(app.error.as_deref().unwrap_or(&app.status));
-    status.set_bounds(bounds(Rect::new(0., HEADER, app.width, 24.), scale));
+    status.set_bounds(bounds(
+        Rect::new(0., app.height - FOOTER, app.width, FOOTER),
+        scale,
+    ));
     children.push(STATUS);
     nodes.push((STATUS, status));
     root.set_children(children);

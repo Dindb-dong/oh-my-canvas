@@ -1,6 +1,7 @@
 use crate::{
     app::{Action, App, Control, Drag, EditTarget, FOOTER, HEADER, LEFT, RIGHT, Tool},
     geometry::Rect,
+    scene_cache::SceneCacheKey,
 };
 use omc_render::paint_scene_preview;
 use skia_safe::{
@@ -9,10 +10,104 @@ use skia_safe::{
 };
 use std::{num::NonZeroU32, path::Path};
 
-const INK: Color = Color::from_rgb(32, 38, 50);
-const MUTED: Color = Color::from_rgb(115, 121, 134);
-const LINE: Color = Color::from_rgb(226, 229, 236);
-const ACCENT: Color = Color::from_rgb(97, 81, 215);
+const INK: Color = Color::from_rgb(32, 33, 36);
+const MUTED: Color = Color::from_rgb(106, 106, 106);
+const LINE: Color = Color::from_rgb(229, 229, 229);
+const ACCENT: Color = Color::from_rgb(37, 99, 235);
+const SELECTED: Color = Color::from_rgb(239, 246, 255);
+const SELECTED_INK: Color = Color::from_rgb(30, 64, 175);
+const WORKSPACE: Color = Color::from_rgb(245, 245, 245);
+const FILE_ACTIONS: [(u64, f64, &str, Action); 4] = [
+    (12, 76., "Import…", Action::Import),
+    (13, 76., "Export…", Action::Export),
+    (34, 62., "Save", Action::Save),
+    (11, 72., "+ New", Action::New),
+];
+const TOOLS: [Tool; 6] = [
+    Tool::Select,
+    Tool::Frame,
+    Tool::Rect,
+    Tool::Ellipse,
+    Tool::Text,
+    Tool::Pan,
+];
+const TAB_START: f64 = LEFT + 10.;
+const TAB_MAX: f64 = 168.;
+const TAB_MIN: f64 = 92.;
+const TAB_GAP: f64 = 4.;
+const STRIP_GAP: f64 = 8.;
+
+fn file_actions_x(width: f64) -> f64 {
+    width
+        - 16.
+        - FILE_ACTIONS
+            .iter()
+            .map(|(_, w, _, _)| w + STRIP_GAP)
+            .sum::<f64>()
+        + STRIP_GAP
+}
+
+fn tab_rects(width: f64, count: usize, active: usize) -> impl Iterator<Item = (usize, Rect, Rect)> {
+    let available = (file_actions_x(width) - STRIP_GAP - TAB_START).max(0.);
+    let capacity = ((available + TAB_GAP) / (TAB_MIN + TAB_GAP)) as usize;
+    let visible = count.min(capacity);
+    let start = active.saturating_add(1).saturating_sub(visible);
+    let tab_width = ((available + TAB_GAP) / visible.max(1) as f64 - TAB_GAP).min(TAB_MAX);
+    (start..start + visible).enumerate().map(move |(i, index)| {
+        let x = TAB_START + i as f64 * (tab_width + TAB_GAP);
+        (
+            index,
+            Rect::new(x, 8., tab_width - 30., 36.),
+            Rect::new(x + tab_width - 30., 8., 30., 36.),
+        )
+    })
+}
+
+fn palette(viewport: Rect) -> Option<Rect> {
+    let width = (viewport.width - 24.).min(316.);
+    if width < 168. || viewport.height < 140. {
+        return None;
+    }
+    Some(Rect::new(
+        viewport.x + (viewport.width - width) * 0.5,
+        viewport.y + viewport.height - 62.,
+        width,
+        48.,
+    ))
+}
+
+fn palette_tools(palette: Rect) -> impl Iterator<Item = (usize, Tool, Rect)> {
+    let width = (palette.width - 12.) / TOOLS.len() as f64;
+    TOOLS.into_iter().enumerate().map(move |(index, tool)| {
+        (
+            index,
+            tool,
+            Rect::new(
+                palette.x + 6. + index as f64 * width,
+                palette.y + 6.,
+                width,
+                36.,
+            ),
+        )
+    })
+}
+
+pub fn palette_rect(app: &App) -> Option<Rect> {
+    if app
+        .editing
+        .as_ref()
+        .is_some_and(|edit| !matches!(edit.target, EditTarget::Property { .. }))
+    {
+        return None;
+    }
+    app.document()?;
+    palette(app.canvas_rect())
+}
+
+fn layers_heading(app: &App) -> f64 {
+    let pages = app.document().map_or(0, |doc| doc.pages.len());
+    HEADER + 84. + pages as f64 * 29.
+}
 
 fn rect(r: Rect) -> SkRect {
     SkRect::from_xywh(r.x as f32, r.y as f32, r.width as f32, r.height as f32)
@@ -73,119 +168,100 @@ pub fn controls(app: &App) -> Vec<Control> {
         };
     add(
         10,
-        Rect::new(16., 12., 142., 30.),
+        Rect::new(76., 8., 142., 36.),
         "Oh My Canvas".into(),
         Action::Refresh,
         false,
         None,
     );
-    add(
-        11,
-        Rect::new(app.width - 102., 12., 84., 30.),
-        "+ New".into(),
-        Action::New,
-        false,
-        None,
-    );
-    for (id, offset, label, action) in [
-        (12, 260., "Import…", Action::Import),
-        (13, 182., "Export…", Action::Export),
-    ] {
+    let mut x = file_actions_x(app.width);
+    for (id, width, label, action) in FILE_ACTIONS {
         add(
             id,
-            Rect::new(app.width - offset, 12., 72., 30.),
+            Rect::new(x, 9., width, 34.),
             label.into(),
             action,
             false,
             None,
         );
+        x += width + STRIP_GAP;
     }
-    let mut x = LEFT + 12.;
-    for (i, id) in app.tabs.iter().enumerate() {
+    let active = app
+        .tabs
+        .iter()
+        .position(|id| Some(id) == app.active.as_ref())
+        .unwrap_or(0);
+    // shortcut: the strip keeps the active tab visible, add explicit overflow navigation for crowded sessions.
+    for (index, open, close) in tab_rects(app.width, app.tabs.len(), active) {
+        let id = &app.tabs[index];
         let title = app
             .snapshots
             .get(id)
             .map(|d| d.title.as_str())
             .unwrap_or("Opening…");
+        let selected = Some(id) == app.active.as_ref();
         add(
-            100 + i as u64,
-            Rect::new(x, 8., 170., 38.),
-            shortened(title, 19),
+            100 + index as u64,
+            open,
+            title.into(),
             Action::Open(id.clone()),
-            app.active.as_ref() == Some(id),
+            selected,
             None,
         );
         add(
-            200 + i as u64,
-            Rect::new(x + 145., 13., 20., 26.),
-            "×".into(),
+            200 + index as u64,
+            close,
+            format!("Close {title}"),
             Action::Close(id.clone()),
-            false,
+            selected,
             None,
         );
-        x += 178.;
-        if x > app.width - 280. {
-            break;
+    }
+    if let Some(palette) = palette_rect(app) {
+        for (index, tool, rect) in palette_tools(palette) {
+            add(
+                20 + index as u64,
+                rect,
+                tool.label().into(),
+                Action::Tool(tool),
+                app.tool == tool,
+                None,
+            );
         }
     }
-    for (i, tool) in [
-        Tool::Select,
-        Tool::Frame,
-        Tool::Rect,
-        Tool::Ellipse,
-        Tool::Text,
-        Tool::Pan,
-    ]
-    .iter()
-    .enumerate()
-    {
-        add(
-            20 + i as u64,
-            Rect::new(LEFT + 12. + i as f64 * 78., 55., 72., 29.),
-            tool.label().into(),
-            Action::Tool(*tool),
-            app.tool == *tool,
-            None,
-        );
+    if app.active.is_some() {
+        let viewport = app.canvas_rect();
+        let right = viewport.x + viewport.width;
+        for (i, (label, action)) in [
+            ("Undo", Action::Undo),
+            ("Redo", Action::Redo),
+            ("Fit", Action::Fit),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            add(
+                30 + i as u64,
+                Rect::new(right - 167. + i as f64 * 51., viewport.y + 10., 47., 28.),
+                label.into(),
+                action,
+                false,
+                None,
+            );
+        }
     }
-    let right = app.canvas_rect().x + app.canvas_rect().width;
-    for (i, (label, action)) in [
-        ("Undo", Action::Undo),
-        ("Redo", Action::Redo),
-        ("Fit", Action::Fit),
-    ]
-    .into_iter()
-    .enumerate()
-    {
+    if let Some(doc) = app.document() {
         add(
-            30 + i as u64,
-            Rect::new(right - 192. + i as f64 * 62., 55., 58., 29.),
-            label.into(),
-            action,
+            35,
+            Rect::new(12., HEADER + 8., LEFT - 24., 34.),
+            format!("Rename {}", doc.title),
+            Action::RenameDocument,
             false,
             None,
         );
-    }
-    add(
-        34,
-        Rect::new(16., 55., 86., 29.),
-        "Save".into(),
-        Action::Save,
-        false,
-        None,
-    );
-    add(
-        35,
-        Rect::new(110., 55., 100., 29.),
-        "Rename".into(),
-        Action::RenameDocument,
-        false,
-        None,
-    );
-    if let Some(doc) = app.document() {
         add(
             36,
-            Rect::new(90., HEADER + 10., 54., 24.),
+            Rect::new(78., HEADER + 51., 66., 24.),
             "+ Page".into(),
             Action::NewPage,
             false,
@@ -193,25 +269,28 @@ pub fn controls(app: &App) -> Vec<Control> {
         );
         add(
             37,
-            Rect::new(149., HEADER + 10., 65., 24.),
+            Rect::new(149., HEADER + 51., 65., 24.),
             "Rename".into(),
             Action::RenamePage,
             false,
             None,
         );
-        let mut y = HEADER + 42.;
+        let mut y = HEADER + 82.;
         for (i, page) in doc.pages.iter().enumerate() {
+            if y + 26. > app.height - FOOTER {
+                break;
+            }
             add(
                 300 + i as u64,
-                Rect::new(12., y, LEFT - 24., 28.),
-                shortened(&page.title, 24),
+                Rect::new(12., y, LEFT - 24., 26.),
+                page.title.clone(),
                 Action::Page(page.id.clone()),
                 app.page.as_ref() == Some(&page.id),
                 None,
             );
-            y += 32.;
+            y += 29.;
         }
-        y += 37.;
+        y = layers_heading(app) + 29.;
         let visible = ((app.height - FOOTER - y) / 29.).max(0.) as usize;
         for index in app
             .visible_layers
@@ -221,7 +300,7 @@ pub fn controls(app: &App) -> Vec<Control> {
         {
             let row = &app.layers[*index];
             let indent = (row.depth.min(7) * 12) as f64;
-            let label = shortened(&row.name, 25 - row.depth.min(7));
+            let label = row.name.clone();
             add(
                 1000 + *index as u64,
                 Rect::new(30. + indent, y, LEFT - 42. - indent, 27.),
@@ -235,11 +314,10 @@ pub fn controls(app: &App) -> Vec<Control> {
                     1_000_000 + *index as u64,
                     Rect::new(10. + indent, y, 20., 27.),
                     if app.collapsed.contains(&row.id) {
-                        "›"
+                        format!("Expand {}", row.name)
                     } else {
-                        "⌄"
-                    }
-                    .into(),
+                        format!("Collapse {}", row.name)
+                    },
                     Action::ToggleLayer(row.id.clone()),
                     false,
                     None,
@@ -255,10 +333,14 @@ pub fn controls(app: &App) -> Vec<Control> {
             .take(15)
             .enumerate()
         {
+            let y = HEADER + 42. + i as f64 * 36.;
+            if y + 32. > app.height - FOOTER {
+                break;
+            }
             add(
                 400 + i as u64,
-                Rect::new(16., HEADER + 42. + i as f64 * 36., LEFT - 32., 32.),
-                shortened(&doc.title, 24),
+                Rect::new(16., y, LEFT - 32., 32.),
+                doc.title.clone(),
                 Action::Open(doc.id.clone()),
                 false,
                 None,
@@ -267,6 +349,295 @@ pub fn controls(app: &App) -> Vec<Control> {
     }
     controls.extend(crate::inspector::controls(app));
     controls
+}
+
+fn control_text(
+    canvas: &Canvas,
+    bounds: Rect,
+    body: &str,
+    padding: f64,
+    baseline: f64,
+    size: f32,
+    color: Color,
+    font: &Font,
+) {
+    let width = bounds.width - padding * 2.;
+    if width <= 0. {
+        return;
+    }
+    let mut font_at_size = font.clone();
+    font_at_size.set_size(size);
+    let width_of = |value: &str| {
+        if value.is_ascii() {
+            font_at_size.measure_str(value, None).0 as f64
+        } else {
+            value
+                .chars()
+                .map(|c| if c.is_ascii() { 0.55 } else { 1. })
+                .sum::<f64>()
+                * f64::from(size)
+        }
+    };
+    let shortened;
+    let max_chars = (width / f64::from(size) * 4.).ceil() as usize;
+    let limit = body
+        .char_indices()
+        .nth(max_chars)
+        .map_or(body.len(), |(i, _)| i);
+    let label = if limit < body.len() || width_of(body) > width {
+        let mut end = 0;
+        for (index, _) in body[..limit].char_indices().rev() {
+            end = index;
+            if width_of(&body[..end]) + f64::from(size) <= width {
+                break;
+            }
+        }
+        shortened = format!("{}…", &body[..end]);
+        &shortened
+    } else {
+        body
+    };
+    canvas.save();
+    canvas.clip_rect(rect(bounds), None, false);
+    text(
+        canvas,
+        label,
+        bounds.x + padding,
+        baseline,
+        size,
+        color,
+        font,
+    );
+    canvas.restore();
+}
+
+fn draw_tool_icon(canvas: &Canvas, tool: Tool, bounds: Rect, color: Color) {
+    let cx = (bounds.x + bounds.width / 2.) as f32;
+    let cy = (bounds.y + bounds.height / 2.) as f32;
+    let mut p = Paint::default();
+    p.set_color(color);
+    p.set_anti_alias(true);
+    p.set_stroke_width(1.5);
+    p.set_stroke_cap(skia_safe::paint::Cap::Round);
+    let line = |x1, y1, x2, y2| canvas.draw_line((cx + x1, cy + y1), (cx + x2, cy + y2), &p);
+    match tool {
+        Tool::Select => {
+            line(-6., -8., -6., 7.);
+            line(-6., -8., 7., 2.);
+            line(-6., 7., -1., 2.);
+            line(-1., 2., 7., 2.);
+            line(-1., 2., 3., 8.);
+        }
+        Tool::Frame => {
+            for offset in [-4., 4.] {
+                line(offset, -8., offset, 8.);
+                line(-8., offset, 8., offset);
+            }
+        }
+        Tool::Rect => {
+            stroke(
+                canvas,
+                Rect::new(f64::from(cx) - 7., f64::from(cy) - 7., 14., 14.),
+                color,
+                1.5,
+            );
+        }
+        Tool::Ellipse => {
+            p.set_style(PaintStyle::Stroke);
+            canvas.draw_circle((cx, cy), 7., &p);
+        }
+        Tool::Text => {
+            line(-7., -6., 7., -6.);
+            line(0., -6., 0., 7.);
+            line(-3., 7., 3., 7.);
+        }
+        Tool::Pan => {
+            line(-8., 0., 8., 0.);
+            line(0., -8., 0., 8.);
+            for direction in [-1., 1.] {
+                for side in [-1., 1.] {
+                    line(8. * direction, 0., 5. * direction, 3. * side);
+                    line(0., 8. * direction, 3. * side, 5. * direction);
+                }
+            }
+        }
+    }
+}
+
+fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
+    let r = control.rect;
+    let hovered = r.contains(app.cursor.0, app.cursor.1);
+    let tab = r.y < HEADER && matches!(control.action, Action::Open(_) | Action::Close(_));
+    let close = matches!(control.action, Action::Close(_));
+    let disclosure = matches!(control.action, Action::ToggleLayer(_));
+    let tool = match control.action {
+        Action::Tool(tool) => Some(tool),
+        _ => None,
+    };
+    let background = if control.selected && tool.is_some() || control.id == 11 {
+        Some(ACCENT)
+    } else if tab && control.selected && !hovered {
+        Some(Color::WHITE)
+    } else if control.selected {
+        Some(SELECTED)
+    } else if hovered || control.field_value.is_some() || matches!(control.id, 30..=32) {
+        Some(if matches!(control.id, 30..=32) && !hovered {
+            Color::WHITE
+        } else {
+            WORKSPACE
+        })
+    } else {
+        None
+    };
+    if let Some(color) = background {
+        if tab && control.selected && !hovered {
+            fill(canvas, r, color);
+        } else {
+            round(canvas, r, color, 7.);
+        }
+    }
+    if app.focus == control.id {
+        stroke(
+            canvas,
+            Rect::new(r.x + 1., r.y + 1., r.width - 2., r.height - 2.),
+            if background == Some(ACCENT) {
+                Color::WHITE
+            } else {
+                ACCENT
+            },
+            1.5,
+        );
+    }
+
+    if let Some(tool) = tool {
+        draw_tool_icon(
+            canvas,
+            tool,
+            r,
+            if control.selected { Color::WHITE } else { INK },
+        );
+        return;
+    }
+    if close || disclosure {
+        let cx = (r.x + r.width / 2.) as f32;
+        let cy = (r.y + r.height / 2.) as f32;
+        let mut p = Paint::default();
+        p.set_color(MUTED);
+        p.set_anti_alias(true);
+        p.set_stroke_width(1.25);
+        if close {
+            canvas.draw_line((cx - 3., cy - 3.), (cx + 3., cy + 3.), &p);
+            canvas.draw_line((cx + 3., cy - 3.), (cx - 3., cy + 3.), &p);
+        } else if matches!(&control.action, Action::ToggleLayer(id) if app.collapsed.contains(id)) {
+            canvas.draw_line((cx - 2., cy - 4.), (cx + 2., cy), &p);
+            canvas.draw_line((cx + 2., cy), (cx - 2., cy + 4.), &p);
+        } else {
+            canvas.draw_line((cx - 4., cy - 2.), (cx, cy + 2.), &p);
+            canvas.draw_line((cx, cy + 2.), (cx + 4., cy - 2.), &p);
+        }
+        return;
+    }
+    if let Some(value) = &control.field_value {
+        control_text(
+            canvas,
+            Rect::new(r.x, r.y - 18., r.width, 16.),
+            &control.label,
+            0.,
+            r.y - 6.,
+            11.,
+            MUTED,
+            font,
+        );
+        if !matches!(
+            (&app.editing, &control.action),
+            (Some(edit), Action::Field(property))
+                if matches!(&edit.target, EditTarget::Property { property: current, .. } if current == property)
+        ) {
+            control_text(canvas, r, value, 9., r.y + 21., 13., INK, font);
+        }
+        return;
+    }
+    let label = if control.id == 35 {
+        control
+            .label
+            .strip_prefix("Rename ")
+            .unwrap_or(&control.label)
+    } else {
+        &control.label
+    };
+    let label_color = if control.id == 11 {
+        Color::WHITE
+    } else if control.selected {
+        SELECTED_INK
+    } else {
+        INK
+    };
+    control_text(
+        canvas,
+        r,
+        label,
+        if matches!(control.id, 10 | 35) {
+            4.
+        } else {
+            8.
+        },
+        r.y + r.height * 0.5 + 4.,
+        if matches!(control.id, 10 | 35) {
+            14.
+        } else {
+            12.
+        },
+        label_color,
+        font,
+    );
+}
+
+fn selection_dimensions(canvas: &Canvas, app: &App, viewport: Rect, font: &Font) {
+    if app.selected.len() != 1
+        || app.drag.is_some()
+        || app.editing.is_some()
+        || viewport.width < 100.
+        || viewport.height < 30.
+    {
+        return;
+    }
+    let Some([x, y, width, height]) = app
+        .selected
+        .iter()
+        .next()
+        .and_then(|id| app.scene.as_ref()?.bounds(id))
+    else {
+        return;
+    };
+    let left = viewport.x + app.camera.x + x * app.camera.zoom;
+    let top = viewport.y + app.camera.y + y * app.camera.zoom;
+    let right = left + width * app.camera.zoom;
+    let bottom = top + height * app.camera.zoom;
+    if right < viewport.x
+        || left > viewport.x + viewport.width
+        || bottom < viewport.y
+        || top > viewport.y + viewport.height
+    {
+        return;
+    }
+    let label = format!("{width:.0} × {height:.0}");
+    let badge_width = (label.chars().count() as f64 * 7.4 + 14.).min(viewport.width - 8.);
+    let badge_top = if bottom + 26. < viewport.y + viewport.height {
+        bottom + 6.
+    } else {
+        top - 25.
+    };
+    let r = Rect::new(
+        ((left + right - badge_width) * 0.5).clamp(
+            viewport.x + 4.,
+            viewport.x + viewport.width - badge_width - 4.,
+        ),
+        badge_top.clamp(viewport.y + 4., viewport.y + viewport.height - 23.),
+        badge_width,
+        19.,
+    );
+    round(canvas, r, ACCENT, 4.);
+    control_text(canvas, r, &label, 7., r.y + 13., 11., Color::WHITE, font);
 }
 
 fn render(app: &App, width: u32, height: u32, scale: f64) -> Result<Surface, String> {
@@ -284,84 +655,63 @@ fn render(app: &App, width: u32, height: u32, scale: f64) -> Result<Surface, Str
         .or_else(|| font_manager.legacy_make_typeface(None, FontStyle::normal()))
         .ok_or("No native UI font is available.")?;
     let font = Font::from_typeface(typeface, 13.);
-    fill(canvas, Rect::new(0., 0., app.width, HEADER), Color::WHITE);
-    fill(
-        canvas,
-        Rect::new(0., HEADER, LEFT, app.height - HEADER),
-        Color::from_rgb(250, 251, 253),
-    );
+    fill(canvas, Rect::new(0., 0., app.width, HEADER), WORKSPACE);
     let viewport = app.canvas_rect();
-    fill(canvas, viewport, Color::from_rgb(239, 241, 245));
-    if app.width >= 1050. {
-        fill(
-            canvas,
-            Rect::new(app.width - RIGHT, HEADER, RIGHT, app.height - HEADER),
-            Color::from_rgb(250, 251, 253),
-        );
-    }
+    fill(canvas, viewport, WORKSPACE);
     fill(canvas, Rect::new(0., HEADER - 1., app.width, 1.), LINE);
     fill(
         canvas,
         Rect::new(LEFT - 1., HEADER, 1., app.height - HEADER),
         LINE,
     );
-    if app.width >= 1050. {
+    if app.inspector_visible() {
         fill(
             canvas,
             Rect::new(app.width - RIGHT, HEADER, 1., app.height - HEADER),
             LINE,
         );
     }
-    text(
-        canvas,
-        if app.active.is_some() {
-            "PAGES"
-        } else {
-            "YOUR DOCUMENTS"
-        },
-        16.,
-        HEADER + 27.,
-        11.,
-        MUTED,
-        &font,
-    );
-    if let Some(doc) = app.document() {
-        text(
-            canvas,
-            "LAYERS",
-            16.,
-            HEADER + 77. + doc.pages.len() as f64 * 32.,
-            11.,
-            MUTED,
-            &font,
-        );
+    if app.document().is_some() {
+        fill(canvas, Rect::new(0., HEADER + 46., LEFT - 1., 1.), LINE);
+        text(canvas, "Pages", 16., HEADER + 67., 12., INK, &font);
+        let heading = layers_heading(app);
+        if heading + 18. < app.height - FOOTER {
+            fill(canvas, Rect::new(0., heading, LEFT - 1., 1.), LINE);
+            text(canvas, "Layers", 16., heading + 19., 12., INK, &font);
+        }
+    } else {
+        text(canvas, "Your documents", 16., HEADER + 27., 13., INK, &font);
     }
-    if app.width >= 1050. {
-        text(
+    if app.inspector_visible() && app.document().is_some() {
+        let panel_x = app.width - RIGHT;
+        let x = panel_x + 16.;
+        fill(
             canvas,
-            "DESIGN",
-            app.width - RIGHT + 16.,
-            HEADER + 27.,
-            11.,
-            MUTED,
-            &font,
+            Rect::new(panel_x + 1., HEADER + 52., RIGHT - 1., 1.),
+            LINE,
         );
         if let Some(node) = app.node() {
             text(
                 canvas,
                 &format!("{:?}", node.kind),
-                app.width - RIGHT + 16.,
-                HEADER + 84.,
-                12.,
+                x,
+                HEADER + 75.,
+                14.,
                 INK,
                 &font,
             );
-        } else {
+            let section = match app.inspector {
+                crate::app::Inspector::Design => "Properties",
+                crate::app::Inspector::Text => "Typography",
+                crate::app::Inspector::Assets => "Styles and tokens",
+            };
+            text(canvas, section, x, HEADER + 102., 12., MUTED, &font);
+        } else if app.inspector != crate::app::Inspector::Assets {
             text(
                 canvas,
                 "Select a layer to edit",
-                app.width - RIGHT + 16.,
-                HEADER + 72.,
+                x,
+                HEADER + 75.,
                 13.,
                 MUTED,
                 &font,
@@ -371,12 +721,26 @@ fn render(app: &App, width: u32, height: u32, scale: f64) -> Result<Surface, Str
     canvas.save();
     canvas.clip_rect(rect(viewport), None, Some(false));
     if let Some(scene) = &app.scene {
+        let translations = app.drag_translations();
+        let paint = |canvas: &Canvas| {
+            paint_scene_preview(canvas, scene, &app.resources, &translations).map(|_| ())
+        };
+        let cached = if matches!(app.drag, Some(Drag::Move { .. })) || !translations.is_empty() {
+            None
+        } else {
+            let mut cache = app.scene_cache.borrow_mut();
+            match SceneCacheKey::new(app.scene_generation, viewport, scale, app.camera) {
+                Some(key) => Some(cache.paint(canvas, key, WORKSPACE, paint)),
+                None => {
+                    cache.clear();
+                    None
+                }
+            }
+        };
         canvas.translate((viewport.x as f32, viewport.y as f32));
         canvas.translate((app.camera.x as f32, app.camera.y as f32));
         canvas.scale((app.camera.zoom as f32, app.camera.zoom as f32));
-        if let Err(error) =
-            paint_scene_preview(canvas, scene, &app.resources, &app.drag_translations())
-        {
+        if let Err(error) = cached.unwrap_or_else(|| paint(canvas)) {
             text(
                 canvas,
                 &format!("Some content could not be rendered: {error}"),
@@ -459,7 +823,7 @@ fn render(app: &App, width: u32, height: u32, scale: f64) -> Result<Surface, Str
                     );
                     let mut p = Paint::default();
                     p.set_anti_alias(true);
-                    p.set_color(Color::from_argb(120, 151, 139, 236));
+                    p.set_color(Color::from_argb(60, 37, 99, 235));
                     if *tool == Tool::Ellipse {
                         canvas.draw_oval(rect(r), &p);
                     } else {
@@ -474,7 +838,7 @@ fn render(app: &App, width: u32, height: u32, scale: f64) -> Result<Surface, Str
                         (end.0 - origin.0).abs(),
                         (end.1 - origin.1).abs(),
                     );
-                    fill(canvas, r, Color::from_argb(30, 97, 81, 215));
+                    fill(canvas, r, Color::from_argb(30, 37, 99, 235));
                     stroke(canvas, r, ACCENT, line_width);
                 }
                 Drag::Pan { .. } | Drag::TextSelection => {}
@@ -506,61 +870,24 @@ fn render(app: &App, width: u32, height: u32, scale: f64) -> Result<Surface, Str
         );
     }
     canvas.restore();
+    selection_dimensions(canvas, app, viewport, &font);
+    if let Some(r) = palette_rect(app) {
+        round(
+            canvas,
+            Rect::new(r.x - 1., r.y + 2., r.width + 2., r.height + 1.),
+            Color::from_argb(20, 0, 0, 0),
+            13.,
+        );
+        round(canvas, r, LINE, 12.);
+        round(
+            canvas,
+            Rect::new(r.x + 1., r.y + 1., r.width - 2., r.height - 2.),
+            Color::WHITE,
+            11.,
+        );
+    }
     for control in &app.controls {
-        let color = if control.selected {
-            Color::from_rgb(235, 232, 255)
-        } else if control.field_value.is_some() {
-            Color::WHITE
-        } else {
-            Color::from_rgb(246, 247, 250)
-        };
-        round(canvas, control.rect, color, 6.);
-        if app.focus == control.id {
-            stroke(canvas, control.rect, ACCENT, 1.);
-        }
-        if let Some(value) = &control.field_value {
-            text(
-                canvas,
-                &control.label,
-                control.rect.x,
-                control.rect.y - 7.,
-                11.,
-                MUTED,
-                &font,
-            );
-            let value = app
-                .editing
-                .as_ref()
-                .and_then(|edit| {
-                    if let EditTarget::Property { property, .. } = &edit.target
-                        && let Action::Field(p) = &control.action
-                        && p == property
-                    {
-                        return Some(edit.buffer.display_text());
-                    }
-                    None
-                })
-                .unwrap_or_else(|| value.clone());
-            text(
-                canvas,
-                &shortened(&value, 25),
-                control.rect.x + 10.,
-                control.rect.y + 23.,
-                13.,
-                INK,
-                &font,
-            );
-        } else {
-            text(
-                canvas,
-                &control.label,
-                control.rect.x + 10.,
-                control.rect.y + control.rect.height * 0.5 + 4.5,
-                if control.id == 10 { 15. } else { 12. },
-                if control.selected { ACCENT } else { INK },
-                &font,
-            );
-        }
+        draw_control(canvas, app, control, &font);
     }
     if let Some(edit) = &app.editing {
         if !matches!(edit.target, EditTarget::Property { .. }) {
@@ -655,10 +982,11 @@ fn render(app: &App, width: u32, height: u32, scale: f64) -> Result<Surface, Str
         Rect::new(0., app.height - FOOTER, app.width, 1.),
         LINE,
     );
-    text(
+    control_text(
         canvas,
+        Rect::new(15., app.height - FOOTER, (app.width - 100.).max(0.), FOOTER),
         &app.status,
-        15.,
+        0.,
         app.height - 10.,
         11.,
         if app.pending { ACCENT } else { MUTED },
@@ -673,17 +1001,6 @@ fn render(app: &App, width: u32, height: u32, scale: f64) -> Result<Surface, Str
         MUTED,
         &font,
     );
-    if let Some(doc) = app.document() {
-        text(
-            canvas,
-            &format!("{} layers · revision {}", doc.nodes.len(), doc.sequence),
-            LEFT + 14.,
-            app.height - 10.,
-            11.,
-            MUTED,
-            &font,
-        );
-    }
     Ok(surface)
 }
 
@@ -733,4 +1050,39 @@ pub fn screenshot(app: &App, path: &Path) -> Result<(), String> {
         .encode(None, skia_safe::EncodedImageFormat::PNG, None)
         .ok_or("PNG encoding failed")?;
     std::fs::write(path, bytes.as_bytes()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_and_tools_fit_compact_and_standard_windows() {
+        for (width, height) in [(960., 640.), (1440., 900.)] {
+            let file_start = file_actions_x(width);
+            let visible: Vec<_> = tab_rects(width, 10, 8).collect();
+            assert!(visible.iter().any(|(index, _, _)| *index == 8));
+            let mut previous_end = TAB_START;
+            for (_, open, close) in visible {
+                assert!(open.x >= previous_end);
+                assert!(open.x + open.width <= close.x);
+                previous_end = close.x + close.width;
+                assert!(previous_end + STRIP_GAP <= file_start);
+                assert!(close.y + close.height <= HEADER);
+            }
+
+            let view = Rect::new(LEFT, HEADER, width - LEFT - RIGHT, height - HEADER - FOOTER);
+            let palette = palette(view).unwrap();
+            assert!(palette.x >= view.x && palette.x + palette.width <= view.x + view.width);
+            assert!(palette.y + palette.height <= view.y + view.height);
+            let mut previous_end = palette.x;
+            assert_eq!(palette_tools(palette).count(), 6);
+            for (_, _, tool) in palette_tools(palette) {
+                assert!(tool.x + 1e-9 >= previous_end);
+                assert!(tool.y >= palette.y && tool.y + tool.height <= palette.y + palette.height);
+                previous_end = tool.x + tool.width;
+                assert!(previous_end <= palette.x + palette.width);
+            }
+        }
+    }
 }
