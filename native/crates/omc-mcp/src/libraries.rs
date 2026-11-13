@@ -12,6 +12,14 @@ pub(crate) fn stable_id(kind: &str, library: &str, source: &str) -> String {
         )
     )
 }
+fn public_library(entry: &Value) -> Value {
+    let mut public = entry.clone();
+    if let Some(path) = entry["path"].as_str() {
+        public["path"] = json!(crate::figcraft_catalog::library_team::display_path(path));
+    }
+    public
+}
+
 impl ToolRouter {
     pub(crate) fn library_tool(
         &self,
@@ -24,7 +32,9 @@ impl ToolRouter {
         let entries = resources::catalogs(&snapshot.metadata, "libraries");
         let action = string(&args, "action")?;
         if action == "list" {
-            return Ok(json!({"ok":true,"libraries":entries.values().collect::<Vec<_>>()}));
+            return Ok(
+                json!({"ok":true,"libraries":entries.values().map(public_library).collect::<Vec<_>>()}),
+            );
         }
         let library_id = args["id"]
             .as_str()
@@ -34,7 +44,9 @@ impl ToolRouter {
             let entry = entries
                 .get(&library_id)
                 .ok_or_else(|| EngineError::invalid("library not found"))?;
-            return Ok(json!({"ok":true,"library":entry,"snapshot":entry["snapshot"]}));
+            return Ok(
+                json!({"ok":true,"library":public_library(entry),"snapshot":entry["snapshot"]}),
+            );
         }
         if action == "insert" {
             let library = entries
@@ -146,7 +158,7 @@ impl ToolRouter {
             mapping.insert(key.clone(), stable_id("node", &library_id, key));
         }
         let mut component_map = BTreeMap::new();
-        let mut definition_roots = BTreeSet::new();
+        let mut definition_roots = BTreeMap::new();
         for (key, component) in components {
             let main = component["mainId"]
                 .as_str()
@@ -155,8 +167,64 @@ impl ToolRouter {
             let native = mapping
                 .get(main)
                 .ok_or_else(|| EngineError::invalid("component definition object missing"))?;
-            definition_roots.insert(main.to_owned());
+            if definition_roots
+                .insert(main.to_owned(), component)
+                .is_some()
+            {
+                return Err(EngineError::invalid(
+                    "library components share a main object",
+                ));
+            }
             component_map.insert(key.clone(), native.clone());
+        }
+        let mut token_map = BTreeMap::new();
+        let mut collection_map = BTreeMap::new();
+        if let Some(collections) = source.get("collections").and_then(Value::as_object) {
+            for key in collections.keys() {
+                collection_map.insert(key.clone(), stable_id("collection", &library_id, key));
+            }
+            for (key, collection) in collections {
+                let mut patch = properties(collection)?;
+                patch.remove("id");
+                patch.insert("libraryId".into(), json!(library_id));
+                patch.insert("sourceCollectionId".into(), json!(key));
+                patch.insert("deleted".into(), json!(false));
+                commands.push(Command::DocumentMetadata {
+                    properties: patch
+                        .into_iter()
+                        .map(|(field, value)| {
+                            (
+                                format!("figcraftCollections/{}/{field}", collection_map[key]),
+                                value,
+                            )
+                        })
+                        .collect(),
+                });
+            }
+        }
+        if let Some(variables) = source.get("variables").and_then(Value::as_object) {
+            for key in variables.keys() {
+                token_map.insert(key.clone(), stable_id("token", &library_id, key));
+            }
+            for (key, variable) in variables {
+                let mut variable = variable.clone();
+                remap_token_refs(&mut variable, &token_map);
+                let collection = variable["collectionId"]
+                    .as_str()
+                    .and_then(|id| collection_map.get(id))
+                    .ok_or_else(|| EngineError::invalid("Library variable collection missing"))?;
+                variable["collectionId"] = json!(collection);
+                variable["libraryId"] = json!(library_id);
+                variable["sourceVariableId"] = json!(key);
+                variable["deleted"] = json!(false);
+                let mut patch = properties(&variable)?;
+                patch.remove("id");
+                commands.push(Command::CatalogSet {
+                    namespace: "tokens".into(),
+                    entity_id: token_map[key].clone(),
+                    properties: patch,
+                });
+            }
         }
         let mut style_map = BTreeMap::new();
         if let Some(styles) = source.get("styles").and_then(Value::as_object) {
@@ -164,13 +232,14 @@ impl ToolRouter {
                 style_map.insert(key.clone(), stable_id("style", &library_id, key));
             }
             for (key, style) in styles {
-                let value = style
+                let mut value = style
                     .get("value")
                     .or_else(|| style.get("paints"))
                     .or_else(|| style.get("text"))
                     .or_else(|| style.get("effects"))
                     .cloned()
                     .ok_or_else(|| EngineError::invalid("library style value missing"))?;
+                remap_token_refs(&mut value, &token_map);
                 commands.push(Command::CatalogSet{namespace:"styles".into(),entity_id:style_map[key].clone(),properties:properties(&json!({"name":style["name"],"type":style["type"],"value":value,"libraryId":library_id,"deleted":false}))?});
             }
         }
@@ -182,14 +251,14 @@ impl ToolRouter {
                 .iter()
                 .find(|key| {
                     let parent = objects[*key]["parentId"].as_str();
-                    definition_roots.contains(*key)
+                    definition_roots.contains_key(*key)
                         || parent.is_none_or(|p| !mapping.contains_key(p) || installed.contains(p))
                 })
                 .cloned()
                 .ok_or_else(|| EngineError::invalid("cyclic library objects"))?;
             remaining.remove(&key);
             let object = &objects[&key];
-            let kind = if definition_roots.contains(&key) {
+            let kind = if definition_roots.contains_key(&key) {
                 NodeKind::Component
             } else {
                 match object["type"]
@@ -216,7 +285,7 @@ impl ToolRouter {
             };
             let mut node = Node::new(kind);
             node.id = mapping[&key].clone();
-            node.parent_id = Some(if definition_roots.contains(&key) {
+            node.parent_id = Some(if definition_roots.contains_key(&key) {
                 container_id.clone()
             } else {
                 object["parentId"]
@@ -225,10 +294,16 @@ impl ToolRouter {
                     .cloned()
                     .unwrap_or(container_id.clone())
             });
-            node.rank = format!(
-                "{:032x}",
-                (installed.len() as u128 + 1) * (u64::MAX as u128)
-            );
+            node.rank = object["rank"]
+                .as_str()
+                .filter(|rank| omc_model::valid_rank(rank))
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    format!(
+                        "{:032x}",
+                        (installed.len() as u128 + 1) * (u64::MAX as u128)
+                    )
+                });
             node.properties = object
                 .as_object()
                 .ok_or_else(|| EngineError::invalid("library object must be an object"))?
@@ -239,6 +314,7 @@ impl ToolRouter {
                         "id" | "type"
                             | "kind"
                             | "parentId"
+                            | "rank"
                             | "childIds"
                             | "box"
                             | "inverseTransform"
@@ -251,6 +327,39 @@ impl ToolRouter {
                 node.properties
                     .extend(inner.iter().map(|(k, v)| (k.clone(), v.clone())));
                 node.properties.remove("properties");
+            }
+            for value in node.properties.values_mut() {
+                remap_token_refs(value, &token_map);
+            }
+            if let Some(modes) = node
+                .properties
+                .get_mut("figcraftVariableModes")
+                .and_then(Value::as_object_mut)
+            {
+                *modes = std::mem::take(modes)
+                    .into_iter()
+                    .map(|(id, value)| (collection_map.get(&id).cloned().unwrap_or(id), value))
+                    .collect();
+            }
+            if let Some(values) = node
+                .properties
+                .get_mut("componentProperties")
+                .and_then(Value::as_object_mut)
+            {
+                for value in values.values_mut() {
+                    if let Some(target) = value.as_str().and_then(|id| component_map.get(id)) {
+                        *value = json!(target);
+                    }
+                }
+            }
+            if let Some(component) = definition_roots.get(&key)
+                && let Some(properties) =
+                    component.get("properties").filter(|value| !value.is_null())
+            {
+                node.properties.insert(
+                    "componentPropertyDefinitions".into(),
+                    library_component_properties(properties, &component_map)?,
+                );
             }
             for reference in [
                 "fillStyleId",
@@ -370,7 +479,27 @@ impl ToolRouter {
                 commands.push(Command::NodeDelete { node_ids: obsolete });
             }
         }
-        commands.push(Command::CatalogSet{namespace:"libraries".into(),entity_id:library_id.clone(),properties:properties(&json!({"name":source.get("name"),"version":source.get("version"),"snapshot":source,"enabled":true,"componentMap":component_map,"nodeIds":native_ids,"containerId":container_id}))?});
+        let enabled = entries
+            .get(&library_id)
+            .and_then(|library| library["enabled"].as_bool())
+            .or_else(|| source.get("enabled").and_then(Value::as_bool))
+            .unwrap_or(true);
+        let path = args["_path"].as_str().map(str::to_owned).or_else(|| {
+            entries
+                .get(&library_id)
+                .and_then(|entry| entry["path"].as_str())
+                .map(str::to_owned)
+        });
+        commands.push(Command::CatalogSet {
+            namespace: "libraries".into(),
+            entity_id: library_id.clone(),
+            properties: properties(&json!({
+                "name":source.get("name"), "version":source.get("version"), "snapshot":source, "path":path,
+                "enabled":enabled, "deleted":false, "componentMap":component_map, "nodeIds":native_ids,
+                "containerId":container_id, "styleMap":style_map, "collectionMap":collection_map, "variableMap":token_map,
+            }))?,
+        });
+        crate::figcraft_catalog::variable_ops::sync_extensions(&snapshot, &mut commands)?;
         if commands.len() > 100 {
             return Err(EngineError::new(
                 "resource_limit",
@@ -389,9 +518,74 @@ impl ToolRouter {
     }
 }
 
+fn remap_token_refs(value: &mut Value, tokens: &BTreeMap<String, String>) {
+    match value {
+        Value::Object(fields) => {
+            if let Some(id) = fields
+                .get("$token")
+                .and_then(Value::as_str)
+                .and_then(|id| tokens.get(id))
+            {
+                fields.insert("$token".into(), json!(id));
+            }
+            for value in fields.values_mut() {
+                remap_token_refs(value, tokens);
+            }
+        }
+        Value::Array(items) => {
+            for value in items {
+                remap_token_refs(value, tokens);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn library_component_properties(
+    properties: &Value,
+    component_map: &BTreeMap<String, String>,
+) -> Result<Value> {
+    let properties = properties
+        .as_array()
+        .ok_or_else(|| EngineError::invalid("library component properties must be an array"))?;
+    if properties.len() > 200 {
+        return Err(EngineError::new(
+            "resource_limit",
+            "component property limit reached",
+        ));
+    }
+    let mut ids = BTreeSet::new();
+    let mut names = BTreeSet::new();
+    let mut definitions = Vec::with_capacity(properties.len());
+    for property in properties {
+        let id = string(property, "id")?;
+        let name = string(property, "name")?;
+        if !ids.insert(id) || !names.insert(name) {
+            return Err(EngineError::invalid("duplicate library component property"));
+        }
+        let kind = string(property, "type")?;
+        let default =
+            match (kind, &property["default"]) {
+                ("text", Value::String(text)) => json!(text),
+                ("boolean", Value::Bool(value)) => json!(value),
+                ("swap", Value::String(source)) if source.is_empty() => json!(""),
+                ("swap", Value::String(source)) => json!(component_map.get(source).ok_or_else(
+                    || EngineError::invalid("library component swap target missing")
+                )?),
+                _ => {
+                    return Err(EngineError::invalid(
+                        "invalid library component property default",
+                    ));
+                }
+            };
+        definitions.push(json!({"id":id,"name":name,"type":kind,"default":default}));
+    }
+    Ok(Value::Array(definitions))
+}
+
 // Library text uses the same character operations as local editing. Keeping the
 // characters when only marks change preserves relative comment/selection anchors.
-fn update_text(old: &Node, node: &Node, commands: &mut Vec<Command>) -> Result<()> {
+pub(crate) fn update_text(old: &Node, node: &Node, commands: &mut Vec<Command>) -> Result<()> {
     node.validate().map_err(EngineError::invalid)?;
     let text = node.string("text").unwrap_or("");
     let changed = old.string("text").unwrap_or("") != text;

@@ -1,12 +1,17 @@
 //! Deterministic outputs from one explicit immutable document revision.
 mod code;
 mod code_context;
+mod platform_code;
+mod print_pdf;
+mod vector_drawable;
 use base64::Engine;
-pub use code::{export_html, export_react};
+pub use code::{export_html, export_react, inspect_web};
 use omc_model::{DocumentContent, DocumentSnapshot};
 use omc_render::{RasterFormat, RenderOptions, ResourceProvider};
-use omc_scene::{SceneOptions, build_scene};
+use omc_scene::{SceneOptions, build_scene_in_color_profile};
 use omc_style::Diagnostic;
+pub use platform_code::{inspect_platform, platform_property};
+pub use print_pdf::PdfPrintOptions;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -22,6 +27,16 @@ pub struct ExportOptions {
     pub scale: f64,
     pub time_ms: f64,
     pub quality: u32,
+    #[serde(default)]
+    pub display_p3: bool,
+    #[serde(default)]
+    pub svg_outline_text: bool,
+    #[serde(default)]
+    pub svg_outline_strokes: bool,
+    #[serde(default)]
+    pub vector_drawable_compat: Option<String>,
+    #[serde(default)]
+    pub pdf_print: PdfPrintOptions,
     pub strict: bool,
     pub max_surface_bytes: usize,
 }
@@ -35,6 +50,11 @@ impl Default for ExportOptions {
             scale: 1.,
             time_ms: 0.,
             quality: 90,
+            display_p3: false,
+            svg_outline_text: false,
+            svg_outline_strokes: false,
+            vector_drawable_compat: None,
+            pdf_print: PdfPrintOptions::default(),
             strict: true,
             max_surface_bytes: 256 * 1024 * 1024,
         }
@@ -69,114 +89,171 @@ pub fn export(
     options: &ExportOptions,
     resources: &dyn ResourceProvider,
 ) -> Result<ExportArtifact, ExportError> {
-    let (bytes, media_type, extension, diagnostics) =
-        match options.format.to_ascii_lowercase().as_str() {
-            "omc" | "native" | "json" => (
-                export_native(snapshot, resources)?,
-                "application/vnd.ohmycanvas.native+json",
-                "omc",
-                Vec::new(),
-            ),
-            "html" => {
-                let (source, diagnostics) = export_html(snapshot, options.page_id.as_deref())?;
-                let (source, diagnostics) = embed_source_assets(source, diagnostics, resources)?;
-                (source.into_bytes(), "text/html", "html", diagnostics)
-            }
-            "react" | "jsx" => {
-                let (source, diagnostics) =
-                    export_react(snapshot, options.page_id.as_deref(), false)?;
-                let (source, diagnostics) = embed_source_assets(source, diagnostics, resources)?;
-                (source.into_bytes(), "text/jsx", "jsx", diagnostics)
-            }
-            "tailwind" => {
-                let (source, diagnostics) =
-                    export_react(snapshot, options.page_id.as_deref(), true)?;
-                let (source, diagnostics) = embed_source_assets(source, diagnostics, resources)?;
-                (source.into_bytes(), "text/jsx", "jsx", diagnostics)
-            }
-            format => {
-                let scene = build_scene(
-                    snapshot,
-                    &SceneOptions {
-                        page_id: options.page_id.clone(),
-                        width: options.width,
-                        height: options.height,
-                        time_ms: options.time_ms,
-                        strict: options.strict,
-                    },
-                )?;
-                let render_options = RenderOptions {
-                    scale: options.scale,
-                    background: None,
-                    max_surface_bytes: options.max_surface_bytes,
-                };
-                let mut diagnostics = scene.diagnostics.clone();
-                let (bytes, media_type, extension) = match format {
-                    "png" => {
-                        let (b, d) = omc_render::render_encoded_with_diagnostics(
+    let (bytes, media_type, extension, diagnostics) = match options
+        .format
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "omc" | "native" | "json" => (
+            export_native(snapshot, resources)?,
+            "application/vnd.ohmycanvas.native+json",
+            "omc",
+            Vec::new(),
+        ),
+        "html" => {
+            let (source, diagnostics) = export_html(snapshot, options.page_id.as_deref())?;
+            let (source, diagnostics) = embed_source_assets(source, diagnostics, resources)?;
+            (source.into_bytes(), "text/html", "html", diagnostics)
+        }
+        "react" | "jsx" => {
+            let (source, diagnostics) = export_react(snapshot, options.page_id.as_deref(), false)?;
+            let (source, diagnostics) = embed_source_assets(source, diagnostics, resources)?;
+            (source.into_bytes(), "text/jsx", "jsx", diagnostics)
+        }
+        "tailwind" => {
+            let (source, diagnostics) = export_react(snapshot, options.page_id.as_deref(), true)?;
+            let (source, diagnostics) = embed_source_assets(source, diagnostics, resources)?;
+            (source.into_bytes(), "text/jsx", "jsx", diagnostics)
+        }
+        format => {
+            let profile = if matches!(format, "png" | "jpg" | "jpeg" | "webp") {
+                omc_style::ColorProfile::from_metadata(&snapshot.metadata)
+            } else {
+                omc_style::ColorProfile::Srgb
+            };
+            let mut scene = build_scene_in_color_profile(
+                snapshot,
+                &SceneOptions {
+                    page_id: options.page_id.clone(),
+                    width: options.width,
+                    height: options.height,
+                    time_ms: options.time_ms,
+                    strict: options.strict,
+                },
+                profile,
+            )?;
+            let render_options = RenderOptions {
+                scale: options.scale,
+                background: None,
+                max_surface_bytes: options.max_surface_bytes,
+            };
+            let mut diagnostics = scene.diagnostics.clone();
+            let (bytes, media_type, extension) = match format {
+                "png" => {
+                    let (b, d) = omc_render::render_encoded_with_profile(
+                        &scene,
+                        &render_options,
+                        resources,
+                        RasterFormat::Png,
+                        options.quality,
+                        options.display_p3,
+                    )?;
+                    diagnostics = d;
+                    (b, "image/png", "png")
+                }
+                "jpeg" | "jpg" => {
+                    let (b, d) = omc_render::render_encoded_with_profile(
+                        &scene,
+                        &RenderOptions {
+                            background: Some([1., 1., 1., 1.]),
+                            ..render_options
+                        },
+                        resources,
+                        RasterFormat::Jpeg,
+                        options.quality,
+                        options.display_p3,
+                    )?;
+                    diagnostics = d;
+                    (b, "image/jpeg", "jpg")
+                }
+                "webp" => {
+                    let (b, d) = omc_render::render_encoded_with_profile(
+                        &scene,
+                        &render_options,
+                        resources,
+                        RasterFormat::Webp,
+                        options.quality,
+                        options.display_p3,
+                    )?;
+                    diagnostics = d;
+                    (b, "image/webp", "webp")
+                }
+                "pdf" => {
+                    let (b, d) = if options.pdf_print == PdfPrintOptions::default() {
+                        omc_render::render_pdf_with_diagnostics(&scene, resources)?
+                    } else {
+                        print_pdf::export(
                             &scene,
-                            &render_options,
                             resources,
-                            RasterFormat::Png,
-                            options.quality,
-                        )?;
-                        diagnostics = d;
-                        (b, "image/png", "png")
+                            options.pdf_print,
+                            options.max_surface_bytes,
+                        )?
+                    };
+                    diagnostics = d;
+                    (b, "application/pdf", "pdf")
+                }
+                "svg" | "xml" => {
+                    if scene
+                        .items
+                        .iter()
+                        .any(|i| i.style.get("filter").is_some_and(|f| f != "none"))
+                    {
+                        return Err(ExportError::Unsupported(
+                            "SVG filter conversion requires an explicit rasterization policy"
+                                .into(),
+                        ));
                     }
-                    "jpeg" | "jpg" => {
-                        let (b, d) = omc_render::render_encoded_with_diagnostics(
-                            &scene,
-                            &RenderOptions {
-                                background: Some([1., 1., 1., 1.]),
-                                ..render_options
-                            },
-                            resources,
-                            RasterFormat::Jpeg,
-                            options.quality,
-                        )?;
-                        diagnostics = d;
-                        (b, "image/jpeg", "jpg")
+                    if !options.scale.is_finite() || !(0. < options.scale && options.scale <= 64.) {
+                        return Err(ExportError::Invalid(
+                            "SVG scale must be greater than 0 and at most 64".into(),
+                        ));
                     }
-                    "webp" => {
-                        let (b, d) = omc_render::render_encoded_with_diagnostics(
-                            &scene,
-                            &render_options,
-                            resources,
-                            RasterFormat::Webp,
-                            options.quality,
-                        )?;
-                        diagnostics = d;
-                        (b, "image/webp", "webp")
-                    }
-                    "pdf" => {
-                        let (b, d) = omc_render::render_pdf_with_diagnostics(&scene, resources)?;
-                        diagnostics = d;
-                        (b, "application/pdf", "pdf")
-                    }
-                    "svg" => {
-                        if scene
-                            .items
-                            .iter()
-                            .any(|i| i.style.get("filter").is_some_and(|f| f != "none"))
-                        {
-                            return Err(ExportError::Unsupported(
-                                "SVG filter conversion requires an explicit rasterization policy"
-                                    .into(),
-                            ));
+                    if options.svg_outline_strokes {
+                        for item in &mut scene.items {
+                            item.properties
+                                .insert("_svgOutlineStroke".into(), json!(true));
                         }
-                        let canvas = skia_safe::svg::Canvas::new(
-                            skia_safe::Rect::from_wh(scene.width as f32, scene.height as f32),
-                            None,
-                        );
-                        diagnostics.extend(omc_render::paint_scene(&canvas, &scene, resources)?);
-                        let bytes = canvas.end().as_bytes().to_vec();
+                    }
+                    let canvas = skia_safe::svg::Canvas::new(
+                        skia_safe::Rect::from_wh(
+                            (scene.width * options.scale) as f32,
+                            (scene.height * options.scale) as f32,
+                        ),
+                        (format == "xml" || options.svg_outline_text)
+                            .then_some(skia_safe::svg::canvas::Flags::CONVERT_TEXT_TO_PATHS),
+                    );
+                    canvas.scale((options.scale as f32, options.scale as f32));
+                    diagnostics.extend(omc_render::paint_scene(&canvas, &scene, resources)?);
+                    let bytes = canvas.end().as_bytes().to_vec();
+                    if format == "xml" {
+                        let (drawable, warnings) = vector_drawable::convert(
+                            &bytes,
+                            scene.width * options.scale,
+                            scene.height * options.scale,
+                            options
+                                .vector_drawable_compat
+                                .as_deref()
+                                .unwrap_or("bestEffort"),
+                        )?;
+                        diagnostics.extend(warnings.into_iter().map(|warning| Diagnostic {
+                            code: "vector_drawable_compatibility".into(),
+                            severity: "warning".into(),
+                            node_id: None,
+                            property: None,
+                            original: warning.clone(),
+                            action: warning,
+                            fidelity_lost: false,
+                        }));
+                        (drawable, "application/xml", "xml")
+                    } else {
                         (bytes, "image/svg+xml", "svg")
                     }
-                    _ => return Err(ExportError::Unsupported(format.into())),
-                };
-                (bytes, media_type, extension, diagnostics)
-            }
-        };
+                }
+                _ => return Err(ExportError::Unsupported(format.into())),
+            };
+            (bytes, media_type, extension, diagnostics)
+        }
+    };
     if options.strict && diagnostics.iter().any(|d| d.fidelity_lost) {
         return Err(ExportError::Unsupported(
             diagnostics
@@ -238,7 +315,7 @@ pub fn export_native(
                 "asset checksum mismatch: {hash}"
             )));
         }
-        let media = media_type(&bytes).ok_or_else(|| {
+        let media = native_asset_media_type(&bytes).ok_or_else(|| {
             ExportError::Unsupported(format!("unknown portable asset type: {hash}"))
         })?;
         assets.push(json!({"hash":hash,"mediaType":media,"byteLength":bytes.len(),"base64":base64::engine::general_purpose::STANDARD.encode(bytes)}));
@@ -246,7 +323,7 @@ pub fn export_native(
     serde_json::to_vec(&json!({"format":"omc.native/1","purpose":"independent-editable-copy","sourceRevision":{"epoch":snapshot.epoch,"sequence":snapshot.sequence.to_string()},"contentSha256":content_digest,"content":content,"assets":assets})).map_err(|e|ExportError::Invalid(e.to_string()))
 }
 
-fn media_type(bytes: &[u8]) -> Option<&'static str> {
+pub fn native_asset_media_type(bytes: &[u8]) -> Option<&'static str> {
     Some(if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         "image/png"
     } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
@@ -287,7 +364,7 @@ fn embed_source_assets(
                 "invalid or excessive asset: {hash}"
             )));
         }
-        let media = media_type(&bytes)
+        let media = native_asset_media_type(&bytes)
             .filter(|m| m.starts_with("image/"))
             .ok_or_else(|| ExportError::Resource(format!("invalid image asset: {hash}")))?;
         let pattern = format!("src=\"assets/{hash}\"");
@@ -355,6 +432,7 @@ fn digest(bytes: &[u8]) -> String {
 }
 
 fn collect_hashes(key: &str, value: &Value, hashes: &mut BTreeSet<String>) {
+    let key = key.rsplit('/').next().unwrap_or(key);
     match value {
         Value::String(hash)
             if matches!(
@@ -379,4 +457,10 @@ fn collect_hashes(key: &str, value: &Value, hashes: &mut BTreeSet<String>) {
         }
         _ => (),
     }
+}
+
+pub fn native_resource_hashes(value: &Value) -> BTreeSet<String> {
+    let mut hashes = BTreeSet::new();
+    collect_hashes("", value, &mut hashes);
+    hashes
 }

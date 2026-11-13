@@ -4216,7 +4216,7 @@
   },
   {
     "name": "import_document",
-    "description": "Import .omc or canvas JSON from a bounded payload or explicit absolute local file path; .fig and .sketch require filePath without a dialog. Opening stays in the background by default.",
+    "description": "Import editable HTML with design CSS, .omc, or canvas JSON from a bounded payload or explicit absolute local file path; .fig and .sketch require filePath without a dialog. Opening stays in the background by default.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4225,6 +4225,7 @@
           "enum": [
             "omc",
             "json",
+            "html",
             "fig",
             "sketch"
           ]
@@ -4235,6 +4236,9 @@
             "merge",
             "copy"
           ]
+        },
+        "strict": {
+          "type": "boolean"
         },
         "payload": {
           "type": "string"
@@ -4262,7 +4266,7 @@
   },
   {
     "name": "export_document",
-    "description": "Export a targeted canvas to typed content or an explicit absolute file path. Existing files are preserved unless overwrite is explicitly true.",
+    "description": "Export a targeted canvas to typed content or an explicit absolute file path. For OMC, mode merge exports the native causal history. Existing files are preserved unless overwrite is explicitly true.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4292,6 +4296,10 @@
         },
         "overwrite": {
           "type": "boolean"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["merge", "copy"]
         },
         "ids": {
           "type": "array",

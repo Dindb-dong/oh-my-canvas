@@ -26,15 +26,17 @@ pub fn catalog_entities(snapshot: &DocumentSnapshot, namespace: &str) -> BTreeMa
     entities
 }
 
-pub struct ReferenceContext {
+pub struct ReferenceContext<'a> {
+    snapshot: &'a DocumentSnapshot,
     styles: BTreeMap<String, Value>,
     tokens: BTreeMap<String, Value>,
     active_mode: Option<String>,
 }
 
-impl ReferenceContext {
-    pub fn new(snapshot: &DocumentSnapshot) -> Self {
+impl<'a> ReferenceContext<'a> {
+    pub fn new(snapshot: &'a DocumentSnapshot) -> Self {
         Self {
+            snapshot,
             styles: catalog_entities(snapshot, "styles"),
             tokens: catalog_entities(snapshot, "tokens"),
             active_mode: snapshot
@@ -45,12 +47,16 @@ impl ReferenceContext {
         }
     }
 
+    pub fn resolve_value(&self, value: &Value, node: Option<&Node>) -> Result<Value, String> {
+        self.resolve(value, node, &mut BTreeSet::new(), 0)
+    }
+
     pub fn token_variables(&self) -> (BTreeMap<String, String>, Vec<Diagnostic>) {
         let mut variables = BTreeMap::new();
         let mut diagnostics = Vec::new();
         for (id, token) in &self.tokens {
             let name = token.get("name").and_then(Value::as_str).unwrap_or(id);
-            match self.token(id, &mut BTreeSet::new(), 0) {
+            match self.token(id, None, &mut BTreeSet::new(), 0) {
                 Ok(value) => {
                     if let Some(value) = css_value(&value) {
                         variables.insert(format!("--{}", name.trim_start_matches("--")), value);
@@ -140,8 +146,80 @@ impl ReferenceContext {
                 properties.remove(stack);
             }
         }
+        if let Some(bindings) = node
+            .properties
+            .get("figcraftVariableBindings")
+            .and_then(Value::as_object)
+        {
+            for (field, reference) in bindings {
+                if field == "text"
+                    && node.kind == omc_model::NodeKind::Text
+                    && reference.get("$token").is_some()
+                {
+                    match self.resolve(reference, Some(node), &mut BTreeSet::new(), 0) {
+                        Ok(Value::String(text)) => {
+                            if properties.get("text").and_then(Value::as_str) != Some(&text) {
+                                properties.remove("textRuns");
+                            }
+                            properties.insert("text".into(), json!(text));
+                        }
+                        Ok(_) => diagnostics.push(reference_diagnostic(
+                            Some(&node.id),
+                            "text",
+                            &reference.to_string(),
+                            "Text field resolved to a nontext value",
+                        )),
+                        Err(reason) => diagnostics.push(reference_diagnostic(
+                            Some(&node.id),
+                            "text",
+                            &reference.to_string(),
+                            &reason,
+                        )),
+                    }
+                }
+                if matches!(
+                    field.as_str(),
+                    "width"
+                        | "height"
+                        | "fontSize"
+                        | "strokeWidth"
+                        | "opacity"
+                        | "cornerRadius"
+                        | "fontWeight"
+                        | "lineHeight"
+                        | "letterSpacing"
+                        | "wordSpacing"
+                ) && reference.get("$token").is_some()
+                {
+                    match self.resolve(reference, Some(node), &mut BTreeSet::new(), 0) {
+                        Ok(value) if value.is_number() => {
+                            let value = if field == "opacity" {
+                                json!((value.as_f64().unwrap() / 100.).clamp(0., 1.))
+                            } else if matches!(field.as_str(), "letterSpacing" | "wordSpacing") {
+                                value
+                            } else {
+                                json!(value.as_f64().unwrap().max(0.))
+                            };
+                            properties.insert(field.clone(), value);
+                        }
+                        Ok(_) => diagnostics.push(reference_diagnostic(
+                            Some(&node.id),
+                            field,
+                            &reference.to_string(),
+                            "Numeric field resolved to a nonnumeric value",
+                        )),
+                        Err(reason) => diagnostics.push(reference_diagnostic(
+                            Some(&node.id),
+                            field,
+                            &reference.to_string(),
+                            &reason,
+                        )),
+                    }
+                }
+            }
+        }
         for (key, value) in &mut properties {
-            match self.resolve(value, &mut BTreeSet::new(), 0) {
+            match self.resolve(value, Some(node), &mut BTreeSet::new(), 0) {
                 Ok(resolved) => *value = resolved,
                 Err(reason) => diagnostics.push(reference_diagnostic(
                     Some(&node.id),
@@ -151,11 +229,38 @@ impl ReferenceContext {
                 )),
             }
         }
-        normalize(&mut properties, &node.id, &mut diagnostics);
+        normalize(&mut properties);
         (properties, diagnostics)
     }
 
-    fn token(&self, id: &str, seen: &mut BTreeSet<String>, depth: usize) -> Result<Value, String> {
+    fn mode_for(&self, node: &Node, collection: &str) -> Option<String> {
+        let mut current = Some(node);
+        // Cap traversal for unvalidated readers as with layout.
+        for _ in 0..512 {
+            let node = current?;
+            if let Some(mode) = node
+                .properties
+                .get("figcraftVariableModes")
+                .and_then(|modes| modes.get(collection))
+                .and_then(Value::as_str)
+            {
+                return Some(mode.to_owned());
+            }
+            current = node
+                .parent_id
+                .as_ref()
+                .and_then(|id| self.snapshot.nodes.get(id));
+        }
+        None
+    }
+
+    fn token(
+        &self,
+        id: &str,
+        node: Option<&Node>,
+        seen: &mut BTreeSet<String>,
+        depth: usize,
+    ) -> Result<Value, String> {
         if depth > 32 || !seen.insert(id.to_owned()) {
             return Err("Token reference cycle or depth limit".into());
         }
@@ -163,15 +268,18 @@ impl ReferenceContext {
             .tokens
             .get(id)
             .ok_or_else(|| format!("Missing token {id}"))?;
-        let mode = token
-            .get("activeMode")
-            .and_then(Value::as_str)
+        let inherited = node
+            .zip(token.get("collectionId").and_then(Value::as_str))
+            .and_then(|(node, collection)| self.mode_for(node, collection));
+        let mode = inherited
+            .as_deref()
+            .or_else(|| token.get("activeMode").and_then(Value::as_str))
             .or(self.active_mode.as_deref());
         let value = mode
             .and_then(|mode| token.get("modes").and_then(|m| m.get(mode)))
             .or_else(|| token.get("value"))
             .ok_or_else(|| format!("Token {id} has no value for the active mode"))?;
-        let result = self.resolve(value, seen, depth + 1);
+        let result = self.resolve(value, node, seen, depth + 1);
         seen.remove(id);
         result
     }
@@ -179,6 +287,7 @@ impl ReferenceContext {
     fn resolve(
         &self,
         value: &Value,
+        node: Option<&Node>,
         seen: &mut BTreeSet<String>,
         depth: usize,
     ) -> Result<Value, String> {
@@ -186,17 +295,50 @@ impl ReferenceContext {
             return Err("Reference nesting limit".into());
         }
         if let Some(id) = value.get("$token").and_then(Value::as_str) {
-            return self.token(id, seen, depth + 1);
+            return self.token(id, node, seen, depth + 1);
+        }
+        let color = |value: &Value| {
+            value
+                .as_str()
+                .and_then(crate::parse_color)
+                .ok_or_else(|| "Color variable calculation resolved to a non-color".to_owned())
+        };
+        let fraction = |value: &Value| {
+            value
+                .as_f64()
+                .filter(|f| (0. ..=1.).contains(f))
+                .map(|f| f as f32)
+                .ok_or_else(|| "Invalid color variable fraction".to_owned())
+        };
+        if let Some(alpha) = value.get("$colorAlpha") {
+            let mut color = color(&self.resolve(&alpha["color"], node, seen, depth + 1)?)?;
+            color.a = fraction(&alpha["opacity"])?;
+            return Ok(json!(color.hex()));
+        }
+        if let Some(mix) = value.get("$colorMix") {
+            let a = color(&self.resolve(&mix["from"], node, seen, depth + 1)?)?;
+            let b = color(&self.resolve(&mix["to"], node, seen, depth + 1)?)?;
+            let t = fraction(&mix["t"])?;
+            let blend = |a: f32, b: f32| (b - a) * t + a;
+            return Ok(json!(
+                crate::Color {
+                    r: blend(a.r, b.r),
+                    g: blend(a.g, b.g),
+                    b: blend(a.b, b.b),
+                    a: blend(a.a, b.a),
+                }
+                .hex()
+            ));
         }
         match value {
             Value::Array(values) => values
                 .iter()
-                .map(|v| self.resolve(v, seen, depth + 1))
+                .map(|v| self.resolve(v, node, seen, depth + 1))
                 .collect::<Result<Vec<_>, _>>()
                 .map(Value::Array),
             Value::Object(values) => values
                 .iter()
-                .map(|(k, v)| Ok((k.clone(), self.resolve(v, seen, depth + 1)?)))
+                .map(|(k, v)| Ok((k.clone(), self.resolve(v, node, seen, depth + 1)?)))
                 .collect::<Result<Map<_, _>, String>>()
                 .map(Value::Object),
             _ => Ok(value.clone()),
@@ -221,7 +363,31 @@ fn reference_diagnostic(
     }
 }
 
-fn normalize(properties: &mut Properties, id: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn normalize(properties: &mut Properties) {
+    if properties.get("figcraftBoundEffects") == Some(&Value::Bool(true))
+        && let Some(effects) = properties.get("effects").and_then(Value::as_array)
+    {
+        let shadows = effects
+            .iter()
+            .filter(|effect| matches!(effect["type"].as_str(), Some("dropShadow" | "innerShadow")))
+            .cloned()
+            .collect::<Vec<_>>();
+        let blur = |kind: &str| {
+            effects
+                .iter()
+                .filter(|effect| effect["type"] == kind && effect["visible"] != false)
+                .filter_map(|effect| effect["radius"].as_f64())
+                .map(|radius| radius * radius)
+                .sum::<f64>()
+                .sqrt()
+                .min(256.)
+        };
+        let layer = blur("layerBlur");
+        let background = blur("backgroundBlur");
+        properties.insert("shadows".into(), json!(shadows));
+        properties.insert("blur".into(), json!(layer));
+        properties.insert("backgroundBlur".into(), json!(background));
+    }
     if properties.get("hidden") == Some(&Value::Bool(true)) {
         properties.insert("visible".into(), json!(false));
     }
@@ -365,18 +531,6 @@ fn normalize(properties: &mut Properties, id: &str, diagnostics: &mut Vec<Diagno
                 .entry("filter")
                 .or_insert(json!(format!("blur({blur}px)")));
         }
-    }
-    if properties
-        .get("backgroundBlur")
-        .and_then(Value::as_f64)
-        .is_some_and(|v| v > 0.)
-        && properties.get("backgroundBlurHidden") != Some(&Value::Bool(true))
-    {
-        diagnostics.push(Diagnostic::unsupported(
-            Some(id),
-            Some("backgroundBlur"),
-            "Backdrop blur requires a backdrop-dependent render group",
-        ));
     }
     if !style.is_empty() {
         properties.insert("style".into(), Value::Object(style));

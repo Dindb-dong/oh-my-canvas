@@ -43,23 +43,44 @@ pub fn resolve_components<'a>(
     for values in children.values_mut() {
         values.sort_by(|a, b| a.rank.cmp(&b.rank).then(a.id.cmp(&b.id)));
     }
-    let mut pending = vec![root];
+    let mut pending = vec![(root, None)];
     let mut seen = BTreeSet::new();
     let mut instances = Vec::new();
-    while let Some(id) = pending.pop() {
+    let mut bindings = Vec::new();
+    while let Some((id, owner)) = pending.pop() {
         if !seen.insert(id) {
             continue;
         }
-        if let Some(node) = snapshot.nodes.get(id) {
-            if node.kind == NodeKind::Instance && node.properties.contains_key("componentId") {
-                instances.push(node.clone());
+        let Some(node) = snapshot.nodes.get(id) else {
+            continue;
+        };
+        if node.properties.contains_key("slotContentFor") {
+            continue;
+        }
+        let owner = if node.kind == NodeKind::Component {
+            Some(node)
+        } else {
+            owner
+        };
+        if let Some(owner) = owner
+            && node.properties.contains_key("componentPropertyRefs")
+        {
+            let mut bound = node.clone();
+            apply_bindings(&mut bound, node, owner, None, None);
+            if bound.properties != node.properties {
+                bindings.push(bound.clone());
             }
+            if node.kind == NodeKind::Instance && bound.properties.contains_key("componentId") {
+                instances.push(bound);
+            }
+        } else if node.kind == NodeKind::Instance && node.properties.contains_key("componentId") {
+            instances.push(node.clone());
         }
         if let Some(nodes) = children.get(id) {
-            pending.extend(nodes.iter().map(|n| n.id.as_str()));
+            pending.extend(nodes.iter().map(|n| (n.id.as_str(), owner)));
         }
     }
-    if instances.is_empty() {
+    if instances.is_empty() && bindings.is_empty() {
         return ComponentProjection {
             snapshot: Cow::Borrowed(snapshot),
             diagnostics: Vec::new(),
@@ -67,6 +88,9 @@ pub fn resolve_components<'a>(
     }
     let mut output = snapshot.clone();
     let mut diagnostics = Vec::new();
+    for bound in bindings {
+        output.nodes.insert(bound.id.clone(), bound);
+    }
     for node in instances {
         expand(
             &node,
@@ -124,6 +148,11 @@ fn expand(
         .properties
         .get("overrides")
         .and_then(Value::as_object);
+    let property_values = instance
+        .properties
+        .get("componentProperties")
+        .or_else(|| instance.properties.get("propertyValues"))
+        .and_then(Value::as_object);
     let mut projected = instance.clone();
     let mut properties = definition.properties.clone();
     properties.remove("x");
@@ -132,17 +161,46 @@ fn expand(
         .and_then(|o| o.get(definition_id))
         .and_then(Value::as_object)
     {
-        properties.extend(root_overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+        apply_overrides(&mut properties, root_overrides);
     }
     properties.extend(instance.properties.clone());
     properties.remove("componentId");
     properties.insert("sourceComponentId".into(), json!(definition_id));
     projected.properties = properties;
+    apply_bindings(
+        &mut projected,
+        definition,
+        definition,
+        property_values,
+        overrides
+            .and_then(|rows| rows.get(definition_id))
+            .and_then(Value::as_object),
+    );
     output.nodes.insert(projected.id.clone(), projected.clone());
+    if let Some(nodes) = children.get(instance.id.as_str()) {
+        for child in nodes
+            .iter()
+            .filter(|node| node.properties.contains_key("slotContentFor"))
+        {
+            output.nodes.remove(&child.id);
+        }
+    }
+    let mut anchor = instance;
+    while !source.nodes.contains_key(&anchor.id) {
+        let Some(ancestor) = anchor
+            .string("instanceId")
+            .and_then(|id| output.nodes.get(id))
+        else {
+            break;
+        };
+        anchor = ancestor;
+    }
+    let anchor = (anchor.id != instance.id).then(|| anchor.id.clone());
     let mut pending: Vec<(&Node, String, usize)> = children
         .get(definition_id)
         .into_iter()
         .flatten()
+        .filter(|node| !node.properties.contains_key("slotContentFor"))
         .map(|n| (*n, instance.id.clone(), depth + 1))
         .collect();
     while let Some((node, parent, level)) = pending.pop() {
@@ -158,14 +216,19 @@ fn expand(
         clone.id = derived_id(&instance.id, &node.id);
         clone.parent_id = Some(parent);
         clone.home_shard = instance.home_shard.clone();
-        if let Some(overrides) = overrides
+        let node_overrides = overrides
             .and_then(|o| o.get(&node.id))
-            .and_then(Value::as_object)
-        {
-            clone
-                .properties
-                .extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+            .and_then(Value::as_object);
+        if let Some(overrides) = node_overrides {
+            apply_overrides(&mut clone.properties, overrides);
         }
+        apply_bindings(
+            &mut clone,
+            node,
+            definition,
+            property_values,
+            node_overrides,
+        );
         clone
             .properties
             .insert("sourceNodeId".into(), json!(node.id));
@@ -183,15 +246,167 @@ fn expand(
                 diagnostics,
                 depth + 1,
             );
-        } else if let Some(descendants) = children.get(node.id.as_str()) {
-            pending.extend(
-                descendants
-                    .iter()
-                    .map(|child| (*child, clone.id.clone(), level + 1)),
-            );
+        } else {
+            let slot = node.properties.get("slotPropertyId").is_some();
+            let scoped_replacement = slot
+                && anchor.as_ref().is_some_and(|id| {
+                    let key = format!("{}/{}", instance.id, node.id);
+                    source.nodes[id]
+                        .properties
+                        .get("slotReplacements")
+                        .and_then(|items| items.get(key))
+                        == Some(&Value::Bool(true))
+                });
+            let replace = scoped_replacement
+                || (slot
+                    && instance
+                        .properties
+                        .get("slotReplacements")
+                        .and_then(|items| items.get(&node.id))
+                        == Some(&Value::Bool(true)));
+            if !replace {
+                if let Some(descendants) = children.get(node.id.as_str()) {
+                    pending.extend(
+                        descendants
+                            .iter()
+                            .filter(|child| !child.properties.contains_key("slotContentFor"))
+                            .map(|child| (*child, clone.id.clone(), level + 1)),
+                    );
+                }
+            }
+            if slot {
+                let owner = instance.string("sourceNodeId").unwrap_or(&instance.id);
+                let defaults = children
+                    .get(owner)
+                    .into_iter()
+                    .flatten()
+                    .filter(|child| {
+                        !scoped_replacement && child.string("slotInstanceFor").is_none()
+                    })
+                    .map(|child| (*child, owner != instance.id));
+                let edits = anchor
+                    .as_ref()
+                    .and_then(|id| children.get(id.as_str()))
+                    .into_iter()
+                    .flatten()
+                    .filter(|child| child.string("slotInstanceFor") == Some(&instance.id))
+                    .map(|child| (*child, false));
+                for (custom, derive) in defaults
+                    .chain(edits)
+                    .filter(|(child, _)| child.string("slotContentFor") == Some(&node.id))
+                {
+                    let mut placed = (*custom).clone();
+                    if derive {
+                        placed.id = derived_id(&instance.id, &custom.id);
+                        placed
+                            .properties
+                            .insert("sourceNodeId".into(), json!(custom.id));
+                    }
+                    placed
+                        .properties
+                        .insert("instanceId".into(), json!(instance.id));
+                    placed.parent_id = Some(clone.id.clone());
+                    placed.home_shard = instance.home_shard.clone();
+                    output.nodes.insert(placed.id.clone(), placed.clone());
+                    if placed.kind == NodeKind::Instance {
+                        expand(
+                            &placed,
+                            source,
+                            children,
+                            output,
+                            stack,
+                            diagnostics,
+                            depth + 1,
+                        );
+                    }
+                }
+            }
         }
     }
     stack.remove(definition_id);
+}
+
+fn apply_overrides(
+    properties: &mut omc_model::Properties,
+    overrides: &serde_json::Map<String, Value>,
+) {
+    for (key, value) in overrides {
+        if value.is_null() {
+            properties.remove(key);
+        } else {
+            properties.insert(key.clone(), value.clone());
+        }
+    }
+}
+
+fn apply_bindings(
+    node: &mut Node,
+    authored: &Node,
+    definition: &Node,
+    values: Option<&serde_json::Map<String, Value>>,
+    overrides: Option<&serde_json::Map<String, Value>>,
+) {
+    let Some(refs) = authored
+        .properties
+        .get("componentPropertyRefs")
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+    let Some(definitions) = definition
+        .properties
+        .get("componentPropertyDefinitions")
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for (field, id) in refs {
+        let Some(property) = definitions.iter().find(|property| property["id"] == *id) else {
+            continue;
+        };
+        let explicit = id
+            .as_str()
+            .and_then(|id| values.and_then(|values| values.get(id)));
+        if explicit.is_none()
+            && overrides.is_some_and(|overrides| match field.as_str() {
+                "visible" => overrides.contains_key("visible") || overrides.contains_key("hidden"),
+                "characters" => {
+                    overrides.contains_key("text") || overrides.contains_key("textRuns")
+                }
+                "mainComponent" => overrides.contains_key("componentId"),
+                _ => false,
+            })
+        {
+            continue;
+        }
+        let value = explicit.unwrap_or(&property["default"]);
+        match (field.as_str(), property["type"].as_str()) {
+            ("visible", Some("boolean")) if value.is_boolean() => {
+                node.properties.insert("visible".into(), value.clone());
+                node.properties.remove("hidden");
+            }
+            ("characters", Some("text")) if node.kind == NodeKind::Text && value.is_string() => {
+                node.properties.insert("text".into(), value.clone());
+                if let Some(runs) = node.properties.get_mut("textRuns") {
+                    let attributes = runs[0]["attributes"]
+                        .as_object()
+                        .cloned()
+                        .unwrap_or_default();
+                    *runs = if value.as_str() == Some("") {
+                        json!([])
+                    } else {
+                        json!([{"text":value,"attributes":attributes}])
+                    };
+                }
+            }
+            ("mainComponent", Some("swap")) if node.kind == NodeKind::Instance => {
+                if let Some(id) = value.as_str().filter(|id| !id.is_empty()) {
+                    node.properties.insert("componentId".into(), json!(id));
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn derived_id(instance: &str, source: &str) -> String {

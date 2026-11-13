@@ -236,6 +236,14 @@ impl DocumentStore {
         decode(&bytes)
     }
 
+    pub fn replica_history_size(&self) -> Result<u64> {
+        self.connection.query_row(
+            "SELECT length(body) + (SELECT coalesce(sum(length(body)),0) FROM transactions) FROM genesis WHERE singleton=1",
+            [],
+            |row| unsigned(row, 0),
+        ).map_err(sql_error)
+    }
+
     pub fn node_state(&self, id: &str, sequence: Option<u64>) -> Result<Option<NodeState>> {
         let seed: Option<Vec<u8>> = self
             .connection
@@ -377,6 +385,14 @@ impl DocumentStore {
     }
 
     pub fn transactions(&self, after_sequence: u64) -> Result<Vec<RemoteTransaction>> {
+        self.transactions_bounded(after_sequence, usize::MAX)
+    }
+
+    pub fn transactions_bounded(
+        &self,
+        after_sequence: u64,
+        max_bytes: usize,
+    ) -> Result<Vec<RemoteTransaction>> {
         let mut statement = self
             .connection
             .prepare("SELECT body FROM transactions WHERE sequence>?1 ORDER BY sequence")
@@ -386,7 +402,31 @@ impl DocumentStore {
                 row.get::<_, Vec<u8>>(0)
             })
             .map_err(sql_error)?;
-        rows.map(|row| decode(&row.map_err(sql_error)?)).collect()
+        let mut remaining = max_bytes;
+        rows.map(|row| {
+            let bytes = row.map_err(sql_error)?;
+            remaining = remaining.checked_sub(bytes.len()).ok_or_else(|| {
+                EngineError::new("resource_limit", "transaction stream exceeds byte limit")
+            })?;
+            decode(&bytes)
+        })
+        .collect()
+    }
+
+    pub fn operation_sequence(&self, id: &str) -> Result<Option<u64>> {
+        let sequence: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT sequence FROM operations WHERE operation_id=?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_error)?;
+        sequence
+            .map(u64::try_from)
+            .transpose()
+            .map_err(|_| EngineError::new("corrupt_state", "negative operation sequence"))
     }
 
     pub fn operation(&self, id: &str) -> Result<Option<Operation>> {
@@ -403,6 +443,38 @@ impl DocumentStore {
     }
 
     pub fn commit(&mut self, commit: Commit<'_>) -> Result<DocumentMetadata> {
+        if self.connection.is_autocommit() {
+            fault_boundary("before_transaction");
+            let transaction = self
+                .connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(sql_error)?;
+            Self::write_commit(&transaction, commit)?;
+            fault_boundary("before_commit");
+            transaction.commit().map_err(sql_error)?;
+            fault_boundary("after_commit");
+        } else {
+            Self::write_commit(&self.connection, commit)?;
+        }
+        self.metadata()
+    }
+
+    pub fn begin_replica_merge(&self) -> Result<()> {
+        self.connection
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(sql_error)
+    }
+
+    pub fn finish_replica_merge(&self, commit: bool) -> Result<()> {
+        if !commit && self.connection.is_autocommit() {
+            return Ok(());
+        }
+        self.connection
+            .execute_batch(if commit { "COMMIT" } else { "ROLLBACK" })
+            .map_err(sql_error)
+    }
+
+    fn write_commit(transaction: &Connection, commit: Commit<'_>) -> Result<()> {
         let tx = commit.transaction;
         let digest = tx.digest()?;
         let next = commit
@@ -410,11 +482,6 @@ impl DocumentStore {
             .checked_add(1)
             .ok_or_else(|| EngineError::new("resource_limit", "revision exhausted"))?;
         let title = commit.catalog.current_title();
-        fault_boundary("before_transaction");
-        let transaction = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(sql_error)?;
         let meta_sequence: u64 = transaction
             .query_row(
                 "SELECT sequence FROM document_meta WHERE singleton=1",
@@ -502,10 +569,7 @@ impl DocumentStore {
                 params![tx.transaction_id],
             )
             .map_err(sql_error)?;
-        fault_boundary("before_commit");
-        transaction.commit().map_err(sql_error)?;
-        fault_boundary("after_commit");
-        self.metadata()
+        Ok(())
     }
 
     pub fn stage_transaction(&mut self, transaction: &RemoteTransaction) -> Result<()> {

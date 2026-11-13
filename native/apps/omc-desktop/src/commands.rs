@@ -35,6 +35,37 @@ pub fn append_rank(
     ))
 }
 
+pub fn toggle_layer_visibility(document: &DocumentSnapshot, id: &str) -> Result<Value, String> {
+    let node = layer(document, id)?;
+    let mut properties = json!({"visible": layer_hidden(node)});
+    if node.properties.get("hidden") == Some(&Value::Bool(true)) {
+        properties["hidden"] = Value::Bool(false);
+    }
+    Ok(json!({"type":"node.set","nodeId":id,"properties":properties}))
+}
+
+pub fn toggle_layer_lock(document: &DocumentSnapshot, id: &str) -> Result<Value, String> {
+    let node = layer(document, id)?;
+    Ok(json!({"type":"node.set","nodeId":id,"properties":{"locked":!layer_locked(node)}}))
+}
+
+pub fn layer_hidden(node: &Node) -> bool {
+    node.properties.get("visible") == Some(&Value::Bool(false))
+        || node.properties.get("hidden") == Some(&Value::Bool(true))
+}
+
+pub fn layer_locked(node: &Node) -> bool {
+    node.properties.get("locked") == Some(&Value::Bool(true))
+}
+
+fn layer<'a>(document: &'a DocumentSnapshot, id: &str) -> Result<&'a Node, String> {
+    document
+        .nodes
+        .get(id)
+        .filter(|node| node.parent_id.is_some())
+        .ok_or_else(|| "The layer is unavailable.".into())
+}
+
 pub fn reorder(document: &DocumentSnapshot, id: &str, forward: bool) -> Result<Value, String> {
     let node = document.nodes.get(id).ok_or("Select a layer first.")?;
     let parent = node
@@ -280,6 +311,49 @@ pub fn create_catalog(namespace: &str, value: Value, count: usize) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layer_toggles_respect_defaults_and_legacy_hidden_flags() {
+        let content = omc_model::DocumentContent::empty("Layer flags");
+        let mut document = DocumentSnapshot {
+            id: "d".into(),
+            title: content.title,
+            epoch: "e".into(),
+            sequence: 0,
+            pages: content.pages,
+            nodes: content.nodes,
+            metadata: content.metadata,
+        };
+        let root = &document.pages[0].root_node_id;
+        let mut node = Node::new(NodeKind::Rect);
+        node.parent_id = Some(root.clone());
+        let id = node.id.clone();
+        document.nodes.insert(id.clone(), node);
+        assert_eq!(
+            toggle_layer_visibility(&document, &id).unwrap()["properties"],
+            json!({"visible":false})
+        );
+        assert_eq!(
+            toggle_layer_lock(&document, &id).unwrap()["properties"],
+            json!({"locked":true})
+        );
+        assert!(toggle_layer_lock(&document, root).is_err());
+
+        let node = document.nodes.get_mut(&id).unwrap();
+        node.properties.extend([
+            ("hidden".into(), json!(true)),
+            ("locked".into(), json!(true)),
+        ]);
+        assert_eq!(
+            toggle_layer_visibility(&document, &id).unwrap()["properties"],
+            json!({"visible":true,"hidden":false})
+        );
+        assert_eq!(
+            toggle_layer_lock(&document, &id).unwrap()["properties"],
+            json!({"locked":false})
+        );
+    }
+
     #[test]
     fn group_preserves_children_parent_coordinates() {
         let content = omc_model::DocumentContent::empty("Group test");

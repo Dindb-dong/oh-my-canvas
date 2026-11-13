@@ -3,8 +3,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
+mod stroke_brush;
+pub use stroke_brush::parse_stroke_brush;
 
 pub type Properties = BTreeMap<String, Value>;
+
+pub const LOCAL_INVITATION_PREFIX: &str = "omc-native://join/";
+
+pub fn local_invitation_payload(link: &str) -> Option<&str> {
+    link.strip_prefix(LOCAL_INVITATION_PREFIX).filter(|payload| {
+        !payload.is_empty()
+            && payload.len() <= 12_000
+            && payload.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    })
+}
 
 pub fn new_id(prefix: &str) -> String {
     format!("{prefix}_{}", Uuid::new_v4().simple())
@@ -64,6 +76,56 @@ pub enum NodeKind {
     Instance,
 }
 
+pub fn component_push_field(key: &str) -> bool {
+    matches!(
+        key,
+        "name"
+            | "fill"
+            | "fills"
+            | "fillStyleId"
+            | "stroke"
+            | "strokes"
+            | "strokeStyleId"
+            | "strokeWidth"
+            | "strokeAlignment"
+            | "strokeDashArray"
+            | "strokeCap"
+            | "strokeJoin"
+            | "effects"
+            | "effectStyleId"
+            | "shadows"
+            | "blur"
+            | "opacity"
+            | "visible"
+            | "hidden"
+            | "radius"
+            | "radii"
+            | "radiusTopLeft"
+            | "radiusTopRight"
+            | "radiusBottomLeft"
+            | "radiusBottomRight"
+            | "text"
+            | "textRuns"
+            | "fontFamily"
+            | "fontWeight"
+            | "fontStyle"
+            | "fontSize"
+            | "lineHeight"
+            | "letterSpacing"
+            | "textAlign"
+            | "textStyleId"
+            | "padding"
+            | "gap"
+            | "layoutGrids"
+            | "exports"
+            | "prototypeClickTargetId"
+            | "prototypeInteractions"
+            | "figcraftVariableModes"
+            | "blendMode"
+            | "clipContent"
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Node {
@@ -98,6 +160,17 @@ impl Node {
 
     pub fn string(&self, name: &str) -> Option<&str> {
         self.properties.get(name).and_then(Value::as_str)
+    }
+
+    pub fn effective_kind(&self) -> NodeKind {
+        if self.parent_id.is_some() && matches!(self.kind, NodeKind::Frame | NodeKind::Group) {
+            match self.string("containerKindOverride") {
+                Some("frame") => return NodeKind::Frame,
+                Some("group") => return NodeKind::Group,
+                _ => {}
+            }
+        }
+        self.kind
     }
 
     pub fn validate(&self) -> Result<(), String> {

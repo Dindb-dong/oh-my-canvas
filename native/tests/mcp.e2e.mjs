@@ -1,12 +1,14 @@
 // Uses the project's official MCP SDK. Runtime applications remain Rust-only.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,realpath,rm,writeFile,copyFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
+import {createServer,connect as connectSocket} from 'node:net';
 import {setTimeout as delay} from 'node:timers/promises';
+import {createMcpFetch} from '../../core/mcp-fetch.mjs';
 
 const root=resolve(fileURLToPath(new URL('../..',import.meta.url)));
 const sdk=process.env.OMC_TEST_SDK_ROOT;
@@ -15,8 +17,8 @@ const {StreamableHTTPClientTransport}=await import(sdk?pathToFileURL(join(sdk,'d
 const {StdioClientTransport}=await import(sdk?pathToFileURL(join(sdk,'dist/esm/client/stdio.js')).href:'@modelcontextprotocol/sdk/client/stdio.js');
 const binary=process.env.OMC_SERVICE_BINARY??join(root,'native/target/debug',process.platform==='win32'?'omc-service.exe':'omc-service');
 const temporary=await mkdtemp(join(tmpdir(),'omc-native-sdk-'));const children=[];
-async function start(profile){
- const child=spawn(binary,['--profile',profile,'--port','0'],{stdio:['ignore','ignore','pipe']});children.push(child);let errors='';child.stderr.on('data',d=>{errors=(errors+d.toString()).slice(-2000);});
+async function start(profile,options=[]){
+ const child=spawn(binary,['--profile',profile,'--port','0',...options],{stdio:['ignore','ignore','pipe']});children.push(child);let errors='';child.stderr.on('data',d=>{errors=(errors+d.toString()).slice(-2000);});
  for(let i=0;i<200;i++){if((child.exitCode!==null||child.signalCode!==null))throw Error(`service exited ${child.exitCode}: ${errors}`);try{const descriptor=JSON.parse(await readFile(join(profile,'native-v1/service.json'),'utf8'));const health=await fetch(descriptor.endpoint+'/health',{headers:{Authorization:`Bearer ${descriptor.token}`}});if(health.ok)return{child,profile,...descriptor};}catch{}await delay(25);}throw Error('service startup deadline');
 }
 async function stop(service){if(service.child.exitCode!==null||service.child.signalCode!==null)return;service.child.kill();await new Promise(resolve=>service.child.once('exit',resolve));}
@@ -33,6 +35,134 @@ async function rpc(service,session,method,params={}){const response=await fetch(
 function native(external){return 'doc_'+external.replaceAll('-','');}
 
 try{
+ await test('legacy HTTPS SDK calls persist pinned identity and real edits across restarts',async()=>{
+  const profile=join(temporary,'legacy-https');
+  let service=await start(profile,['--legacy-mcp-port','0']);
+  const identity=async()=>{
+   const runtime=JSON.parse(await readFile(join(profile,'mcp-runtime.json'),'utf8'));
+   assert.equal(runtime.version,2);assert.equal(runtime.token,undefined);
+   return {
+    endpoint:new URL(`https://127.0.0.1:${runtime.port}/mcp`),
+    cert:await readFile(runtime.certFile,'utf8'),
+    token:await readFile(join(profile,'mcp-token-v2'),'utf8')
+   };
+  };
+  const legacy=await identity();
+  const pinned=createMcpFetch(legacy.cert);
+  const headers={Authorization:`Bearer ${legacy.token}`,'Content-Type':'application/json'};
+  const client=new Client({name:'old-omc-https-contract',version:'1.0.0'});
+  const connectLegacy=endpoint=>client.connect(new StreamableHTTPClientTransport(endpoint,{fetch:pinned,requestInit:{headers}}));
+  const request={method:'POST',headers,body:JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-06-18'}})};
+  assert.equal((await pinned(legacy.endpoint,{...request,headers:{...headers,Authorization:'Bearer rejected'}})).status,403);
+  assert.equal((await pinned(legacy.endpoint,{...request,headers:{...headers,Origin:legacy.endpoint.origin}})).status,403);
+  assert.equal((await pinned(new URL('/rpc',legacy.endpoint),request)).status,404);
+  const other=await start(join(temporary,'other-pin'),['--legacy-mcp-port','0']);
+  const otherRuntime=JSON.parse(await readFile(join(other.profile,'mcp-runtime.json'),'utf8'));
+  await assert.rejects(pinned(new URL(`https://127.0.0.1:${otherRuntime.port}/mcp`),request),{code:'DEPTH_ZERO_SELF_SIGNED_CERT'});
+  await stop(other);
+  await connectLegacy(legacy.endpoint);
+  const invoke=async(name,args)=>{
+   const result=await client.callTool({name,arguments:args});
+   assert.equal(result.isError,false,JSON.stringify(result.content));
+   return result.structuredContent;
+  };
+  const doc=await invoke('create_document',{title:'HTTPS persisted document'});
+  const shape=await invoke('create_shape',{documentId:doc.documentId,type:'rect',width:50,height:20,properties:{name:'Pinned edit'}});
+  assert.equal(shape.receipt.status,'durable');
+  await client.transport.terminateSession();await client.close();
+  await stop(service);
+  service=await start(profile,['--legacy-mcp-port',legacy.endpoint.port]);
+  const restarted=await identity();
+  assert.equal(restarted.endpoint.href,legacy.endpoint.href);
+  assert.equal(restarted.token===legacy.token,true);
+  assert.equal(restarted.cert===legacy.cert,true);
+  await connectLegacy(restarted.endpoint);
+  const tree=await invoke('get_tree',{documentId:doc.documentId,detail:'detailed'});
+  assert.equal(tree.nodes.find(node=>node.name==='Pinned edit').width,50);
+  await client.transport.terminateSession();await client.close();
+  await stop(service);
+ });
+ await test('installed Electron legacy query options and stdio connection work on native service',async()=>{
+  const profile=join(temporary,'legacy-query-options');
+  let service=await start(profile);
+  let api=await connect(service);
+  const {documentId:zulu}=await api.call('create_document',{title:'Legacy order Zulu'});
+  await delay(12);
+  const {documentId:alpha}=await api.call('create_document',{title:'Legacy order Alpha'});
+  await delay(12);
+  const {documentId:middle}=await api.call('create_document',{title:'Legacy order middle'});
+  const list=sort=>api.call('list_documents',{query:'legacy order',sort});
+  assert.deepEqual((await list('title')).documents.map(doc=>doc.id),[alpha,middle,zulu]);
+  assert.deepEqual((await list('recent')).documents.map(doc=>doc.id),[middle,alpha,zulu]);
+  assert.deepEqual((await list()).documents.map(doc=>doc.id),[middle,alpha,zulu]);
+  assert.deepEqual((await list('oldest')).documents.map(doc=>doc.id),[zulu,alpha,middle]);
+  const page=await api.call('list_documents',{query:'legacy order',sort:'oldest',offset:1,limit:1});
+  assert.equal(page.documents[0].id,alpha);
+  assert.equal(page.nextOffset,2);
+  assert.ok(Number.isFinite(Date.parse(page.documents[0].updatedAt)));
+
+  const frame=await api.call('create_shape',{documentId:alpha,type:'frame',width:300,height:200,properties:{name:'Container'}});
+  const rect=await api.call('create_shape',{documentId:alpha,parentId:frame.createdIds[0],type:'rect',x:24,y:36,width:80,height:45,properties:{name:'Nested rectangle',fills:[{type:'solid',color:'#aa2288'}]}});
+  assert.deepEqual((await list('recent')).documents.map(doc=>doc.id),[alpha,middle,zulu]);
+  const names=['width','height','unknown-custom-key'];
+  const read=await api.call('get_styles',{documentId:alpha,ids:rect.createdIds,keys:names});
+  const expected={width:'80px',height:'45px','unknown-custom-key':''};
+  assert.deepEqual(read.styles[0].style,expected);
+  assert.deepEqual(read.styles[0].styles,{width:'80',height:'45','unknown-custom-key':''});
+  assert.equal(read.styles[0].rawId,rect.rawIds[0]);
+  assert.deepEqual((await api.call('get_styles',{documentId:alpha,ids:rect.createdIds,keys:[]})).styles[0].styles,{});
+
+  const shallow=await api.call('get_tree',{documentId:alpha,depth:1});
+  assert.equal(shallow.tree.id,'root');
+  assert.equal(shallow.tree.childCount,1);
+  assert.equal(shallow.tree.children[0].collapsed,true);
+  assert.equal(shallow.tree.children[0].childCount,1);
+  assert.equal(shallow.count,2);
+  assert.equal(shallow.truncated,false);
+  const deep=await api.call('get_tree',{documentId:alpha,detail:'detailed'});
+  const child=deep.tree.children[0].children[0];
+  assert.equal(child.rawId,rect.rawIds[0]);
+  assert.equal(child.hidden,false);
+  assert.equal(child.width,80);
+  assert.deepEqual(deep.nodes.map(node=>node.depth),[0,1,2]);
+  assert.equal(deep.diagnostics.find(row=>row.id===child.id).bounds.width,80);
+  const objects={root:{type:'frame'}};
+  for(let i=0;i<399;i++){
+   objects[`layer-${i}`]={type:'rect',parentId:'root',width:10,height:10};
+  }
+  const boundary=await api.call('import_document',{title:'Layer tree boundary',format:'json',
+   payload:JSON.stringify({pages:['page'],pagesById:{page:{name:'Page',objects}}})});
+  const exact=await api.call('get_tree',{documentId:boundary.documentId});
+  assert.equal(exact.count,400);
+  assert.equal(exact.nodes.length,400);
+  assert.equal(exact.truncated,false);
+  await api.call('create_shape',{documentId:boundary.documentId,type:'rect'});
+  const overflow=await api.call('get_tree',{documentId:boundary.documentId});
+  assert.equal(overflow.count,400);
+  assert.equal(overflow.truncated,true);
+
+  const connection=await api.call('workspace',{action:'connection',transport:'stdio'});
+  assert.equal(connection.available,true);
+  assert.equal(connection.transport,'stdio');
+  const config=JSON.parse(connection.config).mcpServers['oh-my-canvas'];
+  assert.equal(config.args[0],'--profile');
+  assert.equal(await realpath(config.args[1]),await realpath(profile));
+  assert.equal(config.env,undefined);
+  const stdio=new Client({name:'reported-legacy-stdio-config',version:'1.0.0'});
+  try{
+   await stdio.connect(new StdioClientTransport({...config,stderr:'pipe'}));
+   const reply=await stdio.callTool({name:'get_context',arguments:{documentId:alpha}});
+   assert.equal(reply.isError,false);
+   assert.equal(reply.structuredContent.document.title,'Legacy order Alpha');
+  }finally{await stdio.close();}
+  await api.client.close();
+  await stop(service);
+  service=await start(profile);
+  api=await connect(service);
+  assert.deepEqual((await list('recent')).documents.map(doc=>doc.id),[alpha,middle,zulu]);
+  await api.client.close();
+  await stop(service);
+ });
  await test('official MCP SDK + independent native services',async t=>{
   let service=await start(join(temporary,'primary'));let client=await connect(service);const identity=client.registration;assert.ok(identity?.credential);
   const initial=await client.call('create_document',{title:'SDK contract canvas'});const documentId=initial.documentId;const doc=native(documentId);
@@ -68,6 +198,22 @@ try{
   await t.test('native PNG/SVG/PDF and editable copy output',async()=>{
    for(const format of ['png','svg','pdf','omc']){const output=await client.call('export_document',{id:documentId,format});assert.equal(output.ok,true);assert.ok(output.byteLength>20);if(format==='png')assert.equal(Buffer.from(output.base64,'base64').subarray(1,4).toString(),'PNG');if(format==='pdf')assert.equal(Buffer.from(output.base64,'base64').subarray(0,4).toString(),'%PDF');if(format==='omc'){const parsed=JSON.parse(output.content);assert.equal(parsed.format,'omc.native/1');const copy=await client.call('import_document',{format:'omc',payload:output.content});assert.notEqual(copy.documentId,documentId);}}
   });
+  await t.test('agent HTML and CSS import returns editable layers',async()=>{
+   const imported=await client.call('import_document',{
+    format:'html',title:'Agent HTML card',
+    payload:'<style>.card { width: 140px; background: #eef2ff; }</style><div class="card" data-name="Card"><p data-name="Label">참가 신청</p></div>',
+   });
+   const tree=await client.call('get_tree',{documentId:imported.documentId,detail:'detailed'});
+   const card=tree.nodes.find(node=>node.name==='Card');
+   assert.ok(card);
+   const styles=await client.call('get_styles',{documentId:imported.documentId,ids:[card.id]});
+   assert.equal(styles.styles[0].styles.width,'140px');
+   const label=tree.nodes.find(node=>node.name==='Label');
+   assert.ok(label);
+   await client.call('update',{documentId:imported.documentId,id:label.id,attrs:{name:'Edited label'}});
+   const edited=await client.call('get_tree',{documentId:imported.documentId});
+   assert.ok(edited.nodes.some(node=>node.name==='Edited label'));
+  });
   await t.test('resumed principal replays original receipt after service restart',async()=>{
    await client.client.close();await stop(service);service=await start(service.profile);client=await connect(service,identity);await client.call('open_document',{id:documentId});
    const replay=await client.call('create_shape',repeatArgs,repeatMeta);assert.equal(replay.receipt.replayed,true);assert.deepEqual(replay.rawIds,created.rawIds);const tree=await client.call('get_tree',{documentId,detail:'detailed'});assert.equal(tree.nodes.filter(n=>n.name==='Retry-safe text').length,1);
@@ -94,6 +240,690 @@ try{
    const transport=new StdioClientTransport({command:cli,args:['--profile',service.profile,'--connect-only'],stderr:'pipe'});
    const stdio=new Client({name:'stdio-contracts',version:'1.0.0'});
    try{await stdio.connect(transport);const listed=await stdio.listTools();assert.equal(listed.tools.filter(t=>!t.name.startsWith('native_')).length,50);const result=await stdio.callTool({name:'create_document',arguments:{title:'Rust stdio document'}});assert.notEqual(result.isError,true);assert.ok(result.structuredContent.documentId);}finally{await stdio.close();}
+  });
+  await t.test('legacy page duplication, reordering and guides persist and support undo',async()=>{
+   const doc=await client.call('create_document',{title:'Page action fixture'});
+   const documentId=doc.documentId;
+   const page=(action,args={})=>client.call('page',{action,documentId,...args});
+   await client.call('create_shape',{documentId,type:'text',properties:{name:'Original',text:'원본'}});
+   const guides=[{axis:'x',position:20},{axis:'y',position:45}];
+   await page('update',{pageId:doc.page.id,properties:{guides}});
+   const duplicate=await page('duplicate',{pageId:doc.page.id,name:'Copy'});
+   assert.notEqual(duplicate.pageId,doc.page.id);
+   const copied=await client.call('get_tree',{documentId,detail:'detailed'});
+   assert.equal(copied.nodes.find(node=>node.name==='Original').text,'원본');
+   const copyPageId=duplicate.pageId;
+   await page('reorder',{pageId:copyPageId,index:0});
+   assert.deepEqual((await page('list')).pages.map(p=>p.id),[copyPageId,doc.page.id]);
+   assert.deepEqual((await page('list')).pages[0].guides,guides);
+   await client.call('undo',{documentId});
+   assert.deepEqual((await page('list')).pages.map(p=>p.id),[doc.page.id,copyPageId]);
+   await page('delete',{pageId:copyPageId});
+   assert.equal((await page('list')).pageId,doc.page.id);
+   await assert.rejects(page('delete',{pageId:doc.page.id}),/last page/);
+  });
+  await t.test('legacy vector actions edit world-space path geometry and support undo',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Vector editing fixture'});
+   await client.call('write_svg',{documentId,target:'root',position:'last',svg:'<svg width="100" height="100"><path id="first" fill="#222222" d="M10 10 C20 10 30 30 40 30 L60 45"/><path id="second" fill="#222222" d="M70 60 L80 60"/></svg>'});
+   const {nodes}=await client.call('get_tree',{documentId,detail:'detailed'});
+   const paths=nodes.filter(n=>n.kind==='path');
+   assert.equal(paths.length,2);
+   const candidates=await Promise.all(paths.map(node=>client.call('get_path',{documentId,id:node.rawId})));
+   const id=candidates.find(path=>path.segments.length===3).rawId;
+   const otherId=candidates.find(path=>path.segments.length===2).rawId;
+   const inspect=(layer=id)=>client.call('get_path',{documentId,id:layer});
+   const edit=async(action,fields={})=>client.call('edit_path',{documentId,id,revision:(await inspect()).revision,action,...fields});
+   const original=await inspect();
+   assert.equal(original.coordinateSpace,'world');
+   assert.equal(original.segments.length,3);
+   await edit('move_nodes',{indices:[1],dx:3,dy:4});
+   let current=await inspect();
+   assert.equal(current.segments[1].x,original.segments[1].x+3);
+   assert.equal(current.segments[1].y2,original.segments[1].y2+4);
+   await edit('insert_node',{index:1,t:0.5});
+   assert.equal((await inspect()).segments.length,4);
+   const point=(await inspect()).segments[1];
+   await edit('set_handle',{index:1,handle:'in',point:{x:point.x-5,y:point.y},mode:'symmetric'});
+   current=await inspect();
+   assert.ok(Math.abs(current.segments[1].x2-(point.x-5))<0.001);
+   assert.ok(Math.abs(current.segments[2].x1-(point.x+5))<0.001);
+   await edit('convert_node',{index:1,nodeKind:'corner'});
+   assert.equal((await inspect()).segments[1].handleMode,'corner');
+   await edit('delete_nodes',{indices:[1]});
+   assert.equal((await inspect()).segments.length,3);
+   await edit('close');
+   assert.equal((await inspect()).segments.at(-1).command,'close');
+   await edit('open');
+   assert.equal((await inspect()).segments.at(-1).command,'line');
+   await edit('join',{otherId});
+   assert.equal((await inspect()).segments.length,5);
+   await assert.rejects(inspect(otherId));
+   await client.call('undo',{documentId});
+   assert.equal((await inspect(otherId)).segments.length,2);
+   await edit('merge',{otherId,firstStart:true,secondEnd:true});
+   assert.equal((await inspect()).segments.length,4);
+   await edit('primitive',{primitive:{kind:'star',count:5,ratio:0.45}});
+   current=await inspect();
+   assert.equal(current.segments.length,11);
+   assert.equal(current.segments.at(-1).command,'close');
+   const svg=await client.call('export_document',{id:documentId,format:'svg'});
+   assert.match(svg.content,/<path/);
+  });
+  await t.test('legacy spacing and tidy move actual layers with one undo per operation',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Arrangement fixture'});
+   const ids=[];
+   for(const [x,y,name] of [[10,5,'A'],[70,12,'B'],[150,25,'C']]) {
+    const shape=await client.call('create_shape',{documentId,type:'rect',x,y,width:20,height:10,properties:{name}});
+    ids.push(shape.rawIds[0]);
+   }
+   const coords=async()=>{
+    const {nodes}=await client.call('get_tree',{documentId,detail:'detailed'});
+    return ids.map(id=>{const {x,y}=nodes.find(n=>n.rawId===id);return [x,y];});
+   };
+   await client.call('edit_shapes',{documentId,action:'distribute',ids,axis:'h',gap:10});
+   assert.deepEqual(await coords(),[[10,5],[40,12],[70,25]]);
+   await client.call('edit_shapes',{documentId,action:'tidy',ids,columns:2,gap:5});
+   assert.deepEqual(await coords(),[[10,5],[35,5],[10,20]]);
+   await client.call('undo',{documentId});
+   assert.deepEqual(await coords(),[[10,5],[40,12],[70,25]]);
+  });
+  await t.test('legacy boolean, outline and component variant actions change exported geometry',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Native vector and variants'});
+   const make=async (type,x,y,width,height,properties)=>(await client.call('create_shape',{documentId,type,x,y,width,height,properties})).rawIds[0];
+   const a=await make('rect',10,10,80,40,{fills:[{type:'solid',color:'#ff0000'}]});
+   const b=await make('rect',50,10,80,40,{fills:[{type:'solid',color:'#0000ff'}]});
+   const revision=async()=>(await client.call('get_context',{documentId})).revision;
+   const live=(await client.call('boolean',{documentId,operation:'subtract',ids:[a,b],revision:await revision()})).rawIds[0];
+   const inspect=id=>client.call('get_path',{documentId,id});
+   assert.equal((await inspect(live)).editable,false);
+   const flat=(await client.call('boolean',{documentId,operation:'flatten',ids:[live],revision:await revision()})).rawIds[0];
+   assert.equal((await inspect(flat)).editable,true);
+   const text=await make('text',20,80,100,24,{text:'한글',fills:[{type:'solid',color:'#123456'}]});
+   const outline=(await client.call('outline',{documentId,kind:'text',ids:[text],revision:await revision()})).rawIds[0];
+   assert.ok((await inspect(outline)).segments.length>4);
+   const component=async (action,args)=>(await client.call('component',{documentId,action,...args})).rawIds;
+   const red=await make('rect',20,120,30,30,{fills:[{type:'solid',color:'#ff0000'}]});
+   const blue=await make('rect',80,120,30,30,{fills:[{type:'solid',color:'#0000ff'}]});
+   const [normal]=await component('create',{id:red,name:'State=Normal'});
+   const [pressed]=await component('create',{id:blue,name:'State=Pressed'});
+   await component('combine',{ids:[normal,pressed],name:'Button'});
+   const [instance]=await component('instance',{source:normal,x:180,y:120});
+   const png=async()=>(await client.call('export_document',{id:documentId,format:'png',bounds:{x:0,y:0,width:240,height:180}})).base64;
+   const before=await png();
+   await component('variant',{id:instance,name:'State',value:'Pressed'});
+   assert.notEqual(await png(),before);
+  });
+  await t.test('legacy typed component properties edit rendered defaults and instance overrides',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Typed component properties'});
+   const shape=async (type,fields={})=>(await client.call('create_shape',{documentId,type,width:40,height:30,...fields})).rawIds[0];
+   const component=(action,args,meta)=>client.call('component',{documentId,action,...args},meta);
+   const svg=async()=>(await client.call('export_document',{id:documentId,format:'svg'})).content;
+   const text=async()=>(await client.call('export_document',{id:documentId,format:'html'})).content;
+   const source=await shape('frame',{x:10,y:10,width:200,height:100});
+   await shape('text',{parentId:source,width:180,properties:{name:'Label',text:'Unbound text'}});
+   await shape('rect',{parentId:source,x:50,properties:{name:'Badge',fills:[{type:'solid',color:'#bf209b'}]}});
+   const a=await component('create',{id:await shape('rect',{x:320,properties:{fills:[{type:'solid',color:'#481fd1'}]}}),name:'Icon A'});
+   const b=await component('create',{id:await shape('rect',{x:380,properties:{fills:[{type:'solid',color:'#127d74'}]}}),name:'Icon B'});
+   const c=await component('create',{id:source,name:'Card'});
+   assert.equal(c.rawSelection[0],c.componentId);
+   const definition=c.componentId;
+   const tree=await client.call('get_tree',{documentId,id:definition,detail:'detailed'});
+   const layer=name=>tree.nodes.find(node=>node.name===name).rawId;
+   const nested=await component('instance',{source:a.componentId,parent:definition,x:100,y:20});
+   const titleArgs={id:definition,name:'Title',propertyType:'text',value:'Default headline'};
+   const meta={'oh-my-canvas/idempotency-key':'create-component-property'};
+   const title=(await component('property',titleArgs,meta)).property;
+   const replay=await component('property',titleArgs,meta);
+   assert.equal(replay.property.id,title.id);
+   await component('bind',{id:definition,layer:layer('Label'),property:title.id,propertyType:'text'});
+   const visible=(await component('bind',{id:definition,layer:layer('Badge'),name:'Show badge',propertyType:'boolean',value:'false'})).property;
+   const swap=(await component('bind',{id:definition,layer:nested.rawSelection[0],name:'Icon',propertyType:'swap'})).property;
+   assert.equal(swap.default,a.componentId);
+   const instance=(await component('instance',{source:definition,x:10,y:200})).rawSelection[0];
+   const defaultSvg=await svg();
+   assert.match(defaultSvg,/Default headline/);
+   await component('set_property',{id:instance,property:title.id,value:'한글 제목'});
+   await component('set_property',{id:instance,property:visible.id,value:'true'});
+   await component('set_property',{id:instance,property:swap.id,value:b.componentId});
+   const edited=await svg();
+   assert.match(await text(),/한글 제목/);
+   assert.ok(edited.toLowerCase().split('#bf209b').length > defaultSvg.toLowerCase().split('#bf209b').length);
+   assert.ok(edited.toLowerCase().split('#127d74').length > defaultSvg.toLowerCase().split('#127d74').length);
+   await assert.rejects(component('set_property',{id:instance,property:visible.id,value:'maybe'}),/true or false/);
+   await assert.rejects(component('set_property',{id:instance,property:swap.id,value:definition}),/cycle/);
+   assert.equal(await svg(),edited);
+   const changed=(await component('edit_property',{id:definition,property:title.id,name:'Headline',value:'Edited default'})).property;
+   assert.equal(changed.name,'Headline');
+   assert.match(await svg(),/Edited default/);
+   assert.match(await text(),/한글 제목/);
+   await component('reset',{id:instance});
+   assert.doesNotMatch(await text(),/한글 제목/);
+   await component('remove_property',{id:definition,property:title.id});
+   const catalog=await client.call('components',{documentId,query:'Card'});
+   assert.deepEqual(catalog.components[0].componentProperties.map(property=>property.id),[visible.id,swap.id]);
+   assert.match(await svg(),/Edited default/);
+   await component('detach',{id:instance});
+   assert.match(await svg(),/Edited default/);
+  });
+  await t.test('legacy library snapshots install and update typed component bindings',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Legacy library definitions'});
+   const libraries=(action,args={})=>client.call('libraries',{documentId,action,...args});
+   const snapshot={id:'kit',name:'Offline UI Kit',version:1,enabled:true,styles:{},components:{
+    button:{id:'button',name:'Library Button',mainId:'main',properties:[
+     {id:'title',name:'Title',type:'text',default:'Library default'},
+     {id:'visible',name:'Visible',type:'boolean',default:false}
+    ]}
+   },objects:{
+    main:{id:'main',type:'frame',name:'Library Button',width:250,height:60,componentId:'button',isMain:true,isInstanceRoot:true},
+    label:{id:'label',type:'text',name:'Label',parentId:'main',width:240,height:30,text:'Original label',componentPropertyRefs:{characters:'title'}},
+    badge:{id:'badge',type:'rect',name:'Badge',parentId:'main',y:35,width:20,height:20,fills:[{type:'solid',color:'#bf209b'}],componentPropertyRefs:{visible:'visible'}}
+   }};
+   const {id}=await libraries('add',{snapshot});
+   const [instance]=(await libraries('insert',{id,componentId:'button',x:10,y:10})).rawIds;
+   const svg=async()=>(await client.call('export_document',{id:documentId,format:'svg'})).content;
+   assert.match(await svg(),/Library default/);
+   assert.doesNotMatch(await svg(),/#bf209b/i);
+   const set=(property,value)=>client.call('component',{documentId,action:'set_property',id:instance,property,value});
+   await set('title','Custom instance');
+   await set('visible','true');
+   assert.match(await svg(),/Custom instance/);
+   assert.match(await svg(),/#bf209b/i);
+   await libraries('enable',{id,enabled:false});
+   snapshot.version=2;
+   snapshot.components.button.properties[0].default='Updated library default';
+   await libraries('update',{id,snapshot});
+   assert.equal((await libraries('get',{id})).library.enabled,false);
+   assert.match(await svg(),/Custom instance/);
+   await client.call('component',{documentId,action:'reset',id:instance});
+   assert.match(await svg(),/Updated library default/);
+  });
+  await t.test('legacy screenshots paginate tall content and fit the overview',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Screenshot slices'});
+   const frame=(await client.call('create_shape',{documentId,type:'frame',x:100,y:50,width:320,height:2000,properties:{fills:[{type:'solid',color:'#eeeeee'}]}})).rawIds[0];
+   await client.call('create_shape',{documentId,type:'rect',parentId:frame,x:0,y:0,width:320,height:200,properties:{fills:[{type:'solid',color:'#ff1122'}]}});
+   await client.call('create_shape',{documentId,type:'rect',parentId:frame,x:0,y:1760,width:320,height:240,properties:{fills:[{type:'solid',color:'#2244ff'}]}});
+   const shot=(mode,slice)=>client.call('screenshot',{documentId,id:frame,mode,slice});
+   const first=await shot('slice',0);
+   const second=await shot('slice',1);
+   const overview=await shot('overview',0);
+   const size=({base64})=>{const png=Buffer.from(base64,'base64');return [png.readUInt32BE(16),png.readUInt32BE(20)];};
+   assert.equal(first.slices,2);
+   assert.equal(second.slices,2);
+   assert.deepEqual(size(first),[320,1568]);
+   assert.deepEqual(size(second),[320,552]);
+   assert.equal((await shot('slice',80)).sha256,second.sha256);
+   assert.equal(overview.slices,1);
+   assert.deepEqual(size(overview),[234,1458]);
+   assert.notEqual(first.sha256,second.sha256);
+  });
+  await t.test('legacy clipboard replace preserves world placement and undoes atomically',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Clipboard replace'});
+   const shape=async (type,fields)=>(await client.call('create_shape',{documentId,type,width:40,height:30,...fields})).rawIds[0];
+   const source=await shape('frame',{x:50,y:30,width:200,height:100,properties:{rotation:10}});
+   const first=await shape('rect',{parentId:source,x:10,y:12,properties:{name:'Copied one',fills:[{type:'solid',color:'#bb1188'}]}});
+   const second=await shape('rect',{parentId:source,x:60,y:12,properties:{name:'Copied two'}});
+   const destination=await shape('frame',{x:300,y:120,width:200,height:150,properties:{rotation:-15}});
+   const target=await shape('rect',{parentId:destination,x:30,y:20,properties:{name:'Replace me'}});
+   const target2=await shape('rect',{parentId:destination,x:70,y:30,properties:{name:'Replace me too'}});
+   const clip=(action,args,meta)=>client.call('clipboard',{documentId,action,...args},meta);
+   const {payload}=await clip('copy',{ids:[first,second]});
+   assert.equal(Object.keys(payload.rootGeometry).length,2);
+   const meta={'oh-my-canvas/idempotency-key':'replace-rotated-layers'};
+   const placed=await clip('paste',{mode:'replace',ids:[target,target2]},meta);
+   const replay=await clip('paste',{mode:'replace',ids:[target,target2]},meta);
+   assert.deepEqual(replay.rawSelection,placed.rawSelection);
+   const {nodes}=await client.call('get_tree',{documentId,id:destination,detail:'detailed'});
+   assert.deepEqual(nodes.filter(row=>row.depth===1).map(row=>row.rawId),placed.rawSelection);
+   const [a,b]=nodes.filter(row=>row.depth===1);
+   assert.ok(Math.abs(Math.hypot(b.x-a.x,b.y-a.y)-50)<1e-6);
+   assert.ok(a.properties.transform[1]>0.4);
+   await client.call('undo',{documentId});
+   const restored=(await client.call('get_tree',{documentId,id:destination,detail:'detailed'})).nodes;
+   assert.deepEqual(restored.filter(row=>row.depth===1).map(row=>row.rawId),[target,target2]);
+   const other=(await client.call('create_document',{title:'Other clipboard destination'})).documentId;
+   const cross=await client.call('clipboard',{documentId:other,action:'paste',mode:'in_place'});
+   assert.equal(cross.rawSelection.length,2);
+   const pasted=(await client.call('get_tree',{documentId:other,detail:'detailed'})).nodes;
+   assert.deepEqual(pasted.filter(node=>node.depth===1).map(node=>node.name),['Copied one','Copied two']);
+  });
+  await t.test('Electron shapes clipboard preserves relative placement and rejects malformed trees',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Old clipboard format'});
+   const clip=(action,args)=>client.call('clipboard',{documentId,action,...args});
+   const shape=(id,x,y)=>({id,type:'rect',name:id,parentId:'root',x,y,width:30,height:20,fills:[{color:'#a75621'}]});
+   const payload={kind:'oh-my-canvas/shapes',version:1,roots:['first','second'],shapes:[shape('first',20,40),shape('second',80,55)]};
+   const pasted=await clip('paste',{payload,x:300,y:400});
+   const tree=async()=>(await client.call('get_tree',{documentId,detail:'detailed'})).nodes;
+   const nodes=await tree();
+   assert.deepEqual(nodes.filter(row=>pasted.rawSelection.includes(row.rawId)).map(row=>[row.name,row.x,row.y]),
+    [['first',300,400],['second',360,415]]);
+   const copied=(await clip('copy',{ids:pasted.rawSelection})).payload;
+   assert.equal(copied.format,'omc.clipboard/1');assert.equal(copied.kind,'oh-my-canvas/shapes');
+   assert.deepEqual(copied.shapes.map(row=>[row.x,row.y]),[[300,400],[360,415]]);
+   await assert.rejects(clip('paste',{payload:{...payload,roots:['first']}}),/unreachable/);
+   assert.deepEqual(await tree(),nodes);
+  });
+  await t.test('legacy property clipboard preserves target text and geometry',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Clipboard properties'});
+   const text=async (value,x)=>(await client.call('create_shape',{documentId,type:'text',x,y:10,width:140,height:40,properties:{text:value}})).rawIds[0];
+   const source=await text('Styled text',10);
+   const target=await text('보존할 문구',280);
+   await client.call('edit_text',{documentId,id:source,action:'range_style',range:{start:0,end:11},style:{fontSize:32,fontWeight:700}});
+   const clip=(action,args)=>client.call('clipboard',{documentId,action,...args});
+   const {payload}=await clip('copy_properties',{ids:[source]});
+   assert.equal(payload.properties.text,undefined);
+   assert.equal(payload.properties.x,undefined);
+   assert.equal(payload.textFormatting[0].fontSize,32);
+   await clip('paste_properties',{ids:[target],payload});
+   const {nodes}=await client.call('get_tree',{documentId,id:target,detail:'detailed'});
+   assert.equal(nodes[0].x,280);
+   assert.equal(nodes[0].text,'보존할 문구');
+   assert.equal(nodes[0].properties.textRuns[0].attributes.fontSize,32);
+   const plain=await clip('paste',{payload:{kind:'text',text:'텍스트 붙여넣기'},x:150,y:200});
+   const pasted=(await client.call('get_tree',{documentId,id:plain.rawSelection[0],detail:'detailed'})).nodes[0];
+   assert.equal(pasted.text,'텍스트 붙여넣기');
+   assert.deepEqual([pasted.x,pasted.y],[150,200]);
+  });
+  await t.test('legacy clipboard raster budget preserves the native clipboard', async () => {
+   const { documentId } = await client.call('create_document', { title: 'Clipboard transfer budget' });
+   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS9sAAAAASUVORK5CYII=', 'base64');
+   const image = Buffer.concat([png, Buffer.alloc(220_000)]).toString('base64');
+   const asset = await client.call('document_assets', { documentId, action: 'add', kind: 'image', name: 'Shared raster', dataUrl: `data:image/png;base64,${image}` });
+   const ids = [];
+   for (const x of [0, 40, 80]) {
+    const placed = await client.call('document_assets', { documentId, action: 'place', id: asset.id, x, y: 0, width: 32, height: 32 });
+    ids.push(placed.id);
+   }
+   const copy = async (ids) => (await client.call('clipboard', { documentId, action: 'copy', ids })).payload;
+   const transferable = await copy(ids.slice(0, 2));
+   assert.equal(Object.keys(transferable.assetDefinitions).length, 1);
+   assert.equal(transferable.shapes.length, 2);
+   const bounded = await copy(ids);
+   assert.equal(bounded.format, 'omc.clipboard/1');
+   assert.equal(bounded.nodes.length, 3);
+   assert.match(bounded.legacyCompatibility.error, /MCP request size/);
+   const pasted = await client.call('clipboard', { documentId, action: 'paste', payload: bounded, mode: 'in_place' });
+   assert.equal(pasted.rawSelection.length, 3);
+  });
+  await t.test('legacy workspace close respects ownership and uploaded asset search reads the document',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Legacy workspace and assets'});
+   const workspace=(action,args)=>client.call('workspace',{action,...args});
+   assert.equal((await workspace('focus',{documentId})).boundDocumentId,documentId);
+   assert.equal((await workspace('close',{documentId,release:false})).boundDocumentId,documentId);
+   assert.equal((await workspace('state')).boundDocumentId,documentId);
+   const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS9sAAAAASUVORK5CYII=';
+   const asset=await client.call('document_assets',{documentId,action:'add',kind:'image',name:'Fixture image',dataUrl:'data:image/png;base64,'+png});
+   const found=await client.call('assets',{documentId,kind:'upload',query:'fixture'});
+   assert.equal(found.assets[0].id,asset.id);
+   assert.equal((await client.call('assets',{documentId,kind:'stock'})).assets.length,0);
+   const guide=await client.call('get_guide',{documentId,topic:'components'});
+   assert.match(guide.guide,/set_property/);
+   assert.equal((await workspace('close',{documentId})).boundDocumentId,null);
+  });
+  await t.test('legacy export options crop selected layers and apply an independent backdrop',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Legacy selection export'});
+   const make=async(type,args)=>(await client.call('create_shape',{documentId,type,...args})).rawIds[0];
+   const frame=await make('frame',{x:100,y:70,width:160,height:110,properties:{fills:[{type:'solid',color:'#bb22aa'}]}});
+   await make('rect',{parentId:frame,x:30,y:40,width:20,height:25,properties:{fills:[{type:'solid',color:'#11cc66'}]}});
+   await make('rect',{x:10,y:15,width:20,height:25,properties:{fills:[{type:'solid',color:'#5511ff'}]}});
+   const bounds={x:110,y:75,width:90,height:80};
+   const options={format:'svg',ids:[frame],bounds,background:'#221166',omitFill:true};
+   const selection=(await client.call('export_selection',{documentId,...options})).content.toLowerCase();
+   assert.match(selection,/width="90" height="80"/);
+   assert.match(selection,/#(?:221166|216)"/);
+   assert.match(selection,/#(?:11cc66|1c6)"/);
+   assert.doesNotMatch(selection,/#(?:bb22aa|b2a|5511ff|51f)"/);
+   const whole=(await client.call('export_document',{id:documentId,format:'svg',background:'#221166'})).content.toLowerCase();
+   assert.match(whole,/#(?:221166|216)"/);
+   assert.match(whole,/#(?:bb22aa|b2a)"/);
+   assert.match(whole,/#(?:5511ff|51f)"/);
+   const selectedDoc=(await client.call('export_document',{id:documentId,...options})).content.toLowerCase();
+   assert.match(selectedDoc,/#(?:11cc66|1c6)"/);
+   assert.doesNotMatch(selectedDoc,/#(?:5511ff|51f)"/);
+  });
+  await t.test('legacy viewport fits actual world-space layer bounds',async()=>{
+   const {documentId}=await client.call('create_document',{title:'Viewport fit'});
+   const rect=await client.call('create_shape',{documentId,type:'rect',x:100,y:200,width:200,height:100});
+   await client.call('view',{documentId,action:'set',viewport:{vport:{width:800,height:600},vbox:{x:0,y:0,width:800,height:600},zoom:1},flags:{showGrids:true}});
+   const fitted=(await client.call('view',{documentId,action:'fit',ids:rect.rawIds})).view;
+   assert.equal(fitted.viewport.zoom,3.36);
+   const {x,y,width,height}=fitted.viewport.vbox;
+   assert.ok(Math.abs(x+width/2-200)<1e-9 && Math.abs(y+height/2-250)<1e-9);
+   assert.equal(fitted.flags.showGrids,true);
+   assert.deepEqual((await client.call('view',{documentId,action:'get'})).view,fitted);
+  });
+  await t.test('FigCraft-compatible stdio works on the same native document',async()=>{
+   const cli=process.env.OMC_CLI_BINARY??join(root,'native/target/debug',process.platform==='win32'?'omc-cli.exe':'omc-cli');
+   const transport=new StdioClientTransport({command:cli,args:['--profile',service.profile,'--connect-only','--dialect','figcraft'],stderr:'pipe'});
+   const fig=new Client({name:'figcraft-compatibility-contracts',version:'1.0.0'});
+   async function call(name,args={}) {
+    const result=await fig.callTool({name,arguments:args});
+    const value=result.structuredContent??JSON.parse(result.content.find(item=>item.type==='text').text);
+    if(result.isError)throw Object.assign(Error(value.message??JSON.stringify(value)),value);
+    return value;
+   }
+   try {
+    await fig.connect(transport);
+    const {tools}=await fig.listTools();
+    assert.ok(tools.find(tool=>tool.name==='batch').inputSchema.properties.commands);
+    assert.ok((await client.client.listTools()).tools.find(tool=>tool.name==='batch').inputSchema.properties.ops);
+    const doc=await call('run_command',{command:'file.new',params:{name:'FigCraft dialect'}});
+    const created=await call('batch',{commands:[
+     {command:'node.create',as:'card',params:{type:'frame',name:'Card'}},
+     {command:'node.create',params:{type:'text',parent:{$ref:'card'},name:'Korean label',text:'한글 편집'}},
+     {command:'node.set',params:{ids:[{$step:1}],props:{fontSize:18,fill:'#312e81'}}},
+    ]});
+    assert.equal(created[2].nodes[0].fontSize,18);
+    assert.equal((await call('get_node',{id:created[0].id})).children[0].characters,'한글 편집');
+    await assert.rejects(call('batch',{commands:[
+     {command:'node.create',params:{type:'rectangle',name:'Rolled back'}},
+     {command:'node.set',params:{ids:[99999],props:{opacity:0.5}}},
+    ]}),/Step 1/);
+    assert.equal((await call('inspect_document')).layers.length,1);
+    await call('undo');
+    assert.equal((await call('inspect_document')).layers.length,0);
+    await call('redo');
+    assert.equal((await client.call('get_tree',{documentId:doc.id,detail:'detailed'})).nodes.find(n=>n.name==='Korean label').text,'한글 편집');
+    const image=await fig.callTool({name:'screenshot',arguments:{ids:[created[0].id]}});
+    assert.ok(image.content.some(item=>item.type==='image'&&item.mimeType==='image/png'));
+    const run=(command,params={})=>call('run_command',{command,params});
+    const docList=await run('doc.list');
+    assert.ok(docList.some(entry=>entry.id===doc.id));
+    const card=created[0].id,label=created[1].id;
+    await call('type_text',{id:label,text:'두 번째 문장'});
+    assert.deepEqual(await run('node.get',{id:label,fields:['characters']}),{characters:'두 번째 문장'});
+    assert.deepEqual((await run('select.set',{ids:[card]})).selection,[card]);
+    assert.deepEqual((await run('select.children')).selection,[label]);
+    assert.deepEqual((await run('select.parent')).selection,[card]);
+    assert.deepEqual((await run('select.byName',{query:'label'})).selection,[label]);
+    assert.deepEqual((await run('select.add',{ids:[card]})).selection,[label,card]);
+    assert.deepEqual((await run('select.remove',{ids:[label]})).selection,[card]);
+    const rect=await run('shape.rectangle',{x:4,y:7,width:70,height:20});
+    assert.equal(rect.node.type,'RECTANGLE');
+    const ellipse=await run('shape.ellipse',{x:20,y:30,width:15,height:10});
+    assert.equal(ellipse.node.type,'ELLIPSE');
+    assert.equal((await run('shape.line',{x:0,y:0,width:30})).node.type,'LINE');
+    assert.equal((await run('frame.create',{name:'Frame alias'})).node.type,'FRAME');
+    assert.equal((await run('text.create',{characters:'문구',name:'Text alias'})).node.characters,'문구');
+    assert.deepEqual((await run('select.next')).selection,[card]);
+    assert.equal((await run('select.previous')).selection.length,1);
+    assert.equal((await run('select.all')).selection.length,6);
+    assert.deepEqual((await run('select.inverse')).selection,[]);
+    const first=(await run('page.list'))[0];
+    const second=await run('page.add',{name:'Second'});
+    assert.notEqual(second.id,first.id);
+    assert.equal((await run('page.rename',{id:second.id,name:'Renamed'})).name,'Renamed');
+    const third=await run('page.duplicate',{id:first.id});
+    await run('page.move',{id:third.id,index:0});
+    assert.deepEqual((await run('page.list')).map(page=>page.id),[third.id,first.id,second.id]);
+    await run('page.delete',{id:third.id});
+    await run('page.select',{id:first.id});
+    assert.equal((await call('get_node',{id:label})).characters,'두 번째 문장');
+    assert.deepEqual((await run('select.none')).selection,[]);
+    assert.match((await run('file.export',{format:'svg'})).content,/<svg/);
+    await run('edit.delete',{ids:[ellipse.id]});
+    await assert.rejects(call('get_node',{id:ellipse.id}),/layer not found/);
+    await run('edit.undo');
+    assert.equal((await call('get_node',{id:ellipse.id})).type,'ELLIPSE');
+    await run('edit.redo');
+    await assert.rejects(call('get_node',{id:ellipse.id}),/layer not found/);
+    const simple=await run('file.new',{name:'Archive fixture'});
+    const frame=await call('create_node',{type:'frame',name:'Archive frame',width:180,height:80,props:{fill:'#E8E8E8'}});
+    const text=await call('create_node',{type:'text',parent:frame.id,name:'Archive text',text:'한글 아카이브',x:10,y:12,props:{fontSize:18,fill:'#312E81'}});
+    const data=await run('file.saveAs',{data:true});
+    assert.equal(Buffer.from(data.data,'base64').subarray(0,2).toString(),'PK');
+    const path=join(temporary,'sdk-archive.figcraft');
+    assert.equal((await call('save_file',{path})).path,path);
+    assert.deepEqual(await readFile(path),Buffer.from(data.data,'base64'));
+    await call('type_text',{id:text.id,text:'재저장'});
+    await run('file.save');
+    const reloaded=join(temporary,'reloaded-archive.figcraft');
+    await copyFile(path,reloaded);
+    const opened=await call('open_file',{path:reloaded});
+    assert.notEqual(opened.document,simple.id);
+    assert.equal((await call('inspect_document')).layers[0].children[0].characters,'재저장');
+    await assert.rejects(call('save_file',{path}),/output exists/);
+    await writeFile(reloaded,'outside edit');
+    assert.equal((await run('file.open',{path:reloaded})).stale,true);
+    await assert.rejects(call('save_file'),/file changed on disk/);
+   } finally {await fig.close();}
+  });
+  await t.test('FigCraft resources, prompts and comment cursors reflect native data',async()=>{
+   const endpoint=new URL(service.endpoint+'/mcp/figcraft');
+   const transport=new StreamableHTTPClientTransport(endpoint,{requestInit:{headers:{Authorization:`Bearer ${service.token}`}}});
+   const fig=new Client({name:'figcraft-protocol-contracts',version:'1.0.0'});
+   const call=async(name,args={})=>{
+    const result=await fig.callTool({name,arguments:args});
+    assert.equal(result.isError,false,JSON.stringify(result.content));
+    return result.structuredContent??JSON.parse(result.content[0].text);
+   };
+   const read=async uri=>JSON.parse((await fig.readResource({uri})).contents[0].text);
+   await fig.connect(transport);
+   try {
+    const {resources}=await fig.listResources();
+    assert.equal(resources.length,3);
+    assert.equal((await fig.listResourceTemplates()).resourceTemplates.length,2);
+    assert.equal((await fig.listPrompts()).prompts.length,6);
+    const prompt=await fig.getPrompt({name:'mobile_screen',arguments:{screen:'Korean checkout',brand_color:'#112233'}});
+    assert.match(prompt.messages[0].content.text,/Korean checkout/);
+    assert.match(prompt.messages[0].content.text,/#112233/);
+    await assert.rejects(fig.getPrompt({name:'mobile_screen'}));
+    const document=await call('run_command',{command:'file.new',params:{name:'Comment event document'}});
+    const layer=await call('create_node',{type:'text',name:'Feedback target',text:'검토'});
+    assert.equal((await read('figcraft://document')).name,'Comment event document');
+    assert.equal((await read(`figcraft://node/${layer.id}`)).characters,'검토');
+    assert.equal((await read('figcraft://command/node.create')).id,'node.create');
+    await assert.rejects(fig.readResource({uri:'figcraft://command/missing'}));
+    const before=await call('wait_for_changes',{topics:['document']});
+    await client.call('native_comments',{version:'1',action:'create',documentId:document.id,body:'Needs review'});
+    const result=await call('wait_for_changes',{after:before.cursor,limit:1});
+    assert.equal(result.events[0].kind,'comment.added');
+    const open=await read('figcraft://comments');
+    assert.equal(open.comments[0].text,'Needs review');
+    assert.equal(result.events[0].data.commentId,open.comments[0].id);
+    assert.equal(result.events[0].documentId,document.id);
+    assert.equal((await call('wait_for_changes',{after:result.cursor,timeoutMs:0})).events.length,0);
+    assert.equal((await call('wait_for_changes',{after:result.cursor+1000,timeoutMs:0})).reset,true);
+    await call('run_command',{command:'comment.reply',params:{id:open.comments[0].id,text:'Checked'}});
+    const [reply]=(await call('wait_for_changes',{after:result.cursor})).events;
+    assert.equal(reply.kind,'comment.replied');
+    assert.equal(reply.data.reply,0);
+    await call('run_command',{command:'comment.edit',params:{id:reply.data.commentId,reply:reply.data.reply,text:'Checked again'}});
+    assert.equal((await read('figcraft://comments')).comments[0].replies[0].text,'Checked again');
+   } finally {await fig.close();}
+  });
+  await t.test('desktop result accepts PNG payloads larger than ordinary RPC bodies',async()=>{
+   const owner=(await rpc(service,null,'session.open')).sessionId;
+   const poll=rpc(service,owner,'desktop.poll');
+   await delay(40);
+   const transport=new StreamableHTTPClientTransport(new URL(service.endpoint+'/mcp/figcraft'),{requestInit:{headers:{Authorization:`Bearer ${service.token}`}}});
+   const fig=new Client({name:'desktop-upload-contract',version:'1.0.0'});
+   await fig.connect(transport);
+   try {
+    const pending=fig.callTool({name:'screenshot',arguments:{window:true}});
+    const job=await poll;
+    assert.equal(job.method,'screenshot');
+    const base64=Buffer.alloc(900_000,1).toString('base64');
+    await rpc(service,owner,'desktop.complete',{id:job.id,result:{mimeType:'image/png',base64}});
+    const result=await pending;
+    assert.equal(result.isError,false);
+    assert.equal(result.content.find(item=>item.type==='image').data,base64);
+   } finally {
+    await fig.close();
+    await rpc(service,owner,'session.close');
+   }
+  });
+  await t.test('FigCraft collaboration commands share live changes and cursor state over TLS',async()=>{
+   const guestService=await start(join(temporary,'figcraft-live-guest'));
+   const viewerService=await start(join(temporary,'figcraft-live-viewer'));
+   const make=async server=>{
+    const client=new Client({name:'figcraft-room-contract',version:'1.0.0'});
+    const transport=new StreamableHTTPClientTransport(new URL(server.endpoint+'/mcp/figcraft'),{requestInit:{headers:{Authorization:`Bearer ${server.token}`}}});
+    await client.connect(transport);
+    return {client,async call(name,args={}){
+     const result=await client.callTool({name,arguments:args});
+     const value=result.structuredContent??JSON.parse(result.content[0].text);
+     if(result.isError)throw Error(value.message);
+     return value;
+    }};
+   };
+   const host=await make(service), guest=await make(guestService), viewer=await make(viewerService);
+   const run=(client,command,params={})=>client.call('run_command',{command,params});
+   const sockets=new Set();
+   let hostPort, online=true;
+   const proxy=createServer(socket=>{
+    if(!online){socket.destroy();return;}
+    const upstream=connectSocket(hostPort,'127.0.0.1');
+    sockets.add(socket);
+    socket.once('close',()=>{sockets.delete(socket);upstream.destroy();});
+    upstream.once('close',()=>socket.destroy());
+    socket.on('error',()=>socket.destroy());
+    upstream.on('error',()=>upstream.destroy());
+    socket.pipe(upstream).pipe(socket);
+   });
+   await new Promise((resolve,reject)=>proxy.once('error',reject).listen(0,'127.0.0.1',resolve));
+   async function until(check){
+    for(let i=0;i<100;i++){const value=await check();if(value)return value;await delay(35);}
+    throw Error('room did not converge');
+   }
+   try{
+    const document=await run(host,'file.new',{name:'FigCraft MCP room'});
+    assert.equal((await run(host,'collab.peers')).status,'off');
+    const hosting=await run(host,'collab.host');
+    assert.equal(hosting.status,'live');
+    assert.ok(hosting.link.startsWith('omc-native://join/'));
+    hostPort=hosting.port;
+    const prefix='omc-native://join/';
+    const invitation=JSON.parse(Buffer.from(hosting.link.slice(prefix.length),'base64url'));
+    invitation.address=`127.0.0.1:${proxy.address().port}`;
+    const link=prefix+Buffer.from(JSON.stringify(invitation)).toString('base64url');
+    assert.equal((await run(guest,'collab.join',{link})).documentId,document.id);
+    assert.equal((await guest.call('inspect_document')).id,document.id);
+    await until(async()=>(await run(guest,'collab.peers')).status==='live');
+    const sharing=await run(host,'collab.share',{via:'local',bind:'local',access:'view'});
+    assert.equal(sharing.link,sharing.share.viewLink);
+    assert.notEqual(sharing.share.viewLink,sharing.share.editLink);
+    assert.equal((await run(viewer,'collab.join',{code:sharing.code})).readOnly,true);
+    await assert.rejects(viewer.call('create_node',{type:'rectangle',name:'Forbidden viewer edit'}),/view-only/);
+    const edited=await guest.call('create_node',{type:'text',name:'Guest edit',text:'협업 확인'});
+    assert.ok(edited.id);
+    await until(async()=>(await host.call('inspect_document')).layers.find(layer=>layer.characters==='협업 확인'));
+    await until(async()=>(await viewer.call('inspect_document')).layers.find(layer=>layer.characters==='협업 확인'));
+    assert.equal((await run(viewer,'collab.leave')).ended,true);
+    assert.ok((await viewer.call('create_node',{type:'rectangle',name:'Editable local copy'})).id);
+    const presence=(await rpc(service,null,'session.open')).sessionId;
+    try {
+     const page=(await rpc(service,presence,'document.snapshot',{documentId:native(document.id)})).pages[0].id;
+     const viewport=[page,12,20,500,300];
+     await rpc(service,presence,'collaboration',{action:'cursor',documentId:document.id,cursor:null,viewport});
+     const remoteHost=(await run(guest,'collab.peers')).peers.find(peer=>peer.host);
+     assert.equal((await run(guest,'collab.follow',{client:remoteHost.id})).follow,remoteHost.id);
+     assert.equal((await run(guest,'collab.peers')).follow,remoteHost.id);
+     assert.equal((await run(guest,'collab.follow')).follow,null);
+     assert.equal((await run(host,'collab.spotlight',{on:true})).spotlighting,true);
+     await until(async()=>(await run(guest,'collab.peers')).peers.find(peer=>peer.host)?.spotlighting);
+     assert.deepEqual((await run(guest,'collab.peers')).peers.find(peer=>peer.host).presence.viewport,viewport);
+     assert.equal((await run(host,'collab.spotlight')).spotlighting,false);
+    } finally { await rpc(service,presence,'session.close'); }
+    await run(guest,'collab.cursor',{x:17,y:23});
+    await until(async()=>(await run(host,'collab.peers')).peers.some(peer=>peer.cursor?.x===17&&peer.cursor.y===23));
+    assert.equal((await run(guest,'collab.cursorChat',{text:'커서 메시지'})).chat,'커서 메시지');
+    await until(async()=>(await run(host,'collab.peers')).peers.some(peer=>peer.chat==='커서 메시지'));
+    assert.equal((await run(guest,'collab.cursorChat',{text:''})).chat,null);
+    await until(async()=>(await run(host,'collab.peers')).peers.every(peer=>!peer.chat));
+    await run(host,'collab.cursorChat',{text:'호스트 메시지'});
+    await until(async()=>(await run(guest,'collab.peers')).peers.some(peer=>peer.chat==='호스트 메시지'));
+    await delay(5100);
+    await until(async()=>(await run(guest,'collab.peers')).peers.every(peer=>!peer.chat));
+    await run(guest,'collab.cursor');
+    await until(async()=>(await run(host,'collab.peers')).peers.every(peer=>!peer.cursor));
+    await assert.rejects(run(guest,'collab.reconnect'),/no disconnected guest session/);
+    online=false;
+    for(const socket of sockets)socket.destroy();
+    await until(async()=>(await run(guest,'collab.peers')).status==='reconnecting');
+    await guest.call('create_node',{type:'text',name:'Offline edit',text:'재연결 확인'});
+    online=true;
+    assert.ok(['reconnecting','live'].includes((await run(guest,'collab.reconnect')).status));
+    await until(async()=>(await run(host,'inspect_document')).layers.find(layer=>layer.characters==='재연결 확인'));
+    const guestPeer=(await run(host,'collab.peers')).peers.find(peer=>!peer.host);
+    await assert.rejects(run(guest,'collab.removePerson',{client:guestPeer.id}),/only the room host/);
+    assert.deepEqual(await run(host,'collab.removePerson',{client:guestPeer.id}),{removed:true,name:guestPeer.name});
+    await until(async()=>(await run(guest,'collab.peers')).status==='reconnecting');
+    assert.ok((await guest.call('inspect_document')).layers.some(layer=>layer.characters==='재연결 확인'));
+    assert.equal((await run(host,'collab.peers')).peers.some(peer=>peer.id===guestPeer.id),false);
+    assert.equal((await run(guest,'collab.leave')).ended,true);
+    await assert.rejects(run(guest,'collab.join',{link}));
+    assert.equal((await run(host,'collab.stop')).ended,true);
+    assert.equal((await run(host,'collab.peers')).status,'off');
+   }finally{
+    for(const socket of sockets)socket.destroy();
+    await new Promise(resolve=>proxy.close(resolve));
+    await viewer.client.close();await guest.client.close();await host.client.close();
+    await stop(viewerService);await stop(guestService);
+   }
+  });
+  await t.test('native collaboration exchanges durable edits over a dedicated pinned TLS room',async()=>{
+   const peer=await start(join(temporary,'room-guest'));
+   const guest=await connect(peer);
+   try {
+    const hostDocument=await client.call('create_document',{title:'Collaborate TLS fixture'});
+    const documentId=hostDocument.documentId;
+    const host=action=>client.call('collaboration',{action,documentId});
+    const guestAction=action=>guest.call('collaboration',{action,documentId});
+    const layer=await client.call('create_shape',{documentId,type:'rect',properties:{name:'Before join'}});
+    const pixel='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS9sAAAAASUVORK5CYII=';
+    await client.call('document_assets',{action:'add',documentId,kind:'image',name:'Room image',dataUrl:'data:image/png;base64,'+pixel});
+    const {assets}=await client.call('document_assets',{action:'list',documentId});
+    const hash=assets.find(a=>a.name==='Room image').hash;
+    const hosting=await host('host');
+    assert.equal(hosting.mode,'hosting');
+    const {invite}=await client.call('collaboration',{action:'invite',documentId,address:hosting.address});
+    const invitation=JSON.parse(Buffer.from(invite.split('/').at(-1),'base64url'));
+    await assert.rejects(guest.call('collaboration',{action:'join',documentId,invite:'omc-native://join/invalid'}));
+    assert.equal((await guest.call('collaboration',{action:'join',documentId,invite,name:'Guest'})).mode,'connected');
+    assert.equal((await host('status')).participants.length,2);
+    await client.call('collaboration',{action:'cursor',documentId,cursor:{x:17,y:30,page:hostDocument.page.id}});
+    let remoteCursor;
+    for(let i=0;i<20;i++){
+     const {participants}=await guestAction('status');
+     remoteCursor=participants.find(person=>person.host&&person.isSelf===false)?.cursor;
+     if(remoteCursor?.x===17)break;
+     await delay(150);
+    }
+    assert.equal(remoteCursor?.x,17);
+    assert.deepEqual(await readFile(join(peer.profile,'native-v1/assets/sha256',hash.slice(0,2),hash)),Buffer.from(pixel,'base64'));
+    assert.ok((await guest.call('get_tree',{documentId})).nodes.some(n=>n.rawId===layer.rawIds[0]));
+    await client.call('update',{documentId,id:layer.rawIds[0],attrs:{name:'Edited by host'}});
+    await guest.call('create_shape',{documentId,type:'ellipse',properties:{name:'Edited by guest'}});
+    async function converge(connection,name) {
+     for(let i=0;i<40;i++){
+      const {nodes}=await connection.call('get_tree',{documentId});
+      if(nodes.some(n=>n.name===name))return;
+      await delay(150);
+     }
+     assert.fail('a remote edit did not become visible');
+    }
+    await converge(client,'Edited by guest');
+    await converge(guest,'Edited by host');
+    await guest.call('undo',{documentId});
+    for(let i=0;i<40;i++){
+     if(!(await client.call('get_tree',{documentId})).nodes.some(n=>n.name==='Edited by guest'))break;
+     await delay(150);
+    }
+    const final=(await client.call('get_tree',{documentId})).nodes;
+    assert.ok(final.some(n=>n.name==='Edited by host'));
+    assert.ok(!final.some(n=>n.name==='Edited by guest'));
+    assert.equal((await guestAction('leave')).mode,'offline');
+    assert.equal((await host('status')).participants.length,1);
+    await guest.call('create_shape',{documentId,type:'rect',properties:{name:'Edited while offline'}});
+    await client.call('create_shape',{documentId,type:'rect',properties:{name:'Edited while guest away'}});
+    assert.equal((await guest.call('collaboration',{action:'join',documentId,invite,name:'Guest'})).mode,'connected');
+    await converge(client,'Edited while offline');
+    await converge(guest,'Edited while guest away');
+    await guestAction('leave');
+    assert.equal((await host('leave')).mode,'offline');
+    assert.ok((await guest.call('get_tree',{documentId})).nodes.some(n=>n.name==='Edited by host'));
+    assert.ok(invitation.address.startsWith('127.0.0.1:'));
+   } finally {await guest.client.close();await stop(peer);}
   });
   await t.test('single-step layer order preserves blocks, parents, and Undo',async()=>{
    const {documentId}=await client.call('create_document',{title:'Layer order'});

@@ -47,6 +47,9 @@ pub fn validate(name: &str, args: &Value) -> Result<()> {
         ("view", "tool") => &["tool"],
         ("workspace", "focus" | "close") => &["documentId"],
         ("workspace", "sample_color") => &["x", "y"],
+        ("component", "property" | "bind") => &["propertyType"],
+        ("component", "edit_property" | "remove_property") => &["property"],
+        ("component", "set_property") => &["property", "value"],
         ("collaboration", "invite") => &["address"],
         ("collaboration", "join") => &["invite"],
         ("edit_path", "move_nodes") => &["indices", "dx", "dy"],
@@ -75,6 +78,9 @@ pub fn validate(name: &str, args: &Value) -> Result<()> {
     {
         return Err(EngineError::invalid("design file import requires filePath"));
     }
+    if name == "component" && args.get("x").is_some() != args.get("y").is_some() {
+        return Err(EngineError::invalid("x and y must be supplied together"));
+    }
     if name == "boolean" {
         let ids = args["ids"].as_array().unwrap();
         let unique: std::collections::BTreeSet<_> = ids.iter().filter_map(Value::as_str).collect();
@@ -86,7 +92,7 @@ pub fn validate(name: &str, args: &Value) -> Result<()> {
     }
     Ok(())
 }
-pub(crate) fn check(schema: &Value, value: &Value, path: &str) -> Result<()> {
+pub fn check(schema: &Value, value: &Value, path: &str) -> Result<()> {
     let fail = |message: &str| EngineError::invalid(format!("{path} {message}"));
     if let Some(any) = schema["anyOf"].as_array() {
         if !any.iter().any(|s| check(s, value, path).is_ok()) {

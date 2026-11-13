@@ -192,3 +192,37 @@ fn rich_run_marks_change_real_glyph_colors_and_metrics() {
             .any(|p| p[2] > 200 && p[1] < 20 && p[0] < 20 && p[3] > 200)
     );
 }
+
+#[test]
+fn solid_text_paint_uses_its_own_alpha_and_vertical_alignment() {
+    let (mut snapshot, root) = document();
+    let mut text = Node::new(NodeKind::Text);
+    text.parent_id = Some(root);
+    text.properties.extend([
+        ("text".into(), json!("Test")),
+        ("fontSize".into(), json!(18)),
+        ("width".into(), json!(80)),
+        ("height".into(), json!(80)),
+        (
+            "fills".into(),
+            json!([{"type":"solid","color":"#312E81","opacity":0.5}]),
+        ),
+        ("textVerticalAlign".into(), json!("bottom")),
+    ]);
+    let id = text.id.clone();
+    snapshot.nodes.insert(id.clone(), text);
+    let rgba = pixels(&snapshot);
+    let drawn: Vec<_> = rgba
+        .chunks_exact(4)
+        .enumerate()
+        .filter(|(_, p)| p[3] > 0)
+        .collect();
+    assert!(!drawn.is_empty());
+    assert!(drawn.iter().all(|(index, _)| index / 128 > 45));
+    assert!(drawn.iter().all(|(_, pixel)| pixel[3] <= 128));
+    snapshot.nodes.get_mut(&id).unwrap().properties.insert(
+        "fills".into(),
+        json!([{"type":"solid","color":"#312E81","visible":false}]),
+    );
+    assert!(pixels(&snapshot).chunks_exact(4).all(|pixel| pixel[3] == 0));
+}

@@ -1,18 +1,19 @@
 //! A real native accessibility tree for controls and the active text buffer.
 //! OS screen-reader journeys remain separate platform qualification gates.
 use crate::{
-    app::{Action, App, EditTarget, HEADER},
+    app::{Action, App, EditTarget, FOOTER, HEADER},
     geometry::Rect,
 };
 use accesskit::{
     Action as AxAction, ActionData, Node, NodeId, Rect as AxRect, Role, TextPosition,
-    TextSelection, TreeId, TreeInfo, TreeUpdate,
+    TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
 };
 
 const ROOT: NodeId = NodeId(1);
 const EDITOR: NodeId = NodeId(1_u64 << 60);
 const TEXT_RUN: NodeId = NodeId((1_u64 << 60) + 1);
 const STATUS: NodeId = NodeId((1_u64 << 60) + 2);
+const INSPECTOR_DETAIL_START: u64 = (1_u64 << 60) + 100;
 
 fn bounds(r: Rect, scale: f64) -> AxRect {
     AxRect::new(
@@ -24,7 +25,7 @@ fn bounds(r: Rect, scale: f64) -> AxRect {
 }
 
 pub fn tree(app: &App) -> TreeUpdate {
-    let scale = app.window.as_ref().map_or(1., |w| w.scale_factor());
+    let scale = app.window.as_ref().map_or(1., |w| w.scale_factor()) * app.ui_scale();
     let mut root = Node::new(Role::Window);
     root.set_label("Oh My Canvas");
     root.set_bounds(AxRect::new(0., 0., app.width * scale, app.height * scale));
@@ -33,39 +34,71 @@ pub fn tree(app: &App) -> TreeUpdate {
     for control in &app.controls {
         let id = NodeId(control.id);
         children.push(id);
-        let mut node = Node::new(if control.field_value.is_some() {
-            Role::TextInput
-        } else {
-            Role::Button
-        });
+        let layer_toggle = matches!(
+            control.action,
+            Action::LayerVisibility(_) | Action::LayerLock(_) | Action::ToggleFontDownloads
+        );
+        let mut node = Node::new(
+            if matches!(
+                control.action,
+                Action::Field(_) | Action::EditCatalog { .. } | Action::EditLibraryDescription
+            ) && control.field_value.is_some()
+            {
+                Role::TextInput
+            } else if layer_toggle {
+                Role::CheckBox
+            } else if control.rect.y < HEADER && matches!(control.action, Action::Open(_)) {
+                Role::Tab
+            } else {
+                Role::Button
+            },
+        );
         node.set_label(control.label.clone());
         node.set_bounds(bounds(control.rect, scale));
-        node.add_action(AxAction::Focus);
-        node.add_action(AxAction::Click);
+        if !app.action_available(&control.action) {
+            node.set_disabled();
+        } else {
+            node.add_action(AxAction::Focus);
+            node.add_action(AxAction::Click);
+        }
         if let Some(value) = &control.field_value {
             node.set_value(value.clone());
-            node.add_action(AxAction::SetValue);
+            if matches!(
+                control.action,
+                Action::Field(_) | Action::EditLibraryDescription
+            ) && app.action_available(&control.action)
+            {
+                node.add_action(AxAction::SetValue);
+            }
         }
-        if control.selected {
+        if layer_toggle {
+            node.set_toggled(Toggled::from(control.selected));
+        } else if control.selected {
             node.set_selected(true);
         }
         nodes.push((id, node));
     }
-    let focus = if let Some(edit) = &app.editing {
-        let viewport = app.canvas_rect();
-        let r = Rect::new(
-            viewport.x + 24.,
-            viewport.y + viewport.height - 118.,
-            (viewport.width - 48.).max(100.),
-            88.,
-        );
-        let mut node = Node::new(if matches!(edit.target, EditTarget::Text { .. }) {
+    for (index, (rect, label)) in crate::inspector::detail_text(app).into_iter().enumerate() {
+        let id = NodeId(INSPECTOR_DETAIL_START + index as u64);
+        let mut node = Node::new(Role::Label);
+        node.set_label(label);
+        node.set_bounds(bounds(rect, scale));
+        children.push(id);
+        nodes.push((id, node));
+    }
+    let focus = if let Some(edit) = &app.editing
+        && let Some(r) = crate::text_ui::editor_rect(app)
+    {
+        let mut node = Node::new(if edit.target.is_canvas_text() {
             Role::MultilineTextInput
         } else {
             Role::TextInput
         });
         node.set_label(match &edit.target {
-            EditTarget::Text { .. } => "Canvas text",
+            EditTarget::Text { .. } | EditTarget::TextOnPath { .. } => "Canvas text",
+            EditTarget::LibraryDescription => "Library description",
+            EditTarget::CursorChat => "Cursor chat",
+            EditTarget::CanvasComment { .. } => "Canvas comment",
             EditTarget::Title => "Document name",
             EditTarget::Page { .. } => "Page name",
             EditTarget::Catalog { property, .. } => property,
@@ -109,10 +142,7 @@ pub fn tree(app: &App) -> TreeUpdate {
                 .map(|c| c.len_utf8() as u8)
                 .collect::<Vec<_>>(),
         );
-        run.set_bounds(bounds(
-            Rect::new(r.x + 13., r.y + 29., r.width - 26., 28.),
-            scale,
-        ));
+        run.set_bounds(bounds(r, scale));
         nodes.push((EDITOR, node));
         nodes.push((TEXT_RUN, run));
         children.push(EDITOR);
@@ -124,7 +154,10 @@ pub fn tree(app: &App) -> TreeUpdate {
     };
     let mut status = Node::new(Role::Label);
     status.set_label(app.error.as_deref().unwrap_or(&app.status));
-    status.set_bounds(bounds(Rect::new(0., HEADER, app.width, 24.), scale));
+    status.set_bounds(bounds(
+        Rect::new(0., app.height - FOOTER, app.width, FOOTER),
+        scale,
+    ));
     children.push(STATUS);
     nodes.push((STATUS, status));
     root.set_children(children);
@@ -188,6 +221,7 @@ pub fn handle(app: &mut App, event: accesskit_winit::Event) {
                         _ => {}
                     }
                 }
+                app.refresh_path_text_scene();
             } else if let Some(control) = app
                 .controls
                 .iter()
@@ -195,10 +229,16 @@ pub fn handle(app: &mut App, event: accesskit_winit::Event) {
                 .cloned()
             {
                 match (request.action, request.data) {
-                    (AxAction::Focus, _) => app.focus = control.id,
+                    (AxAction::Focus, _) => {
+                        app.focus = control.id;
+                        app.keyboard_focus_visible = true;
+                    }
                     (AxAction::Click, _) => app.action(control.action),
                     (AxAction::SetValue, Some(ActionData::Value(value))) => {
-                        if matches!(control.action, Action::Field(_)) {
+                        if matches!(
+                            control.action,
+                            Action::Field(_) | Action::EditLibraryDescription
+                        ) {
                             app.action(control.action);
                             if let Some(edit) = &mut app.editing {
                                 edit.buffer.select_all();

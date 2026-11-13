@@ -59,12 +59,20 @@ pub enum Action {
     DeleteNode {
         node_id: String,
     },
+    RestoreNode {
+        node_id: String,
+        deletions: Vec<String>,
+    },
     CreatePage {
         page: Page,
     },
     RenamePage {
         page_id: String,
         title: String,
+    },
+    MovePage {
+        page_id: String,
+        rank: String,
     },
     DeletePage {
         page_id: String,
@@ -105,6 +113,7 @@ impl Action {
             | Self::MoveNode { node_id, .. }
             | Self::AdjustRank { node_id, .. }
             | Self::DeleteNode { node_id }
+            | Self::RestoreNode { node_id, .. }
             | Self::TextInsert { node_id, .. }
             | Self::TextDelete { node_id, .. }
             | Self::TextMark { node_id, .. } => node_id,
@@ -327,6 +336,23 @@ impl NodeState {
                     ));
                 }
             }
+            Action::RestoreNode { deletions, .. } => {
+                if deletions.is_empty() || deletions.len() > 4096 {
+                    return Err(EngineError::invalid(
+                        "restore requires 1–4096 observed deletions",
+                    ));
+                }
+                if deletions.iter().any(|id| {
+                    !self.events.iter().any(|event| {
+                        &event.id == id && matches!(event.action, Action::DeleteNode { .. })
+                    })
+                }) {
+                    return Err(EngineError::new(
+                        "dependency_unavailable",
+                        "restore deletion is not present",
+                    ));
+                }
+            }
             Action::TextInsert {
                 after,
                 text,
@@ -418,12 +444,37 @@ impl NodeState {
         })
     }
 
+    pub fn active_deletions(&self) -> Vec<String> {
+        let events = live_events(&self.events);
+        Self::deletions_after_restore(&events)
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn deletions_after_restore<'a>(events: &[&'a Operation]) -> Vec<&'a str> {
+        let restored: BTreeSet<_> = events
+            .iter()
+            .filter_map(|event| match &event.action {
+                Action::RestoreNode { deletions, .. } => Some(deletions),
+                _ => None,
+            })
+            .flatten()
+            .map(String::as_str)
+            .collect();
+        events
+            .iter()
+            .filter_map(|event| {
+                (matches!(event.action, Action::DeleteNode { .. })
+                    && !restored.contains(event.id.as_str()))
+                .then_some(event.id.as_str())
+            })
+            .collect()
+    }
+
     pub fn project(&self) -> Result<Option<Node>> {
         let events = live_events(&self.events);
-        if events
-            .iter()
-            .any(|e| matches!(e.action, Action::DeleteNode { .. }))
-        {
+        if !Self::deletions_after_restore(&events).is_empty() {
             return Ok(None);
         }
         let mut node = self.seed.clone();
@@ -508,7 +559,7 @@ impl NodeState {
                 Action::SetNode { properties, .. } => properties.contains_key(field),
                 Action::UnsetNode { properties, .. } => properties.iter().any(|key| key == field),
                 Action::MoveNode { .. } => field == "placement",
-                Action::DeleteNode { .. } => field == "existence",
+                Action::DeleteNode { .. } | Action::RestoreNode { .. } => field == "existence",
                 Action::TextInsert { .. } | Action::TextDelete { .. } | Action::TextMark { .. } => {
                     field == "text"
                 }
@@ -871,6 +922,17 @@ impl CatalogState {
                     return Err(EngineError::invalid("page title is too long"));
                 }
             }
+            Action::MovePage { page_id, rank } => {
+                if !known_page(page_id) {
+                    return Err(EngineError::new(
+                        "dependency_unavailable",
+                        "page declaration is missing",
+                    ));
+                }
+                if !omc_model::valid_rank(rank) {
+                    return Err(EngineError::invalid("invalid page rank"));
+                }
+            }
             Action::DeletePage { page_id } => {
                 if !known_page(page_id) {
                     return Err(EngineError::new(
@@ -962,6 +1024,11 @@ impl CatalogState {
                         page.title.clone_from(title);
                     }
                 }
+                Action::MovePage { page_id, rank } => {
+                    if let Some(page) = pages.get_mut(page_id) {
+                        page.rank.clone_from(rank);
+                    }
+                }
                 Action::DeletePage { page_id } => {
                     deleted.insert(page_id.clone());
                 }
@@ -992,6 +1059,11 @@ impl CatalogState {
                 Action::RenamePage { page_id, title } => {
                     if let Some(page) = pages.get_mut(page_id) {
                         page.title.clone_from(title);
+                    }
+                }
+                Action::MovePage { page_id, rank } => {
+                    if let Some(page) = pages.get_mut(page_id) {
+                        page.rank.clone_from(rank);
                     }
                 }
                 Action::DeletePage { page_id } => {
@@ -1113,6 +1185,49 @@ mod tests {
             action,
         }
     }
+    #[test]
+    fn restoring_observed_node_deletion_preserves_unobserved_delete() {
+        let node = Node::new(omc_model::NodeKind::Frame);
+        let local_delete = operation(
+            "local",
+            1,
+            1,
+            Action::DeleteNode {
+                node_id: node.id.clone(),
+            },
+        );
+        let peer_delete = operation(
+            "peer",
+            1,
+            1,
+            Action::DeleteNode {
+                node_id: node.id.clone(),
+            },
+        );
+        let restore = operation(
+            "local",
+            2,
+            2,
+            Action::RestoreNode {
+                node_id: node.id.clone(),
+                deletions: vec![local_delete.id.clone()],
+            },
+        );
+        let mut state = NodeState::seeded(node.clone());
+        assert!(state.apply(restore.clone()).is_err());
+        state.apply(local_delete.clone()).unwrap();
+        state.apply(restore.clone()).unwrap();
+        assert_eq!(state.project().unwrap(), Some(node.clone()));
+        state.apply(peer_delete.clone()).unwrap();
+        assert!(state.project().unwrap().is_none());
+        let mut reversed = NodeState::seeded(node);
+        reversed.apply(peer_delete).unwrap();
+        reversed.apply(local_delete).unwrap();
+        reversed.apply(restore).unwrap();
+        assert!(reversed.project().unwrap().is_none());
+        assert_eq!(state.active_deletions(), reversed.active_deletions());
+    }
+
     #[test]
     fn observed_delete_preserves_concurrent_insert_in_both_orders() {
         let mut node = Node::new(NodeKind::Text);

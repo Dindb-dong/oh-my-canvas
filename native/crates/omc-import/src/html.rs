@@ -4,6 +4,8 @@ use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use omc_model::{Node, NodeKind};
 use serde_json::{Value, json};
 
+const MAX_HTML_DEPTH: usize = 256;
+
 pub fn import_html(source: &str, options: &ImportOptions) -> Result<ImportResult, ImportError> {
     validate_input(source.as_bytes(), options)?;
     let dom = parse_document(RcDom::default(), Default::default()).one(source);
@@ -28,16 +30,25 @@ pub fn import_html(source: &str, options: &ImportOptions) -> Result<ImportResult
         ]);
     let mut css = String::new();
     let mut counter = 0;
-    for child in dom.document.children.borrow().iter() {
-        visit(
-            child,
-            &root,
+    let mut pending = vec![(dom.document.clone(), root, 0)];
+    while let Some((node, parent, depth)) = pending.pop() {
+        if let Some(parent) = visit(
+            &node,
+            &parent,
             &mut result,
             &mut css,
             options,
             &mut counter,
-            0,
-        )?;
+            depth,
+        )? {
+            pending.extend(
+                node.children
+                    .borrow()
+                    .iter()
+                    .rev()
+                    .map(|child| (child.clone(), parent.clone(), depth + 1)),
+            );
+        }
     }
     result.content.metadata.insert("css".into(), json!(css));
     result
@@ -66,16 +77,12 @@ fn visit(
     options: &ImportOptions,
     counter: &mut usize,
     depth: usize,
-) -> Result<(), ImportError> {
-    if depth > 256 {
+) -> Result<Option<String>, ImportError> {
+    if depth > MAX_HTML_DEPTH {
         return Err(ImportError::ResourceLimit("HTML tree depth".into()));
     }
     match &handle.data {
-        NodeData::Document => {
-            for child in handle.children.borrow().iter() {
-                visit(child, parent, result, css, options, counter, depth + 1)?;
-            }
-        }
+        NodeData::Document => return Ok(Some(parent.into())),
         NodeData::Element { name, attrs, .. } => {
             let tag = name.local.as_ref();
             let attrs: BTreeMap<String, String> = attrs
@@ -86,7 +93,7 @@ fn visit(
             if matches!(tag, "style") {
                 css.push_str(&text_content(handle));
                 css.push('\n');
-                return Ok(());
+                return Ok(None);
             }
             if matches!(tag, "script" | "iframe" | "object" | "embed") {
                 result.diagnostics.push(Diagnostic {
@@ -100,7 +107,7 @@ fn visit(
                             .into(),
                     fidelity_lost: true,
                 });
-                return Ok(());
+                return Ok(None);
             }
             if tag == "link" && attrs.get("rel").is_some_and(|v| v == "stylesheet") {
                 result.diagnostics.push(Diagnostic::unsupported(
@@ -111,7 +118,7 @@ fn visit(
                         .map(String::as_str)
                         .unwrap_or("external stylesheet"),
                 ));
-                return Ok(());
+                return Ok(None);
             }
             if matches!(tag, "head" | "html") {
                 if tag == "html" {
@@ -125,13 +132,10 @@ fn visit(
                         }
                     }
                 }
-                for child in handle.children.borrow().iter() {
-                    visit(child, parent, result, css, options, counter, depth + 1)?;
-                }
-                return Ok(());
+                return Ok(Some(parent.into()));
             }
             if matches!(tag, "meta" | "title" | "base") {
-                return Ok(());
+                return Ok(None);
             }
             if tag == "svg" {
                 result.diagnostics.push(Diagnostic::unsupported(
@@ -139,13 +143,18 @@ fn visit(
                     Some("inline-svg"),
                     "Inline SVG in HTML must be imported through the SVG converter",
                 ));
-                return Ok(());
+                return Ok(None);
             }
             *counter += 1;
             if *counter > options.max_nodes {
                 return Err(ImportError::ResourceLimit("HTML node limit".into()));
             }
-            let text_only = is_text_element(tag) && handle.children.borrow().iter().all(is_inline);
+            let text_only = is_text_element(tag)
+                && handle
+                    .children
+                    .borrow()
+                    .iter()
+                    .all(|child| is_inline(child, depth + 1));
             let kind = if tag == "img" {
                 NodeKind::Image
             } else if text_only {
@@ -157,6 +166,9 @@ fn visit(
             node.parent_id = Some(parent.into());
             node.rank = rank(*counter);
             node.properties.insert("tag".into(), json!(tag));
+            if let Some(name) = attrs.get("data-name").or_else(|| attrs.get("id")) {
+                node.properties.insert("name".into(), json!(name));
+            }
             if let Some(id) = attrs.get("id") {
                 node.properties.insert("htmlId".into(), json!(id));
                 result
@@ -166,25 +178,19 @@ fn visit(
             if let Some(class) = attrs.get("class") {
                 node.properties.insert("class".into(), json!(class));
             }
-            let mut style = default_style(tag).to_owned();
             if let Some(authored) = attrs.get("style") {
-                style.push(';');
-                style.push_str(authored);
-            }
-            let parsed = omc_style::parse_declarations(&style);
-            for d in &parsed {
-                if matches!(d.name.as_str(), "position")
-                    && matches!(d.value.as_str(), "fixed" | "sticky")
-                {
-                    result.diagnostics.push(Diagnostic::unsupported(
-                        Some(&node.id),
-                        Some("position"),
-                        &d.value,
-                    ));
+                for declaration in omc_style::parse_declarations(authored) {
+                    if declaration.name == "position"
+                        && matches!(declaration.value.as_str(), "fixed" | "sticky")
+                    {
+                        result.diagnostics.push(Diagnostic::unsupported(
+                            Some(&node.id),
+                            Some("position"),
+                            &declaration.value,
+                        ));
+                    }
                 }
-            }
-            if !style.is_empty() {
-                node.properties.insert("style".into(), json!(style));
+                node.properties.insert("style".into(), json!(authored));
             }
             for key in ["width", "height"] {
                 if let Some(value) = attrs.get(key) {
@@ -262,7 +268,7 @@ fn visit(
             }
             if matches!(
                 tag,
-                "table" | "tr" | "td" | "th" | "input" | "select" | "textarea" | "button"
+                "table" | "tr" | "td" | "th" | "input" | "select" | "textarea"
             ) {
                 result.diagnostics.push(Diagnostic::unsupported(
                     Some(&node.id),
@@ -272,16 +278,12 @@ fn visit(
             }
             let id = node.id.clone();
             result.content.nodes.insert(id.clone(), node);
-            if !text_only {
-                for child in handle.children.borrow().iter() {
-                    visit(child, &id, result, css, options, counter, depth + 1)?;
-                }
-            }
+            return Ok((!text_only).then_some(id));
         }
         NodeData::Text { contents } => {
             let text = collapse_whitespace(contents.borrow().as_ref(), false);
             if text.trim().is_empty() {
-                return Ok(());
+                return Ok(None);
             }
             *counter += 1;
             if *counter > options.max_nodes {
@@ -296,7 +298,7 @@ fn visit(
         }
         _ => (),
     }
-    Ok(())
+    Ok(None)
 }
 fn text_content(handle: &Handle) -> String {
     match &handle.data {
@@ -305,14 +307,21 @@ fn text_content(handle: &Handle) -> String {
         _ => handle.children.borrow().iter().map(text_content).collect(),
     }
 }
-fn is_inline(handle: &Handle) -> bool {
+fn is_inline(handle: &Handle, depth: usize) -> bool {
+    if depth > MAX_HTML_DEPTH {
+        return false;
+    }
     match &handle.data {
         NodeData::Text { .. } => true,
         NodeData::Element { name, .. } => {
             matches!(
                 name.local.as_ref(),
                 "span" | "strong" | "b" | "em" | "i" | "u" | "s" | "a" | "br" | "code"
-            ) && handle.children.borrow().iter().all(is_inline)
+            ) && handle
+                .children
+                .borrow()
+                .iter()
+                .all(|child| is_inline(child, depth + 1))
         }
         NodeData::Comment { .. } => true,
         _ => false,
@@ -344,21 +353,6 @@ fn collapse_whitespace(text: &str, pre: bool) -> String {
         text.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 }
-fn default_style(tag: &str) -> &'static str {
-    match tag {
-        "body" => "display:block;margin:8px",
-        "h1" => "font-size:32px;font-weight:bold;margin:0 0 16px 0",
-        "h2" => "font-size:24px;font-weight:bold;margin:0 0 12px 0",
-        "h3" => "font-size:20px;font-weight:bold",
-        "strong" | "b" => "font-weight:bold",
-        "em" | "i" => "font-style:italic",
-        "p" => "margin:0 0 16px 0",
-        "pre" | "code" => "font-family:monospace;white-space:pre",
-        "ul" | "ol" => "padding-left:24px;display:block",
-        _ => "",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,7 +376,18 @@ mod tests {
     }
     #[test]
     fn strict_rejects_scripts_external_resources_and_fixed_layout() {
-        assert!(import_html("<script>alert(1)</script>", &ImportOptions::default()).is_err());
+        for source in [
+            "<script>alert(1)</script>",
+            "<button onclick='alert(1)'>Click</button>",
+            "<img src='file:///secret.png'>",
+            "<link rel='stylesheet' href='style.css'>",
+            "<div style='position:fixed'>Fixed</div>",
+        ] {
+            assert!(matches!(
+                import_html(source, &ImportOptions::default()),
+                Err(ImportError::Unsupported(_))
+            ));
+        }
         let r = import_html(
             "<img src='file:///secret.png'>",
             &ImportOptions {
@@ -393,5 +398,14 @@ mod tests {
         .unwrap();
         assert!(r.resources.is_empty());
         assert_eq!(r.diagnostics[0].code, "resource_unavailable");
+    }
+
+    #[test]
+    fn inline_subtrees_obey_the_same_depth_limit() {
+        let source = format!("{}한글{}", "<span>".repeat(300), "</span>".repeat(300));
+        assert!(matches!(
+            import_html(&source, &ImportOptions::default()),
+            Err(ImportError::ResourceLimit(_))
+        ));
     }
 }

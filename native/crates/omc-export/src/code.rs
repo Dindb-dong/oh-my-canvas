@@ -17,6 +17,7 @@ pub fn export_html(
         &mut BTreeSet::new(),
         &mut diagnostics,
         0,
+        None,
     )?;
     // A literal closing style tag cannot be allowed to terminate the element.
     let css = css.replace('<', "\\3c ");
@@ -45,6 +46,7 @@ pub fn export_react(
         &mut BTreeSet::new(),
         &mut diagnostics,
         0,
+        None,
     )?;
     let css = serde_json::to_string(&css).map_err(|e| ExportError::Invalid(e.to_string()))?;
     Ok((
@@ -59,6 +61,291 @@ pub fn export_react(
         diagnostics,
     ))
 }
+
+pub fn inspect_web(
+    snapshot: &DocumentSnapshot,
+    id: &str,
+    language: &str,
+    root_font_size: Option<f64>,
+    component: Option<(&str, &BTreeMap<String, String>)>,
+    mobile: Option<&str>,
+) -> Result<String, ExportError> {
+    let (prepared, css, mut diagnostics) = super::code_context::prepare(snapshot, Some(id));
+    let node = prepared
+        .nodes
+        .get(id)
+        .ok_or_else(|| ExportError::Invalid("unknown export layer".into()))?;
+    let mobile_styles = mobile
+        .map(|mobile| responsive_styles(&prepared, id, snapshot, mobile))
+        .unwrap_or_default();
+    let options = InspectOptions {
+        root_font_size,
+        component: component.map(|(_, properties)| properties),
+        language,
+        mobile_styles,
+    };
+    if language == "css" {
+        return Ok(format!(
+            "{};",
+            authored_style(node)
+                .into_iter()
+                .map(|(key, value)| { format!("{key}: {}", options.units(value)) })
+                .collect::<Vec<_>>()
+                .join(";\n")
+        ));
+    }
+    let jsx = matches!(language, "react" | "tailwind");
+    let body = element(
+        &prepared,
+        id,
+        jsx,
+        language == "tailwind",
+        &mut BTreeSet::new(),
+        &mut diagnostics,
+        0,
+        Some(&options),
+    )?;
+    let name = component.map_or("CanvasDesign", |(name, _)| name);
+    let css = options.units(css);
+    let style = css.replace('<', "\\3c ");
+    Ok(match language {
+        "react" | "tailwind" => {
+            let style =
+                serde_json::to_string(&css).map_err(|e| ExportError::Invalid(e.to_string()))?;
+            format!(
+                "export default function {name}(props = {{}}) {{\n  return (<>\n    <style>{{{style}}}</style>\n    {body}\n  </>);\n}}"
+            )
+        }
+        "vue" => {
+            let script = if component.is_some() {
+                "<script setup>\nconst props = defineProps(".to_owned()
+                    + &json!(options.vue_props(&prepared)).to_string()
+                    + ")\n</script>\n\n"
+            } else {
+                String::new()
+            };
+            format!("{script}<template>\n  {body}\n</template>\n<style>\n{style}\n</style>")
+        }
+        "leptos" => {
+            let fields = options.leptos_props(&prepared).join(", ");
+            format!(
+                "use leptos::prelude::*;\n\n#[component]\npub fn {name}({fields}) -> impl IntoView {{\n    view! {{ <style>{{{css:?}}}</style> {body} }}\n}}"
+            )
+        }
+        _ if style.is_empty() => body,
+        _ => format!("<style>{style}</style>\n{body}"),
+    })
+}
+
+struct InspectOptions<'a> {
+    root_font_size: Option<f64>,
+    component: Option<&'a BTreeMap<String, String>>,
+    language: &'a str,
+    mobile_styles: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+impl InspectOptions<'_> {
+    fn units(&self, value: String) -> String {
+        let Some(base) = self.root_font_size else {
+            return value;
+        };
+        Self::lengths_in_rem(&value, base)
+    }
+
+    fn prop_name<'a>(&'a self, node: &Node, kind: &str) -> Option<&'a str> {
+        let key = node
+            .properties
+            .get("componentPropertyRefs")?
+            .get(kind)?
+            .as_str()?;
+        self.component?.get(key).map(String::as_str)
+    }
+
+    fn property(&self, node: &Node, kind: &str) -> Option<String> {
+        let property = self.prop_name(node, kind)?;
+        if self.language == "leptos" {
+            let name = leptos_prop(property);
+            let fallback = if kind == "characters" {
+                format!("{:?}.to_owned()", node.string("text").unwrap_or_default())
+            } else {
+                (node.properties.get("visible") != Some(&Value::Bool(false))).to_string()
+            };
+            return Some(format!("{name}.clone().unwrap_or_else(|| {fallback})"));
+        }
+        serde_json::to_string(property)
+            .ok()
+            .map(|key| format!("props[{key}]"))
+    }
+
+    fn vue_props(&self, snapshot: &DocumentSnapshot) -> BTreeMap<String, Value> {
+        self.bound_props(snapshot)
+            .into_iter()
+            .map(|(property, (kind, fallback))| {
+                let value = if kind == "characters" {
+                    json!(fallback)
+                } else {
+                    json!(fallback == "true")
+                };
+                (property, json!({"default":value}))
+            })
+            .collect()
+    }
+
+    fn lengths_in_rem(value: &str, base: f64) -> String {
+        let mut result = String::with_capacity(value.len());
+        let mut rest = value;
+        let mut previous = None;
+        let mut quote = None;
+        while let Some(ch) = rest.chars().next() {
+            if let Some(delimiter) = quote {
+                result.push(ch);
+                rest = &rest[ch.len_utf8()..];
+                if ch == '\\' {
+                    if let Some(escaped) = rest.chars().next() {
+                        result.push(escaped);
+                        rest = &rest[escaped.len_utf8()..];
+                    }
+                } else if ch == delimiter {
+                    quote = None;
+                }
+            } else {
+                if ch == '\'' || ch == '"' {
+                    quote = Some(ch);
+                }
+                let start = ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.');
+                let separate = previous
+                    .is_none_or(|ch: char| !ch.is_alphanumeric() && !matches!(ch, '-' | '_' | '.'));
+                if start && separate {
+                    let end = rest
+                        .char_indices()
+                        .take_while(|(index, ch)| {
+                            ch.is_ascii_digit()
+                                || *ch == '.'
+                                || *index == 0 && matches!(ch, '+' | '-')
+                        })
+                        .last()
+                        .map_or(0, |(index, ch)| index + ch.len_utf8());
+                    let (number, suffix) = rest.split_at(end);
+                    if let Some(after) = suffix.strip_prefix("px")
+                        && after.chars().next().is_none_or(|ch| {
+                            !ch.is_alphanumeric() && !matches!(ch, '-' | '_' | '.')
+                        })
+                        && let Ok(pixels) = number.parse::<f64>()
+                        && let rem = pixels / base
+                        && rem.is_finite()
+                    {
+                        let rendered = format!("{rem:.6}");
+                        result.push_str(rendered.trim_end_matches('0').trim_end_matches('.'));
+                        result.push_str("rem");
+                        rest = after;
+                        previous = Some('x');
+                        continue;
+                    }
+                }
+                result.push(ch);
+                rest = &rest[ch.len_utf8()..];
+            }
+            previous = Some(ch);
+        }
+        result
+    }
+
+    fn leptos_props(&self, snapshot: &DocumentSnapshot) -> Vec<String> {
+        self.bound_props(snapshot)
+            .into_iter()
+            .map(|(property, (kind, _))| {
+                let param = leptos_prop(&property);
+                let typ = if kind == "characters" {
+                    "String"
+                } else {
+                    "bool"
+                };
+                format!("#[prop(optional)] {param}: Option<{typ}>")
+            })
+            .collect()
+    }
+
+    fn bound_props(&self, snapshot: &DocumentSnapshot) -> BTreeMap<String, (&'static str, String)> {
+        let mut properties = BTreeMap::new();
+        for node in snapshot.nodes.values() {
+            for kind in ["characters", "visible"] {
+                if let Some(name) = self.prop_name(node, kind) {
+                    let fallback = if kind == "characters" {
+                        node.string("text").unwrap_or_default().to_owned()
+                    } else {
+                        (node.properties.get("visible") != Some(&Value::Bool(false))).to_string()
+                    };
+                    properties.insert(name.to_owned(), (kind, fallback));
+                }
+            }
+        }
+        properties
+    }
+}
+fn leptos_prop(name: &str) -> String {
+    format!(
+        "prop_{}",
+        name.chars()
+            .map(|c| if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            })
+            .collect::<String>()
+    )
+}
+
+fn responsive_styles(
+    desktop: &DocumentSnapshot,
+    desktop_root: &str,
+    original: &DocumentSnapshot,
+    mobile_root: &str,
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    let (mobile, _, _) = super::code_context::prepare(original, Some(mobile_root));
+    let children = |snapshot: &DocumentSnapshot| {
+        let mut by_parent = BTreeMap::<String, Vec<(String, String, String)>>::new();
+        for node in snapshot.nodes.values() {
+            if let Some(parent) = &node.parent_id {
+                by_parent.entry(parent.clone()).or_default().push((
+                    node.string("name").unwrap_or_default().to_owned(),
+                    node.rank.to_string(),
+                    node.id.clone(),
+                ));
+            }
+        }
+        for nodes in by_parent.values_mut() {
+            nodes.sort_by(|a, b| (&a.1, &a.2).cmp(&(&b.1, &b.2)));
+        }
+        by_parent
+    };
+    let desktop_children = children(desktop);
+    let mobile_children = children(&mobile);
+    let mut styles = BTreeMap::new();
+    let mut pending = vec![(desktop_root.to_owned(), mobile_root.to_owned())];
+    while let Some((desktop_id, mobile_id)) = pending.pop() {
+        if styles.contains_key(&desktop_id) {
+            continue;
+        }
+        let Some(node) = mobile.nodes.get(&mobile_id) else {
+            continue;
+        };
+        styles.insert(desktop_id.clone(), authored_style(node));
+        let mut used = BTreeSet::new();
+        for (name, _, child) in desktop_children.get(&desktop_id).into_iter().flatten() {
+            if let Some((_, _, matching)) = mobile_children
+                .get(&mobile_id)
+                .into_iter()
+                .flatten()
+                .find(|(candidate, _, matching)| candidate == name && !used.contains(matching))
+            {
+                used.insert(matching.clone());
+                pending.push((child.clone(), matching.clone()));
+            }
+        }
+    }
+    styles
+}
+
 fn root<'a>(s: &'a DocumentSnapshot, id: Option<&str>) -> Result<&'a str, ExportError> {
     match id {
         Some(id) => s
@@ -80,6 +367,7 @@ fn element(
     visiting: &mut BTreeSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
+    options: Option<&InspectOptions<'_>>,
 ) -> Result<String, ExportError> {
     if depth > 512 || !visiting.insert(id.into()) {
         return Err(ExportError::Invalid(
@@ -101,10 +389,29 @@ fn element(
             _ => "div",
         });
     let mut attrs = format!(" data-omc-id=\"{}\"", escape(id));
+    if tag == "button" {
+        attrs.push_str(" type=\"button\"");
+    }
     if let Some(id) = node.properties.get("htmlId").and_then(Value::as_str) {
         attrs.push_str(&format!(" id=\"{}\"", escape(id)));
     }
-    let styles = authored_style(node);
+    let language = options.map_or("", |options| options.language);
+    let leptos = language == "leptos";
+    let vue = language == "vue";
+    let visible = options.and_then(|options| options.property(node, "visible"));
+    let text = options.and_then(|options| options.property(node, "characters"));
+    let mut styles = authored_style(node);
+    if visible.is_some() && matches!(styles.get("display").map(String::as_str), Some("none")) {
+        styles.remove("display");
+    }
+    if vue {
+        if let Some(visible) = &visible {
+            attrs.push_str(&format!(" v-if=\"{}\"", escape(visible)));
+        }
+        if let Some(text) = &text {
+            attrs.push_str(&format!(" v-text=\"{}\"", escape(text)));
+        }
+    }
     let mut classes = node
         .properties
         .get("class")
@@ -112,14 +419,37 @@ fn element(
         .unwrap_or("")
         .to_owned();
     let mut inline = BTreeMap::new();
+    let mobile = options.and_then(|options| options.mobile_styles.get(id));
+    let utility = |key: &str, value: &str| {
+        value
+            .chars()
+            .all(|c| !matches!(c, '[' | ']' | '"' | '\'' | '<' | '>' | '\\' | '\n'))
+            .then(|| format!("[{key}:{}]", value.replace(' ', "_")))
+    };
+    if let Some(mobile) = mobile {
+        for (key, value) in mobile {
+            if styles.get(key) != Some(value) {
+                if let Some(class) = utility(key, value) {
+                    classes.push_str(&format!(" {class}"));
+                    if !styles.contains_key(key) {
+                        classes.push_str(&format!(" lg:[{key}:initial]"));
+                    }
+                }
+            }
+        }
+    }
     for (key, value) in styles {
-        if tailwind
-            && value
-                .chars()
-                .all(|c| !matches!(c, '[' | ']' | '"' | '\'' | '<' | '>' | '\\' | '\n'))
-        {
-            classes.push(' ');
-            classes.push_str(&format!("[{key}:{}]", value.replace(' ', "_")));
+        let value = match options {
+            Some(options) => options.units(value),
+            None => value,
+        };
+        if let Some(class) = tailwind.then(|| utility(&key, &value)).flatten() {
+            let breakpoint = if mobile.is_some_and(|styles| styles.get(&key) != Some(&value)) {
+                "lg:"
+            } else {
+                ""
+            };
+            classes.push_str(&format!(" {breakpoint}{class}"));
         } else {
             inline.insert(key, value);
         }
@@ -183,7 +513,10 @@ fn element(
             fidelity_lost: false,
         });
         visiting.remove(id);
-        return Ok(format!("<{tag}{attrs}{}>", if jsx { " /" } else { "" }));
+        return Ok(format!(
+            "<{tag}{attrs}{}>",
+            if jsx || leptos { " /" } else { "" }
+        ));
     }
     if matches!(
         node.kind,
@@ -203,7 +536,15 @@ fn element(
         ));
     }
     let mut body = String::new();
-    if let Some(runs) = node
+    if let Some(text) = text {
+        if jsx {
+            let fallback = serde_json::to_string(node.string("text").unwrap_or_default())
+                .map_err(|e| ExportError::Invalid(e.to_string()))?;
+            body.push_str(&format!("{{{text} ?? {fallback}}}"));
+        } else if leptos {
+            body.push_str(&format!("{{{text}}}"));
+        }
+    } else if let Some(runs) = node
         .properties
         .get("textRuns")
         .and_then(Value::as_array)
@@ -270,7 +611,9 @@ fn element(
                     )
                 )
             };
-            let text = if jsx {
+            let text = if leptos {
+                format!("{{{text:?}}}")
+            } else if jsx {
                 format!(
                     "{{{}}}",
                     serde_json::to_string(text).map_err(|e| ExportError::Invalid(e.to_string()))?
@@ -286,7 +629,9 @@ fn element(
             ));
         }
     } else if let Some(text) = node.properties.get("text").and_then(Value::as_str) {
-        body.push_str(&if jsx {
+        body.push_str(&if leptos {
+            format!("{{{text:?}}}")
+        } else if jsx {
             format!(
                 "{{{}}}",
                 serde_json::to_string(text).map_err(|e| ExportError::Invalid(e.to_string()))?
@@ -310,10 +655,25 @@ fn element(
             visiting,
             diagnostics,
             depth + 1,
+            options,
         )?);
     }
     visiting.remove(id);
-    Ok(format!("<{tag}{attrs}>{body}</{tag}>"))
+    let markup = format!("<{tag}{attrs}>{body}</{tag}>");
+    if let Some(visible) = visible {
+        if jsx {
+            return Ok(format!(
+                "{{({visible} ?? {}) && {markup}}}",
+                node.properties.get("visible") != Some(&Value::Bool(false))
+            ));
+        }
+        if leptos {
+            return Ok(format!(
+                "{{if {visible} {{ view! {{ {markup} }}.into_any() }} else {{ ().into_any() }}}}"
+            ));
+        }
+    }
+    Ok(markup)
 }
 fn authored_style(node: &Node) -> BTreeMap<String, String> {
     let mut result = BTreeMap::new();
@@ -490,6 +850,7 @@ fn safe_tag(tag: &str) -> bool {
             | "ol"
             | "li"
             | "label"
+            | "button"
             | "a"
             | "img"
             | "pre"

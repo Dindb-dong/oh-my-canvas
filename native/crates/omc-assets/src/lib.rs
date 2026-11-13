@@ -40,6 +40,10 @@ impl AssetStore {
         Ok(self.root.join(&hash[..2]).join(hash))
     }
     pub fn read(&self, hash: &str) -> Result<Vec<u8>> {
+        self.read_limited(hash, MAX_ASSET_BYTES)
+    }
+    pub fn read_limited(&self, hash: &str, max_bytes: usize) -> Result<Vec<u8>> {
+        let max_bytes = max_bytes.min(MAX_ASSET_BYTES);
         let path = self.path(hash)?;
         let metadata = std::fs::symlink_metadata(&path).map_err(io_error)?;
         if !metadata.is_file() || metadata.file_type().is_symlink() {
@@ -47,10 +51,10 @@ impl AssetStore {
                 "asset must be a regular immutable file",
             ));
         }
-        if metadata.len() > MAX_ASSET_BYTES as u64 {
+        if metadata.len() > max_bytes as u64 {
             return Err(EngineError::new(
                 "resource_limit",
-                "encoded asset exceeds 64 MiB",
+                format!("encoded asset exceeds {max_bytes} bytes"),
             ));
         }
         let canonical = path.canonicalize().map_err(io_error)?;
@@ -60,10 +64,10 @@ impl AssetStore {
         let mut bytes = Vec::with_capacity(metadata.len() as usize);
         File::open(canonical)
             .map_err(io_error)?
-            .take(MAX_ASSET_BYTES as u64 + 1)
+            .take(max_bytes as u64 + 1)
             .read_to_end(&mut bytes)
             .map_err(io_error)?;
-        if bytes.len() > MAX_ASSET_BYTES || hex::encode(Sha256::digest(&bytes)) != hash {
+        if bytes.len() > max_bytes || hex::encode(Sha256::digest(&bytes)) != hash {
             return Err(EngineError::new(
                 "corrupt_state",
                 "immutable asset checksum mismatch",

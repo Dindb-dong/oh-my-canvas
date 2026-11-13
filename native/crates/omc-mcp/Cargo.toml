@@ -11,10 +11,12 @@ omc-model = { path = "../omc-model" }
 omc-protocol = { path = "../omc-protocol" }
 omc-workspace = { path = "../omc-workspace" }
 omc-style = { path = "../omc-style" }
+omc-text = { path = "../omc-text" }
 omc-scene = { path = "../omc-scene" }
 omc-render = { path = "../omc-render" }
 omc-import = { path = "../omc-import" }
 omc-export = { path = "../omc-export" }
+omc-plugin = { path = "../omc-plugin" }
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
@@ -22,6 +24,14 @@ base64.workspace = true
 sha2.workspace = true
 hex.workspace = true
 regex = "=1.13.1"
+svgtypes.workspace = true
+zip.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+flate2 = "=1.1.9"
+unicode-segmentation.workspace = true
+skia-safe.workspace = true
+tract-onnx = { version = "=0.23.10", default-features = false }
 
 [dev-dependencies]
 tempfile.workspace = true

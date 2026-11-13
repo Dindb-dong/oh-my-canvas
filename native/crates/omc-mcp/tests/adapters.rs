@@ -31,6 +31,107 @@ fn setup() -> (
 }
 
 #[test]
+fn native_html_import_creates_editable_layers_that_survive_reopen() {
+    let (_dir, workspace, router, session, _) = setup();
+    let html = r##"
+        <style>
+            .card { display: flex; flex-direction: column; gap: 12px;
+                    width: 300px; padding: 20px; background-color: #eaf0ff; }
+            .card h2 { font-size: 32px; }
+            .primary { display: flex; align-items: center; width: 140px; height: 38px;
+                       background-color: #2563eb; color: white;
+                       border-radius: 8px; font-size: 15px; }
+        </style>
+        <body style="margin: 0">
+          <section class="card" data-name="Registration card">
+            <h2 id="title" data-name="Title" style="margin: 0">참가 신청</h2>
+            <button class="primary" id="register">신청하기</button>
+          </section>
+        </body>
+    "##;
+    let (imported, diagnostics) = router
+        .import_bytes_native(&session, "html", html.as_bytes(), Some("HTML card"), true)
+        .unwrap();
+    assert_eq!(diagnostics, json!([]));
+    let document_id = imported.id.as_str();
+    let mcp_id = uuid::Uuid::parse_str(document_id.strip_prefix("doc_").unwrap())
+        .unwrap()
+        .to_string();
+    let title = imported
+        .nodes
+        .values()
+        .find(|node| node.properties.get("htmlId") == Some(&json!("title")))
+        .unwrap();
+    assert_eq!(title.properties["name"], "Title");
+    assert_eq!(title.properties["text"], "참가 신청");
+    let button = imported
+        .nodes
+        .values()
+        .find(|node| node.properties.get("htmlId") == Some(&json!("register")))
+        .unwrap();
+    let label = imported
+        .nodes
+        .values()
+        .find(|node| {
+            node.parent_id.as_ref() == Some(&button.id)
+                && node.properties.get("text") == Some(&json!("신청하기"))
+        })
+        .unwrap();
+    let scene = omc_scene::build_scene(&imported, &Default::default()).unwrap();
+    assert_eq!(
+        scene.item(&title.id).unwrap().style.get("font-size"),
+        Some("32px")
+    );
+    let bounds = scene.bounds(&button.id).unwrap();
+    assert_eq!(bounds[2..], [140., 38.]);
+    let text = scene.item(&label.id).unwrap().text.as_ref().unwrap();
+    assert_eq!(
+        text.caret_rect(0).unwrap()[1],
+        text.caret_rect(4).unwrap()[1]
+    );
+
+    invoke(
+        &router,
+        &session,
+        "edit_text",
+        json!({"documentId":mcp_id,"id":title.id,"action":"replace",
+               "range":{"start":0,"end":5},"text":"등록 완료"}),
+    );
+    workspace
+        .command(
+            &session,
+            document_id,
+            &imported.epoch,
+            omc_protocol::Command::NodeSet {
+                node_id: button.id.clone(),
+                properties: [("fill".into(), json!("#006b54"))].into(),
+            },
+        )
+        .unwrap();
+    workspace.checkpoint(document_id).unwrap();
+    workspace.release(&session, document_id).unwrap();
+    workspace.bind(&session, document_id).unwrap();
+    let reopened = workspace.snapshot(document_id).unwrap();
+    assert_eq!(reopened.nodes[&title.id].properties["text"], "등록 완료");
+    assert_eq!(reopened.nodes[&button.id].properties["fill"], "#006b54");
+    let artifact = router
+        .export_bytes_native(document_id, &json!({"format":"html"}))
+        .unwrap();
+    let source = String::from_utf8(artifact.bytes).unwrap();
+    assert!(source.contains("등록 완료"));
+    assert!(source.contains("type=\"button\""));
+    assert!(source.contains("#006b54"));
+
+    let before = workspace.list(false).unwrap();
+    assert!(
+        router
+            .import_bytes_native(&session, "html", b"<script>active</script>", None, true)
+            .is_err()
+    );
+    assert_eq!(workspace.list(false).unwrap(), before);
+}
+
+#[test]
 fn authored_masks_keep_world_geometry_and_render_the_selected_source() {
     for (mode, alpha) in [("alpha", 128), ("luminance", 64), ("vector", 255)] {
         let (_dir, workspace, router, session, id) = setup();

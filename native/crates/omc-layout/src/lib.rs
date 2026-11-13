@@ -129,7 +129,10 @@ pub fn layout(
                 width as f64,
             ) {
                 Ok(text) => Size {
-                    width: known.width.unwrap_or(text.width.min(width as f64) as f32),
+                    // SkParagraph rounds its layout width down before deciding line breaks.
+                    width: known
+                        .width
+                        .unwrap_or(text.width.ceil().min(width as f64) as f32),
                     height: known.height.unwrap_or(text.height as f32),
                 },
                 Err(error) => {

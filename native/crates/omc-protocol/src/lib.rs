@@ -104,6 +104,8 @@ impl Default for Preconditions {
 pub enum Command {
     #[serde(rename = "node.create")]
     NodeCreate { node: Node },
+    #[serde(rename = "node.createMany")]
+    NodeCreateMany { nodes: Vec<Node> },
     #[serde(rename = "node.set")]
     NodeSet {
         #[serde(rename = "nodeId")]
@@ -129,6 +131,11 @@ pub enum Command {
         #[serde(rename = "nodeIds")]
         node_ids: Vec<String>,
     },
+    #[serde(rename = "component.restoreMain")]
+    ComponentRestoreMain {
+        #[serde(rename = "instanceId")]
+        instance_id: String,
+    },
     #[serde(rename = "node.rebalance")]
     NodeRebalance {
         #[serde(rename = "parentId")]
@@ -141,6 +148,12 @@ pub enum Command {
         #[serde(rename = "pageId")]
         page_id: String,
         title: String,
+    },
+    #[serde(rename = "page.move")]
+    PageMove {
+        #[serde(rename = "pageId")]
+        page_id: String,
+        rank: String,
     },
     #[serde(rename = "page.delete")]
     PageDelete {
@@ -205,6 +218,43 @@ pub enum Command {
     HistoryUndo { channel: HistoryChannel },
     #[serde(rename = "history.redo")]
     HistoryRedo { channel: HistoryChannel },
+}
+
+pub fn node_override_commands(id: &str, properties: &Properties) -> Result<Vec<Command>> {
+    let mut commands = Vec::new();
+    let mut set = Properties::new();
+    let mut unset = Vec::new();
+    for (key, value) in properties {
+        match key.as_str() {
+            "text" => {
+                let text = value.as_str().ok_or_else(|| {
+                    EngineError::invalid("component text override must be a string")
+                })?;
+                commands.push(Command::TextReplace {
+                    node_id: id.into(),
+                    text: text.into(),
+                });
+            }
+            "textRuns" => {}
+            _ if value.is_null() => unset.push(key.clone()),
+            _ => {
+                set.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    if !unset.is_empty() {
+        commands.push(Command::NodeUnset {
+            node_id: id.into(),
+            properties: unset,
+        });
+    }
+    if !set.is_empty() {
+        commands.push(Command::NodeSet {
+            node_id: id.into(),
+            properties: set,
+        });
+    }
+    Ok(commands)
 }
 
 impl Command {

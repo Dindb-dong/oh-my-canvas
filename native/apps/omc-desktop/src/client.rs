@@ -1,5 +1,6 @@
 //! The desktop is a protocol client. All authored state and durable writes belong
 //! to omc-service; this module deliberately has no engine/storage dependency.
+use crate::WindowProxy;
 use base64::Engine as _;
 use omc_model::DocumentSnapshot;
 use serde::Deserialize;
@@ -14,11 +15,11 @@ use std::{
     time::{Duration, Instant},
 };
 use uuid::Uuid;
-use winit::event_loop::EventLoopProxy;
 
 const MAX_REPLY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_EXPORT_REPLY_BYTES: usize = 96 * 1024 * 1024;
 const MAX_IMPORT_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_PASTE_HTML_BYTES: usize = 1024 * 1024;
 const MAX_EXPORT_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -28,6 +29,19 @@ pub struct DocumentEntry {
     pub title: String,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default, deserialize_with = "deserialize_thumbnail")]
+    pub thumbnail: Option<skia_safe::Image>,
+}
+
+fn deserialize_thumbnail<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<skia_safe::Image>, D::Error> {
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value
+        .and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok())
+        .and_then(|bytes| {
+            skia_safe::images::deferred_from_encoded_data(skia_safe::Data::new_copy(&bytes), None)
+        }))
 }
 
 #[derive(Debug)]
@@ -40,6 +54,12 @@ pub enum Request {
         id: String,
     },
     Import,
+    OpenPath {
+        path: String,
+    },
+    ImportHtml {
+        html: String,
+    },
     Export {
         id: String,
         page: Option<String>,
@@ -47,6 +67,23 @@ pub enum Request {
     },
     Snapshot {
         id: String,
+    },
+    ShapeBuilder {
+        id: String,
+        epoch: String,
+        sequence: u64,
+        page: String,
+        layers: Vec<String>,
+        points: Vec<(f64, f64)>,
+        remove: bool,
+    },
+    BoardTool {
+        id: String,
+        epoch: String,
+        sequence: u64,
+        page: String,
+        command: &'static str,
+        params: Value,
     },
     Command {
         id: String,
@@ -77,8 +114,23 @@ pub enum Request {
     Save {
         id: String,
     },
+    PublishLibrary {
+        id: String,
+        revision: omc_model::Revision,
+        description: String,
+    },
     Close {
         id: String,
+    },
+    Collaboration {
+        action: &'static str,
+        args: Value,
+    },
+    PluginManager {
+        window: u64,
+        ticket: u64,
+        operation: &'static str,
+        arguments: Value,
     },
     Shutdown,
 }
@@ -86,7 +138,21 @@ pub enum Request {
 #[derive(Debug)]
 pub enum Response {
     Connected,
+    Collaboration {
+        action: &'static str,
+        result: Result<(Value, Option<DocumentSnapshot>), String>,
+    },
+    PluginManager {
+        ticket: u64,
+        operation: &'static str,
+        result: Result<Value, String>,
+    },
     Documents(Vec<DocumentEntry>),
+    CanvasMutation {
+        document: DocumentSnapshot,
+        selected: Vec<String>,
+        edit_label: Option<String>,
+    },
     Snapshot {
         document: DocumentSnapshot,
         mutation: bool,
@@ -102,6 +168,10 @@ pub enum Response {
     },
     Closed {
         id: String,
+    },
+    TabError {
+        id: String,
+        message: String,
     },
     FileOperation {
         message: String,
@@ -120,12 +190,99 @@ struct Descriptor {
     token: String,
 }
 
+impl Descriptor {
+    fn ready(path: &Path, http: &reqwest::blocking::Client) -> Result<Option<Self>, String> {
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(format!("Could not read the service endpoint: {error}")),
+        };
+        if bytes.len() > 16 * 1024 {
+            return Err("The service descriptor is too large.".into());
+        }
+        let mut descriptor: Self = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("Invalid service descriptor: {e}"))?;
+        if descriptor.protocol != "omc.service/1" {
+            return Err("This service uses an incompatible protocol.".into());
+        }
+        let url = reqwest::Url::parse(&descriptor.endpoint)
+            .map_err(|_| "Invalid service endpoint.".to_string())?;
+        if url.scheme() != "http"
+            || !matches!(
+                url.host_str(),
+                Some("127.0.0.1") | Some("[::1]") | Some("::1")
+            )
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return Err(
+                "The service endpoint must use an authenticated loopback connection.".into(),
+            );
+        }
+        descriptor.endpoint = descriptor.endpoint.trim_end_matches('/').to_string();
+        let healthy = http
+            .get(format!("{}/health", descriptor.endpoint))
+            .bearer_auth(&descriptor.token)
+            .timeout(Duration::from_millis(200))
+            .send()
+            .is_ok_and(|response| response.status().is_success());
+        Ok(healthy.then_some(descriptor))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+
+    #[test]
+    fn stale_descriptor_stops_being_ready_when_its_service_exits() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            let mut request = BufReader::new(&stream);
+            let mut line = String::new();
+            request.read_line(&mut line).unwrap();
+            assert_eq!(line.trim_end(), "GET /health HTTP/1.1");
+            let authenticated = request
+                .lines()
+                .map_while(Result::ok)
+                .take_while(|line| !line.is_empty())
+                .any(|line| line.eq_ignore_ascii_case("authorization: Bearer test-token"));
+            assert!(authenticated);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
+        });
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let descriptor = serde_json::to_vec(
+            &json!({"protocol":"omc.service/1","endpoint":endpoint,"token":"test-token"}),
+        )
+        .unwrap();
+        fs::write(file.path(), &descriptor).unwrap();
+        let http = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap();
+        assert!(Descriptor::ready(file.path(), &http).unwrap().is_some());
+        server.join().unwrap();
+        assert!(Descriptor::ready(file.path(), &http).unwrap().is_none());
+        assert_eq!(fs::read(file.path()).unwrap(), descriptor);
+    }
+}
+
+#[derive(Clone)]
 pub struct Bridge {
     pub sender: SyncSender<Request>,
 }
 
 impl Bridge {
-    pub fn start(profile: PathBuf, proxy: EventLoopProxy<crate::Event>) -> Self {
+    pub fn start(profile: PathBuf, proxy: WindowProxy) -> Self {
         let (sender, receiver) = mpsc::sync_channel::<Request>(32);
         thread::spawn(move || {
             let mut client = match Client::connect(&profile) {
@@ -139,6 +296,11 @@ impl Bridge {
                 }
             };
             let _ = proxy.send_event(crate::Event::Service(Response::Connected));
+            if proxy.id == 1 {
+                let automation = client.clone();
+                let automation_proxy = proxy.clone();
+                thread::spawn(move || automation.poll_automation(automation_proxy));
+            }
             let mut leases = BTreeSet::new();
             while let Ok(request) = receiver.recv() {
                 if matches!(request, Request::Shutdown) {
@@ -152,15 +314,33 @@ impl Bridge {
                 let mutation = matches!(
                     request,
                     Request::Command { .. }
+                        | Request::ShapeBuilder { .. }
+                        | Request::BoardTool { .. }
                         | Request::Undo { .. }
                         | Request::Splice { .. }
+                        | Request::PublishLibrary { .. }
                         | Request::Import
+                        | Request::ImportHtml { .. }
                         | Request::Export { .. }
                 );
+                let tab = match &request {
+                    Request::Open { id } | Request::Close { id } => Some(id.clone()),
+                    _ => None,
+                };
+                let target = match &request {
+                    Request::PluginManager { window, .. } => WindowProxy {
+                        id: *window,
+                        raw: proxy.raw.clone(),
+                    },
+                    _ => proxy.clone(),
+                };
                 let response = client
                     .handle(request, &mut leases)
-                    .unwrap_or_else(|message| Response::Error { message, mutation });
-                if proxy.send_event(crate::Event::Service(response)).is_err() {
+                    .unwrap_or_else(|message| match tab {
+                        Some(id) => Response::TabError { id, message },
+                        None => Response::Error { message, mutation },
+                    });
+                if target.send_event(crate::Event::Service(response)).is_err() {
                     break;
                 }
             }
@@ -181,6 +361,7 @@ impl Bridge {
     }
 }
 
+#[derive(Clone)]
 struct Client {
     http: reqwest::blocking::Client,
     endpoint: String,
@@ -189,9 +370,62 @@ struct Client {
 }
 
 impl Client {
+    fn poll_automation(&self, proxy: WindowProxy) {
+        loop {
+            let value = match self.call("desktop.poll", json!({})) {
+                Ok(value) => value,
+                Err(message) if message.starts_with("busy:") => {
+                    thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
+                Err(_) => break,
+            };
+            if value.is_null() {
+                continue;
+            }
+            let id = value["id"].clone();
+            let result = match serde_json::from_value::<crate::app::automation::Job>(value) {
+                Ok(job) => {
+                    let (reply, receiver) = mpsc::sync_channel(1);
+                    if proxy
+                        .send_event(crate::Event::Automation(job, reply))
+                        .is_err()
+                    {
+                        break;
+                    }
+                    receiver.recv_timeout(Duration::from_secs(7))
+                        .unwrap_or_else(|_| Err("The desktop did not finish in time. Check the document before retrying an edit.".into()))
+                }
+                Err(error) => Err(format!("Invalid desktop request: {error}")),
+            };
+            let quitting = result
+                .as_ref()
+                .is_ok_and(|result| result["quitting"] == true);
+            let complete = match result {
+                Ok(result) => json!({"id":id,"result":result}),
+                Err(error) => json!({"id":id,"error":error}),
+            };
+            if self.call("desktop.complete", complete).is_err() {
+                break;
+            }
+            if quitting {
+                let _ = proxy.send_event(crate::Event::AutomationQuit);
+                break;
+            }
+        }
+    }
+
     fn connect(profile: &Path) -> Result<Self, String> {
         let path = profile.join("native-v1/service.json");
-        if !path.exists() {
+        let http = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .build()
+            .map_err(|e| e.to_string())?;
+        let descriptor = if let Some(descriptor) = Descriptor::ready(&path, &http)? {
+            descriptor
+        } else {
             let executable = std::env::current_exe().map_err(|e| e.to_string())?;
             let name = if cfg!(windows) {
                 "omc-service.exe"
@@ -213,42 +447,21 @@ impl Client {
                 .spawn()
                 .map_err(|e| format!("Could not start the document service: {e}"))?;
             let until = Instant::now() + Duration::from_secs(10);
-            while !path.exists() && Instant::now() < until {
+            loop {
+                if let Some(descriptor) = Descriptor::ready(&path, &http)? {
+                    break descriptor;
+                }
+                if Instant::now() >= until {
+                    return Err(
+                        "The document service did not become ready for this profile.".into(),
+                    );
+                }
                 thread::sleep(Duration::from_millis(100));
             }
-        }
-        let bytes =
-            fs::read(&path).map_err(|e| format!("Could not read the service endpoint: {e}"))?;
-        if bytes.len() > 16 * 1024 {
-            return Err("The service descriptor is too large.".into());
-        }
-        let descriptor: Descriptor = serde_json::from_slice(&bytes)
-            .map_err(|e| format!("Invalid service descriptor: {e}"))?;
-        if descriptor.protocol != "omc.service/1" {
-            return Err("This service uses an incompatible protocol.".into());
-        }
-        let url = reqwest::Url::parse(&descriptor.endpoint)
-            .map_err(|_| "Invalid service endpoint.".to_string())?;
-        if url.scheme() != "http"
-            || !matches!(
-                url.host_str(),
-                Some("127.0.0.1") | Some("[::1]") | Some("::1")
-            )
-            || !url.username().is_empty()
-            || url.password().is_some()
-        {
-            return Err(
-                "The service endpoint must use an authenticated loopback connection.".into(),
-            );
-        }
-        let http = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|e| e.to_string())?;
+        };
         let mut client = Self {
             http,
-            endpoint: descriptor.endpoint.trim_end_matches('/').to_string(),
+            endpoint: descriptor.endpoint,
             token: descriptor.token,
             session: None,
         };
@@ -328,14 +541,110 @@ impl Client {
         })
     }
 
+    fn import_design(
+        &self,
+        format: &str,
+        bytes: &[u8],
+        title: &str,
+        leases: &mut BTreeSet<String>,
+    ) -> Result<Response, String> {
+        let value = self.call(
+            "document.import",
+            json!({
+                "format": format,
+                "contentBase64": base64::engine::general_purpose::STANDARD.encode(bytes),
+                "title": title,
+                "strict": true,
+            }),
+        )?;
+        let document: DocumentSnapshot =
+            serde_json::from_value(value).map_err(|e| format!("Invalid imported document: {e}"))?;
+        leases.insert(document.id.clone());
+        Ok(Response::Snapshot {
+            document,
+            mutation: true,
+            activate: true,
+        })
+    }
+
     fn handle(
         &mut self,
         request: Request,
         leases: &mut BTreeSet<String>,
     ) -> Result<Response, String> {
         match request {
+            Request::PluginManager {
+                window: _,
+                ticket,
+                operation,
+                mut arguments,
+            } => {
+                let result = (|| {
+                    if operation == "import" {
+                        let Some(path) = rfd::FileDialog::new()
+                            .set_title("Choose figcraft-plugin.json")
+                            .add_filter("Plugin manifest", &["json"])
+                            .pick_file()
+                        else {
+                            return Ok(Value::Null);
+                        };
+                        arguments["path"] =
+                            json!(path.to_str().ok_or("Plugin manifest path must be UTF-8.")?);
+                    }
+                    arguments["operation"] = json!(operation);
+                    self.call("desktop.plugins", arguments)
+                })();
+                Ok(Response::PluginManager {
+                    ticket,
+                    operation,
+                    result,
+                })
+            }
+            Request::Collaboration { action, mut args } => {
+                args["action"] = if action == "host-lan" { "host" } else { action }.into();
+                let result = (|| {
+                    if action == "host-lan" {
+                        // A UDP connect queries the route without sending a packet.
+                        let socket =
+                            std::net::UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
+                        socket
+                            .connect("192.0.2.1:9")
+                            .map_err(|e| format!("No LAN route: {e}"))?;
+                        let address = socket.local_addr().map_err(|e| e.to_string())?.ip();
+                        if address.is_loopback() || address.is_unspecified() {
+                            return Err("No usable LAN interface was found.".into());
+                        }
+                        args["address"] = address.to_string().into();
+                    }
+                    let id = args["documentId"].clone();
+                    let state = self.call("collaboration", args)?;
+                    let state = if matches!(action, "chat" | "follow") {
+                        self.call("collaboration", json!({"documentId":id,"action":"status"}))?
+                    } else {
+                        state
+                    };
+                    let document = if action == "join" {
+                        let id = state["documentId"]
+                            .as_str()
+                            .ok_or("Joined room returned no document ID.")?;
+                        let id = format!(
+                            "doc_{}",
+                            Uuid::parse_str(id).map_err(|e| e.to_string())?.simple()
+                        );
+                        let snapshot = self.call("document.snapshot", json!({"documentId":id}))?;
+                        let document: DocumentSnapshot =
+                            serde_json::from_value(snapshot).map_err(|e| e.to_string())?;
+                        leases.insert(document.id.clone());
+                        Some(document)
+                    } else {
+                        None
+                    };
+                    Ok((state, document))
+                })();
+                Ok(Response::Collaboration { action, result })
+            }
             Request::Refresh => {
-                let value = self.call("workspace.list", json!({}))?;
+                let value = self.call("workspace.list", json!({"thumbnails":true}))?;
                 let documents = serde_json::from_value(
                     value.get("documents").cloned().unwrap_or_else(|| json!([])),
                 )
@@ -363,6 +672,17 @@ impl Client {
                     activate: true,
                 })
             }
+            Request::OpenPath { path } => {
+                let value = self.call("desktop.openPath", json!({"path":path}))?;
+                let document: DocumentSnapshot =
+                    serde_json::from_value(value).map_err(|e| e.to_string())?;
+                leases.insert(document.id.clone());
+                Ok(Response::Snapshot {
+                    document,
+                    mutation: false,
+                    activate: true,
+                })
+            }
             Request::Import => {
                 use std::io::Read;
                 let Some(path) = rfd::FileDialog::new()
@@ -371,6 +691,7 @@ impl Client {
                         "Supported designs",
                         &["omc", "json", "svg", "html", "htm", "fig", "sketch"],
                     )
+                    .add_filter("HTML with CSS", &["html", "htm"])
                     .pick_file()
                 else {
                     return Ok(Response::FileOperation {
@@ -406,15 +727,20 @@ impl Client {
                     .file_stem()
                     .and_then(|v| v.to_str())
                     .unwrap_or("Imported design");
-                let value=self.call("document.import",json!({"format":format,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"title":title,"strict":true}))?;
-                let document: DocumentSnapshot = serde_json::from_value(value)
-                    .map_err(|e| format!("Invalid imported document: {e}"))?;
-                leases.insert(document.id.clone());
-                Ok(Response::Snapshot {
-                    document,
-                    mutation: true,
-                    activate: true,
-                })
+                self.import_design(format, &bytes, title, leases)
+            }
+            Request::ImportHtml { html } => {
+                let markup = html.trim_start_matches('\u{feff}').trim();
+                if !markup.starts_with('<') {
+                    return Err("Copy HTML source with its CSS, then choose Paste HTML.".into());
+                }
+                if markup.len() > MAX_PASTE_HTML_BYTES {
+                    return Err(
+                        "Paste HTML accepts up to one MiB. Import larger HTML files from disk."
+                            .into(),
+                    );
+                }
+                self.import_design("html", markup.as_bytes(), "Imported HTML", leases)
             }
             Request::Export { id, page, title } => {
                 use std::io::Write;
@@ -508,6 +834,64 @@ impl Client {
                 })
             }
             Request::Snapshot { id } => self.snapshot(&id, false),
+            Request::PublishLibrary {
+                id,
+                revision,
+                description,
+            } => {
+                self.call(
+                    "document.publish_library",
+                    json!({"documentId":id,"revision":revision,"description":description}),
+                )?;
+                self.snapshot(&id, true)
+            }
+            Request::ShapeBuilder {
+                id,
+                epoch,
+                sequence,
+                page,
+                layers,
+                points,
+                remove,
+            } => {
+                let result = self.call(
+                    "document.shapeBuilder",
+                    json!({"documentId":id,"epoch":epoch,"sequence":sequence.to_string(),
+                    "page":page,"layers":layers,"points":points,"remove":remove}),
+                )?;
+                let document = self.call("document.snapshot", json!({"documentId":id}))?;
+                Ok(Response::CanvasMutation {
+                    document: serde_json::from_value(document)
+                        .map_err(|error| error.to_string())?,
+                    selected: serde_json::from_value(result["nativeSelection"].clone())
+                        .map_err(|error| error.to_string())?,
+                    edit_label: None,
+                })
+            }
+            Request::BoardTool {
+                id,
+                epoch,
+                sequence,
+                page,
+                command,
+                params,
+            } => {
+                let result = self.call(
+                    "document.boardTool",
+                    json!({
+                        "documentId":id,"epoch":epoch,"sequence":sequence.to_string(),
+                        "page":page,"command":command,"params":params,
+                    }),
+                )?;
+                let document = self.call("document.snapshot", json!({"documentId":id}))?;
+                Ok(Response::CanvasMutation {
+                    document: serde_json::from_value(document)
+                        .map_err(|error| error.to_string())?,
+                    selected: serde_json::from_value(result["nativeSelection"].clone())
+                        .map_err(|error| error.to_string())?,
+                    edit_label: result["editLabel"].as_str().map(str::to_owned),
+                })
+            }
             Request::Command {
                 id,
                 epoch,
@@ -515,8 +899,42 @@ impl Client {
                 command,
                 undo_group,
             } => {
-                let envelope = json!({"protocol":"omc.engine/1","requestId":Uuid::new_v4().to_string(),"documentId":id,"targetEpoch":epoch,"idempotencyKey":Uuid::new_v4().to_string(),"preconditions":{"revision":{"epoch":epoch,"sequence":sequence.to_string()}},"undoGroup":undo_group,"command":command});
-                self.call("document.command", json!({"envelope":envelope}))?;
+                let mut envelope = json!({"protocol":"omc.engine/1","requestId":Uuid::new_v4().to_string(),"documentId":id,"targetEpoch":epoch,"idempotencyKey":Uuid::new_v4().to_string(),"preconditions":{"revision":{"epoch":epoch,"sequence":sequence.to_string()}},"undoGroup":undo_group,"command":command});
+                let first = self.call("document.command", json!({"envelope":envelope}));
+                if let Err(error) = first {
+                    let properties = &command["properties"];
+                    let is_new_comment = command["type"] == "catalog.set"
+                        && command["namespace"] == "comments"
+                        && properties["body"].is_string()
+                        && properties["createdAt"].is_number()
+                        && properties["threadId"].is_null();
+                    if !is_new_comment || !error.starts_with("stale_revision:") {
+                        return Err(error);
+                    }
+                    let live = self.call("document.snapshot", json!({"documentId":id}))?;
+                    let comment = command["entityId"]
+                        .as_str()
+                        .ok_or("Comment ID is missing.")?;
+                    let page = properties["pageId"]
+                        .as_str()
+                        .ok_or("Comment page is missing.")?;
+                    if live["epoch"] != epoch
+                        || !live["pages"]
+                            .as_array()
+                            .is_some_and(|pages| pages.iter().any(|entry| entry["id"] == page))
+                        || live["metadata"]
+                            .get(format!("comments/{comment}/createdAt"))
+                            .is_some()
+                    {
+                        return Err(error);
+                    }
+                    let revision = live["sequence"]
+                        .as_u64()
+                        .or_else(|| live["sequence"].as_str()?.parse().ok())
+                        .ok_or("Comment document revision is missing.")?;
+                    envelope["preconditions"]["revision"]["sequence"] = json!(revision.to_string());
+                    self.call("document.command", json!({"envelope":envelope}))?;
+                }
                 self.snapshot(&id, true)
             }
             Request::Undo { id, epoch, redo } => {

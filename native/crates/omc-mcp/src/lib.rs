@@ -1,18 +1,36 @@
 //! Compatibility adapters: every semantic write crosses the document authority.
+pub mod desktop_commands;
+mod clipboard_legacy;
+
 mod extensions;
 pub use extensions::capabilities as native_capabilities;
+mod figcraft;
+mod figcraft_catalog;
+pub use figcraft_catalog::library_team::TeamLibraryPublication;
+mod figcraft_file;
+mod figcraft_protocol;
+mod image;
 mod interchange;
+pub use figcraft::defaults::headless_tool_command as figcraft_headless_tool;
+pub use figcraft::plugins::directory::compare_directory_versions;
+pub use figcraft::preview::preserves_preview as figcraft_preserves_preview;
+pub use figcraft::publish_server::normalize_figcraft_endpoint;
+pub use figcraft_protocol::{figcraft_tools, validate_figcraft_tool};
 mod libraries;
+mod legacy_read;
+mod legacy_view;
 mod mutations;
+mod paths;
 mod resources;
 pub mod schema;
+mod vector;
 use omc_model::{DocumentContent, DocumentSnapshot, Node, Properties};
 use omc_protocol::{Command, CommandEnvelope, EngineError, Preconditions, Result};
 use omc_workspace::Workspace;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::AtomicU64},
 };
 
 #[derive(Clone, Default)]
@@ -22,13 +40,30 @@ pub(crate) struct ViewState {
     pub root: String,
     pub aliases: HashMap<String, String>,
     pub next_alias: usize,
+    pub fig_saved_revision: Option<u64>,
+    pub fig_file: Option<figcraft_file::FigFile>,
+    pub fig_aliases: HashMap<String, u64>,
     pub view: Value,
-    pub clipboard: Option<Value>,
 }
 pub struct ToolRouter {
     pub workspace: Arc<Workspace>,
     states: Mutex<HashMap<(String, String), ViewState>>,
     extensions: extensions::ExtensionState,
+    legacy_clipboards: Mutex<HashMap<String, Value>>,
+    fig_clipboards: Mutex<HashMap<String, figcraft::clipboard::Clipboard>>,
+    fig_tabs: Mutex<HashMap<String, Vec<String>>>,
+    fig_font_downloads: figcraft::font_download::Downloads,
+    fig_creation_defaults: Mutex<HashMap<String, figcraft::defaults::CreationDefaults>>,
+    fig_previews: Mutex<HashMap<String, Arc<DocumentSnapshot>>>,
+    fig_fonts: Mutex<HashMap<String, figcraft::text::SessionFonts>>,
+    fig_file_access: Mutex<HashMap<String, Vec<String>>>,
+    fig_events: figcraft_protocol::Events,
+    fig_design_clipboard: Mutex<HashMap<(String, String), Value>>,
+    fig_repeat: Mutex<HashMap<String, (String, Value)>>,
+    fig_plugins: Mutex<HashMap<String, Arc<Mutex<figcraft::plugins::Plugins>>>>,
+    fig_team_libraries: Mutex<BTreeMap<String, Value>>,
+    fig_team_publish_links: Mutex<HashMap<(String, String), String>>,
+    next_fig_alias: AtomicU64,
 }
 impl ToolRouter {
     pub fn new(workspace: Arc<Workspace>) -> Self {
@@ -36,6 +71,21 @@ impl ToolRouter {
             workspace,
             states: Mutex::new(HashMap::new()),
             extensions: extensions::ExtensionState::default(),
+            legacy_clipboards: Mutex::default(),
+            fig_clipboards: Mutex::new(HashMap::new()),
+            fig_tabs: Mutex::new(HashMap::new()),
+            fig_font_downloads: Default::default(),
+            fig_creation_defaults: Mutex::default(),
+            fig_previews: Mutex::default(),
+            fig_fonts: Mutex::default(),
+            fig_file_access: Mutex::new(HashMap::new()),
+            fig_events: figcraft_protocol::Events::default(),
+            fig_design_clipboard: Mutex::default(),
+            fig_repeat: Mutex::default(),
+            fig_plugins: Mutex::default(),
+            fig_team_libraries: Mutex::default(),
+            fig_team_publish_links: Mutex::default(),
+            next_fig_alias: AtomicU64::new(1),
         }
     }
     pub fn tools(&self) -> Value {
@@ -46,6 +96,20 @@ impl ToolRouter {
     pub fn end_session(&self, session: &str) {
         self.states.lock().unwrap().retain(|(s, _), _| s != session);
         self.extensions.release_session(session);
+        self.legacy_clipboards.lock().unwrap().remove(session);
+        self.fig_file_access.lock().unwrap().remove(session);
+        self.fig_team_publish_links.lock().unwrap().retain(|(owner, _), _| owner != session);
+        self.fig_design_clipboard
+            .lock()
+            .unwrap()
+            .retain(|(owner, _), _| owner != session);
+        self.fig_tabs.lock().unwrap().remove(session);
+        self.fig_fonts.lock().unwrap().remove(session);
+        self.fig_creation_defaults.lock().unwrap().remove(session);
+        self.take_fig_preview(session);
+        self.fig_clipboards.lock().unwrap().remove(session);
+        self.fig_repeat.lock().unwrap().remove(session);
+        self.fig_plugins.lock().unwrap().remove(session);
     }
     pub fn call(
         self: &Arc<Self>,
@@ -55,6 +119,8 @@ impl ToolRouter {
         meta: Value,
     ) -> Result<Value> {
         self.workspace.session(session)?;
+        let _profile_fonts =
+            omc_text::font_scope(omc_text::profile_font_manager(&self.workspace.profile));
         let mut meta = if meta.is_object() { meta } else { json!({}) };
         meta["nativeAdapterDigest"] =
             omc_protocol::canonical_digest(&json!({"tool":name,"arguments":args}))?.into();
@@ -84,14 +150,29 @@ impl ToolRouter {
                 for d in &mut docs {
                     d["id"] = external_id(d["id"].as_str().unwrap()).into();
                 }
+                legacy_read::order_documents(&mut docs, args["sort"].as_str());
                 let total = docs.len();
                 let offset = args["offset"].as_u64().unwrap_or(0) as usize;
                 let limit = args["limit"].as_u64().unwrap_or(50) as usize;
                 Ok(
-                    json!({"ok":true,"documents":docs.into_iter().skip(offset).take(limit).collect::<Vec<_>>(),"total":total,"offset":offset}),
+                    json!({"ok":true,"documents":docs.into_iter().skip(offset).take(limit).collect::<Vec<_>>(),
+                    "total":total,"offset":offset,"nextOffset":(offset.saturating_add(limit)<total).then_some(offset.saturating_add(limit)),
+                    "boundDocumentId":self.workspace.session(session)?.binding.as_deref().map(external_id)}),
                 )
             }
             "create_document" => {
+                if args["sample"] == true {
+                    // The Studio 01 sample from the Electron app, in its portable canvas form.
+                    let title = args["title"].as_str().unwrap_or("Studio 01");
+                    let (snapshot, _) = self.import_bytes_native(
+                        session,
+                        "json",
+                        include_bytes!("../fixtures/studio-sample.json"),
+                        Some(title),
+                        true,
+                    )?;
+                    return self.context_from(session, &snapshot);
+                }
                 let snapshot = self.workspace.create(
                     session,
                     args["title"].as_str().unwrap_or("Untitled"),
@@ -181,6 +262,7 @@ impl ToolRouter {
                     self.context(session, &id)?;
                 }
                 match name {
+                    "image" => self.image_operation(session, &id, &args, &meta),
                     "select_page" => {
                         let snapshot = self.workspace.snapshot(&id)?;
                         let page = snapshot
@@ -207,7 +289,11 @@ impl ToolRouter {
                     "page" if args["action"] == "list" => {
                         let s = self.workspace.snapshot(&id)?;
                         Ok(
-                            json!({"ok":true,"revision":s.sequence,"pages":s.pages,"pageId":self.state(session,&id)?.page_id}),
+                            json!({"ok":true,"revision":s.sequence,"pages":s.pages.iter().map(|page| {
+                                let mut value = json!(page);
+                                value["guides"] = s.nodes.get(&page.root_node_id).and_then(|root| root.properties.get("guides")).cloned().unwrap_or(json!([]));
+                                value
+                            }).collect::<Vec<_>>(),"pageId":self.state(session,&id)?.page_id}),
                         )
                     }
                     "styles" | "libraries" => self.catalog_tool(session, &id, name, args, meta),
@@ -240,16 +326,7 @@ impl ToolRouter {
     pub(crate) fn alias(&self, session: &str, document: &str, raw: &str) -> String {
         let mut states = self.states.lock().unwrap();
         let state = states.get_mut(&(session.into(), document.into())).unwrap();
-        if raw == state.root {
-            return "root".into();
-        }
-        if let Some((alias, _)) = state.aliases.iter().find(|(_, id)| *id == raw) {
-            return alias.clone();
-        }
-        state.next_alias += 1;
-        let alias = format!("n{}", state.next_alias);
-        state.aliases.insert(alias.clone(), raw.into());
-        alias
+        state.legacy_alias(raw)
     }
     pub fn context(&self, session: &str, id: &str) -> Result<Value> {
         let context = self.workspace.context(id)?;
@@ -296,6 +373,10 @@ impl ToolRouter {
             if state.epoch != snapshot.epoch || state.page_id != page.id {
                 state.aliases.clear();
                 state.next_alias = 0;
+                if state.epoch != snapshot.epoch {
+                    state.fig_aliases.clear();
+                    state.view = Value::Null;
+                }
             }
             state.epoch = snapshot.epoch.clone();
             state.page_id = page.id.clone();
@@ -346,20 +427,86 @@ impl ToolRouter {
         v
     }
     fn inspect(&self, session: &str, id: &str, name: &str, args: &Value) -> Result<Value> {
+        let snapshot = self.workspace.snapshot(id)?;
         if name == "assets" {
-            return Ok(json!({"ok":true,"assets":[],"providers":[]}));
+            let entries = resources::catalogs(&snapshot.metadata, "assets");
+            let local = args["kind"].as_str().is_none_or(|kind| kind == "upload");
+            let query = args["query"].as_str().unwrap_or_default().to_lowercase();
+            let assets = entries
+                .values()
+                .filter(|entry| {
+                    local
+                        && entry["name"]
+                            .as_str()
+                            .is_some_and(|name| name.to_lowercase().contains(&query))
+                })
+                .collect::<Vec<_>>();
+            return Ok(
+                json!({"ok":true,"revision":snapshot.sequence,"assets":assets,"configured":local,"providers":if local {vec!["upload"]} else {Vec::new()}}),
+            );
         }
         if name == "get_guide" {
+            let topic = args["topic"].as_str().unwrap_or("html");
+            let guide = match topic {
+                "layout" => {
+                    "Use get_tree and get_styles to inspect authored layout. Apply edit_shapes layout or import CSS with write_html. Measure the resulting bounds before exporting."
+                }
+                "text" => {
+                    "Read the target text layer and its revision, then use edit_text with UTF-16 ranges. Use fonts to check installed and document families and screenshot to verify wrapping."
+                }
+                "review" => {
+                    "Capture an overview, then use slice screenshots to review detail. Check text wrapping, contrast and child bounds. Inspect export diagnostics before treating the output as final."
+                }
+                "components" => {
+                    "Create a definition, inspect it with components, then place instances with component instance. Bind typed text, visibility or swap properties to layers inside the definition. Override them on individual instances with set_property."
+                }
+                "vector" => {
+                    "Use get_path to read world-space nodes and the current revision before edit_path. Boolean operations keep operands editable until flatten. Use outline to turn visible text or strokes into paths."
+                }
+                "image" => {
+                    "Use document_assets to add and place images. Background removal requires the native U2NetP model and keeps the source for image restore."
+                }
+                "workspace" => {
+                    "List documents and open an explicit document before editing. Workspace focus changes this session’s document binding. Use workspace close to release it and save_document to checkpoint it."
+                }
+                _ => {
+                    "Open or create a document, then use write_html with a target to insert editable HTML and CSS. Inspect the resulting layer tree and diagnostics. Export SVG or HTML to verify the result."
+                }
+            };
             return Ok(
-                json!({"ok":true,"text":"Native preview: explicit document targeting and durable receipts are required. Read context before editing. Native capabilities report implemented and unqualified areas. Edits use authored styles and UTF-16 ranges; imports and output carry diagnostics."}),
+                json!({"ok":true,"revision":snapshot.sequence,"topic":topic,"guide":guide,"text":guide}),
             );
         }
         if name == "fonts" {
+            let query = args["query"].as_str().unwrap_or_default().to_lowercase();
+            let manager = skia_safe::FontMgr::default();
+            let mut fonts = manager
+                .family_names()
+                .filter(|family| family.to_lowercase().contains(&query))
+                .map(|family| (family.clone(), json!({"family":family,"source":"system"})))
+                .collect::<BTreeMap<_, _>>();
+            for entry in resources::catalogs(&snapshot.metadata, "assets")
+                .into_values()
+                .filter(|entry| entry["kind"] == "font")
+            {
+                if let Some(family) = entry["family"]
+                    .as_str()
+                    .or_else(|| entry["name"].as_str())
+                    .filter(|family| family.to_lowercase().contains(&query))
+                {
+                    fonts.insert(
+                        family.to_owned(),
+                        json!({"family":family,"source":"document","assetId":entry["id"]}),
+                    );
+                }
+            }
             return Ok(
-                json!({"ok":true,"fonts":[{"family":"sans-serif","source":"system","fallback":true}]}),
+                json!({"ok":true,"revision":snapshot.sequence,"fonts":fonts.into_values().collect::<Vec<_>>()}),
             );
         }
-        let snapshot = self.workspace.snapshot(id)?;
+        if name == "get_tree" {
+            return self.legacy_tree(session, &snapshot, args);
+        }
         if name == "get_styles" {
             let projection = omc_scene::resolve_components(&snapshot, None);
             let styles = omc_style::compute_styles(&projection.snapshot, (1440., 900.));
@@ -369,19 +516,20 @@ impl ToolRouter {
                 let style = styles
                     .get(&raw)
                     .ok_or_else(|| EngineError::invalid("layer not found"))?;
-                output.push(json!({"id":self.alias(session,id,&raw),"styles":style.values,"provenance":style.provenance,"diagnostics":style.diagnostics}));
+                let (compatibility, native) = legacy_read::filtered_styles(style, projection.snapshot.nodes.get(&raw), args["keys"].as_array().map(Vec::as_slice));
+                let provenance = style.provenance.iter().filter(|(key, _)| native.contains_key(*key)).collect::<BTreeMap<_,_>>();
+                output.push(json!({"id":self.alias(session,id,&raw),"rawId":raw,"style":compatibility,
+                    "styles":native,"provenance":provenance,"diagnostics":style.diagnostics}));
             }
             return Ok(json!({"ok":true,"revision":snapshot.sequence,"styles":output}));
         }
         if name == "get_path" {
             let raw = self.resolve(session, id, string(args, "id")?)?;
-            let node = snapshot
-                .nodes
-                .get(&raw)
-                .ok_or_else(|| EngineError::invalid("path not found"))?;
-            return Ok(
-                json!({"ok":true,"id":args["id"],"revision":snapshot.sequence,"path":node.properties.get("path"),"properties":node.properties}),
-            );
+            let mut result = paths::inspect(&snapshot, &self.state(session, id)?.page_id, &raw)?;
+            result["ok"] = true.into();
+            result["id"] = self.alias(session, id, &raw).into();
+            result["revision"] = snapshot.sequence.into();
+            return Ok(result);
         }
         if name == "components" {
             let offset = args["offset"].as_u64().unwrap_or(0) as usize;
@@ -398,7 +546,13 @@ impl ToolRouter {
                 })
                 .collect();
             return Ok(
-                json!({"ok":true,"total":all.len(),"components":all.into_iter().skip(offset).take(200).map(|n|self.describe(session,id,n,true)).collect::<Vec<_>>()}),
+                json!({"ok":true,"total":all.len(),"components":all.into_iter().skip(offset).take(200).map(|n| {
+                    let mut row = self.describe(session,id,n,true);
+                    row["componentId"] = json!(n.id);
+                    row["mainId"] = json!(n.id);
+                    row["componentProperties"] = n.properties.get("componentPropertyDefinitions").cloned().unwrap_or(json!([]));
+                    row
+                }).collect::<Vec<_>>()}),
             );
         }
         let root = args[if name == "find" { "within" } else { "id" }]
@@ -486,6 +640,14 @@ impl ToolRouter {
                     .collect::<Vec<_>>()
             );
         }
+        if let Some(raw) = result["rawSelection"].as_array() {
+            result["selection"] = json!(
+                raw.iter()
+                    .filter_map(Value::as_str)
+                    .map(|id_value| self.alias(session, id, id_value))
+                    .collect::<Vec<_>>()
+            );
+        }
         result
     }
     pub(crate) fn submit(
@@ -495,6 +657,17 @@ impl ToolRouter {
         command: Command,
         meta: &Value,
         revision: Option<u64>,
+    ) -> Result<Value> {
+        self.submit_with_output(session, id, command, meta, revision, Properties::new())
+    }
+    pub(crate) fn submit_with_output(
+        &self,
+        session: &str,
+        id: &str,
+        command: Command,
+        meta: &Value,
+        revision: Option<u64>,
+        extra: Properties,
     ) -> Result<Value> {
         let state = self.state(session, id)?;
         let mut envelope = CommandEnvelope::new(id, &state.epoch, command);
@@ -512,6 +685,9 @@ impl ToolRouter {
         fn created(command: &Command, out: &mut Vec<String>) {
             match command {
                 Command::NodeCreate { node } => out.push(node.id.clone()),
+                Command::NodeCreateMany { nodes } => {
+                    out.extend(nodes.iter().map(|node| node.id.clone()))
+                }
                 Command::PageCreate { root, .. } => out.push(root.id.clone()),
                 Command::Batch { commands } => {
                     for command in commands {
@@ -523,7 +699,8 @@ impl ToolRouter {
         }
         let mut ids = Vec::new();
         created(&envelope.command, &mut ids);
-        let mut output = json!({"rawIds":ids});
+        let mut output = json!(extra);
+        output["rawIds"] = json!(ids);
         fn catalog_id(command: &Command) -> Option<&str> {
             match command {
                 Command::CatalogSet { entity_id, .. } => Some(entity_id),
@@ -544,24 +721,47 @@ impl ToolRouter {
         } else {
             (envelope, output)
         };
-        let receipt = self.workspace.execute(session, envelope)?;
+        let receipt = self.execute_observed(session, envelope)?;
         Ok(self.receipt_output(session, id, receipt, output))
     }
     fn workspace_tool(&self, session: &str, args: &Value) -> Result<Value> {
         match args["action"].as_str().unwrap() {
-            "state" | "show_library" => self.workspace.list(false),
+            "state" | "show_library" => {
+                let mut listing = self.workspace.list(false)?;
+                listing["ok"] = true.into();
+                listing["boundDocumentId"] = json!(
+                    self.workspace
+                        .session(session)?
+                        .binding
+                        .as_deref()
+                        .map(external_id)
+                );
+                Ok(listing)
+            }
             "focus" => {
                 let id = native_id(string(args, "documentId")?)?;
                 self.workspace.bind(session, &id)?;
-                self.context(session, &id)
+                let mut result = self.context(session, &id)?;
+                result["boundDocumentId"] = external_id(&id).into();
+                Ok(result)
             }
-            "close" => self
-                .workspace
-                .release(session, &native_id(string(args, "documentId")?)?),
+            "close" => {
+                let id = native_id(string(args, "documentId")?)?;
+                self.workspace.document_path(&id)?;
+                let release = args["release"] != false;
+                if release {
+                    self.workspace.release(session, &id)?;
+                }
+                Ok(
+                    json!({"ok":true,"documentId":external_id(&id),"released":release,
+                    "boundDocumentId":self.workspace.session(session)?.binding.as_deref().map(external_id)}),
+                )
+            }
             "capabilities" => Ok(extensions::capabilities()),
             "about" => Ok(
                 json!({"name":"Oh My Canvas Native","version":"0.1.0","releaseStatus":"incomplete-preview","browserRuntime":false}),
             ),
+            "connection" if args["transport"] == "stdio" => self.legacy_stdio_connection(),
             "connection" => {
                 Ok(json!({"transport":"streamable-http","scope":"loopback","authenticated":true}))
             }
@@ -598,31 +798,79 @@ impl ToolRouter {
         Ok(json!({"ok":true,"preferences":preferences}))
     }
     fn view_tool(&self, session: &str, id: &str, args: &Value) -> Result<Value> {
+        let action = string(args, "action")?;
+        let mut bounds = None;
+        if action == "fit" {
+            let snapshot = self.workspace.snapshot(id)?;
+            let view = self.state(session, id)?;
+            let scene = paths::scene(&snapshot, &view.page_id)?;
+            let mut targets = Vec::new();
+            if let Some(ids) = args["ids"].as_array().filter(|ids| !ids.is_empty()) {
+                for alias in ids {
+                    let raw = self.resolve(session, id, alias.as_str().unwrap())?;
+                    let item = scene
+                        .item(&raw)
+                        .filter(|item| item.id != view.root)
+                        .ok_or_else(|| {
+                            EngineError::invalid("layer is outside the selected page")
+                        })?;
+                    targets.push(item.bounds);
+                }
+            } else {
+                targets.extend(
+                    scene
+                        .items
+                        .iter()
+                        .filter(|item| item.parent == Some(scene.root) && !item.hidden)
+                        .map(|item| item.bounds),
+                );
+            }
+            bounds = targets
+                .into_iter()
+                .map(|[x, y, w, h]| [x, y, x + w, y + h])
+                .reduce(|[x1, y1, x2, y2], [a, b, c, d]| {
+                    [x1.min(a), y1.min(b), x2.max(c), y2.max(d)]
+                });
+        }
         let mut states = self.states.lock().unwrap();
         let state = states.get_mut(&(session.into(), id.into())).unwrap();
         if !state.view.is_object() {
-            state.view = json!({"selection":[],"tool":"move","flags":{},"viewport":{}});
+            state.view = json!({"selection":[],"tool":"move","flags":{"snapping":true,"showOutlines":false,"uiHidden":false,"pixelSnap":false,"showRulers":false,"showGrids":false,"multiSelect":false},
+                "viewport":{"vport":{"width":1000,"height":800},"vbox":{"x":0,"y":0,"width":1000,"height":800},"zoom":1}});
         }
-        match args["action"].as_str().unwrap() {
+        match action {
             "get" => {}
             "set" => {
-                for key in ["viewport", "flags"] {
-                    if let Some(v) = args.get(key) {
-                        state.view[key] = v.clone();
+                if let Some(viewport) = args.get("viewport") {
+                    state.view["viewport"] = viewport.clone();
+                }
+                if let Some(flags) = args["flags"].as_object() {
+                    for (key, value) in flags {
+                        state.view["flags"][key] = value.clone();
                     }
                 }
             }
             "select" => state.view["selection"] = args["ids"].clone(),
             "tool" => state.view["tool"] = args["tool"].clone(),
             "fit" => {
-                return Err(EngineError::new(
-                    "unsupported_feature",
-                    "fit requires the native desktop viewport",
-                ));
+                if let Some([x1, y1, x2, y2]) = bounds {
+                    let viewport = &mut state.view["viewport"];
+                    let width = viewport["vport"]["width"].as_f64().unwrap_or(1000.0);
+                    let height = viewport["vport"]["height"].as_f64().unwrap_or(800.0);
+                    let zoom = ((width - 128.0) / (x2 - x1).max(1.0))
+                        .min((height - 128.0) / (y2 - y1).max(1.0))
+                        .clamp(0.01, 200.0);
+                    let (w, h) = (width / zoom, height / zoom);
+                    viewport["zoom"] = json!(zoom);
+                    viewport["vbox"] = json!({"x":(x1 + x2 - w) / 2.0,"y":(y1 + y2 - h) / 2.0,"width":w,"height":h});
+                }
             }
             _ => return Err(EngineError::invalid("unknown view action")),
         }
-        Ok(json!({"ok":true,"view":state.view}))
+        let view = state.view.clone();
+        drop(states);
+        let revision = self.workspace.snapshot(id)?.sequence;
+        Ok(legacy_view::legacy_view_output(view, json!(revision)))
     }
 }
 fn rusqlite_params(id: &str, starred: bool) -> (&str, bool) {
@@ -716,3 +964,9 @@ fn remap_values(props: &mut Properties, ids: &BTreeMap<String, String>) {
         visit(value, ids)
     }
 }
+
+#[doc(hidden)]
+pub use figcraft_file::{
+    WireComments, decode_wire_document, decode_wire_document_with_comments, encode_wire_document,
+    encode_wire_document_with_comments, read_recovery_archive,
+};

@@ -326,12 +326,28 @@ fn dispatch(engine: &mut DocumentEngine, action: &str, args: Value) -> Reply {
             }
             Ok(json!(out))
         }
-        "execute" => {
+        "preview" => {
             let context: RequestContext =
                 serde_json::from_value(args["context"].clone()).map_err(json_error)?;
             let envelope: CommandEnvelope =
                 serde_json::from_value(args["envelope"].clone()).map_err(json_error)?;
-            value(engine.execute(&context, &envelope))
+            value(engine.preview(&context, &envelope))
+        }
+        "execute" | "execute_branch_rebase" => {
+            let context: RequestContext =
+                serde_json::from_value(args["context"].clone()).map_err(json_error)?;
+            let envelope: CommandEnvelope =
+                serde_json::from_value(args["envelope"].clone()).map_err(json_error)?;
+            let result = engine.execute(&context, &envelope)?;
+            if action == "execute_branch_rebase" {
+                engine.reset_local_history(&result.revision)?;
+            }
+            value(Ok(result))
+        }
+        "reset_branch_history" => {
+            let revision = serde_json::from_value(args["revision"].clone()).map_err(json_error)?;
+            engine.reset_local_history(&revision)?;
+            Ok(json!({"ok":true}))
         }
         "checkpoint" => {
             engine.checkpoint()?;
@@ -364,6 +380,15 @@ fn dispatch(engine: &mut DocumentEngine, action: &str, args: Value) -> Reply {
             ))
         }
         "replica_package" => value(engine.replica_package()),
+        "portable_replica_package" => value(engine.portable_replica_package()),
+        "merge_replica" => {
+            value(engine.merge_replica(serde_json::from_value(args).map_err(json_error)?))
+        }
+        "collaboration_changes" => engine.collaboration_changes(
+            required(&args, "author")?,
+            required(&args, "session")?,
+            args["saved"].as_u64(),
+        ),
         "export_transactions" => {
             value(engine.export_transactions(args["afterSequence"].as_u64().unwrap_or(0)))
         }
