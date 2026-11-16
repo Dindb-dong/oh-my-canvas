@@ -11,17 +11,55 @@ use objc2_metal::{
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer, CATransaction};
 use skia_safe::{Canvas, ColorType, gpu};
+use std::{
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
 use winit::{
     dpi::PhysicalSize,
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::Window,
 };
 
+type Drawable = Retained<ProtocolObject<dyn CAMetalDrawable>>;
+
+struct DrawableSource(Retained<CAMetalLayer>);
+
+// Apple's custom Metal view calls nextDrawable on a render thread. Layer geometry
+// stays on the main thread and only changes between requests.
+unsafe impl Send for DrawableSource {}
+
+impl DrawableSource {
+    fn acquire(&self, trace: bool) -> Option<ReadyDrawable> {
+        autoreleasepool(|_| {
+            let start = trace.then(Instant::now);
+            self.0.nextDrawable().map(|drawable| ReadyDrawable {
+                drawable,
+                wait: start.map(|start| start.elapsed()),
+            })
+        })
+    }
+}
+
+pub(crate) struct ReadyDrawable {
+    drawable: Drawable,
+    wait: Option<Duration>,
+}
+
+// Only ownership crosses threads. The worker relinquishes the retained drawable
+// before the main thread renders to its texture and schedules presentation.
+unsafe impl Send for ReadyDrawable {}
+
 pub struct MetalPresenter {
     context: gpu::DirectContext,
     queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
     layer: Retained<CAMetalLayer>,
     dimensions: Option<(PhysicalSize<u32>, f64)>,
+    trace_phases: bool,
+    request_drawable: mpsc::SyncSender<()>,
+    waiting: bool,
+    ready: Option<ReadyDrawable>,
 }
 
 fn new_context(
@@ -49,7 +87,7 @@ fn new_context(
 }
 
 impl MetalPresenter {
-    pub fn new(window: &Window) -> Result<Self, String> {
+    pub fn new(window: &Window, proxy: crate::WindowProxy) -> Result<Self, String> {
         MainThreadMarker::new().ok_or("Metal window setup requires the main thread.")?;
         let handle = window.window_handle().map_err(|error| error.to_string())?;
         let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
@@ -70,13 +108,43 @@ impl MetalPresenter {
         // Skia may sample the drawable for destination-dependent blends.
         layer.setFramebufferOnly(false);
         layer.setOpaque(true);
+        let trace_phases = std::env::var_os("OMC_NATIVE_FRAME_TRACE").is_some();
+        let source = DrawableSource(layer.clone());
+        let (request_drawable, requests) = mpsc::sync_channel(1);
+        thread::Builder::new()
+            .name("metal-drawable".into())
+            .spawn(move || {
+                while requests.recv().is_ok() {
+                    let drawable = source.acquire(trace_phases);
+                    if proxy
+                        .send_event(crate::Event::MetalDrawableReady(drawable))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .map_err(|error| format!("Could not start the Metal drawable worker: {error}"))?;
         root.addSublayer(&layer);
         Ok(Self {
             context,
             queue,
             layer,
             dimensions: None,
+            trace_phases,
+            request_drawable,
+            waiting: false,
+            ready: None,
         })
+    }
+
+    pub fn accept_drawable(&mut self, drawable: Option<ReadyDrawable>) {
+        self.waiting = false;
+        self.ready = drawable;
+    }
+
+    pub fn discard_drawable(&mut self) {
+        self.ready = None;
     }
 
     pub fn present(
@@ -86,7 +154,11 @@ impl MetalPresenter {
         scale: f64,
         draw: impl FnOnce(&Canvas) -> Result<(), String>,
     ) -> Result<bool, String> {
+        if self.waiting {
+            return Ok(false);
+        }
         if self.dimensions != Some((size, scale)) {
+            self.discard_drawable();
             CATransaction::begin();
             CATransaction::setDisableActions(true);
             self.layer.setFrame(CGRect::new(
@@ -102,10 +174,16 @@ impl MetalPresenter {
             CATransaction::commit();
             self.dimensions = Some((size, scale));
         }
+        let Some(ReadyDrawable { drawable, wait }) = self.ready.take() else {
+            self.request_drawable
+                .try_send(())
+                .map_err(|error| format!("Could not request a Metal drawable: {error}"))?;
+            self.waiting = true;
+            return Ok(false);
+        };
         autoreleasepool(|_| {
-            let Some(drawable) = self.layer.nextDrawable() else {
-                return Ok(false);
-            };
+            let stamp = || self.trace_phases.then(Instant::now);
+            let t1 = stamp();
             let texture = drawable.texture();
             // The retained drawable texture is a valid Metal texture, retained again by Skia.
             let texture_info =
@@ -123,8 +201,11 @@ impl MetalPresenter {
                 None,
             )
             .ok_or("Could not bind the Metal drawable to Skia.")?;
+            let t2 = stamp();
             draw(surface.canvas())?;
+            let t3 = stamp();
             self.context.flush_and_submit_surface(&mut surface, None);
+            let t4 = stamp();
 
             let command = self
                 .queue
@@ -134,6 +215,20 @@ impl MetalPresenter {
             window.pre_present_notify();
             command.presentDrawable(drawable);
             command.commit();
+            if let (Some(wait), Some(t1), Some(t2), Some(t3), Some(t4), Some(t5)) =
+                (wait, t1, t2, t3, t4, stamp())
+            {
+                let ms =
+                    |a: std::time::Instant, b: std::time::Instant| (b - a).as_secs_f64() * 1000.;
+                eprintln!(
+                    "Metal phases acquire_ms={:.3} wrap_ms={:.3} paint_ms={:.3} flush_ms={:.3} present_ms={:.3}",
+                    wait.as_secs_f64() * 1000.,
+                    ms(t1, t2),
+                    ms(t2, t3),
+                    ms(t3, t4),
+                    ms(t4, t5),
+                );
+            }
             Ok(true)
         })
     }

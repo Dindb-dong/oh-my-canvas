@@ -4066,18 +4066,19 @@ pub fn draw(app: &mut App) -> Result<bool, String> {
     if size.width == 0 || size.height == 0 {
         return Ok(false);
     }
-    app.controls = controls(app);
     let scale = window.scale_factor() * app.ui_scale();
     #[cfg(target_os = "macos")]
     if let Some(mut presenter) = app.gpu_presenter.take() {
         let result = check_surface_size(size.width, size.height).and_then(|_| {
             presenter.present(&window, size, window.scale_factor(), |canvas| {
+                app.controls = controls(app);
                 render_to_canvas(app, canvas, scale, true)
             })
         });
         app.gpu_presenter = Some(presenter);
         return result;
     }
+    app.controls = controls(app);
     let mut raster = render(app, size.width, size.height, scale, true)?;
     let pixmap = raster
         .peek_pixels()

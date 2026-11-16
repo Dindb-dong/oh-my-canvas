@@ -1065,6 +1065,57 @@ impl App {
             window.request_redraw();
         }
     }
+    fn draw_frame(&mut self, window: &Window) {
+        let trace = self.input_frame.take();
+        let draw_start = Instant::now();
+        match crate::paint::draw(self) {
+            Ok(true) => {
+                self.presented = true;
+                self.automation.last_frame = Some(draw_start.elapsed().as_secs_f64() * 1000.);
+                self.automation.frames_drawn = self.automation.frames_drawn.saturating_add(1);
+                if let Some((kind, start)) = trace {
+                    eprintln!(
+                        "Native frame {kind} input_to_submit_ms={:.3} draw_ms={:.3} camera={:.2},{:.2},{:.3}",
+                        start.elapsed().as_secs_f64() * 1000.,
+                        draw_start.elapsed().as_secs_f64() * 1000.,
+                        self.camera.x,
+                        self.camera.y,
+                        self.camera.zoom,
+                    );
+                }
+            }
+            Ok(false) => self.input_frame = trace,
+            Err(error) => {
+                eprintln!("Native presentation failed: {error}");
+                self.error = Some(error);
+                self.smoke_failed = true;
+            }
+        }
+        if let Some(mut access) = self.access.take() {
+            access.update_if_active(|| crate::accessibility::tree(self));
+            self.access = Some(access);
+        }
+        window.set_ime_allowed(self.editing.is_some());
+        if let (Some(edit), Some(area)) = (&self.editing, crate::text_ui::editor_rect(self)) {
+            let size = if matches!(edit.target, EditTarget::Property { .. }) {
+                13.
+            } else {
+                18.
+            };
+            if let Some(caret) =
+                crate::text_ui::prepare(&edit.buffer, area, size).and_then(|p| p.caret())
+            {
+                let interface = self.ui_scale();
+                window.set_ime_cursor_area(
+                    LogicalPosition::new(
+                        caret.x * interface,
+                        caret.y.clamp(area.y, area.y + area.height) * interface,
+                    ),
+                    LogicalSize::new(2. * interface, caret.height * interface),
+                );
+            }
+        }
+    }
     fn trace_input(&mut self, kind: &'static str) {
         if self.trace_frames && self.input_frame.is_none() {
             self.input_frame = Some((kind, Instant::now()));
@@ -3800,7 +3851,7 @@ impl ApplicationHandler<Event> for App {
             }
         };
         #[cfg(target_os = "macos")]
-        let use_gpu = match crate::gpu_presenter::MetalPresenter::new(&window) {
+        let use_gpu = match crate::gpu_presenter::MetalPresenter::new(&window, self.proxy.clone()) {
             Ok(presenter) => {
                 self.gpu_presenter = Some(presenter);
                 window.set_title("Oh My Canvas — Metal preview");
@@ -3928,6 +3979,18 @@ impl ApplicationHandler<Event> for App {
                 self.resume_automation();
             }
             Event::PanRasterReady => self.redraw(),
+            #[cfg(target_os = "macos")]
+            Event::MetalDrawableReady(drawable) => {
+                let redraw = !self.occluded && drawable.is_some();
+                if let Some(presenter) = &mut self.gpu_presenter {
+                    presenter.accept_drawable(if redraw { drawable } else { None });
+                }
+                if redraw && let Some(window) = self.window.clone() {
+                    self.draw_frame(&window);
+                } else {
+                    self.input_frame = None;
+                }
+            }
             Event::Accessibility(event) => crate::accessibility::handle(self, event),
         }
     }
@@ -3953,6 +4016,10 @@ impl ApplicationHandler<Event> for App {
                 self.occluded = occluded;
                 needs_redraw = !occluded;
                 if occluded {
+                    #[cfg(target_os = "macos")]
+                    if let Some(presenter) = &mut self.gpu_presenter {
+                        presenter.discard_drawable();
+                    }
                     self.input_frame = None;
                 }
             }
@@ -4096,60 +4163,7 @@ impl ApplicationHandler<Event> for App {
                 self.move_cache.get_mut().clear();
                 self.space_pan = false;
             }
-            WindowEvent::RedrawRequested if !self.occluded => {
-                let trace = self.input_frame.take();
-                let draw_start = Instant::now();
-                match crate::paint::draw(self) {
-                    Ok(true) => {
-                        self.presented = true;
-                        self.automation.last_frame =
-                            Some(draw_start.elapsed().as_secs_f64() * 1000.);
-                        self.automation.frames_drawn =
-                            self.automation.frames_drawn.saturating_add(1);
-                        if let Some((kind, start)) = trace {
-                            eprintln!(
-                                "Native frame {kind} input_to_submit_ms={:.3} draw_ms={:.3} camera={:.2},{:.2},{:.3}",
-                                start.elapsed().as_secs_f64() * 1000.,
-                                draw_start.elapsed().as_secs_f64() * 1000.,
-                                self.camera.x,
-                                self.camera.y,
-                                self.camera.zoom,
-                            );
-                        }
-                    }
-                    Ok(false) => {}
-                    Err(error) => {
-                        eprintln!("Native presentation failed: {error}");
-                        self.error = Some(error);
-                        self.smoke_failed = true;
-                    }
-                }
-                if let Some(mut access) = self.access.take() {
-                    access.update_if_active(|| crate::accessibility::tree(self));
-                    self.access = Some(access);
-                }
-                window.set_ime_allowed(self.editing.is_some());
-                if let (Some(edit), Some(area)) = (&self.editing, crate::text_ui::editor_rect(self))
-                {
-                    let size = if matches!(edit.target, EditTarget::Property { .. }) {
-                        13.
-                    } else {
-                        18.
-                    };
-                    if let Some(caret) =
-                        crate::text_ui::prepare(&edit.buffer, area, size).and_then(|p| p.caret())
-                    {
-                        let interface = self.ui_scale();
-                        window.set_ime_cursor_area(
-                            LogicalPosition::new(
-                                caret.x * interface,
-                                caret.y.clamp(area.y, area.y + area.height) * interface,
-                            ),
-                            LogicalSize::new(2. * interface, caret.height * interface),
-                        );
-                    }
-                }
-            }
+            WindowEvent::RedrawRequested if !self.occluded => self.draw_frame(&window),
             _ => {}
         }
         if self.proxy.id == 1
