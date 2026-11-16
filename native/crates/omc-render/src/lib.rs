@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use skia_safe::{
     AlphaType, BlendMode, Canvas, Color4f, ColorSpace, ColorType, Data, EncodedImageFormat, Image,
-    ImageInfo, Matrix, Paint, Path, Rect, Shader, Surface, TileMode, canvas::SaveLayerRec,
-    paint::Style,
+    ImageInfo, Matrix, Paint, Path, QuickReject, Rect, Shader, Surface, TileMode,
+    canvas::SaveLayerRec, paint::Style,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -566,6 +566,48 @@ impl MovePaintPlan {
     }
 }
 
+// Keep effect, stroke, mask, and custom property handling on the general path.
+fn paint_plain_rect(canvas: &Canvas, item: &SceneItem) -> bool {
+    let [1., 0., 0., 1., x, y] = item.local.0 else {
+        return false;
+    };
+    if item.kind != NodeKind::Rect
+        || !item.children.is_empty()
+        || item.clip
+        || item.text.is_some()
+        || !item.properties.keys().all(|key| {
+            matches!(
+                key.as_str(),
+                "x" | "y" | "width" | "height" | "name" | "fill"
+            )
+        })
+        || !item.style.values.keys().all(|key| {
+            matches!(
+                key.as_str(),
+                "left" | "top" | "width" | "height" | "background-color"
+            )
+        })
+    {
+        return false;
+    }
+    let Some(color) = item.style.color("background-color") else {
+        return false;
+    };
+    let rect = Rect::from_wh(item.width as f32, item.height as f32);
+    let saved = canvas.save();
+    canvas.translate((x as f32, y as f32));
+    if !canvas.quick_reject(&rect) {
+        let mut paint = Paint::default();
+        paint
+            .set_anti_alias(true)
+            .set_color4f(Color4f::new(color.r, color.g, color.b, color.a), None);
+        // Match the general painter's path coverage at fractional zoom.
+        canvas.draw_path(&Path::rect(rect, None), &paint);
+    }
+    canvas.restore_to_count(saved);
+    true
+}
+
 fn paint_item(
     canvas: &Canvas,
     scene: &Scene,
@@ -595,6 +637,14 @@ fn paint_item(
         }
         None => true,
     };
+    if own
+        && translations.is_empty()
+        && poses.is_none()
+        && outline.is_none()
+        && paint_plain_rect(canvas, item)
+    {
+        return Ok(());
+    }
     let saved = canvas.save();
     let result = (|| {
         if let Some((x, y)) = translations.get(&item.id) {
@@ -1331,6 +1381,39 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn solid_rectangle_matches_the_general_painter_at_fractional_zoom() {
+        let mut scene = fixture();
+        let rect = scene
+            .items
+            .iter_mut()
+            .find(|item| item.kind == NodeKind::Rect)
+            .unwrap();
+        rect.local = Affine::translation(7.25, 8.75);
+        let mut target = skia_safe::surfaces::raster_n32_premul((64, 64)).unwrap();
+        assert!(paint_plain_rect(target.canvas(), rect));
+
+        let options = RenderOptions {
+            scale: 1.43,
+            ..Default::default()
+        };
+        let fast = render_rgba(&scene, &options, &EmptyResources).unwrap();
+        scene
+            .items
+            .iter_mut()
+            .find(|item| item.kind == NodeKind::Rect)
+            .unwrap()
+            .properties
+            .insert("description".into(), json!("annotation"));
+        let general = render_rgba(&scene, &options, &EmptyResources).unwrap();
+        let mismatch = fast
+            .pixels
+            .iter()
+            .zip(&general.pixels)
+            .position(|(a, b)| a != b);
+        assert_eq!(mismatch, None, "rectangle coverage at fractional zoom");
     }
 
     #[test]
