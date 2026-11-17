@@ -1065,6 +1065,16 @@ impl App {
             window.request_redraw();
         }
     }
+    #[cfg(target_os = "macos")]
+    fn metal_window_visible(&self) -> bool {
+        !self.occluded
+            && !self.closing
+            && self
+                .window
+                .as_ref()
+                .is_some_and(|window| window.is_visible().unwrap_or(true))
+    }
+
     fn draw_frame(&mut self, window: &Window) {
         let trace = self.input_frame.take();
         let draw_start = Instant::now();
@@ -3981,13 +3991,14 @@ impl ApplicationHandler<Event> for App {
             Event::PanRasterReady => self.redraw(),
             #[cfg(target_os = "macos")]
             Event::MetalDrawableReady(drawable) => {
-                let redraw = !self.occluded && drawable.is_some();
+                let visible = self.metal_window_visible();
+                let redraw = visible && drawable.is_some();
                 if let Some(presenter) = &mut self.gpu_presenter {
-                    presenter.accept_drawable(if redraw { drawable } else { None });
+                    presenter.accept_drawable(drawable, visible);
                 }
                 if redraw && let Some(window) = self.window.clone() {
                     self.draw_frame(&window);
-                } else {
+                } else if !visible {
                     self.input_frame = None;
                 }
             }
@@ -4266,6 +4277,19 @@ impl ApplicationHandler<Event> for App {
                 Instant::now() + Duration::from_millis(100),
             ));
             return;
+        }
+        #[cfg(target_os = "macos")]
+        if self
+            .gpu_presenter
+            .as_ref()
+            .is_some_and(|presenter| presenter.retry_due())
+            && self.metal_window_visible()
+            && let Some(window) = &self.window
+        {
+            let size = window.inner_size();
+            if size.width > 0 && size.height > 0 {
+                window.request_redraw();
+            }
         }
         if !self.collaboration_pending
             && !self.pending

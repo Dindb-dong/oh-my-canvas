@@ -51,6 +51,53 @@ pub(crate) struct ReadyDrawable {
 // before the main thread renders to its texture and schedules presentation.
 unsafe impl Send for ReadyDrawable {}
 
+enum DrawableRequest<T> {
+    Idle,
+    Waiting,
+    RetryAt(Instant),
+    Ready(T),
+}
+
+impl<T> DrawableRequest<T> {
+    fn complete(&mut self, drawable: Option<T>, visible: bool, now: Instant) {
+        *self = match drawable {
+            _ if !visible => Self::Idle,
+            Some(drawable) => Self::Ready(drawable),
+            // An unavailable layer can return immediately. Pace retries even during input.
+            None => Self::RetryAt(now + Duration::from_millis(50)),
+        };
+    }
+
+    fn deferred(&self, now: Instant) -> bool {
+        matches!(self, Self::Waiting) || matches!(self, Self::RetryAt(at) if now < *at)
+    }
+
+    fn retry_due(&self, now: Instant) -> bool {
+        matches!(self, Self::RetryAt(at) if now >= *at)
+    }
+
+    fn discard(&mut self) {
+        if !matches!(self, Self::Waiting) {
+            *self = Self::Idle;
+        }
+    }
+
+    fn take_ready(&mut self) -> Option<T> {
+        match std::mem::replace(self, Self::Idle) {
+            Self::Ready(drawable) => Some(drawable),
+            _ => None,
+        }
+    }
+
+    fn request(&mut self, sender: &mpsc::SyncSender<()>) -> Result<(), String> {
+        sender
+            .try_send(())
+            .map_err(|error| format!("Could not request a Metal drawable: {error}"))?;
+        *self = Self::Waiting;
+        Ok(())
+    }
+}
+
 pub struct MetalPresenter {
     context: gpu::DirectContext,
     queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
@@ -58,8 +105,7 @@ pub struct MetalPresenter {
     dimensions: Option<(PhysicalSize<u32>, f64)>,
     trace_phases: bool,
     request_drawable: mpsc::SyncSender<()>,
-    waiting: bool,
-    ready: Option<ReadyDrawable>,
+    drawable: DrawableRequest<ReadyDrawable>,
 }
 
 fn new_context(
@@ -133,18 +179,20 @@ impl MetalPresenter {
             dimensions: None,
             trace_phases,
             request_drawable,
-            waiting: false,
-            ready: None,
+            drawable: DrawableRequest::Idle,
         })
     }
 
-    pub fn accept_drawable(&mut self, drawable: Option<ReadyDrawable>) {
-        self.waiting = false;
-        self.ready = drawable;
+    pub fn accept_drawable(&mut self, drawable: Option<ReadyDrawable>, visible: bool) {
+        self.drawable.complete(drawable, visible, Instant::now());
+    }
+
+    pub fn retry_due(&self) -> bool {
+        self.drawable.retry_due(Instant::now())
     }
 
     pub fn discard_drawable(&mut self) {
-        self.ready = None;
+        self.drawable.discard();
     }
 
     pub fn present(
@@ -154,7 +202,7 @@ impl MetalPresenter {
         scale: f64,
         draw: impl FnOnce(&Canvas) -> Result<(), String>,
     ) -> Result<bool, String> {
-        if self.waiting {
+        if self.drawable.deferred(Instant::now()) {
             return Ok(false);
         }
         if self.dimensions != Some((size, scale)) {
@@ -174,11 +222,8 @@ impl MetalPresenter {
             CATransaction::commit();
             self.dimensions = Some((size, scale));
         }
-        let Some(ReadyDrawable { drawable, wait }) = self.ready.take() else {
-            self.request_drawable
-                .try_send(())
-                .map_err(|error| format!("Could not request a Metal drawable: {error}"))?;
-            self.waiting = true;
+        let Some(ReadyDrawable { drawable, wait }) = self.drawable.take_ready() else {
+            self.drawable.request(&self.request_drawable)?;
             return Ok(false);
         };
         autoreleasepool(|_| {
@@ -249,6 +294,39 @@ mod tests {
     };
     use skia_safe::{Color, ImageInfo};
     use std::cell::Cell;
+
+    #[test]
+    fn drawable_timeout_retries_a_deferred_frame_and_discards_hidden_work() {
+        let mut frame = DrawableRequest::Idle;
+        let (sender, worker) = mpsc::sync_channel(1);
+        let now = Instant::now();
+        let deadline = now + Duration::from_millis(50);
+
+        frame.request(&sender).unwrap();
+        assert_eq!(worker.try_recv(), Ok(()));
+        assert!(frame.deferred(now)); // A redraw arrives while acquisition is in flight.
+        frame.complete(None, true, now); // Inject nextDrawable returning nil.
+        assert!(frame.deferred(deadline - Duration::from_millis(1)));
+        assert!(!frame.retry_due(now));
+        assert!(frame.retry_due(deadline));
+        assert!(!frame.deferred(deadline));
+        assert_eq!(frame.take_ready(), None);
+        frame.request(&sender).unwrap();
+        assert_eq!(worker.try_recv(), Ok(()));
+        assert!(!frame.retry_due(deadline));
+        frame.complete(Some(7), true, deadline);
+        assert_eq!(frame.take_ready(), Some(7));
+
+        frame.request(&sender).unwrap();
+        assert_eq!(worker.try_recv(), Ok(()));
+        frame.discard();
+        assert!(frame.deferred(deadline));
+        frame.complete(None, false, deadline);
+        assert!(!frame.retry_due(deadline + Duration::from_secs(1)));
+        frame.complete(None, true, deadline);
+        frame.discard();
+        assert!(!frame.retry_due(deadline + Duration::from_secs(1)));
+    }
 
     #[test]
     #[ignore = "requires a working Metal device"]
