@@ -104,11 +104,11 @@ async function connectEditor(editor) {
   await editor.getByRole('toolbar', {name:'Drawing tools'}).waitFor();
   await editor.getByRole('button', {name:'MCP', exact:true}).click();
   const connect = editor.getByRole('menuitem', {name:/^Connect( here)?$/});
+  const connected = editor.getByText('MCP connected', {exact:true});
+  await connect.or(connected).first().waitFor();
   if (await connect.isVisible()) {
     await connect.click();
     await editor.getByText(/Connected to MCP/i).first().waitFor({timeout:3000}).catch(() => {});
-  } else {
-    await editor.getByRole('menuitem', {name:/^Disconnect/}).waitFor();
   }
 }
 
