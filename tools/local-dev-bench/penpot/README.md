@@ -82,3 +82,29 @@ browser context. A separate native read verifies the saved caption on the
 same file, page and shape. The save response watcher records an optional HTTP
 observation. Host/OS caches are uncontrolled. This route has no import
 conversion, HTML ingestion, first-login timing, or large-case runtime evidence.
+
+## LD03 field-relay native token probe
+
+The deterministic adapter prepares the canonical 40-card field-relay scene
+using editable Penpot boards and text. Penpot's local token set binds native
+color to fill and spacing to vertical row gap. The two target token edits
+leave the four local overrides and four archive cards in place. The adapter
+closes and reopens the original, duplicates it using the Penpot dashboard,
+performs the second token edit on the distinct copy, and rereads the original.
+
+Generate and run the fixture against a disposable task-owned loopback stack:
+
+```sh
+python3 tools/local-dev-bench/workloads/synthetic.py fixture LD03 --variant field-relay > "$FIXTURE"
+OMC_BENCH_CANDIDATE="$EVIDENCE" node tools/local-dev-bench/penpot/ld03.mjs http://localhost:19001 "$FIXTURE"
+python3 tools/local-dev-bench/workloads/synthetic.py grade LD03 "$EVIDENCE" --variant field-relay
+node --test tools/local-dev-bench/penpot/ld03.test.mjs
+```
+
+With the attempt runner, use the probe as the producer and the common
+`synthetic.py grade LD03` command as the independent acceptance command.
+The producer reports setup, two-token edit readback and normal reopen
+timings on its internal clock. The runner's completion includes duplicate
+and verification actions. This probe measures native editable properties,
+token IDs and bindings. It does not measure visual raster presentation,
+model-assisted work or the native component extension.
