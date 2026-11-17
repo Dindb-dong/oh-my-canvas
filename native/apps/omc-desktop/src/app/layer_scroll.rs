@@ -45,10 +45,8 @@ fn reveal_path<'a>(nodes: &'a BTreeMap<String, Node>, root: &str, selected: &str
     Vec::new()
 }
 
-fn reveal_offset(offset: f64, viewport_height: f64, index: usize) -> f64 {
-    let top = index as f64 * LAYER_ROW_STEP;
-    let minimum = top + LAYER_ROW_STEP - viewport_height;
-    offset.clamp(minimum.min(top), top)
+fn reveal_offset(index: usize, maximum: f64) -> f64 {
+    (index as f64 * LAYER_ROW_STEP).min(maximum)
 }
 
 impl App {
@@ -68,6 +66,7 @@ impl App {
     pub(super) fn reset_layer_scroll(&mut self) {
         self.layer_scroll = 0.;
         self.layer_scroll_animation = None;
+        self.layer_reveal = None;
     }
 
     fn animate_layer_scroll(&mut self, to: f64) {
@@ -126,11 +125,17 @@ impl App {
             .iter()
             .position(|&index| self.layers[index].id == target)
         {
-            let height = layer_viewport(self).height;
-            if height > 0. {
-                self.animate_layer_scroll(reveal_offset(self.layer_scroll, height, index));
+            self.layer_reveal = Some((selected.to_owned(), target));
+            if layer_viewport(self).height > 0. {
+                self.animate_layer_scroll(reveal_offset(index, self.layer_scroll_max()));
             }
         }
+    }
+
+    pub(crate) fn is_layer_reveal_target(&self, id: &str) -> bool {
+        self.layer_reveal
+            .as_ref()
+            .is_some_and(|(selected, target)| id == target && self.selected.contains(selected))
     }
 
     pub(super) fn tick_layer_scroll(&mut self) -> Option<Instant> {
@@ -182,10 +187,10 @@ mod tests {
     }
 
     #[test]
-    fn reveal_preserves_visible_rows_and_eases_to_offscreen_rows() {
-        assert_eq!(reveal_offset(19.5, 150., 2), 19.5);
-        assert_eq!(reveal_offset(19.5, 150., 7), 146.);
-        assert_eq!(reveal_offset(19.5, 150., 0), 0.);
+    fn reveal_aligns_even_visible_rows_and_clamps_at_the_end() {
+        assert_eq!(reveal_offset(2, 146.), 74.);
+        assert_eq!(reveal_offset(7, 146.), 146.);
+        assert_eq!(reveal_offset(0, 146.), 0.);
         let started = Instant::now();
         let animation = LayerScrollAnimation {
             from: 19.5,
