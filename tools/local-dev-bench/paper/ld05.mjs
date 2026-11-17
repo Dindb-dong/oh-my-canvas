@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {createHash} from 'node:crypto';
-import {copyFile, mkdir, readFile, realpath, writeFile} from 'node:fs/promises';
+import {createHash, randomBytes} from 'node:crypto';
+import {copyFile, lstat, mkdir, readFile, realpath, writeFile} from 'node:fs/promises';
 import {basename, dirname, isAbsolute, join, resolve} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {benchRequire} from '../replays/mcp.mjs';
+import {benchRequire, Client, StreamableHTTPClientTransport} from '../replays/mcp.mjs';
 import {mergeExtraCard, mergeStyles, sourceProbe} from '../omc-native/ld05.mjs';
 import {withPaper} from './ld03.mjs';
 import {publishCandidate} from '../publish-candidate.mjs';
-import {awaitNativeReopen, inheritedDeadline} from '../figma/ld05-run.mjs';
+import {inheritedDeadline} from '../figma/ld05-run.mjs';
 
 const approvedCanvas = 'OMC Benchmark • Synthetic CAP Probe • 2026-11-17';
 const sourceScript = fileURLToPath(new URL('../ld05_source.py', import.meta.url));
@@ -341,6 +341,85 @@ async function registerAssets(sourceDir, manifest) {
   return paths;
 }
 
+export async function awaitPaperNativeReopen({output, runId, cycle, fileKey, pageId, writtenAt, deadline},
+  {call: injectedCall} = {}) {
+  const remaining = () => {
+    const left = deadline - performance.now();
+    assert.ok(left > 0, 'Attempt deadline expired during Paper native reopen');
+    return Math.max(1, Math.floor(left));
+  };
+  remaining();
+  assert.ok([1, 2, 3].includes(cycle));
+  const request = {run_id: runId, cycle, file_key: fileKey, page_id: pageId,
+    nonce: randomBytes(16).toString('hex'), native_write_completed_at: writtenAt,
+    requested_at: new Date().toISOString(), lifecycle_mode: 'root-close-then-paper-open_file',
+    receipt_file: `cycle-${cycle}-editor-closed.json`};
+  await publishCandidate(join(output, `cycle-${cycle}-await-editor-reopen.json`), request);
+  console.log(JSON.stringify({phase: 'AWAIT_NATIVE_CLOSE', ...request}));
+  let receipt;
+  while (!receipt) {
+    remaining();
+    try {
+      const path = join(output, request.receipt_file);
+      assert.ok((await lstat(path)).isFile(), 'Close receipt must be an atomic regular JSON file');
+      receipt = JSON.parse(await readFile(path, 'utf8'));
+      for (const key of ['run_id', 'cycle', 'file_key', 'page_id', 'nonce']) {
+        assert.equal(receipt[key], request[key], 'Paper close receipt has wrong ' + key);
+      }
+      assert.equal(receipt.actor, 'root-cua', 'Paper close requires the actual root UI observer');
+      const closed = Date.parse(receipt.closed_at);
+      assert.ok(closed > Date.parse(writtenAt) && closed >= Date.parse(request.requested_at) &&
+        closed <= Date.now(), 'Paper close timestamp must follow the write and request');
+      assert.ok(typeof receipt.close_observation === 'string' && receipt.close_observation.trim() &&
+        receipt.close_observation.length <= 8192, 'Missing actual UI close observation');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      await delay(Math.min(25, remaining()));
+    }
+  }
+  const reopen = async call => {
+    const checked = async (name, args) => { remaining(); const data = await call(name, args); remaining(); return data; };
+    const before = await checked('list_resources', {limit: 200});
+    assert.ok(Array.isArray(before.resources));
+    const closed = before.resources.find(row => row.id === fileKey);
+    assert.ok(!closed?.open, 'Root-closed Paper file is still an open desktop tab');
+    assert.ok(closed || !before.truncated, 'Truncated resources cannot establish a closed tab');
+    const opened = await checked('open_file', {fileId: fileKey, pageId});
+    assert.equal(opened.fileName, approvedCanvas);
+    assert.equal(opened.pageId, pageId);
+    const after = await checked('list_resources', {limit: 200});
+    const tab = after.resources.find(row => row.id === fileKey);
+    assert.equal(tab?.open, true, 'Official open_file did not reopen the desktop tab');
+    const info = await checked('get_basic_info', {fileId: fileKey, pageId});
+    assert.equal(info.fileName, approvedCanvas);
+    assert.equal(info.pageId, pageId);
+    const lifecycle = {...request, actor: 'root-cua+paper-open_file', closed_at: receipt.closed_at,
+      reopened_at: new Date().toISOString(), close_observation: receipt.close_observation,
+      reopen_observation: 'Official open_file reopened the exact desktop tab and page; list_resources open=true',
+      root_close_receipt: receipt, tab_before: closed ?? null, tab_after: tab,
+      opened_page_id: info.pageId};
+    await publishCandidate(join(output, `cycle-${cycle}-editor-official-reopen.json`), lifecycle);
+    console.log(JSON.stringify({phase: 'OFFICIAL_NATIVE_REOPENED', cycle, file_key: fileKey, page_id: pageId}));
+    return lifecycle;
+  };
+  if (injectedCall) return reopen(injectedCall);
+  const endpoint = new URL(process.env.PAPER_BENCH_URL ?? 'http://127.0.0.1:29979/mcp');
+  assert.ok(endpoint.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname));
+  assert.ok(!endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash);
+  const client = new Client({name: 'paper-ld05-official-reopen', version: '1'});
+  try {
+    await client.connect(new StreamableHTTPClientTransport(endpoint), {timeout: Math.min(10_000, remaining())});
+    return await reopen(async (name, args) => {
+      const answer = await client.callTool({name, arguments: args}, undefined, {timeout: remaining()});
+      assert.ok(!answer.isError, 'Paper lifecycle tool failed: ' + name);
+      const text = answer.content.filter(block => block.type === 'text').at(-1)?.text;
+      const data = JSON.parse(text);
+      assert.ok(!data.error, 'Paper lifecycle returned an in-band error: ' + name);
+      return data;
+    });
+  } finally { await client.close(); }
+}
+
 export async function verifyPaperReopen(read, scope, pageId, canvas) {
   const call = (name, args = {}) => read({name, arguments: {...args, fileId: scope.fileId}});
   const info = await call('get_basic_info', {pageId});
@@ -403,7 +482,7 @@ export async function runPaperLD05(read, scope, fixture, output, runId, {nativeR
       rules.result, cycle, assets, save);
     let lifecycle;
     if (nativeReopen) {
-      lifecycle = await awaitNativeReopen({output, runId, cycle, fileKey: scope.fileId, pageId: page.id,
+      lifecycle = await awaitPaperNativeReopen({output, runId, cycle, fileKey: scope.fileId, pageId: page.id,
         writtenAt: new Date().toISOString(), deadline});
       const reopened = await verifyPaperReopen(read, scope, page.id, canvas);
       assert.ok(performance.now() < deadline, 'Attempt deadline expired during Paper reopen readback');

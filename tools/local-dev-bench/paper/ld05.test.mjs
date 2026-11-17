@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
-import {normalizePaperNative, normalizePaperSource, paperLD05Markup, resolvePaperFlex, verifyImage, verifyPaperReopen} from './ld05.mjs';
+import {setTimeout as delay} from 'node:timers/promises';
+import {publishCandidate} from '../publish-candidate.mjs';
+import {awaitPaperNativeReopen, normalizePaperNative, normalizePaperSource, paperLD05Markup, resolvePaperFlex, verifyImage, verifyPaperReopen} from './ld05.mjs';
 
 const head = '<h1>Service route board</h1><button id="toggle">Pin route</button><p id="state">Route unpinned</p>';
 const validation = '<label for="fixture-value">Dispatch note</label><p id="field-error">Enter four characters.</p>' +
@@ -150,4 +152,56 @@ test('native editable labels preserve measured source states without inventing n
     {...measured, keyboard_before: 'Unobserved state'}));
   assert.throws(() => paperLD05Markup(head + list, appearance, assets, 1,
     {...measured, component: undefined}));
+});
+
+
+test('official Paper reopen consumes an authenticated actual-close receipt and verifies desktop lifecycle', async t => {
+  const folder = await mkdtemp(join(tmpdir(), 'paper-native-reopen-'));
+  t.after(() => rm(folder, {recursive: true, force: true}));
+  const fileKey = 'synthetic-file', pageId = 'synthetic-page';
+  const scenarios = ['valid', 'still-open', 'wrong-nonce', 'stale', 'missing', 'wrong-page', 'wrong-actor'];
+  for (const [index, scenario] of scenarios.entries()) {
+    const output = join(folder, scenario);
+    await (await import('node:fs/promises')).mkdir(output);
+    const calls = [];
+    let resourceReads = 0;
+    const call = async (name, args) => {
+      calls.push(name);
+      if (name === 'list_resources') return {resources: [{id: fileKey,
+        open: ++resourceReads > 1 || scenario === 'still-open'}]};
+      if (name === 'open_file') {
+        assert.deepEqual(args, {fileId: fileKey, pageId});
+        return {fileName: 'OMC Benchmark • Synthetic CAP Probe • 2026-11-17',
+          pageId: scenario === 'wrong-page' ? 'other-page' : pageId};
+      }
+      if (name === 'get_basic_info') return {fileName: 'OMC Benchmark • Synthetic CAP Probe • 2026-11-17', pageId};
+      throw new Error(name);
+    };
+    const work = awaitPaperNativeReopen({output, runId: 'test-' + index, cycle: 1, fileKey, pageId,
+      writtenAt: new Date(Date.now() - 1000).toISOString(), deadline: performance.now() + 250}, {call});
+    const checked = scenario === 'valid' ? work : assert.rejects(work);
+    let request;
+    while (!request) {
+      try { request = JSON.parse(await readFile(join(output, 'cycle-1-await-editor-reopen.json'), 'utf8')); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; await delay(1); }
+    }
+    if (scenario !== 'missing') {
+      await publishCandidate(join(output, 'cycle-1-editor-closed.json'), {
+        run_id: request.run_id, cycle: request.cycle, file_key: fileKey, page_id: pageId,
+        nonce: scenario === 'wrong-nonce' ? 'wrong' : request.nonce,
+        actor: scenario === 'wrong-actor' ? 'untrusted' : 'root-cua',
+        closed_at: scenario === 'stale' ? '2000-01-01T00:00:00.000Z' : new Date().toISOString(),
+        close_observation: 'TEST MOCK: UI close observed for exact synthetic tab',
+      });
+    }
+    const result = await checked;
+    if (scenario === 'valid') {
+      assert.deepEqual(calls, ['list_resources', 'open_file', 'list_resources', 'get_basic_info']);
+      assert.equal(result.actor, 'root-cua+paper-open_file');
+      assert.equal(result.tab_before.open, false);
+      assert.equal(result.tab_after.open, true);
+      assert.equal(result.opened_page_id, pageId);
+    } else if (['wrong-nonce', 'stale', 'missing', 'wrong-actor'].includes(scenario)) assert.deepEqual(calls, []);
+    else if (scenario === 'still-open') assert.deepEqual(calls, ['list_resources']);
+  }
 });
