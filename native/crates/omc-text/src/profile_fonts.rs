@@ -40,7 +40,7 @@ pub fn profile_font_manager(profile: &Path) -> Option<FontMgr> {
         return manager;
     }
     let mut provider = TypefaceFontProvider::new();
-    let system = FontMgr::default();
+    let system = super::SYSTEM_FONTS.with(Clone::clone);
     let mut count = 0;
     for entry in generation
         .iter()
