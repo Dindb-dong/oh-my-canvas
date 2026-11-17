@@ -105,6 +105,27 @@ export function normalizeAssets(raw,scene,images,font) {
   return {document_id:raw.id,nodes,styles:[]};
 }
 
+export function glyphScreenshotId(view,raw,key) {
+  assert.equal(view.id,assetToolDocumentId(raw.id));
+  assert.equal(String(view.revision),String(raw.sequence));
+  assert.equal(view.truncated,false);
+  const matches=[];
+  const visit=node=>{
+    if(node.name===marker+key) matches.push(node);
+    for(const child of node.children??[]) visit(child);
+  };
+  for(const node of view.layers) visit(node);
+  assert.equal(matches.length,1,'Expected one scoped glyph layer');
+  const [layer]=matches;
+  const native=Object.values(raw.nodes).find(node=>node.properties.name===marker+key);
+  assert.equal(native?.kind,'text');
+  assert.equal(layer.type,'TEXT');
+  assert.equal(layer.characters,native.properties.text);
+  // FigCraft's numeric aliases are separate from get_tree's string aliases (n1, n2, ...).
+  assert.ok(Number.isSafeInteger(layer.id)&&layer.id>0,'Screenshot requires a native numeric alias');
+  return layer.id;
+}
+
 async function execute(fixture,inputs,save,report,profile,signal) {
   const {assets,content}=inputs,plan=planAssets(fixture,content,assets),font=assets.get(fixture.font.name);
   const fontStore=join(profile,'native-v1','font-store'),stage=join(fontStore,'.ld06-stage');
@@ -153,10 +174,16 @@ async function execute(fixture,inputs,save,report,profile,signal) {
       } catch(error) { report.rasters[label]={error:error.message}; }
       // Two actual text rasters diagnose Latin/Hangul ink. They do not certify every registered glyph.
       report.glyphDiagnostics[label]=[];
+      let glyphView,glyphViewError;
+      try {
+        glyphView=await service.call('inspect_document',{depth:6});
+        await save(label+'-glyph-tree.json',glyphView);
+      } catch(error) { glyphViewError=error; }
       for(const key of ['card/0/name','card/0/caption']) {
         try {
+          if(glyphViewError) throw glyphViewError;
           const node=Object.values(raw.nodes).find(node=>node.properties.name===marker+key);
-          const alias=scene.nodes.find(row=>row.rawId===node.id).id;
+          const alias=glyphScreenshotId(glyphView,raw,key);
           const image=await service.call('screenshot',{ids:[alias],scale:1});
           const bytes=Buffer.from(image.base64,'base64'),width=bytes.readUInt32BE(16),height=bytes.readUInt32BE(20);
           const pixels=pngPixels(bytes,width,height),artifact=label+'-'+key.replaceAll('/','-')+'.png';

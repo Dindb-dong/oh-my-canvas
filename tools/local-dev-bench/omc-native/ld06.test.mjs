@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import test from 'node:test';
-import {coverCrop,normalizeAssets,planAssets,verifyInputs} from './ld06.mjs';
+import {coverCrop,glyphScreenshotId,normalizeAssets,planAssets,verifyInputs} from './ld06.mjs';
 import {pngPixels,makePressureFixture} from './asset-pressure.mjs';
 
 test('asset plan retains 26 native identities and applies the supplied two replacements',()=>{
@@ -34,6 +34,23 @@ test('cover crop follows actual source and destination sizes, with no fixture co
   assert.deepEqual(coverCrop(128,96,160,104),[0,6.399999999999999,128,83.2]);
   assert.deepEqual(coverCrop(96,128,160,104),[0,32.8,96,62.4]);
   assert.throws(()=>coverCrop(0,128,160,104));
+});
+
+test('glyph screenshots use observed numeric aliases and reject string, stale or wrong-document IDs',()=>{
+  const raw={id:'doc_0123456789abcdef0123456789abcdef',sequence:9,nodes:{
+    text:{kind:'text',properties:{name:'LD06 card/0/caption',text:'서울 광장'}}}};
+  const layer={id:1042,type:'TEXT',name:'LD06 card/0/caption',characters:'서울 광장'};
+  const view={id:'01234567-89ab-cdef-0123-456789abcdef',revision:9,truncated:false,layers:[{children:[layer]}]};
+  assert.equal(glyphScreenshotId(view,raw,'card/0/caption'),1042);
+  for(const mutate of [
+    v=>{v.layers[0].children[0].id='n42';},
+    v=>{v.revision=8;},
+    v=>{v.id='another-document';},
+    v=>{v.layers[0].children[0].characters='different text';},
+  ]) {
+    const changed=structuredClone(view); mutate(changed);
+    assert.throws(()=>glyphScreenshotId(changed,raw,'card/0/caption'));
+  }
 });
 
 test('readback refuses missing bytes and stale geometry, and does not claim unsupported cropping',()=>{
