@@ -18,6 +18,8 @@ The MCP suite starts native processes on loopback and removes its temporary prof
 
 ## Foundation
 
+For source-backed performance hypotheses, current probe limitations, and the proposed cross-product study, see the [local development benchmark protocol](../docs/benchmarks/README.md). It compares accepted workflows, complete model usage, visible latency, and whole-product resources. It does not report completed comparative measurements or replace native release qualification.
+
 - `omc-model`: stable typed identifiers, ordered pages and nodes, authored properties, revision serialization, relative UTF-16 text positions.
 - `omc-protocol`: validated semantic command envelopes, explicit document epochs and preconditions, durable receipt shape, RFC 8785 canonical request digests, duplicate JSON key rejection and request size limits.
 

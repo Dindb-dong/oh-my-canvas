@@ -142,6 +142,8 @@ The current run passed **353 editor tests across 14 files**, **40 host tests**, 
 
 [Current verification and limits →](docs/independent/VERIFICATION.md) · [How to run checks →](docs/TESTING.md)
 
+[Local development benchmark protocol →](docs/benchmarks/README.md) specifies how to compare native OMC with Paper and Figma on agent tokens, accepted task time, whole-product resource use, and source preservation. It includes a source audit and proposed measurement/acceptance rules; comparative results remain **NOT_RUN**.
+
 <a id="contributing"></a>
 
 ## Help shape the project
