@@ -172,10 +172,14 @@ class ResponsesHandler(BaseHTTPRequestHandler):
 
 
 class ResponsesGateway(ThreadingHTTPServer):
-    def __init__(self, upstream_port, token_cap, *, port=0, minimum_output_tokens=1):
+    def __init__(self, upstream_port, token_cap, *, port=0, minimum_output_tokens=1,
+                 upstream_timeout=TIMEOUT_SECONDS):
         if type(upstream_port) is not int or not 0 < upstream_port < 65536:
             raise ValueError("invalid loopback upstream port")
+        if type(upstream_timeout) is not int or upstream_timeout <= 0:
+            raise ValueError("invalid loopback upstream socket timeout")
         self.upstream_port = upstream_port
+        self.upstream_timeout = upstream_timeout
         self.gate = BudgetGate(token_cap, minimum_output_tokens=minimum_output_tokens)
         self.admissions = Lock()
         self.stopping = Event()
@@ -185,7 +189,7 @@ class ResponsesGateway(ThreadingHTTPServer):
             raise ValueError("upstream and gateway ports must differ")
 
     def connection(self):
-        return HTTPConnection(LOOPBACK, self.upstream_port, timeout=TIMEOUT_SECONDS)
+        return HTTPConnection(LOOPBACK, self.upstream_port, timeout=self.upstream_timeout)
 
     @staticmethod
     def post(connection, path, body):
@@ -221,12 +225,15 @@ def main():
     parser.add_argument("--upstream-port", type=int, required=True)
     parser.add_argument("--token-cap", type=int, required=True)
     parser.add_argument("--minimum-output-tokens", type=int, default=1)
+    parser.add_argument("--upstream-timeout", type=int, default=TIMEOUT_SECONDS,
+                        help="Upstream socket inactivity timeout in seconds")
     parser.add_argument("--ledger", type=Path, required=True, help="New private JSON evidence file")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, interrupted)
     with (
         ResponsesGateway(args.upstream_port, args.token_cap,
-                         minimum_output_tokens=args.minimum_output_tokens) as gateway,
+                         minimum_output_tokens=args.minimum_output_tokens,
+                         upstream_timeout=args.upstream_timeout) as gateway,
         open(args.ledger, "x", encoding="utf-8", opener=private_open) as ledger,
     ):
         print(json.dumps({"base_url": f"http://{LOOPBACK}:{gateway.server_port}/v1"}), flush=True)

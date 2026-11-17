@@ -6,7 +6,7 @@ import json
 from threading import Event, Thread
 import unittest
 
-from responses_gateway import COUNT_PATH, CREATE_PATH, LOOPBACK, ResponsesGateway, json_bytes
+from responses_gateway import COUNT_PATH, CREATE_PATH, LOOPBACK, TIMEOUT_SECONDS, ResponsesGateway, json_bytes
 
 
 def frame(event_type, response, *, multiline=False):
@@ -74,6 +74,15 @@ class GatewayTest(unittest.TestCase):
             conn.request("POST", path, body, {"Content-Type": "application/json", **(headers or {})})
             response = conn.getresponse()
             return response.status, response.read()
+
+    def test_upstream_socket_timeout_is_scoped_and_positive(self):
+        with ResponsesGateway(12345, 40) as default, ResponsesGateway(12345, 40, upstream_timeout=60) as opted_in:
+            with closing(default.connection()) as default_connection, closing(opted_in.connection()) as longer_connection:
+                self.assertEqual(default_connection.timeout, TIMEOUT_SECONDS)
+                self.assertEqual(longer_connection.timeout, 60)
+        for invalid in (0, -1, True, 1.5):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                ResponsesGateway(12345, 40, upstream_timeout=invalid)
 
     def test_title_and_main_are_serialized_and_share_the_live_cap(self):
         self.setup_gateway(100, {"main": 60, "title": 30}, {
