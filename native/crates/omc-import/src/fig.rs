@@ -34,7 +34,7 @@ pub fn import_fig(bytes: &[u8], options: &ImportOptions) -> Result<ImportResult,
         &decoded,
         &mut images,
         &digest(bytes),
-        source_version(bytes),
+        source_version(binary),
         options,
         None,
     )
@@ -72,14 +72,13 @@ pub fn import_fig_reader<R: Read + Seek>(
         ));
     }
     let (source_hash, header, source_bytes) = source_identity(&mut reader, options, check)?;
-    let version = source_version(&header);
     if !header.starts_with(b"PK") {
         return import_fig_raw_reader(
             reader,
             options,
             working_bytes,
             source_hash,
-            version,
+            source_version(&header),
             source_bytes,
             check,
         );
@@ -88,6 +87,7 @@ pub fn import_fig_reader<R: Read + Seek>(
     let raw = archive
         .read("canvas.fig", working_bytes)?
         .ok_or_else(|| invalid("FIG archive has no canvas.fig"))?;
+    let version = source_version(&raw);
     let decoded = decode_fig(&raw, options, working_bytes.saturating_sub(raw.capacity()))?;
     drop(raw);
     let budget = Cell::new(working_bytes.saturating_sub(decoded.allocation));

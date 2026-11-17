@@ -198,7 +198,8 @@ def run(manifest, output):
             result["cleanup"].append(receipt)
             event("process.cleanup", **receipt)
             if receipt["status"] != "COMPLETE" and result["execution_status"] != "TIMEOUT_BUDGET":
-                result.update(execution_status="INVALID_RUN", reason="process_cleanup_unconfirmed")
+                result.update(execution_status="INVALID_RUN", reason="process_cleanup_unconfirmed",
+                              accepted_ready_ms=None)
 
         try:
             with (output / "stdout.log").open("xb") as stdout, (output / "stderr.log").open("xb") as stderr:

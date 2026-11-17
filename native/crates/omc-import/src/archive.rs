@@ -1,5 +1,49 @@
 use super::*;
-use std::io::{Cursor, Read, Seek};
+use std::io::{Cursor, Read, Seek, SeekFrom};
+
+// zip 2.x deduplicates names before exposing entries. Count physical directory rows first.
+fn open_archive<R: Read + Seek>(reader: R) -> Result<zip::ZipArchive<R>, ImportError> {
+    let archive =
+        zip::ZipArchive::new(reader).map_err(|error| ImportError::Invalid(error.to_string()))?;
+    let expected = archive.len();
+    if expected > 100_000 {
+        return Err(ImportError::ResourceLimit("archive entry limit".into()));
+    }
+    let start = archive.central_directory_start();
+    let mut reader = archive.into_inner();
+    reader
+        .seek(SeekFrom::Start(start))
+        .map_err(|error| ImportError::Invalid(error.to_string()))?;
+    for index in 0..=expected {
+        let mut header = [0_u8; 46];
+        reader
+            .read_exact(&mut header[..4])
+            .map_err(|error| ImportError::Invalid(error.to_string()))?;
+        if &header[..4] != b"PK\x01\x02" {
+            if index != expected {
+                return Err(ImportError::Invalid(
+                    "archive directory count differs".into(),
+                ));
+            }
+            return zip::ZipArchive::new(reader)
+                .map_err(|error| ImportError::Invalid(error.to_string()));
+        }
+        if index == expected {
+            return Err(ImportError::Invalid("duplicate archive entry".into()));
+        }
+        reader
+            .read_exact(&mut header[4..])
+            .map_err(|error| ImportError::Invalid(error.to_string()))?;
+        let length = [28, 30, 32]
+            .into_iter()
+            .map(|at| u16::from_le_bytes([header[at], header[at + 1]]) as i64)
+            .sum();
+        reader
+            .seek(SeekFrom::Current(length))
+            .map_err(|error| ImportError::Invalid(error.to_string()))?;
+    }
+    unreachable!()
+}
 
 /// Validated directory with bounded, one-entry-at-a-time decompression.
 pub(super) struct Archive<R: Read + Seek> {
@@ -12,8 +56,7 @@ pub(super) struct Archive<R: Read + Seek> {
 
 impl<R: Read + Seek> Archive<R> {
     pub(super) fn new(reader: R, options: &ImportOptions) -> Result<Self, ImportError> {
-        let mut inner = zip::ZipArchive::new(reader)
-            .map_err(|error| ImportError::Invalid(error.to_string()))?;
+        let mut inner = open_archive(reader)?;
         if inner.len() > 100_000 {
             return Err(ImportError::ResourceLimit("archive entry limit".into()));
         }
@@ -123,14 +166,23 @@ impl<R: Read + Seek> Archive<R> {
                 .inner
                 .by_index(*index)
                 .map_err(|error| ImportError::Invalid(error.to_string()))?;
+            let mut remaining = entry.size();
             loop {
                 check()?;
                 let count = entry
                     .read(&mut buffer)
                     .map_err(|error| ImportError::Invalid(error.to_string()))?;
                 if count == 0 {
+                    if remaining != 0 {
+                        return Err(ImportError::Invalid(
+                            "archive entry shorter than declared length".into(),
+                        ));
+                    }
                     break;
                 }
+                remaining = remaining.checked_sub(count as u64).ok_or_else(|| {
+                    ImportError::ResourceLimit("archive entry exceeds declared length".into())
+                })?;
                 self.expanded = self
                     .expanded
                     .checked_add(count)
@@ -151,8 +203,7 @@ pub(super) fn unpack(
     options: &ImportOptions,
 ) -> Result<BTreeMap<String, Vec<u8>>, ImportError> {
     validate_input(bytes, options)?;
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
-        .map_err(|e| ImportError::Invalid(e.to_string()))?;
+    let mut archive = open_archive(Cursor::new(bytes))?;
     if archive.len() > 100_000 {
         return Err(ImportError::ResourceLimit("archive entry limit".into()));
     }
@@ -192,12 +243,16 @@ pub(super) fn unpack(
         if output.contains_key(&name) {
             return Err(ImportError::Invalid("duplicate archive entry".into()));
         }
+        let length = entry.size() as usize;
         let mut data = Vec::new();
         entry
             .by_ref()
-            .take((limit - expanded) as u64 + 1)
+            .take((limit - expanded).min(length) as u64 + 1)
             .read_to_end(&mut data)
             .map_err(|e| ImportError::Invalid(e.to_string()))?;
+        if data.len() != length {
+            return Err(ImportError::Invalid("archive entry length differs".into()));
+        }
         expanded = expanded
             .checked_add(data.len())
             .ok_or_else(|| ImportError::ResourceLimit("archive size overflow".into()))?;

@@ -48,6 +48,26 @@ fn reader_preserves_raw_conversion_and_source_identity() {
 }
 
 #[test]
+fn archive_metadata_uses_inner_canvas_version_on_both_import_routes() {
+    let canvas = editable();
+    let expected = u32::from_le_bytes(canvas[8..12].try_into().unwrap());
+    let bytes = zip(&[("canvas.fig", &canvas)]);
+    assert_ne!(
+        u32::from_le_bytes(bytes[8..12].try_into().unwrap()),
+        expected
+    );
+    for actual in [
+        import_fig(&bytes, &ImportOptions::default()).unwrap(),
+        read(&bytes, 1024 * 1024).unwrap(),
+    ] {
+        assert_eq!(
+            actual.content.metadata["figVersion"],
+            serde_json::json!(expected)
+        );
+    }
+}
+
+#[test]
 fn archive_can_exceed_working_reservation_without_retaining_unused_assets() {
     let canvas = editable();
     let unused = vec![0x5a; 2 * 1024 * 1024];
@@ -76,6 +96,54 @@ fn validates_unused_entry_crc_and_archive_names_before_returning_candidate() {
         read(&bytes, 1024 * 1024),
         Err(ImportError::Invalid(_))
     ));
+}
+
+#[test]
+fn rejects_shadowed_duplicate_directory_entries_on_both_routes() {
+    let canvas = editable();
+    let mut bytes = zip(&[("canvas.fig", &canvas), ("shadow.fig", &canvas)]);
+    let names: Vec<_> = bytes
+        .windows(10)
+        .enumerate()
+        .filter_map(|(i, name)| (name == b"shadow.fig").then_some(i))
+        .collect();
+    assert_eq!(names.len(), 2);
+    for at in names {
+        bytes[at..at + 10].copy_from_slice(b"canvas.fig");
+    }
+    for result in [
+        import_fig(&bytes, &ImportOptions::default()),
+        read(&bytes, 1024 * 1024),
+    ] {
+        assert!(
+            matches!(result, Err(ImportError::Invalid(message)) if message.contains("duplicate archive entry"))
+        );
+    }
+}
+
+#[test]
+fn rejects_unused_entry_with_forged_expanded_size_on_both_routes() {
+    let canvas = editable();
+    for length in [3_u32, 30] {
+        let mut bytes = zip(&[
+            ("canvas.fig", &canvas),
+            ("images/unused", b"unused-payload"),
+        ]);
+        let central = bytes
+            .windows(4)
+            .enumerate()
+            .find_map(|(i, signature)| {
+                (signature == b"PK\x01\x02" && bytes.get(i + 46..i + 59) == Some(b"images/unused"))
+                    .then_some(i)
+            })
+            .unwrap();
+        let local =
+            u32::from_le_bytes(bytes[central + 42..central + 46].try_into().unwrap()) as usize;
+        bytes[central + 24..central + 28].copy_from_slice(&length.to_le_bytes());
+        bytes[local + 22..local + 26].copy_from_slice(&length.to_le_bytes());
+        assert!(import_fig(&bytes, &ImportOptions::default()).is_err());
+        assert!(read(&bytes, 1024 * 1024).is_err());
+    }
 }
 
 #[test]

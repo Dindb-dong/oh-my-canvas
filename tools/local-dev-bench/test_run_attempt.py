@@ -185,6 +185,26 @@ class AttemptTests(unittest.TestCase):
         self.assertEqual(result["reason"], "process_cleanup_unconfirmed")
         self.assertFalse((self.output / "acceptance.stdout.log").exists())
 
+    def test_unconfirmed_grader_cleanup_clears_accepted_time(self):
+        self.manifest.update(argv=python(WRITE), acceptance_argv=python(GRADE))
+        calls = 0
+
+        def cleanup(process):
+            nonlocal calls
+            receipt = stop_group(process)
+            calls += 1
+            if calls == 2:
+                receipt.update(status="INCOMPLETE", group_absent_confirmed=False)
+            return receipt
+
+        with patch("run_attempt.stop_group", side_effect=cleanup):
+            result = run(self.manifest, self.output)
+        self.assertEqual(result["acceptance_returncode"], 0)
+        self.assertEqual(result["execution_status"], "INVALID_RUN")
+        self.assertEqual(result["reason"], "process_cleanup_unconfirmed")
+        self.assertIsNone(result["accepted_ready_ms"])
+        self.assertIsNone(result["analysis_capped_time_ms"])
+
     def test_grader_timeout_keeps_candidate_and_marks_run_invalid(self):
         self.manifest.update(
             argv=python(WRITE), acceptance_argv=python("import time; time.sleep(3)"),
