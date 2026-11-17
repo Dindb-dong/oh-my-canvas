@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { atlasFullPageReads, atlasSnapshot, figmaAtlasModelDriver, normalizeAtlas, planAtlas,
-  planAtlasReset } from './ld02-atlas.mjs';
+  planAtlasReset, withFigmaAtlasModelAndObservation } from './ld02-atlas.mjs';
 
 const synth = fileURLToPath(new URL('../workloads/synthetic.py', import.meta.url));
 const python = (...args) => spawnSync('python3', [synth, ...args], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
@@ -174,8 +174,52 @@ test('Atlas broker binds model-selected changes to its observed synthetic baseli
   await assert.rejects(driver.edit({...driver.query, receipt:'AA-999'}, changes), /Only one registered/);
   assert.equal(invocations.length, 2);
   const after = await driver.edit(driver.query, changes);
-  assert.deepEqual(after, {...found, text: changes.text, gap_px: changes.gap, radius_px: changes.radius});
+  assert.deepEqual(after, {name:found.name,receipt:found.receipt,text:changes.text,gap_px:changes.gap,radius_px:changes.radius});
+  assert.deepEqual(Object.keys(after).sort(),['gap_px','name','radius_px','receipt','text']);
+  const completion=spawnSync('python3',['-B','-c',`
+import json,sys,tempfile
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from ld02_completion import EditCompletion
+expected=json.loads(sys.argv[2])
+with tempfile.TemporaryDirectory(prefix='figma-stop-test-') as root:
+    config=Path(root)/'config.json'
+    config.write_text(json.dumps({'expected_arguments':expected,'receipt_path':str(Path(root)/'receipt.json')}))
+    completion=EditCompletion(config)
+    params={'name':'edit_section','arguments':expected}
+    completion.observe(params,{'result':dict(expected,found=True)})
+    assert not completion.completed()
+    completion.observe(params,{'result':expected})
+    assert completion.completed()
+`,fileURLToPath(new URL('..',import.meta.url)),JSON.stringify(after)],{encoding:'utf8'});
+  assert.equal(completion.status,0,completion.stderr);
   assert.equal(edits.length, 1);
   await assert.rejects(driver.edit(driver.query, changes), /Only one registered/);
   assert.throws(() => figmaAtlasModelDriver(fixture, {fileKey:'wrong-draft', sessionId, before}, () => {}));
+});
+
+test('one official transport owns the model then an independent full Atlas observation',async()=>{
+  const fixture=JSON.parse(python('fixture','LD02','--variant','conservation-atlas').stdout);
+  const fileKey='approved-original',plan=planAtlas(fixture,fileKey),figma=figmaMock(fileKey);
+  await seed(figma,plan);
+  const before=atlasSnapshot(fixture,await capture(figma,plan.original.read));
+  const dir=mkdtempSync(join(tmpdir(),'figma-atlas-session-test-'));
+  let starts=0,closed=false,modelFinished=false,reads=0;
+  const invoke=async request=>{assert.equal(closed,false);reads++;return wrap(await execute(figma,request));};
+  try {
+    const result=await withFigmaAtlasModelAndObservation(fixture,
+      {fileKey,sessionId:'5bd636ba-7048-4fad-a896-46207a0bac92',before},join(dir,'b.sock'),[],[],
+      async()=>{await execute(figma,plan.original.edit);modelFinished=true;return 'done';},
+      async transport=>{
+        assert.equal(modelFinished,true);assert.equal(transport,invoke);
+        const read=atlasFullPageReads(plan.original.read);
+        const inventory=await transport(read.inventory),pages=[];
+        for(const item of read.pages)pages.push(await transport(item));
+        return atlasSnapshot(fixture,{inventory,pages});
+      },{connect:async run=>{starts++;try{return await run(invoke,{startup_ms:1});}finally{closed=true;}}});
+    assert.equal(starts,1);assert.equal(reads,11);assert.equal(closed,true);
+    assert.equal(result.model,'done');assert.equal(result.observed.nodes.length,1000);
+    assert.notDeepEqual(result.observed,before);
+    assert.deepEqual(result.observed,atlasSnapshot(fixture,await capture(figma,plan.original.read)));
+  } finally {rmSync(dir,{recursive:true,force:true});}
 });

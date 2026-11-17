@@ -365,7 +365,10 @@ export function figmaAtlasModelDriver(fixture, { fileKey, sessionId, before }, i
     assert.equal(observed.page_id, native.page);
     assert.deepEqual(observed.writes, changes.map(change => ({...change, native_id: native[change.field]})));
     edits.push(result);
-    return observed.state;
+    const {found,...state}=observed.state;
+    assert.equal(found,true,'Guarded native edit did not resolve its station');
+    assert.deepEqual(Object.keys(state).sort(),['gap_px','name','radius_px','receipt','text']);
+    return state;
   }
   return {query, find: selector => call(selector), edit: (selector, values) => call(selector, values)};
 }
@@ -373,6 +376,16 @@ export function figmaAtlasModelDriver(fixture, { fileKey, sessionId, before }, i
 export function withOfficialFigmaAtlasModel(fixture, scope, socketPath, events, edits, run, options) {
   return withFigmaMCP((invoke) => withLD02Broker(socketPath,
     figmaAtlasModelDriver(fixture, scope, invoke, edits), events, run), options);
+}
+
+// Independent post-edit reads share transport startup, never the model's cached state.
+export function withFigmaAtlasModelAndObservation(fixture, scope, socketPath, events, edits, run, observe,
+  {connect = withFigmaMCP, ...options} = {}) {
+  return connect(async (invoke, readiness) => {
+    const model = await withLD02Broker(socketPath,figmaAtlasModelDriver(fixture,scope,invoke,edits),events,run);
+    const observed = await observe(invoke);
+    return {model,observed,readiness};
+  },options);
 }
 
 export function normalizeAtlas(fixture, raw) {
