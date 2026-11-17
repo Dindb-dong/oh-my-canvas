@@ -1,12 +1,15 @@
+import errno
 import json
 from pathlib import Path
 import sys
+import signal
+import subprocess
 import tempfile
 import time
 import unittest
 from unittest.mock import Mock, patch
 
-from run_attempt import run, validate_manifest
+from run_attempt import run, stop_group, validate_manifest
 from test_usage import gateway_ledger
 from usage import RESPONSES_LEDGER_FORMAT
 
@@ -122,6 +125,65 @@ class AttemptTests(unittest.TestCase):
         self.assertGreaterEqual(result["observed_wall_ms"], 400)
         self.assertLess(result["observed_wall_ms"], 2000)
         self.assertEqual((self.output / "stdout.log").read_text(), "started\n")
+
+    def test_group_cleanup_confirms_absence_after_normal_signals(self):
+        process = Mock(pid=123456, returncode=0)
+        with patch("run_attempt.os.killpg", side_effect=[None, None, ProcessLookupError()]) as kill:
+            receipt = stop_group(process)
+        self.assertEqual(receipt["status"], "COMPLETE")
+        self.assertTrue(receipt["group_absent_confirmed"])
+        self.assertEqual([call.args for call in kill.call_args_list],
+                         [(process.pid, signal.SIGTERM), (process.pid, signal.SIGKILL), (process.pid, 0)])
+
+    def test_group_cleanup_reaps_and_retries_darwin_permission_race(self):
+        process = Mock(pid=123456, returncode=0)
+        with patch("run_attempt.os.killpg", side_effect=[
+            PermissionError(errno.EPERM, "Operation not permitted"),
+            ProcessLookupError(), ProcessLookupError(), ProcessLookupError(),
+        ]):
+            receipt = stop_group(process)
+        process.poll.assert_called_once()
+        self.assertEqual(receipt["status"], "COMPLETE")
+
+    def test_live_group_is_not_declared_clean_after_leader_exits(self):
+        process = Mock(pid=123456, returncode=0)
+        with patch("run_attempt.os.killpg"):
+            receipt = stop_group(process)
+        self.assertEqual(receipt["status"], "INCOMPLETE")
+        self.assertFalse(receipt["group_absent_confirmed"])
+
+    def test_timeout_permission_failure_still_finalizes_resources_and_result(self):
+        process = Mock(pid=123456, returncode=None)
+        process.wait.side_effect = subprocess.TimeoutExpired("synthetic", 0.01)
+        process.poll.return_value = None
+        sampler = Mock()
+        sampler.stop.return_value = {"physical_footprint_peak_bytes": 42}
+        self.manifest.update(sample_resources=True, acceptance_argv=python(GRADE), usage_path="stdout")
+        with patch("run_attempt.subprocess.Popen", return_value=process), patch(
+            "run_attempt.os.killpg", side_effect=PermissionError(errno.EPERM, "Operation not permitted")
+        ) as kill, patch("resources.ResourceSampler", return_value=sampler):
+            result = run(self.manifest, self.output)
+        self.assertEqual(result["execution_status"], "TIMEOUT_BUDGET")
+        self.assertEqual(result["reason"], "wall_time_limit")
+        self.assertEqual(result["cleanup"][0]["status"], "INCOMPLETE")
+        self.assertFalse(result["cleanup"][0]["group_absent_confirmed"])
+        self.assertIsNone(result["returncode"])
+        self.assertEqual(result["physical_footprint_peak_bytes"], 42)
+        sampler.stop.assert_called_once()
+        self.assertEqual(result, json.loads((self.output / "result.json").read_text()))
+        self.assertEqual(self.events()[-1]["event"], "attempt.finalized")
+        self.assertTrue(all(call.args[0] == process.pid for call in kill.call_args_list))
+        self.assertTrue(all(call.kwargs.get("timeout") is not None for call in process.wait.call_args_list))
+
+    def test_unconfirmed_cleanup_cannot_accept_an_otherwise_valid_candidate(self):
+        self.manifest.update(argv=python(WRITE), acceptance_argv=python(GRADE))
+        with patch("run_attempt.stop_group", return_value={
+            "status": "INCOMPLETE", "group_absent_confirmed": False, "errors": [],
+        }):
+            result = run(self.manifest, self.output)
+        self.assertEqual(result["execution_status"], "INVALID_RUN")
+        self.assertEqual(result["reason"], "process_cleanup_unconfirmed")
+        self.assertFalse((self.output / "acceptance.stdout.log").exists())
 
     def test_grader_timeout_keeps_candidate_and_marks_run_invalid(self):
         self.manifest.update(

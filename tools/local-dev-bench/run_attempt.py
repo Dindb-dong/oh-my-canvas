@@ -65,27 +65,41 @@ def validate_manifest(manifest):
 
 
 def stop_group(proc):
+    errors = []
+
     def send(sig):
-        try:
-            os.killpg(proc.pid, sig)
-        except PermissionError:
-            # Darwin can deny signals to an exited leader until it is reaped.
-            proc.poll()
+        for attempt in range(2):
             try:
                 os.killpg(proc.pid, sig)
+                return True
             except ProcessLookupError:
                 return False
-        except ProcessLookupError:
-            return False
-        return True
+            except OSError as error:
+                if isinstance(error, PermissionError) and attempt == 0:
+                    # Darwin can deny signals to an exited leader until it is reaped.
+                    proc.poll()
+                    continue
+                errors.append({"operation": "killpg", "signal": int(sig),
+                               "errno": error.errno, "reason": str(error)})
+                return False
 
     if send(signal.SIGTERM):
         try:
             proc.wait(timeout=0.5)
         except subprocess.TimeoutExpired:
             pass
-        send(signal.SIGKILL)
-    proc.wait()
+        except OSError as error:
+            errors.append({"operation": "wait", "reason": str(error)})
+    send(signal.SIGKILL)
+    try:
+        proc.wait(timeout=0.5)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        errors.append({"operation": "wait", "reason": str(error)})
+    # Reaping the leader does not establish that its descendants have exited.
+    group_remaining = send(0)
+    return {"status": "INCOMPLETE" if errors or group_remaining else "COMPLETE",
+            "pid": proc.pid, "leader_returncode": proc.returncode,
+            "group_absent_confirmed": not errors and not group_remaining, "errors": errors}
 
 
 def candidate_hash(path):
@@ -119,6 +133,7 @@ def run(manifest, output):
         "observed_wall_ms": None,
         "published_ready_ms": None,
         "cleanup_ms": None,
+        "cleanup": [],
         "accepted_ready_ms": None,
         "analysis_capped_time_ms": None,
         "candidate_sha256": None,
@@ -172,6 +187,18 @@ def run(manifest, output):
                 result["candidate_sha256"] = digest
                 result["published_ready_ms"] = (ready_ns - start_ns) / 1e6
                 event("candidate.ready", ready_ns, sha256=digest)
+
+        def cleanup(process, role):
+            try:
+                receipt = {"role": role, **stop_group(process)}
+            except OSError as error:
+                receipt = {"role": role, "pid": process.pid, "status": "INCOMPLETE",
+                           "group_absent_confirmed": False,
+                           "errors": [{"operation": "cleanup", "reason": str(error)}]}
+            result["cleanup"].append(receipt)
+            event("process.cleanup", **receipt)
+            if receipt["status"] != "COMPLETE" and result["execution_status"] != "TIMEOUT_BUDGET":
+                result.update(execution_status="INVALID_RUN", reason="process_cleanup_unconfirmed")
 
         try:
             with (output / "stdout.log").open("xb") as stdout, (output / "stderr.log").open("xb") as stderr:
@@ -234,7 +261,7 @@ def run(manifest, output):
             cleanup_start_ns = time.monotonic_ns()
             stopped_at_deadline = proc is not None and proc.returncode is None
             if stopped_at_deadline:
-                stop_group(proc)
+                cleanup(proc, "attempt")
             if sampler is not None:
                 tail_seconds = manifest.get("resource_tail_seconds", 0)
                 if tail_seconds and not stopped_at_deadline and proc.returncode == 0:
@@ -255,7 +282,7 @@ def run(manifest, output):
                     result["resources"] = {"reason": "sampler_stop_failed"}
             if proc is not None:
                 if not stopped_at_deadline:
-                    stop_group(proc)
+                    cleanup(proc, "attempt")
                 result["returncode"] = proc.returncode
             result["cleanup_ms"] = (time.monotonic_ns() - cleanup_start_ns) / 1e6
 
@@ -312,7 +339,7 @@ def run(manifest, output):
                 result.update(execution_status="INVALID_RUN", reason="independent_oracle_unavailable")
             finally:
                 if grader is not None:
-                    stop_group(grader)
+                    cleanup(grader, "acceptance")
 
         status = result["execution_status"]
         if "acceptance_argv" in manifest and status != "INVALID_RUN":
