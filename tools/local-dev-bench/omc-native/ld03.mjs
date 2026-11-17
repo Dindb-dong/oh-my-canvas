@@ -107,6 +107,17 @@ function color(value) {
   return value.toLowerCase();
 }
 
+export function sharedLD03Values(variables, ids) {
+  assert.equal(variables.length, ids.size);
+  const seen = new Map(variables.map(row => [row.name, row]));
+  for (const [key, id] of ids) assert.equal(seen.get(key)?.id, id);
+  const family = key => ({
+    accent: color(seen.get(`${key}.accent`).value),
+    spacing_px: seen.get(`${key}.spacing`).value,
+  });
+  return {target: family('target'), archive: family('keep')};
+}
+
 export async function captureLD03(api, documentId, fixture) {
   await api.bind(documentId);
   const raw = await api.snapshot(documentId);
@@ -321,13 +332,7 @@ async function runLD03(fixture, plan, report, modelCommand) {
 
   async function sharedValues(original) {
     const {variables} = await api.run('variable.list');
-    assert.equal(variables.length, original.variableIds.size);
-    const seen = new Map(variables.map(row => [row.name, row]));
-    for (const [key, id] of original.variableIds) assert.equal(seen.get(key)?.id, id);
-    return Object.fromEntries(['target', 'archive'].map(family => [family, {
-      accent: color(seen.get(`${family}.accent`).value),
-      spacing_px: seen.get(`${family}.spacing`).value,
-    }]));
+    return sharedLD03Values(variables, original.variableIds);
   }
 
   try {
