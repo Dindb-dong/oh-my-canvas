@@ -16,8 +16,8 @@ const binaryDir = process.env.OMC_BENCH_BIN_DIR ?? '/Applications/Oh My Canvas.a
 const serviceBinary = join(binaryDir, 'omc-service');
 const desktopBinary = join(binaryDir, 'omc-desktop');
 const [mode, extra] = process.argv.slice(2);
-assert.ok(extra === undefined && [undefined, '--agent', '--resource-replay'].includes(mode),
-  'Usage: node omc-ld02.mjs [--agent | --resource-replay]');
+assert.ok(extra === undefined && [undefined, '--agent', '--resource-replay', '--idle-resources'].includes(mode),
+  'Usage: node omc-ld02.mjs [--agent | --resource-replay | --idle-resources]');
 const resourceReplay = mode === '--resource-replay';
 const outputDir = process.env.OMC_BENCH_OUTPUT_DIR;
 assert.ok(!mode || outputDir, 'Agent and resource modes require the runner output directory');
@@ -178,106 +178,139 @@ try {
   await rpc('workspace.open', {documentId}, sessionId);
   const snapshot = () => rpc('document.snapshot', {documentId}, sessionId);
 
-  if (resourceReplay) {
+  if (mode === '--idle-resources') {
+    const before = await snapshot();
+    assert.equal(before.pages.length, fixture.pages.length);
+    assert.equal(Object.keys(before.nodes).length, fixture.logicalObjects + fixture.pages.length);
     sampler = await openPhaseSampler(join(outputDir, 'product-resources'));
-    await sampler.send({command: 'start', root_pids: [service.pid, desktop.pid]});
+    await sampler.send({command: 'start', root_pids: [service.pid, desktop.pid],
+      baseline_seconds: 600, tail_seconds: 300});
     await sampler.send({command: 'baseline'});
-    await delay(60_000, undefined, {signal});
+    await delay(600_000, undefined, {signal});
     await sampler.send({command: 'replay'});
-  }
-  const started = performance.now();
-  const baseline = await snapshot();
-  assert.equal(baseline.pages.length, fixture.pages.length);
-  assert.equal(Object.keys(baseline.nodes).length, fixture.logicalObjects + fixture.pages.length);
-  const page = baseline.pages.find(p => p.title === edit.page);
-  assert.ok(page);
-  const allNodes = Object.values(baseline.nodes);
-  const card = allNodes.find(n => n.parentId === page.rootNodeId && n.properties.name === edit.card);
-  assert.ok(card);
-  const children = allNodes.filter(n => n.parentId === card.id).sort((a, b) => a.rank.localeCompare(b.rank));
-  assert.equal(children.length, 3);
-  const [label, reference, swatch] = children;
-  assert.equal(label.properties.text, edit.before.text);
-  assert.equal(reference.properties.text, edit.before.reference);
-  assert.equal(card.properties.layout.gap, edit.before.gap);
-  assert.equal(swatch.properties.fill, edit.before.fill);
-
-  const targetEpoch = baseline.epoch;
-  if (mode === '--agent') {
-    await runAgent(descriptor.endpoint, descriptor.token);
-  } else {
-    const requestId = randomUUID();
-    const layout = {...card.properties.layout, gap: edit.after.gap};
-    await rpc('document.command', {envelope: {
-      protocol: 'omc.engine/1', requestId, documentId, targetEpoch, idempotencyKey: requestId,
-      preconditions: {revision: {epoch: targetEpoch, sequence: baseline.sequence}},
-      command: {type: 'batch', commands: [
-        {type: 'node.set', nodeId: card.id, properties: {layout}},
-        {type: 'text.replace', nodeId: label.id, text: edit.after.text},
-        {type: 'node.set', nodeId: swatch.id, properties: {fill: edit.after.fill}},
-      ]},
-    }}, sessionId);
-  }
-
-  const after = await snapshot();
-  const editReadbackMs = performance.now() - started;
-  assert.deepEqual(after.pages, baseline.pages);
-  assert.deepEqual(Object.keys(after.nodes).sort(), Object.keys(baseline.nodes).sort());
-  const changed = Object.keys(baseline.nodes)
-    .filter(key => JSON.stringify(baseline.nodes[key]) !== JSON.stringify(after.nodes[key]));
-  assert.deepEqual(changed.sort(), [card.id, label.id, swatch.id].sort());
-  assert.equal(after.nodes[card.id].properties.layout.gap, edit.after.gap);
-  assert.equal(after.nodes[label.id].properties.text, edit.after.text);
-  assert.equal(after.nodes[swatch.id].properties.fill, edit.after.fill);
-  if (mode === '--agent') {
-    assert.equal(after.title, baseline.title);
-    assert.deepEqual(after.metadata, baseline.metadata);
-    assert.deepEqual(after.nodes[card.id], {
-      ...card, properties: {...card.properties, layout: {...card.properties.layout, gap: edit.after.gap}},
-    });
-    assert.deepEqual(after.nodes[swatch.id], {
-      ...swatch, properties: {...swatch.properties, fill: edit.after.fill},
-    });
-    const [run] = label.properties.textRuns;
-    assert.equal(label.properties.textRuns.length, 1);
-    assert.deepEqual(after.nodes[label.id], {
-      ...label, properties: {
-        ...label.properties, text: edit.after.text, textRuns: [{...run, text: edit.after.text}],
-      },
-    });
-  }
-
-  // The independent RPC session cannot undo operations from the closed agent MCP session.
-  const undoRedoVerified = mode !== '--agent';
-  if (undoRedoVerified) {
-    await rpc('document.undo', {documentId, targetEpoch}, sessionId);
-    assert.deepEqual((await snapshot()).nodes, baseline.nodes);
-    await rpc('document.redo', {documentId, targetEpoch}, sessionId);
-    assert.deepEqual((await snapshot()).nodes, after.nodes);
-  }
-  await rpc('document.save', {documentId}, sessionId);
-  await rpc('workspace.close', {documentId}, sessionId);
-  const reopened = await rpc('workspace.open', {documentId}, sessionId);
-  assert.deepEqual(reopened.nodes, after.nodes);
-  const verifiedWorkMs = performance.now() - started;
-  if (resourceReplay) {
+    const afterIdle = await snapshot();
+    assert.equal(afterIdle.sequence, before.sequence);
+    assert.deepEqual(afterIdle.nodes, before.nodes);
+    await call('workspace', {action: 'close', documentId: external});
+    await rpc('workspace.close', {documentId}, sessionId);
+    const verifyClosed = async () => {
+      const {window} = await call('workspace', {action: 'state'});
+      assert.ok(window.attached && window.documentId !== documentId);
+      assert.ok(window.windows.length > 0 && window.windows.every(row => row.focused === false));
+    };
+    await verifyClosed();
     await sampler.send({command: 'tail', replay_complete: true});
-    await delay(30_000, undefined, {signal});
+    await delay(300_000, undefined, {signal});
     await sampler.send({command: 'stop', tail_complete: true});
-  }
+    await verifyClosed();
+    console.log(JSON.stringify({
+      workload: 'LD10', fixture: fixture.workload, measurement: 'idle-resource-diagnostic',
+      logicalObjects: fixture.logicalObjects, pages: fixture.pages.length,
+      resourcePhases: {baseline: 'idle_with_document', replay: 'verify_and_close', tail: 'post_close'},
+      launchProfile: 'unfocused-background',
+    }));
+  } else {
+    if (resourceReplay) {
+      sampler = await openPhaseSampler(join(outputDir, 'product-resources'));
+      await sampler.send({command: 'start', root_pids: [service.pid, desktop.pid]});
+      await sampler.send({command: 'baseline'});
+      await delay(60_000, undefined, {signal});
+      await sampler.send({command: 'replay'});
+    }
+    const started = performance.now();
+    const baseline = await snapshot();
+    assert.equal(baseline.pages.length, fixture.pages.length);
+    assert.equal(Object.keys(baseline.nodes).length, fixture.logicalObjects + fixture.pages.length);
+    const page = baseline.pages.find(p => p.title === edit.page);
+    assert.ok(page);
+    const allNodes = Object.values(baseline.nodes);
+    const card = allNodes.find(n => n.parentId === page.rootNodeId && n.properties.name === edit.card);
+    assert.ok(card);
+    const children = allNodes.filter(n => n.parentId === card.id).sort((a, b) => a.rank.localeCompare(b.rank));
+    assert.equal(children.length, 3);
+    const [label, reference, swatch] = children;
+    assert.equal(label.properties.text, edit.before.text);
+    assert.equal(reference.properties.text, edit.before.reference);
+    assert.equal(card.properties.layout.gap, edit.before.gap);
+    assert.equal(swatch.properties.fill, edit.before.fill);
 
-  console.log(JSON.stringify({
-    workload: fixture.workload,
-    measurement: mode === '--agent' ? 'model-assisted-diagnostic' : 'deterministic-replay',
-    ...(resourceReplay && {resourceEvidence: 'product-resources'}),
-    editReadbackMs,
-    ...(undoRedoVerified
-      ? {serviceSaveUndoRedoReopenMs: verifiedWorkMs}
-      : {agentSaveRebindMs: performance.now() - started, undoRedoVerified}),
-    logicalObjects: fixture.logicalObjects,
-    pages: fixture.pages.length,
-    changed: changed.length,
-  }));
+    const targetEpoch = baseline.epoch;
+    if (mode === '--agent') {
+      await runAgent(descriptor.endpoint, descriptor.token);
+    } else {
+      const requestId = randomUUID();
+      const layout = {...card.properties.layout, gap: edit.after.gap};
+      await rpc('document.command', {envelope: {
+        protocol: 'omc.engine/1', requestId, documentId, targetEpoch, idempotencyKey: requestId,
+        preconditions: {revision: {epoch: targetEpoch, sequence: baseline.sequence}},
+        command: {type: 'batch', commands: [
+          {type: 'node.set', nodeId: card.id, properties: {layout}},
+          {type: 'text.replace', nodeId: label.id, text: edit.after.text},
+          {type: 'node.set', nodeId: swatch.id, properties: {fill: edit.after.fill}},
+        ]},
+      }}, sessionId);
+    }
+
+    const after = await snapshot();
+    const editReadbackMs = performance.now() - started;
+    assert.deepEqual(after.pages, baseline.pages);
+    assert.deepEqual(Object.keys(after.nodes).sort(), Object.keys(baseline.nodes).sort());
+    const changed = Object.keys(baseline.nodes)
+      .filter(key => JSON.stringify(baseline.nodes[key]) !== JSON.stringify(after.nodes[key]));
+    assert.deepEqual(changed.sort(), [card.id, label.id, swatch.id].sort());
+    assert.equal(after.nodes[card.id].properties.layout.gap, edit.after.gap);
+    assert.equal(after.nodes[label.id].properties.text, edit.after.text);
+    assert.equal(after.nodes[swatch.id].properties.fill, edit.after.fill);
+    if (mode === '--agent') {
+      assert.equal(after.title, baseline.title);
+      assert.deepEqual(after.metadata, baseline.metadata);
+      assert.deepEqual(after.nodes[card.id], {
+        ...card, properties: {...card.properties, layout: {...card.properties.layout, gap: edit.after.gap}},
+      });
+      assert.deepEqual(after.nodes[swatch.id], {
+        ...swatch, properties: {...swatch.properties, fill: edit.after.fill},
+      });
+      const [run] = label.properties.textRuns;
+      assert.equal(label.properties.textRuns.length, 1);
+      assert.deepEqual(after.nodes[label.id], {
+        ...label, properties: {
+          ...label.properties, text: edit.after.text, textRuns: [{...run, text: edit.after.text}],
+        },
+      });
+    }
+
+    // The independent RPC session cannot undo operations from the closed agent MCP session.
+    const undoRedoVerified = mode !== '--agent';
+    if (undoRedoVerified) {
+      await rpc('document.undo', {documentId, targetEpoch}, sessionId);
+      assert.deepEqual((await snapshot()).nodes, baseline.nodes);
+      await rpc('document.redo', {documentId, targetEpoch}, sessionId);
+      assert.deepEqual((await snapshot()).nodes, after.nodes);
+    }
+    await rpc('document.save', {documentId}, sessionId);
+    await rpc('workspace.close', {documentId}, sessionId);
+    const reopened = await rpc('workspace.open', {documentId}, sessionId);
+    assert.deepEqual(reopened.nodes, after.nodes);
+    const verifiedWorkMs = performance.now() - started;
+    if (resourceReplay) {
+      await sampler.send({command: 'tail', replay_complete: true});
+      await delay(30_000, undefined, {signal});
+      await sampler.send({command: 'stop', tail_complete: true});
+    }
+
+    console.log(JSON.stringify({
+      workload: fixture.workload,
+      measurement: mode === '--agent' ? 'model-assisted-diagnostic' : 'deterministic-replay',
+      ...(resourceReplay && {resourceEvidence: 'product-resources'}),
+      editReadbackMs,
+      ...(undoRedoVerified
+        ? {serviceSaveUndoRedoReopenMs: verifiedWorkMs}
+        : {agentSaveRebindMs: performance.now() - started, undoRedoVerified}),
+      logicalObjects: fixture.logicalObjects,
+      pages: fixture.pages.length,
+      changed: changed.length,
+    }));
+  }
 } finally {
   await sampler?.close().catch(() => {});
   await client.close().catch(() => {});
