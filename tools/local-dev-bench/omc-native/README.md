@@ -13,3 +13,15 @@ N-A supports 1,000, 10,000 and 100,000 total document nodes, depths 1 and 32, an
 Each sample records a verified durable receipt, an unconditional full snapshot after the edit, a conditional snapshot using the previous revision, then a conditional read at the current revision. The latter returns null. The three reads run in that order and their cache state may differ. RPC timings are client-wall-clock boundaries and report body bytes, request-to-body time and client decode/parse time. Setup and import have separate boundaries. Use the outer benchmark collector for peak memory and CPU, including any measurement of the startup and validation overhead.
 
 The current installed binary path does not expose revision-linked scene readiness, frame submission or frame presentation for this edit. N-B leaves styled and indexed counts, active interaction, unrelated metadata payloads and components unmeasured. These service-path diagnostics do not qualify the full native experiments.
+
+## History aging
+
+```sh
+node tools/local-dev-bench/omc-native/native-probe.mjs --experiment N-C --samples 2
+node tools/local-dev-bench/omc-native/native-probe.mjs --experiment N-C --history-edits 1000 --history-shape concentrated --samples 2
+node tools/local-dev-bench/omc-native/native-probe.mjs --experiment N-C --history-edits 1000 --history-shape distributed --samples 2
+```
+
+N-C uses one headless 1,440 × 900 frame with 16 named rectangles under fresh isolated profiles. The default control performs zero prior edits. Opt in to an even prior-edit count up to 100,000. Concentrated aging applies every two-edit pair to the first rectangle. Distributed aging rotates whole pairs across the sixteen rectangles. Each pair moves one rectangle one unit on the x axis and restores its authored coordinate. Every prior edit gets an acknowledged durable response that advances the same epoch by exactly one sequence. Full page, metadata, and node state must equal the imported control before and after reopening.
+
+Each condition gracefully shuts down and restarts its own service with the retained profile. The service descriptor, open/snapshot RPC, native bounded-query RPC, timed scalar edits and restorations have separate records. The query reads the complete small fixture, including all prior targets. Each measured scalar edit is restored before the next sample. Storage snapshots report logical SQLite/WAL file sizes at the recorded boundaries. The OS file cache is uncontrolled. The probe leaves tombstone retention and attributed replay CPU unmeasured.

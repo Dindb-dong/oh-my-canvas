@@ -6,8 +6,8 @@ export const targetNodeId = id('node', 2);
 export const targetNodeName = 'Probe edit target';
 
 export function makeFixture({experiment, nodeCount, depth, cssRules}) {
-  assert.ok(nodeCount >= 100 && (depth === 1 || depth === 32));
-  assert.ok(experiment === 'N-A' || experiment === 'N-B');
+  assert.ok(experiment === 'N-C' ? nodeCount === 17 && depth === 1 : nodeCount >= 100 && [1, 32].includes(depth));
+  assert.ok(['N-A', 'N-B', 'N-C'].includes(experiment));
   const pages = [];
   const nodes = {};
   const activePageAuthoredNodes = experiment === 'N-B' ? 100 : nodeCount - 1;

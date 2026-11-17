@@ -10,32 +10,33 @@ import unittest
 import synthetic
 
 
-def observations(spec):
-    def snapshot(phase, document):
-        data = copy.deepcopy(spec[phase])
-        styles = {style["key"]: f"{document}/style/{style['key']}" for style in data["styles"]}
-        for style in data["styles"]:
-            style["native_id"] = styles[style["key"]]
-        for node in data["nodes"]:
-            node.update(native_id=f"{document}/node/{node['key']}", editable=True)
-            if "bindings" in node:
-                node["bindings"] = {prop: styles[key] for prop, key in node["bindings"].items()}
-        return {"document_id": document, **data}
+def snapshot(spec, document):
+    data = copy.deepcopy(spec)
+    styles = {style["key"]: f"{document}/style/{style['key']}" for style in data["styles"]}
+    for style in data["styles"]:
+        style["native_id"] = styles[style["key"]]
+    for node in data["nodes"]:
+        node.update(native_id=f"{document}/node/{node['key']}", editable=True)
+        if "bindings" in node:
+            node["bindings"] = {prop: styles[key] for prop, key in node["bindings"].items()}
+    return {"document_id": document, **data}
 
+
+def observations(spec):
     return {
-        "before": snapshot("start", "work"),
-        "candidate": snapshot("expected", "work"),
-        "reopened": snapshot("expected", "work"),
-        "probe": snapshot("probe", "copy"),
-        "after_probe_original": snapshot("expected", "work"),
+        "before": snapshot(spec["start"], "work"),
+        "candidate": snapshot(spec["expected"], "work"),
+        "reopened": snapshot(spec["expected"], "work"),
+        "probe": snapshot(spec["probe"], "copy"),
+        "after_probe_original": snapshot(spec["expected"], "work"),
         "probe_actions": copy.deepcopy(spec["probe_actions"]),
     }
 
 
 class SyntheticWorkloadTests(unittest.TestCase):
     def test_expected_observations_pass_for_all_variants(self):
-        for workload, module in synthetic.WORKLOADS.items():
-            for variant in module.VARIANTS:
+        for workload in ("LD01", "LD03"):
+            for variant in synthetic.WORKLOADS[workload].VARIANTS:
                 with self.subTest(workload=workload, variant=variant):
                     spec = synthetic.fixture(workload, variant)
                     self.assertEqual(synthetic.grade(spec, observations(spec)), [])

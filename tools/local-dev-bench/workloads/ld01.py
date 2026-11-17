@@ -69,6 +69,24 @@ def _chunk(tag, data):
     return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
 
 
+def png_asset(name, width, height, rows):
+    png = (b"\x89PNG\r\n\x1a\n"
+           + _chunk(b"IHDR", struct.pack(">2I5B", width, height, 8, 6, 0, 0, 0))
+           + _chunk(b"sRGB", b"\0")
+           + _chunk(b"IDAT", zlib.compress(b"".join(b"\0" + row for row in rows), 0))
+           + _chunk(b"IEND", b""))
+    return ({
+        "name": name,
+        "width": width,
+        "height": height,
+        "color_space": "sRGB",
+        "media_type": "image/png",
+        "license": "CC0-1.0",
+        "sha256": hashlib.sha256(png).hexdigest(),
+        "rgba_sha256": hashlib.sha256(b"".join(rows)).hexdigest(),
+    }, png)
+
+
 def make_assets(source):
     assets = []
     for name, width, height in (("badge", 32, 32), ("detail-map", 96, 48)):
@@ -79,21 +97,7 @@ def make_assets(source):
                 block = (x // 8 + y // 8 + x // 24 * (y // 16)) % 3
                 row.extend((*source["palette"][block], 255))
             rows.append(bytes(row))
-        png = (b"\x89PNG\r\n\x1a\n"
-               + _chunk(b"IHDR", struct.pack(">2I5B", width, height, 8, 6, 0, 0, 0))
-               + _chunk(b"sRGB", b"\0")
-               + _chunk(b"IDAT", zlib.compress(b"".join(b"\0" + row for row in rows), 0))
-               + _chunk(b"IEND", b""))
-        assets.append(({
-            "name": name + ".png",
-            "width": width,
-            "height": height,
-            "color_space": "sRGB",
-            "media_type": "image/png",
-            "license": "CC0-1.0",
-            "sha256": hashlib.sha256(png).hexdigest(),
-            "rgba_sha256": hashlib.sha256(b"".join(rows)).hexdigest(),
-        }, png))
+        assets.append(png_asset(name + ".png", width, height, rows))
     return assets
 
 

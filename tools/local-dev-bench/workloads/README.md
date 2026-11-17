@@ -2,14 +2,19 @@
 
 These fixtures describe useful design work in product-independent terms. Each
 variant is a separately authored source family for fixture development. The
-first batch supplies two variants per workload. It does not establish a
-confirmatory sample size or capability across the products.
+current set supplies two variants each for LD01, LD03, LD04, and LD06.
+Confirmatory sample size and per-product capability require separate evidence.
 
 ```sh
 python3 tools/local-dev-bench/workloads/synthetic.py fixture LD01 \
   --variant harbor-ops --assets-dir /path/to/new-assets
 python3 tools/local-dev-bench/workloads/synthetic.py fixture LD03 \
   --variant edition-grid
+python3 tools/local-dev-bench/workloads/synthetic.py brief LD04 \
+  --variant lab-queue --registration /path/to/private-width.json
+python3 tools/local-dev-bench/workloads/synthetic.py fixture LD06 \
+  --variant metro-stories --font-file /path/to/licensed-font.otf \
+  --font-license OFL-1.1 --assets-dir /path/to/new-assets
 python3 tools/local-dev-bench/workloads/synthetic.py grade LD01 \
   /path/to/observations.json --variant harbor-ops
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/local-dev-bench/workloads
@@ -31,6 +36,30 @@ shared accent and another changes the shared spacing on a verification copy.
 The product adapter must prove editable persistent style bindings before
 registering the profile. The native component extension is not covered.
 
+LD04 variants `street-market` and `lab-queue` use separate card content,
+constraints and nesting. Use a private registration file with an intermediate
+integer `width` strictly between 390 and 1440, excluding 768, and a random
+`nonce` of at least 16 characters. Lock the `withheld_width_commitment`
+from the `brief` output before the run. Keep the registration file and the
+`fixture` output private. Use the same registration file with `grade`.
+A fixture generated with the built-in demonstration width cannot pass.
+The native wrap contract uses one connected frame and common width-driven
+min/basis/max, row order, gap, content height and overflow rules.
+
+LD06 variants `metro-stories` and `garden-labels` provide distinct six-card
+designs, the supplied JSON content, six initial PNG assets, and two image
+replacements. Two separately named initial assets share identical bytes and
+stay shared through the edit. Select an openly redistributable
+single-font `.otf` or `.ttf` that covers the listed Latin and Korean
+characters. Supply both the file and its license identifier before grading.
+The validator reads the family and required Unicode mappings from the
+font and pins the exact file digest. The actual import, resolved glyph runs,
+fallback, and code handoff require product evidence. [OpenType cmap](https://learn.microsoft.com/en-us/typography/opentype/spec/cmap)
+
+Pass the same font
+file and license to `grade`. A fixture without a registered font is usable
+for preparation and cannot pass.
+
 ## Capture contract
 
 An independent observer reads the actual product state and emits these
@@ -39,9 +68,10 @@ snapshots in its JSON evidence:
 - `before` records the starting document.
 - `candidate` records the submitted persisted design.
 - `reopened` records the candidate after the normal close and reopen path.
-- `probe` records the isolated verification copy after the registered edits.
-- `after_probe_original` rereads the original to detect unintended changes.
-- `probe_actions` records the actions actually performed on the copy in order.
+- `probe` records the isolated verification copy after the registered edits for LD01, LD03 and LD04.
+- `after_probe_original` rereads that original to detect unintended changes.
+- `probe_actions` records the actions actually performed on that copy in order.
+- `loaded` records the initial import before the two prescribed updates for LD06.
 
 Each snapshot has `document_id`, `nodes`, and `styles`. The last two are
 arrays keyed by the fixture's logical `key`. All nodes and styles carry their
@@ -62,3 +92,33 @@ the true reads, actions, and persistence boundaries. Do not pass their
 grader-only data or generated expected snapshots to the measured model.
 The semantic checker does not implement native UI capture, compare raster
 clipping, or generate evidence from an app on its own.
+
+
+For LD04 also capture the locked `withheld_width_commitment` and ordered
+`width_observations` snapshots. Each snapshot has the observed `width`.
+The independent copy resizes to 768, 390, the withheld width, then 1440.
+All four observations and `probe` must carry the same native object IDs and
+document ID. The original candidate is reopened at 1440 and reread unchanged
+after the copy verification. Derive `fully_visible`, `overflow_x`, and
+layout properties from the actual UI and native constraints.
+
+For LD06 each `loaded`, `candidate` and `reopened` snapshot includes
+`glyph_render: {font_sha256, rendered}`. Here `rendered` is the sorted
+set of required characters proven to use the expected face in glyph runs.
+Each imported text's
+`font_sha256` is the observed resolved face. For images, `crop_source_px`
+is x, y, width, height in the original asset pixel space before scaling.
+
+The LD06 `handoff` observation includes a source `commit` and a
+`source_tree_sha256` of the immutable input, plus two `builds` of separate
+clean checkouts. Each build includes unique `checkout_id`, the observed
+`commit`, `source_tree_sha256`, `clean_checkout`, process `exit_code`,
+`external_requests`, `glyph_render`, and a `rendered` map of observed
+content and assets keyed by logical IDs. Record rendered fields from the
+fixture and `provenance: bundled|embedded` for reproducible local assets.
+Do not include requests to the test app itself in `external_requests`. Any
+dependency outside the clean local test server must appear there, including
+private-local URLs that happen to work on the setup machine. Preserve source
+commit, build logs, browser readbacks, and asset resolution proof alongside
+the normalized observation. Product import, browser capture, font installation
+and code export require product adapters.

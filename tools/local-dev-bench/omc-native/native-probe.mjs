@@ -10,6 +10,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {parseArgs} from 'node:util';
 
 import {makeFixture, targetNodeName} from './fixture.mjs';
+import {historySchedule, measureHistory} from './history.mjs';
 
 const {values} = parseArgs({options: {
   experiment: {type: 'string'},
@@ -18,25 +19,39 @@ const {values} = parseArgs({options: {
   desktop: {type: 'string', default: 'headless'},
   samples: {type: 'string', default: '5'},
   'css-rules': {type: 'string', default: '0'},
+  'history-edits': {type: 'string'},
+  'history-shape': {type: 'string'},
   'fixture-only': {type: 'boolean', default: false},
 }});
 const {experiment, desktop} = values;
-const nodeCount = Number(values.nodes);
+const isHistory = experiment === 'N-C';
+const nodeCount = Number(values.nodes ?? (isHistory ? 17 : NaN));
 const depth = Number(values.depth);
 const sampleCount = Number(values.samples);
 const cssRules = Number(values['css-rules']);
-assert.ok(['N-A', 'N-B'].includes(experiment), '--experiment must be N-A or N-B');
-assert.ok([1000, 10000, 100000].includes(nodeCount) || (experiment === 'N-B' && nodeCount === 100),
-  '--nodes must be 1000, 10000, 100000, or 100 for the N-B baseline');
+assert.ok(['N-A', 'N-B', 'N-C'].includes(experiment), '--experiment must be N-A, N-B or N-C');
+assert.ok(isHistory ? nodeCount === 17 : [1000, 10000, 100000].includes(nodeCount) || (experiment === 'N-B' && nodeCount === 100),
+  '--nodes must be 1000, 10000, 100000, 100 for the N-B baseline, or 17 for N-C');
 assert.ok([1, 32].includes(depth), '--depth must be 1 or 32');
 assert.ok(['headless', 'attached'].includes(desktop), '--desktop must be headless or attached');
 assert.ok(Number.isInteger(sampleCount) && sampleCount >= 1 && sampleCount <= 50, '--samples must be 1–50');
 assert.ok(Number.isInteger(cssRules) && cssRules >= 0 && cssRules <= 1000, '--css-rules must be 0–1000');
 assert.ok(experiment === 'N-B' || !cssRules, '--css-rules is specific to N-B');
+assert.ok(isHistory || (values['history-edits'] === undefined && values['history-shape'] === undefined),
+  '--history-edits and --history-shape are specific to N-C');
+assert.ok(!isHistory || (depth === 1 && desktop === 'headless'), 'N-C uses a fixed headless fixture at depth 1');
+const historyEdits = Number(values['history-edits'] ?? 0);
+const historyPlacement = values['history-shape'] ?? 'concentrated';
+assert.ok(Number.isInteger(historyEdits) && historyEdits >= 0 && historyEdits <= 100_000 && historyEdits % 2 === 0,
+  '--history-edits must be an even number from 0 through 100000');
+assert.ok(['concentrated', 'distributed'].includes(historyPlacement), '--history-shape must be concentrated or distributed');
 
 let {document, summary} = makeFixture({experiment, nodeCount, depth, cssRules});
 let input = JSON.stringify(document);
 const expectedCss = document.metadata.css;
+const authoredShapes = isHistory
+  ? Object.values(document.nodes).filter(node => node.kind === 'rect').map(node => node.properties)
+  : [];
 assert.equal(Object.keys(document.nodes).length, summary.documentNodeCount);
 document = null;
 const report = {
@@ -60,6 +75,18 @@ const report = {
     indexedActiveNodes: 'The installed path does not expose active-scene index counts.',
   },
 };
+if (isHistory) {
+  const editsPerTarget = Array(authoredShapes.length).fill(0);
+  const terminalDelta = Array(authoredShapes.length).fill(0);
+  for (const {target, delta} of historySchedule(historyEdits, historyPlacement, authoredShapes.length)) {
+    editsPerTarget[target]++;
+    terminalDelta[target] = delta;
+  }
+  assert.ok(terminalDelta.every(delta => delta === 0));
+  report.history = {priorEdits: historyEdits, placement: historyEdits ? historyPlacement : 'fresh', editsPerTarget};
+  report.unavailable.historyReplayCpu = 'No isolated operation-replay CPU counter exposed by the installed path.';
+  report.unavailable.tombstoneRetention = 'This diagnostic ages scalar coordinates only.';
+}
 
 async function hashFile(path) {
   const hash = createHash('sha256');
@@ -67,11 +94,11 @@ async function hashFile(path) {
   return hash.digest('hex');
 }
 
-async function stop(child) {
+async function stop(child, exitSignal = 'SIGTERM') {
   if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
   const exited = once(child, 'exit');
-  child.kill();
-  const deadline = setTimeout(() => child.kill('SIGKILL'), 2_000);
+  child.kill(exitSignal);
+  const deadline = setTimeout(() => child.kill('SIGKILL'), exitSignal === 'SIGINT' ? 10_000 : 2_000);
   try {
     await exited;
   } finally {
@@ -99,29 +126,38 @@ async function run() {
   let service;
   let window;
   let client;
+  let endpoint;
+  let auth;
   try {
     const source = join(profile, 'fixture.json');
     await writeFile(source, input, {mode: 0o600});
     input = null;
-    const startup = performance.now();
-    service = spawn(serviceBinary, ['--profile', profile, '--port', '0'], {stdio: ['ignore', 2, 2]});
-    await once(service, 'spawn');
-    let descriptor;
-    while (!descriptor && performance.now() - startup < 10_000) {
-      signal.throwIfAborted();
-      assert.ok(service.exitCode === null && service.signalCode === null, 'OMC service exited during setup');
-      try {
-        descriptor = JSON.parse(await readFile(join(profile, 'native-v1/service.json'), 'utf8'));
-      } catch (error) {
-        if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
-        await delay(25, undefined, {signal});
+    const descriptorPath = join(profile, 'native-v1/service.json');
+
+    async function startService() {
+      const startup = performance.now();
+      service = spawn(serviceBinary, ['--profile', profile, '--port', '0'], {stdio: ['ignore', 2, 2]});
+      await once(service, 'spawn');
+      let descriptor;
+      while (!descriptor && performance.now() - startup < 10_000) {
+        signal.throwIfAborted();
+        assert.ok(service.exitCode === null && service.signalCode === null, 'OMC service exited during setup');
+        try {
+          const published = JSON.parse(await readFile(descriptorPath, 'utf8'));
+          if (published.pid === service.pid) descriptor = published;
+        } catch (error) {
+          if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+        }
+        if (!descriptor) await delay(25, undefined, {signal});
       }
+      assert.ok(descriptor, 'OMC service descriptor unavailable');
+      endpoint = new URL(descriptor.endpoint);
+      assert.equal(endpoint.hostname, '127.0.0.1');
+      auth = {Authorization: `Bearer ${descriptor.token}`};
+      return performance.now() - startup;
     }
-    assert.ok(descriptor, 'OMC service descriptor unavailable');
-    report.stages.serviceDescriptorMs = performance.now() - startup;
-    const endpoint = new URL(descriptor.endpoint);
-    assert.equal(endpoint.hostname, '127.0.0.1');
-    const auth = {Authorization: `Bearer ${descriptor.token}`};
+
+    report.stages.serviceDescriptorMs = await startService();
 
     async function rpc(method, params = {}, session) {
       const body = JSON.stringify({id: randomUUID(), method, params});
@@ -208,6 +244,13 @@ async function run() {
     report.stages.workspaceOpen = workspaceOpen;
     assert.equal(initial.pages.length, summary.pageCount);
     assert.equal(Object.keys(initial.nodes).length, summary.documentNodeCount);
+    if (isHistory) {
+      await measureHistory({
+        rpc, restart, signal, profile, documentId, sessionId, initial, authoredShapes, report,
+        placement: historyPlacement, edits: historyEdits, samples: sampleCount,
+      });
+      return;
+    }
     // Native JSON import remaps IDs. Resolve the sole named target from the imported state.
     let targets = Object.values(initial.nodes).filter(node => node.properties.name === targetNodeName);
     assert.equal(targets.length, 1);
@@ -255,11 +298,21 @@ async function run() {
       assert.equal(result.nodes[targetNodeId].properties.x, x);
       return result.sequence;
     }
+
+    async function restart() {
+      const started = performance.now();
+      await client.close();
+      client = undefined;
+      await stop(service, 'SIGINT');
+      assert.equal(service.exitCode, 0, 'OMC service must exit normally before the reopen timing');
+      report.stages.gracefulShutdownMs = performance.now() - started;
+      report.stages.restartedServiceDescriptorMs = await startService();
+    }
   } finally {
     try {
       await Promise.all([stop(window), client?.close()]);
     } finally {
-      await stop(service);
+      await stop(service, isHistory ? 'SIGINT' : 'SIGTERM');
       await rm(profile, {recursive: true, force: true, maxRetries: 10});
     }
   }
