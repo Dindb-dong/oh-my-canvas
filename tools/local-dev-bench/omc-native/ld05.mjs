@@ -101,21 +101,32 @@ async function diagnose(api, fixture, root, manifest, save, report) {
   report.sourceAssetSha256 = digest(image);
   const materialized = source.evaluatedHtml
     .replace('<link rel="stylesheet" href="./theme.css">', `<style>${css}</style>`)
+    .replace('<script type="module" src="./app.mjs"></script>', '')
     .replaceAll(`src="./assets/${assetPath}"`, `src="data:image/png;base64,${image.toString('base64')}"`);
-  assert.ok(materialized.includes('<style>') && !materialized.includes(`src="./assets/${assetPath}"`));
+  assert.ok(materialized.includes('<style>') && !materialized.includes('<script') &&
+    !materialized.includes(`src="./assets/${assetPath}"`));
   await save('native-import-rendered.html', materialized);
 
   const imported = {};
   for (const [route, markup] of [['raw', rawHtml], ['rendered', materialized]]) {
-    const snapshot = await api.rpc('document.import', {
-      format: 'html', contentBase64: Buffer.from(markup).toString('base64'), title: `LD05 ${route}`, strict: true,
-    });
+    const args = {format: 'html', contentBase64: Buffer.from(markup).toString('base64'), title: `LD05 ${route}`};
+    let snapshot;
+    let strictRejection;
+    try {
+      snapshot = await api.rpc('document.import', {...args, strict: true});
+    } catch (error) {
+      if (!error.message.includes('unsupported source feature:')) throw error;
+      strictRejection = error.message;
+      report[route] = {strictRejection};
+      snapshot = await api.rpc('document.import', {...args, strict: false});
+    }
     imported[route] = snapshot;
     await save(`${route}-native.json`, snapshot);
     const exported = await api.rpc('document.export', {documentId: snapshot.id, format: 'html'});
     await save(`${route}-native.html`, Buffer.from(exported.contentBase64,'base64'));
     report[route] = {documentId: snapshot.id, nodeCount: Object.keys(snapshot.nodes).length,
-      text: textOf(snapshot), stylesRetained: Boolean(snapshot.metadata?.css), diagnostics: exported.diagnostics};
+      strictRejection, text: textOf(snapshot), stylesRetained: Boolean(snapshot.metadata?.css),
+      diagnostics: exported.diagnostics};
   }
   const expected = fixture.cycles[0].source_state;
   assert.ok(expected.cards.every(label => report.rendered.text.includes(label)), 'Rendered state did not reach editable layers');
