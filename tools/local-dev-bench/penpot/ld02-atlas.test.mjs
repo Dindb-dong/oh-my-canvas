@@ -5,7 +5,8 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
 import {
-  atlasDifferences,atlasInventory,atlasTarget,readAtlasPage,readAtlasPages,reopenAtlas,runAtlasModel,seedAtlasPage,validateFixture,
+  atlasDifferences,atlasInventory,atlasTarget,readAtlasPage,readAtlasPages,reopenAtlas,runAtlasModel,seedAtlasPage,
+  seedSaveFence,seedFenceReadback,validateFixture,
 } from './ld02-atlas.mjs';
 
 const generator = 'tools/local-dev-bench/workloads/synthetic.py';
@@ -15,6 +16,20 @@ const id = '00000000-0000-4000-8000-000000000001';
 const copyId = '00000000-0000-4000-8000-000000000002';
 const Async = (async () => {}).constructor;
 const evalScript = (code,penpot) => new Async('penpot',code)(penpot);
+
+test('final seed fence waits for contentsave and independently reads the persisted marker',async()=>{
+  const marker='a'.repeat(32), data=new Map();
+  let callback, detached=false;
+  const page={id:copyId,setPluginData:(key,value)=>{data.set(key,value);queueMicrotask(callback);},
+    getPluginData:key=>data.get(key)};
+  const app={currentFile:{id,pages:[page]},currentPage:page,
+    on:(event,listener)=>{assert.equal(event,'contentsave');callback=listener;return 'listener';},
+    off:listener=>{assert.equal(listener,'listener');detached=true;}};
+  assert.deepEqual(await evalScript(seedSaveFence(id,marker),app),{pageId:copyId,marker,contentsave:true});
+  assert.ok(detached);
+  assert.equal(await evalScript(seedFenceReadback(id,copyId),app),marker);
+  await assert.rejects(evalScript(seedFenceReadback(copyId,id),app),/Wrong isolated/);
+});
 
 test('normal reopen closes the old workspace and awaits document readiness before attach',async()=>{
   const calls=[];

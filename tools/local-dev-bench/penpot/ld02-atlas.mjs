@@ -101,6 +101,27 @@ export function atlasInventory(fixture, fileId) {
   `;
 }
 
+export function seedSaveFence(fileId, marker) {
+  assert.match(marker,/^[a-f0-9]{32}$/);
+  return `${guard(fileId)}
+    const page=penpot.currentPage;
+    const saved = new Promise((resolve,reject)=>{
+      const listener=penpot.on("contentsave",()=>{clearTimeout(timer);penpot.off(listener);resolve(true);});
+      const timer=setTimeout(()=>{penpot.off(listener);reject(new Error("Atlas contentsave deadline"));},20000);
+    });
+    page.setPluginData("atlas-save-fence",${JSON.stringify(marker)});
+    await saved;
+    return {pageId:page.id,marker:page.getPluginData("atlas-save-fence"),contentsave:true};`;
+}
+
+export function seedFenceReadback(fileId, pageId) {
+  assert.match(pageId,nativeId);
+  return `${guard(fileId)}
+    const page=penpot.currentFile.pages.find(page=>page.id===${JSON.stringify(pageId)});
+    if (!page) throw new Error("Missing Atlas seed fence page");
+    return page.getPluginData("atlas-save-fence");`;
+}
+
 export function readAtlasPage(page, fileId) {
   return readAtlasPages([page],fileId);
 }
@@ -389,9 +410,21 @@ async function replay(origin, fixture, modelCommand, prepare, prepared) {
         nativePages.set(page.key,result.nativeId);
       }
       workspace.searchParams.set('page-id',nativePages.get(fixture.working_page));
-      initialSaveObserved = await setupSave;
+      await setupSave;
+      phase = 'final Atlas seed save fence';
+      const marker = randomBytes(16).toString('hex');
+      const finalResponse = editor.waitForResponse(response=>response.ok() &&
+        new URL(response.url()).origin === origin && response.url().includes('/update-file') &&
+        response.request().method()==='POST' && response.request().postData()?.includes(marker),{timeout:22000})
+        .then(()=>true,error=>error);
+      const fence = await execute(seedSaveFence(id,marker));
+      initialSaveObserved = await finalResponse;
       if (initialSaveObserved instanceof Error) throw initialSaveObserved;
+      assert.equal(fence.contentsave,true);
+      assert.equal(fence.marker,marker);
       editor = await reopen(editor,context,workspace);
+      assert.equal(await readAfterAttach(()=>execute(seedFenceReadback(id,fence.pageId))),marker,
+        'Last seed change was not durably visible after normal reopen');
       before = await verifyStart(execute,fixture,id,'before');
       phase = 'duplicate the prepared original';
       copy = await duplicateFromDashboard(editor,context,origin,scope);
