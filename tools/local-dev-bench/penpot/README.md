@@ -182,3 +182,23 @@ shape identities, hierarchy and geometry. The original is read after normal
 reopen and again after the copy edits. The independent scorer remains the
 acceptance gate. The product-only scope excludes model and presentation
 measurements.
+
+## LD04 responsive street-market
+
+Generate the fixture with a private width registration before starting the
+product. Use the same registration in the common runner's acceptance command.
+
+```sh
+python3 tools/local-dev-bench/workloads/synthetic.py fixture LD04 --variant street-market --registration "$REGISTRATION" > "$FIXTURE"
+OMC_BENCH_CANDIDATE="$EVIDENCE" node tools/local-dev-bench/penpot/ld04.mjs http://localhost:19001 "$FIXTURE"
+python3 tools/local-dev-bench/workloads/synthetic.py grade LD04 "$EVIDENCE" --variant street-market --registration "$REGISTRATION"
+node --test tools/local-dev-bench/penpot/ld04.test.mjs
+```
+
+The adapter seeds an editable fixed baseline in a disposable account, adapts
+the same native shapes to wrapping flex, reopens the original in a new editor
+tab and creates a native dashboard duplicate. It edits only the Width field
+on the duplicate and reads all four widths. The observer records native sizing
+and rendered text bounds. Penpot 2.19.2 exposes fill, min and max sizing. The
+observer reports the independent basis as unavailable and forwards all actual
+geometry to the common oracle.

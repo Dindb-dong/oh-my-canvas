@@ -287,13 +287,13 @@ async function takeState(execute, fileId, spec) {
   return state;
 }
 
-function watchSave(page, origin) {
+export function watchSave(page, origin) {
   return page.waitForResponse(response => response.ok() && new URL(response.url()).origin === origin &&
     response.url().includes('/update-file') && response.request().method() === 'POST',
   {timeout:8000}).then(() => true, error => error.name === 'TimeoutError' ? false : error);
 }
 
-async function reopenPage(page, context, workspace) {
+export async function reopenPage(page, context, workspace) {
   const next = await context.newPage();
   await page.close();
   await next.goto(workspace.href);
