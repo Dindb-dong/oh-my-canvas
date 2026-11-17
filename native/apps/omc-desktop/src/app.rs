@@ -6,6 +6,7 @@ mod dev_focus;
 mod eyedropper;
 mod home;
 pub use home::{HomeAction, HomeMenu, HomeView};
+mod layer_scroll;
 mod object_snap;
 mod prototype_runtime;
 mod scale_tool;
@@ -526,7 +527,8 @@ pub struct App {
     pub error: Option<String>,
     pub width: f64,
     pub height: f64,
-    pub layer_scroll: usize,
+    pub layer_scroll: f64,
+    layer_scroll_animation: Option<layer_scroll::LayerScrollAnimation>,
     pub inspector: Inspector,
     pub inspector_scroll: f64,
     pub prototype_frame: Option<String>,
@@ -770,7 +772,8 @@ impl App {
             error: None,
             width: 1440.,
             height: 900.,
-            layer_scroll: 0,
+            layer_scroll: 0.,
+            layer_scroll_animation: None,
             inspector: Inspector::Design,
             prototype_frame: None,
             prototype_playback: prototype_runtime::Playback::default(),
@@ -1269,6 +1272,7 @@ impl App {
         self.home_menu = None;
         self.active = Some(id.clone());
         self.selected.clear();
+        self.reset_layer_scroll();
         self.page = self
             .snapshots
             .get(&id)
@@ -1299,9 +1303,7 @@ impl App {
                 skip_depth = Some(row.depth);
             }
         }
-        self.layer_scroll = self
-            .layer_scroll
-            .min(self.visible_layers.len().saturating_sub(1));
+        self.clamp_layer_scroll();
     }
     fn remember_camera(&mut self) {
         if self.dev_focus_active() {
@@ -1927,6 +1929,7 @@ impl App {
                 }
             }
             Action::Layer(id) => {
+                self.layer_scroll_animation = None;
                 self.commit_edit();
                 if !self.selected.contains(&id) {
                     self.inspector_scroll = 0.;
@@ -1949,6 +1952,7 @@ impl App {
                 }
             }
             Action::ToggleLayer(id) => {
+                self.layer_scroll_animation = None;
                 if !self.collapsed.remove(&id) {
                     self.collapsed.insert(id);
                 }
@@ -2424,6 +2428,7 @@ impl App {
         self.remember_camera();
         self.page = Some(id.clone());
         self.selected.clear();
+        self.reset_layer_scroll();
         self.camera = self
             .cameras
             .get(&(self.active.clone().unwrap_or_default(), id))
@@ -2709,6 +2714,7 @@ impl App {
                 && self.current_root().as_ref() != Some(&id)
             {
                 if !self.selected.contains(&id) {
+                    self.reveal_canvas_layer(&id);
                     self.selected = BTreeSet::from([id]);
                 }
                 self.open_layer_context();
@@ -2727,7 +2733,10 @@ impl App {
                     .controls
                     .iter()
                     .rev()
-                    .find(|c| self.action_available(&c.action) && c.rect.contains(x, y))
+                    .find(|c| {
+                        self.action_available(&c.action)
+                            && crate::paint::control_bounds(self, c).contains(x, y)
+                    })
                     .cloned()
             {
                 self.focus = control.id;
@@ -2849,6 +2858,7 @@ impl App {
                 self.selected.clear();
             }
             if let Some(id) = hit {
+                self.reveal_canvas_layer(&id);
                 self.selected.insert(id);
             }
             self.inspector_scroll = 0.;
@@ -2862,6 +2872,7 @@ impl App {
         self.last_click = Some((Instant::now(), (x, y)));
         if let Some(id) = hit {
             if double {
+                self.reveal_canvas_layer(&id);
                 self.selected.clear();
                 self.selected.insert(id.clone());
                 self.begin_text(id);
@@ -2870,6 +2881,7 @@ impl App {
             if multi_select && self.selected.remove(&id) {
                 return;
             }
+            self.reveal_canvas_layer(&id);
             if !multi_select && !self.modifiers.shift_key() && !self.selected.contains(&id) {
                 self.selected.clear();
             }
@@ -3218,13 +3230,21 @@ impl App {
                     origin.0.max(end.0),
                     origin.1.max(end.1),
                 );
+                let mut first = None;
+                let root = self.current_root();
                 if let Some(scene) = &self.scene {
                     for item in &scene.items {
                         let [x, y, w, h] = item.bounds;
                         if x >= x0 && y >= y0 && x + w <= x1 && y + h <= y1 {
+                            if first.is_none() && root.as_ref() != Some(&item.id) {
+                                first = Some(item.id.clone());
+                            }
                             self.selected.insert(item.id.clone());
                         }
                     }
+                }
+                if let Some(id) = first {
+                    self.reveal_canvas_layer(&id);
                 }
             }
         }
@@ -3254,8 +3274,14 @@ impl App {
             return false;
         }
         let canvas = self.canvas_rect();
-        let under_cursor = scroll_target_at(canvas, self.inspector_visible(), self.cursor);
-        let target = if matches!(delta, MouseScrollDelta::PixelDelta(_)) {
+        let mut under_cursor = scroll_target_at(canvas, self.inspector_visible(), self.cursor);
+        if under_cursor == ScrollTarget::Layers
+            && !crate::paint::layer_viewport(self).contains(self.cursor.0, self.cursor.1)
+        {
+            under_cursor = ScrollTarget::Outside;
+        }
+        let precise = matches!(delta, MouseScrollDelta::PixelDelta(_));
+        let target = if precise {
             if phase == TouchPhase::Started || self.scroll_target.is_none() {
                 self.scroll_target = Some(under_cursor);
             }
@@ -3273,12 +3299,7 @@ impl App {
         }
         match target {
             ScrollTarget::Layers if dy != 0. => {
-                let max_scroll = self.visible_layers.len().saturating_sub(1);
-                self.layer_scroll = if dy < 0. {
-                    (self.layer_scroll + 3).min(max_scroll)
-                } else {
-                    self.layer_scroll.saturating_sub(3)
-                };
+                return self.scroll_layers(-dy, precise);
             }
             ScrollTarget::Inspector if dy != 0. => {
                 let max = crate::inspector::max_scroll(self);
@@ -4263,6 +4284,7 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::Resized(size) => {
                 self.update_window_metrics(&window, size);
+                self.clamp_layer_scroll();
                 self.finish_automation_resize();
                 if let Some(id) = self.prototype_frame.clone() {
                     self.show_prototype_frame(id);
@@ -4271,6 +4293,7 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::ScaleFactorChanged { .. } => {
                 self.update_window_metrics(&window, window.inner_size());
+                self.clamp_layer_scroll();
                 self.schedule_scene();
             }
             WindowEvent::ThemeChanged(_) => self.invalidate_chrome_theme(),
@@ -4292,8 +4315,9 @@ impl ApplicationHandler<Event> for App {
                             .hovered_canvas_item_at(self.cursor)
                             .map(|item| &item.id)
                     || self.controls.iter().any(|control| {
-                        control.rect.contains(previous.0, previous.1)
-                            != control.rect.contains(self.cursor.0, self.cursor.1)
+                        let bounds = crate::paint::control_bounds(self, control);
+                        bounds.contains(previous.0, previous.1)
+                            != bounds.contains(self.cursor.0, self.cursor.1)
                     });
             }
             WindowEvent::CursorLeft { .. } if self.drag.is_none() => {
@@ -4461,6 +4485,7 @@ impl ApplicationHandler<Event> for App {
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let prototype_tick = self.prototype_tick();
+        let layer_tick = self.tick_layer_scroll();
         self.expire_automation_gesture();
         if self.font_scan_at.elapsed() >= Duration::from_secs(2) {
             self.font_scan_at = Instant::now();
@@ -4567,7 +4592,10 @@ impl ApplicationHandler<Event> for App {
         }
         let idle = Instant::now() + Duration::from_millis(100);
         event_loop.set_control_flow(ControlFlow::WaitUntil(
-            prototype_tick.map_or(idle, |at| at.min(idle)),
+            prototype_tick
+                .into_iter()
+                .chain(layer_tick)
+                .fold(idle, Instant::min),
         ));
     }
 }
