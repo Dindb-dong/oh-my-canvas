@@ -119,7 +119,8 @@ export function readFieldRelay(fileId) {
     const nodes = [];
     const walk = (shape, parent) => {
       if (!shape.name.startsWith(prefix)) throw new Error("Unexpected unmarked LD03 object");
-      const key = shape.name.slice(prefix.length);
+      // Penpot stores slash-separated layer names with spaced path separators.
+      const key = shape.name.slice(prefix.length).replaceAll(" / ", "/");
       const row = {key, native_id:shape.id, parent, editable: !shape.blocked && !shape.hidden,
         kind:shape.type === "board" ? "frame" : shape.type};
       if (shape.type === "text") row.text = shape.characters;
@@ -228,7 +229,7 @@ async function duplicateFromDashboard(page, context, origin) {
   await dashboard.getByText('Duplicate', {exact:true}).click();
 
   const cards = dashboard.locator('[class*="grid-item-button"][title], [class*="list-item-row"][title]');
-  await cards.filter({hasText:/Copy/}).first().waitFor({state:'visible'});
+  await cards.nth(1).waitFor({state:'visible'});
   const titles = await cards.evaluateAll(items => items.map(item => item.getAttribute('title')));
   assert.equal(titles.length, 2, 'Expected one original and one native duplicate on the disposable account');
   assert.ok(titles.includes(fileName), 'Original benchmark card missing');

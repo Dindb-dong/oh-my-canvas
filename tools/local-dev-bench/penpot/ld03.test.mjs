@@ -25,6 +25,11 @@ function fakePenpot(documentId) {
         token.apply();
       },
     };
+    let name;
+    Object.defineProperty(shape, 'name', {
+      get:() => name,
+      set:value => { name = value.replaceAll('/', ' / '); },
+    });
     root.children.push(shape);
     return shape;
   };
@@ -80,6 +85,7 @@ test('field-relay uses native editable objects, four real override omissions and
   const original = fakePenpot(fileId);
   await assert.rejects(run(seedFieldRelay(fixture,copyId), original), /Wrong isolated/);
   assert.deepEqual(await run(seedFieldRelay(fixture,fileId), original), {nodes:fixture.logical_objects, styles:4});
+  assert.equal(original.currentPage.root.children[0].children[0].name, 'LD03 board / title');
   const before = await run(readFieldRelay(fileId), original);
   assert.deepEqual(stateDifferences(fixture.start, before), []);
   const bad = structuredClone(before);
