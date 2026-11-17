@@ -113,12 +113,12 @@ async function snapshotProtectedFixture(found) {
   assert.deepEqual(runPages.map(page => page.name).sort(),
     fixture.pages.map(page => pagePrefix + page.name).sort());
   const protectedContent = {};
-  async function digest(nodeId, expectedIds) {
+  async function digest(nodeId) {
     const tree = await call('get_tree_summary', {nodeId, depth: 3});
     const jsx = await call('get_jsx', {nodeId, includeNodeIds: true, includeRootPositioning: true});
     const treeText = JSON.stringify(tree);
     const jsxText = JSON.stringify(jsx);
-    assert.ok(tree && jsx && expectedIds.every(id => treeText.includes(id) && jsxText.includes(id)),
+    assert.ok(treeText?.includes(nodeId) && jsxText?.includes(nodeId),
       'Paper readback did not identify the requested subtree');
     return createHash('sha256').update(JSON.stringify([tree, jsx])).digest('hex');
   }
@@ -130,13 +130,12 @@ async function snapshotProtectedFixture(found) {
     assert.deepEqual(children.map(node => node.name), expectedPage.children.map(card => card.name));
     const target = page.name === pagePrefix + edit.page;
     if (target) assert.ok(children.some(node => node.id === found.card.id));
+    // Paper emits no JSX for a page root. Its cards are independently exportable.
+    const ids = children.filter(node => !target || node.id !== found.card.id).map(node => node.id);
     const subtrees = [];
-    if (target) {
-      for (const node of children) {
-        if (node.id !== found.card.id) subtrees.push([node.id, await digest(node.id, [node.id])]);
-      }
-    } else {
-      subtrees.push([rootNodeId, await digest(rootNodeId, children.map(node => node.id))]);
+    for (let offset = 0; offset < ids.length; offset += 4) {
+      subtrees.push(...await Promise.all(ids.slice(offset, offset + 4)
+        .map(async id => [id, await digest(id)])));
     }
     protectedContent[page.name] = {
       pageId: page.id,
