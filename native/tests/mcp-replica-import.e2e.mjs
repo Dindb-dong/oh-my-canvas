@@ -133,6 +133,6 @@ test('legacy MCP merges native OMC history atomically and migrates Electron canv
       service.process.kill('SIGINT');
       await service.exited;
     }));
-    await rm(temporary, { recursive: true, force: true });
+    await rm(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

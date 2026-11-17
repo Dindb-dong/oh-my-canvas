@@ -470,6 +470,6 @@ test('FigCraft design commands change native layout, appearance and rendered out
     await client.close().catch(() => {});
     if (service.exitCode === null) service.kill();
     await exited;
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
