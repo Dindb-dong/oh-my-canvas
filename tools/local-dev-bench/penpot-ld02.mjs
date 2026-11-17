@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
 import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join, resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {isDeepStrictEqual} from 'node:util';
 import {fixture, target} from './replays/ld02-fixture.mjs';
@@ -470,39 +471,47 @@ async function selfTestEvidence() {
   assert.throws(() => validateEvidence({...evidence, reopened}), /Normal reopen differs/);
 }
 
-if (process.argv.length !== 3) {
-  console.error('Usage: node tools/local-dev-bench/penpot-ld02.mjs <loopback-origin|--accept|--self-test>');
-  process.exitCode = 2;
-} else if (process.argv[2] === '--accept') {
-  const candidate = process.env.OMC_BENCH_CANDIDATE;
-  assert.ok(candidate, 'Set OMC_BENCH_CANDIDATE to the producer snapshot');
-  try {
-    validateEvidence(JSON.parse(await readFile(candidate, 'utf8')));
-    console.log(JSON.stringify({
-      workload:'LD02', accepted:true, checks:['fixture', 'edit', 'undo', 'redo', 'normal_reopen', 'native_identities', 'protected_scope'],
-    }));
-  } catch (error) {
-    console.log(JSON.stringify({workload:'LD02', accepted:false, reason:error.message}));
-    process.exitCode = 1;
+export {loopbackOrigin, waitForBackend, createAccount, getMcpEndpoint, newFile, connectEditor};
+
+async function main() {
+  if (process.argv.length !== 3) {
+    console.error('Usage: node tools/local-dev-bench/penpot-ld02.mjs <loopback-origin|--accept|--self-test>');
+    process.exitCode = 2;
+  } else if (process.argv[2] === '--accept') {
+    const candidate = process.env.OMC_BENCH_CANDIDATE;
+    assert.ok(candidate, 'Set OMC_BENCH_CANDIDATE to the producer snapshot');
+    try {
+      validateEvidence(JSON.parse(await readFile(candidate, 'utf8')));
+      console.log(JSON.stringify({
+        workload:'LD02', accepted:true, checks:['fixture', 'edit', 'undo', 'redo', 'normal_reopen', 'native_identities', 'protected_scope'],
+      }));
+    } catch (error) {
+      console.log(JSON.stringify({workload:'LD02', accepted:false, reason:error.message}));
+      process.exitCode = 1;
+    }
+  } else if (process.argv[2] === '--self-test') {
+    assert.equal(loopbackOrigin('http://localhost:19001'), 'http://localhost:19001');
+    for (const bad of ['https://localhost:19001', 'http://example.test:19001', 'http://user@localhost:19001',
+      'http://localhost:19001/mcp', 'http://localhost:19001/?secret=1', 'http://localhost']) {
+      assert.throws(() => loopbackOrigin(bad));
+    }
+    assert.equal(fixture.pages.length, 10);
+    const page = fixture.pages.find(candidate => candidate.name === batch);
+    assert.equal(page.children.length, 25);
+    assert.ok(seedCode('if (false) throw new Error();', page).includes(cardName));
+    let requests = 0;
+    await waitForBackend('http://localhost:19001', async url => {
+      assert.equal(url.href, 'http://localhost:19001/api/main/methods/get-profile');
+      if (++requests === 1) return new Response('bad gateway', {status:502});
+      return new Response('{}', {headers:{'content-type':'application/transit+json'}});
+    });
+    assert.equal(requests, 2);
+    await selfTestEvidence();
+  } else {
+    await replay(loopbackOrigin(process.argv[2]));
   }
-} else if (process.argv[2] === '--self-test') {
-  assert.equal(loopbackOrigin('http://localhost:19001'), 'http://localhost:19001');
-  for (const bad of ['https://localhost:19001', 'http://example.test:19001', 'http://user@localhost:19001',
-    'http://localhost:19001/mcp', 'http://localhost:19001/?secret=1', 'http://localhost']) {
-    assert.throws(() => loopbackOrigin(bad));
-  }
-  assert.equal(fixture.pages.length, 10);
-  const page = fixture.pages.find(candidate => candidate.name === batch);
-  assert.equal(page.children.length, 25);
-  assert.ok(seedCode('if (false) throw new Error();', page).includes(cardName));
-  let requests = 0;
-  await waitForBackend('http://localhost:19001', async url => {
-    assert.equal(url.href, 'http://localhost:19001/api/main/methods/get-profile');
-    if (++requests === 1) return new Response('bad gateway', {status:502});
-    return new Response('{}', {headers:{'content-type':'application/transit+json'}});
-  });
-  assert.equal(requests, 2);
-  await selfTestEvidence();
-} else {
-  await replay(loopbackOrigin(process.argv[2]));
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main();
 }

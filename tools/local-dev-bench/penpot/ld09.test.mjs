@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {collectLifecycle, makeCase, parsePlan, validateEvidence} from './ld09.mjs';
+import {seedCode, seedReadbackCode} from './seed-small.mjs';
 
 function prepared(size = 'small', count = 0) {
   const testCase = makeCase(size, count);
@@ -85,4 +86,39 @@ test('recorded asset and font evidence is checked and lost edits fail reopen', a
   assert.throws(() => validateEvidence(plan, evidence));
   const lossy = mocked(plan, {assetStatus, losesEdit:true});
   await assert.rejects(collectLifecycle(plan, lossy, lossy.now), /Native document fixture/);
+});
+
+test('small seeder rejects the wrong file and prepares four independently native shapes', async () => {
+  const fixture = makeCase('small', 0);
+  const page = {id:'mock-page', name:'Page 1', root:{children:[]}};
+  let sequence = 0;
+  const shape = (type, properties = {}) => ({
+    id:`mock-shape-${sequence++}`, type, ...properties,
+    resize(width, height) { Object.assign(this, {width, height}); },
+  });
+  const penpot = {
+    currentPage:page,
+    currentFile:{id:'mock-fixture', name:fixture.targetName, pages:[page]},
+    createBoard() {
+      const board = shape('board', {
+        children:[],
+        addFlexLayout() { return {appendChild:child => this.children.push(child)}; },
+      });
+      this.currentPage.root.children.push(board);
+      return board;
+    },
+    createText:characters => shape('text', {characters}),
+    createRectangle:() => shape('rectangle'),
+    createEllipse:() => shape('ellipse'),
+  };
+  const AsyncFunction = (async () => {}).constructor;
+  const execute = code => new AsyncFunction('penpot', code)(penpot);
+  await assert.rejects(execute(seedCode('unrelated-file')), /Wrong blank benchmark file/);
+  assert.deepEqual(page.root.children, []);
+  const state = await execute(seedCode('mock-fixture'));
+  assert.deepEqual(page.root.children[0].children.map(child => child.type), ['text','rectangle','ellipse']);
+  assert.equal(await execute(seedReadbackCode({...fixture, fileId:'mock-fixture', ...state})), true);
+  await assert.rejects(execute(seedCode('mock-fixture')), /Wrong blank benchmark file/);
+  page.root.children[0].children[0].characters = 'Unexpected';
+  await assert.rejects(execute(seedReadbackCode({...fixture, fileId:'mock-fixture', ...state})), /did not survive reopen/);
 });

@@ -18,7 +18,20 @@ saved-project inventory with the preparation record. The probe checks the
 declared catalog names and count, and verifies the opened file live by native
 IDs and object count. Catalog verification is part of fixture setup.
 
-Prepare a disposable local Penpot account and project. Create the target file
+To prepare the small, zero-distractor case on an already running, task-owned
+Penpot stack, supply a new private directory outside version control:
+
+```sh
+node tools/local-dev-bench/penpot/seed-small.mjs http://localhost:19001 /private/evidence/new-ld09-seed
+```
+
+This creates a fresh synthetic account and native file using headless Chrome.
+It verifies the saved catalog and checks the fixture after normal reopen. The
+directory contains `prepared.json`, `storage-state.json`, and
+`mcp-endpoint.txt`. Keep all three private. The generated case uses simple
+native solid shapes and carries no image/font readiness registration.
+
+For other cases, prepare a disposable local Penpot account and project. Create the target file
 and one page with the plan's exact names. Create a top-level board named
 `LD09 lifecycle board` with a text child named `LD09 editable caption` containing
 `Library status: awaiting review`. Put the registered native object count on that
