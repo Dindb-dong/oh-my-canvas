@@ -5,6 +5,8 @@ import {normalizeAssetSnapshot,uploadTargets} from './ld06-run.mjs';
 
 test('official upload URL contract pins targets before any binary POST',()=>{
   const url='https://example.invalid/synthetic-test-only';
+  // Exact key shape observed from the official tool; no private URL retained.
+  assert.deepEqual(uploadTargets({uploads:[{submitUrl:url,targetNodeId:'1:2'}],instructions:'POST bytes'},['1:2']),[url]);
   assert.deepEqual(uploadTargets({uploads:[{uploadUrl:url,targetNodeId:'1:2'}]},['1:2']),[url]);
   assert.throws(()=>uploadTargets({uploads:[{uploadUrl:url,targetNodeId:'other'}]},['1:2']));
   assert.throws(()=>uploadTargets({uploads:[]},['1:2']),/manifest/);

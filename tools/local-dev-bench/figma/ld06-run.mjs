@@ -17,7 +17,7 @@ export function uploadTargets(response,nodeIds) {
   const entries=response.uploads??response.uploadUrls??response.upload_urls;
   assert.ok(Array.isArray(entries)&&entries.length===nodeIds.length,'Unexpected official upload URL manifest');
   return entries.map((entry,index)=>{
-    const url=typeof entry==='string'?entry:entry.uploadUrl??entry.url??entry.upload_url;
+    const url=typeof entry==='string'?entry:entry.submitUrl??entry.uploadUrl??entry.url??entry.upload_url;
     assert.ok(typeof url==='string'&&url.startsWith('https://'),'Missing official upload URL');
     if(entry.targetNodeId)assert.equal(entry.targetNodeId,nodeIds[index]);
     return url;
