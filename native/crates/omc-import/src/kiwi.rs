@@ -20,6 +20,7 @@ struct Definition {
 pub(super) struct Decoded {
     pub root: Value,
     pub arrays: Vec<Vec<u8>>,
+    pub allocation: usize,
 }
 impl Decoded {
     pub fn bytes(&self, value: &Value) -> Option<&[u8]> {
@@ -83,7 +84,7 @@ impl<'a> Reader<'a> {
         result |= (self.byte()? as u64) << 56;
         Ok(result)
     }
-    fn string(&mut self) -> Result<String, ImportError> {
+    fn string_ref(&mut self) -> Result<&'a str, ImportError> {
         let rest = &self.bytes[self.offset..];
         let length = rest
             .iter()
@@ -92,9 +93,8 @@ impl<'a> Reader<'a> {
         if length > 16 * 1024 * 1024 {
             return Err(limit("Kiwi string limit"));
         }
-        let value = std::str::from_utf8(self.take(length)?)
-            .map_err(|_| invalid("invalid Kiwi UTF-8"))?
-            .to_owned();
+        let value =
+            std::str::from_utf8(self.take(length)?).map_err(|_| invalid("invalid Kiwi UTF-8"))?;
         self.byte()?;
         Ok(value)
     }
@@ -119,7 +119,32 @@ pub(super) fn decode(
     message_bytes: &[u8],
     max_bytes: usize,
 ) -> Result<Decoded, ImportError> {
-    let definitions = schema(schema_bytes)?;
+    decode_inner(schema_bytes, message_bytes, max_bytes, false)
+}
+
+pub(super) fn decode_reserved(
+    schema_bytes: &[u8],
+    message_bytes: &[u8],
+    max_bytes: usize,
+) -> Result<Decoded, ImportError> {
+    decode_inner(schema_bytes, message_bytes, max_bytes, true)
+}
+
+fn decode_inner(
+    schema_bytes: &[u8],
+    message_bytes: &[u8],
+    max_bytes: usize,
+    reserved: bool,
+) -> Result<Decoded, ImportError> {
+    let (definitions, schema_allocation) = schema(schema_bytes, max_bytes)?;
+    // Schema and graph share the reader reservation; the byte API keeps independent ceilings.
+    let max_bytes = if reserved {
+        max_bytes
+            .checked_sub(schema_allocation)
+            .ok_or_else(|| limit("FIG schema reservation exceeded"))?
+    } else {
+        max_bytes
+    };
     let root = definitions
         .iter()
         .position(|d| d.name == "Message")
@@ -142,33 +167,66 @@ pub(super) fn decode(
     Ok(Decoded {
         root,
         arrays: decoder.arrays,
+        allocation: decoder.allocation,
     })
 }
-fn schema(bytes: &[u8]) -> Result<Vec<Definition>, ImportError> {
+struct SchemaBudget {
+    used: usize,
+    maximum: usize,
+}
+impl SchemaBudget {
+    fn charge(&mut self, bytes: usize) -> Result<(), ImportError> {
+        self.used = self
+            .used
+            .checked_add(bytes)
+            .filter(|used| *used <= self.maximum)
+            .ok_or_else(|| limit("FIG schema reservation exceeded"))?;
+        Ok(())
+    }
+}
+fn schema(bytes: &[u8], maximum: usize) -> Result<(Vec<Definition>, usize), ImportError> {
     let mut reader = Reader { bytes, offset: 0 };
     let count = reader.uint()? as usize;
     if count > 10000 {
         return Err(limit("Kiwi schema definition limit"));
     }
+    if count > (bytes.len() - reader.offset) / 3 {
+        return Err(invalid("truncated Kiwi schema definitions"));
+    }
+    let mut budget = SchemaBudget { used: 0, maximum };
+    budget.charge(count.saturating_mul(std::mem::size_of::<Definition>()))?;
     let mut definitions = Vec::with_capacity(count);
     let mut names = std::collections::BTreeSet::new();
+    let mut total_fields = 0usize;
     for _ in 0..count {
-        let name = reader.string()?;
-        if !names.insert(name.clone()) {
+        let source_name = reader.string_ref()?;
+        budget.charge(source_name.len().saturating_add(64))?;
+        if !names.insert(source_name) {
             return Err(invalid("duplicate Kiwi definition"));
         }
+        let name = source_name.to_owned();
         let kind = reader.byte()?;
         if kind > 2 {
             return Err(invalid("unknown Kiwi definition kind"));
         }
         let count = reader.uint()? as usize;
-        if count > 10000 {
+        total_fields = total_fields
+            .checked_add(count)
+            .ok_or_else(|| limit("Kiwi aggregate field limit"))?;
+        if count > 10000 || total_fields > 100_000 {
             return Err(limit("Kiwi field limit"));
         }
+        // A field needs at least a NUL name, type, array bit and tag.
+        if count > (bytes.len() - reader.offset) / 4 {
+            return Err(invalid("truncated Kiwi schema fields"));
+        }
+        budget.charge(count.saturating_mul(std::mem::size_of::<Field>()))?;
         let mut fields = Vec::with_capacity(count);
         let mut tags = BTreeMap::new();
         for _ in 0..count {
-            let name = reader.string()?;
+            let source_name = reader.string_ref()?;
+            budget.charge(source_name.len().saturating_add(64))?;
+            let name = source_name.to_owned();
             let field_type = reader.int()?;
             let array = reader.byte()? & 1 != 0;
             let tag = reader.uint()?;
@@ -200,7 +258,8 @@ fn schema(bytes: &[u8]) -> Result<Vec<Definition>, ImportError> {
     if reader.offset != bytes.len() {
         return Err(invalid("trailing Kiwi schema bytes"));
     }
-    Ok(definitions)
+    // The borrowed-name index is released before graph allocation.
+    Ok((definitions, budget.used.saturating_sub(names.len() * 64)))
 }
 struct Decoder<'a> {
     reader: Reader<'a>,
@@ -256,9 +315,9 @@ impl Decoder<'_> {
                 -4 => Ok(json!(self.reader.uint()?)),
                 -5 => Ok(json!(self.reader.float()?)),
                 -6 => {
-                    let text = self.reader.string()?;
+                    let text = self.reader.string_ref()?;
                     self.charge(text.len() + 24)?;
-                    Ok(Value::String(text))
+                    Ok(Value::String(text.to_owned()))
                 }
                 -7 => {
                     let value = self.reader.uint64()?;
@@ -316,6 +375,50 @@ fn limit(message: &str) -> ImportError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn schema_checks_capacities_and_strings_before_materializing_them() {
+        let mut definitions = vec![0x90, 0x4e]; // 10000 definitions
+        definitions.resize(30002, 0);
+        assert!(matches!(
+            schema(&definitions, 128),
+            Err(ImportError::ResourceLimit(_))
+        ));
+        let fields = b"\x01Message\0\x02\x90\x4e";
+        assert!(matches!(
+            schema(fields, 1024 * 1024),
+            Err(ImportError::Invalid(_))
+        ));
+        let mut name = vec![1];
+        name.extend(std::iter::repeat_n(b'x', 4096));
+        name.extend([0, 2, 0]);
+        assert!(matches!(
+            schema(&name, 1024),
+            Err(ImportError::ResourceLimit(_))
+        ));
+    }
+    #[test]
+    fn schema_has_an_aggregate_field_limit() {
+        fn uint(bytes: &mut Vec<u8>, mut value: u32) {
+            while value >= 128 {
+                bytes.push((value as u8 & 127) | 128);
+                value >>= 7;
+            }
+            bytes.push(value as u8);
+        }
+        let mut bytes = vec![11];
+        for index in 0..11 {
+            bytes.extend(format!("Type{index}\0").as_bytes());
+            bytes.push(2);
+            uint(&mut bytes, 10000);
+            for tag in 0..10000 {
+                bytes.extend([0, 7, 0]);
+                uint(&mut bytes, tag);
+            }
+        }
+        assert!(
+            matches!(schema(&bytes, 32 * 1024 * 1024), Err(ImportError::ResourceLimit(message)) if message == "Kiwi field limit")
+        );
+    }
     #[test]
     fn byte_reader_rejects_overflow_and_decodes_rotated_float() {
         let value = 12.5f32;

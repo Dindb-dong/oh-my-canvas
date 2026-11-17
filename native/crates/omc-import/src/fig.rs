@@ -2,7 +2,11 @@ use super::*;
 use omc_model::{Node, NodeKind, Page};
 use omc_scene::Affine;
 use serde_json::{Value, json};
-use std::{collections::BTreeSet, io::Read};
+use std::{
+    cell::Cell,
+    collections::BTreeSet,
+    io::{Read, Seek},
+};
 
 pub fn import_fig(bytes: &[u8], options: &ImportOptions) -> Result<ImportResult, ImportError> {
     validate_input(bytes, options)?;
@@ -19,6 +23,205 @@ pub fn import_fig(bytes: &[u8], options: &ImportOptions) -> Result<ImportResult,
             .ok_or_else(|| invalid("FIG archive has no canvas.fig"))?
             .as_slice()
     };
+    let decoded = decode_fig(binary, options, usize::MAX)?;
+    let mut images = |key: &str, resources: &mut Vec<ImportedResource>| {
+        files
+            .get(&format!("images/{key}"))
+            .map(|bytes| image_resource(bytes, resources))
+            .transpose()
+    };
+    convert(
+        &decoded,
+        &mut images,
+        &digest(bytes),
+        source_version(bytes),
+        options,
+        None,
+    )
+}
+
+type ImageLookup<'a> =
+    dyn FnMut(&str, &mut Vec<ImportedResource>) -> Result<Option<String>, ImportError> + 'a;
+
+fn source_version(bytes: &[u8]) -> u32 {
+    u32::from_le_bytes(
+        bytes
+            .get(8..12)
+            .unwrap_or(&[0, 0, 0, 0])
+            .try_into()
+            .unwrap_or([0, 0, 0, 0]),
+    )
+}
+
+/// Import a seekable source without retaining its archive or all image bytes.
+/// The sink may stage immutable assets. Publish the document only after this returns successfully.
+/// `working_bytes` limits logical importer reservations, not process RSS or allocations inside
+/// the sink/ZIP codec. The synchronous sink must finish staging before returning; it must not
+/// retain copies of asset bytes in memory. Failed imports may leave unreferenced immutable assets.
+pub fn import_fig_reader<R: Read + Seek>(
+    mut reader: R,
+    options: &ImportOptions,
+    working_bytes: usize,
+    sink: &mut dyn FnMut(&[u8], &str, &str) -> Result<(), ImportError>,
+    check: &mut dyn FnMut() -> Result<(), ImportError>,
+) -> Result<ImportResult, ImportError> {
+    validate_input(&[], options)?;
+    if working_bytes == 0 || working_bytes > 512 * 1024 * 1024 {
+        return Err(ImportError::ResourceLimit(
+            "FIG working reservation limit".into(),
+        ));
+    }
+    let (source_hash, header, source_bytes) = source_identity(&mut reader, options, check)?;
+    let version = source_version(&header);
+    if !header.starts_with(b"PK") {
+        return import_fig_raw_reader(
+            reader,
+            options,
+            working_bytes,
+            source_hash,
+            version,
+            source_bytes,
+            check,
+        );
+    }
+    let mut archive = super::archive::Archive::new(reader, options)?;
+    let raw = archive
+        .read("canvas.fig", working_bytes)?
+        .ok_or_else(|| invalid("FIG archive has no canvas.fig"))?;
+    let decoded = decode_fig(&raw, options, working_bytes.saturating_sub(raw.capacity()))?;
+    drop(raw);
+    let budget = Cell::new(working_bytes.saturating_sub(decoded.allocation));
+    let mut cached = BTreeMap::<String, Option<String>>::new();
+    let mut images = |key: &str, _resources: &mut Vec<ImportedResource>| {
+        check()?;
+        if let Some(hash) = cached.get(key) {
+            return Ok(hash.clone());
+        }
+        let hash = if let Some(bytes) = archive.read(&format!("images/{key}"), budget.get())? {
+            let (hash, media) = image_identity(&bytes)?;
+            if !cached
+                .values()
+                .any(|stored| stored.as_deref() == Some(hash.as_str()))
+            {
+                sink(&bytes, media, &hash)?;
+            }
+            Some(hash)
+        } else {
+            None
+        };
+        charge(
+            Some(&budget),
+            key.len() + hash.as_ref().map_or(0, String::len) + 128,
+        )?;
+        cached.insert(key.into(), hash.clone());
+        Ok(hash)
+    };
+    let result = convert(
+        &decoded,
+        &mut images,
+        &source_hash,
+        version,
+        options,
+        Some(&budget),
+    )?;
+    drop(images);
+    drop(decoded);
+    drop(cached);
+    let mut reader = archive.finish(check)?;
+    let (after, _, count) = source_identity(&mut reader, options, check)?;
+    if after != source_hash || count != source_bytes {
+        return Err(invalid("FIG source changed during import"));
+    }
+    Ok(result)
+}
+
+fn source_identity<R: Read + Seek>(
+    reader: &mut R,
+    options: &ImportOptions,
+    check: &mut dyn FnMut() -> Result<(), ImportError>,
+) -> Result<(String, Vec<u8>, usize), ImportError> {
+    reader
+        .rewind()
+        .map_err(|error| invalid(&error.to_string()))?;
+    let mut hash = Sha256::new();
+    let mut header = Vec::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut count = 0usize;
+    loop {
+        check()?;
+        let size = reader
+            .read(&mut buffer)
+            .map_err(|error| invalid(&error.to_string()))?;
+        if size == 0 {
+            break;
+        }
+        count = count
+            .checked_add(size)
+            .ok_or_else(|| ImportError::ResourceLimit("input byte limit".into()))?;
+        if count > options.max_input_bytes {
+            return Err(ImportError::ResourceLimit("input byte limit".into()));
+        }
+        if header.len() < 12 {
+            header.extend_from_slice(&buffer[..size.min(12 - header.len())]);
+        }
+        hash.update(&buffer[..size]);
+    }
+    reader
+        .rewind()
+        .map_err(|error| invalid(&error.to_string()))?;
+    Ok((
+        hash.finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+        header,
+        count,
+    ))
+}
+
+fn import_fig_raw_reader<R: Read + Seek>(
+    mut reader: R,
+    options: &ImportOptions,
+    working: usize,
+    source_hash: String,
+    version: u32,
+    source_bytes: usize,
+    check: &mut dyn FnMut() -> Result<(), ImportError>,
+) -> Result<ImportResult, ImportError> {
+    if source_bytes > working {
+        return Err(ImportError::ResourceLimit(
+            "FIG working reservation limit".into(),
+        ));
+    }
+    let mut bytes = vec![0_u8; source_bytes];
+    reader
+        .read_exact(&mut bytes)
+        .map_err(|error| invalid(&error.to_string()))?;
+    let decoded = decode_fig(&bytes, options, working.saturating_sub(bytes.capacity()))?;
+    drop(bytes);
+    let mut missing = |_key: &str, _resources: &mut Vec<ImportedResource>| Ok(None);
+    let budget = Cell::new(working.saturating_sub(decoded.allocation));
+    let result = convert(
+        &decoded,
+        &mut missing,
+        &source_hash,
+        version,
+        options,
+        Some(&budget),
+    )?;
+    drop(decoded);
+    let (after, _, count) = source_identity(&mut reader, options, check)?;
+    if after != source_hash || count != source_bytes {
+        return Err(invalid("FIG source changed during import"));
+    }
+    Ok(result)
+}
+
+fn decode_fig(
+    binary: &[u8],
+    options: &ImportOptions,
+    working_bytes: usize,
+) -> Result<super::kiwi::Decoded, ImportError> {
     if binary.get(..8) != Some(b"fig-kiwi") || binary.len() < 12 {
         return Err(invalid("expected fig-kiwi header"));
     }
@@ -52,11 +255,26 @@ pub fn import_fig(bytes: &[u8], options: &ImportOptions) -> Result<ImportResult,
     let maximum = options
         .max_input_bytes
         .saturating_mul(4)
-        .min(512 * 1024 * 1024);
-    let schema = decompress(chunks[0], maximum)?;
-    let message = decompress(chunks[1], maximum.saturating_sub(schema.len()))?;
-    let decoded = super::kiwi::decode(&schema, &message, maximum)?;
-    convert(&decoded, &files, bytes, options)
+        .min(512 * 1024 * 1024)
+        .min(working_bytes);
+    let decoded = {
+        let schema = decompress(chunks[0], maximum)?;
+        let message = decompress(chunks[1], maximum.saturating_sub(schema.len()))?;
+        if working_bytes == usize::MAX {
+            // Preserve the existing byte API's independent decoded-allocation ceiling.
+            super::kiwi::decode(&schema, &message, maximum)?
+        } else {
+            let scratch = schema.capacity().saturating_add(message.capacity());
+            super::kiwi::decode_reserved(
+                &schema,
+                &message,
+                working_bytes.checked_sub(scratch).ok_or_else(|| {
+                    ImportError::ResourceLimit("FIG chunk reservation exceeded".into())
+                })?,
+            )?
+        }
+    };
+    Ok(decoded)
 }
 fn decompress(bytes: &[u8], maximum: usize) -> Result<Vec<u8>, ImportError> {
     let mut reader: Box<dyn Read + '_> = if bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
@@ -80,9 +298,11 @@ fn decompress(bytes: &[u8], maximum: usize) -> Result<Vec<u8>, ImportError> {
 
 fn convert(
     decoded: &super::kiwi::Decoded,
-    files: &BTreeMap<String, Vec<u8>>,
-    source_bytes: &[u8],
+    images: &mut ImageLookup<'_>,
+    source_hash: &str,
+    source_version: u32,
     options: &ImportOptions,
+    budget: Option<&Cell<usize>>,
 ) -> Result<ImportResult, ImportError> {
     let sources = decoded
         .root
@@ -101,6 +321,8 @@ fn convert(
         }
         let id = guid(source.get("guid").unwrap_or(&Value::Null))
             .ok_or_else(|| invalid("FIG node has no valid guid"))?;
+        // Account for the retained conversion indices as they are populated.
+        charge(budget, id.len() * 3 + 256)?;
         if source_nodes.insert(id.clone(), source).is_some() {
             return Err(invalid("duplicate FIG node guid"));
         }
@@ -110,6 +332,7 @@ fn convert(
             .and_then(|p| p.get("guid"))
             .and_then(guid)
         {
+            charge(budget, parent.len() + id.len() + 128)?;
             children.entry(parent).or_default().push(id);
         }
     }
@@ -158,12 +381,24 @@ fn convert(
             ("height".into(), json!(options.height)),
         ]);
         let root_id = root.id.clone();
+        charge(budget, node_bytes(&root) + root_id.len() + 64)?;
         result.content.nodes.insert(root_id.clone(), root);
         let mut page = Page::new(name, &root_id);
         page.rank = rank(index);
         result
             .source_map
             .insert(format!("fig:{canvas}"), root_id.clone());
+        charge(
+            budget,
+            std::mem::size_of::<Page>()
+                + page.id.len()
+                + page.title.len()
+                + page.root_node_id.len()
+                + page.rank.len()
+                + canvas.len()
+                + root_id.len()
+                + 68,
+        )?;
         result.content.pages.push(page);
         for (order, id) in children.get(canvas).into_iter().flatten().enumerate() {
             visit(
@@ -174,9 +409,10 @@ fn convert(
                 &ids,
                 &children,
                 decoded,
-                files,
+                images,
                 &mut result,
                 options,
+                budget,
                 &mut BTreeSet::new(),
                 0,
             )?;
@@ -189,17 +425,11 @@ fn convert(
     result
         .content
         .metadata
-        .insert("sourceSha256".into(), json!(digest(source_bytes)));
-    result.content.metadata.insert(
-        "figVersion".into(),
-        json!(u32::from_le_bytes(
-            source_bytes
-                .get(8..12)
-                .unwrap_or(&[0, 0, 0, 0])
-                .try_into()
-                .unwrap_or([0, 0, 0, 0])
-        )),
-    );
+        .insert("sourceSha256".into(), json!(source_hash));
+    result
+        .content
+        .metadata
+        .insert("figVersion".into(), json!(source_version));
     finish(result, options)
 }
 
@@ -212,9 +442,10 @@ fn visit(
     ids: &BTreeMap<String, String>,
     children: &BTreeMap<String, Vec<String>>,
     decoded: &super::kiwi::Decoded,
-    files: &BTreeMap<String, Vec<u8>>,
+    images: &mut ImageLookup<'_>,
     result: &mut ImportResult,
     options: &ImportOptions,
+    budget: Option<&Cell<usize>>,
     active: &mut BTreeSet<String>,
     depth: usize,
 ) -> Result<(), ImportError> {
@@ -224,6 +455,7 @@ fn visit(
     if result.content.nodes.len() >= options.max_nodes {
         return Err(ImportError::ResourceLimit("FIG node limit".into()));
     }
+    let diagnostic_start = result.diagnostics.len();
     let source = sources[id];
     let class = source
         .get("type")
@@ -309,7 +541,7 @@ fn visit(
     let fills = paints(
         source.get("fillPaints"),
         decoded,
-        files,
+        images,
         result,
         &node.id,
         gradient_size,
@@ -317,7 +549,7 @@ fn visit(
     let mut strokes = paints(
         source.get("strokePaints"),
         decoded,
-        files,
+        images,
         result,
         &node.id,
         gradient_size,
@@ -403,8 +635,10 @@ fn visit(
                 .insert("sourceTextStyles".into(), data.clone());
         }
     }
+    let mut path_reservation = 0usize;
     if kind == NodeKind::Path {
-        let mut paths = Vec::new();
+        let mut path = String::new();
+        let mut geometries_seen = 0usize;
         let geometries = source
             .get("fillGeometry")
             .and_then(Value::as_array)
@@ -426,7 +660,11 @@ fn visit(
                 .bytes(blob)
                 .or_else(|| blob.get("bytes").and_then(|v| decoded.bytes(v)))
                 .ok_or_else(|| invalid("FIG geometry bytes unavailable"))?;
-            paths.push(path_bytes(bytes)?);
+            if geometries_seen > 0 {
+                append_path_text(&mut path, " ", budget)?;
+            }
+            append_path_bytes(bytes, &mut path, budget)?;
+            geometries_seen += 1;
             if entry.get("windingRule").and_then(Value::as_str) == Some("ODD") {
                 node.properties.insert("fillRule".into(), json!("evenodd"));
             }
@@ -442,18 +680,21 @@ fn visit(
                 ));
             }
         }
-        if paths.is_empty() && class == "LINE" {
-            paths.push(format!("M0 0 L{width} {height}"));
+        if geometries_seen == 0 && class == "LINE" {
+            append_path_text(&mut path, &format!("M0 0 L{width} {height}"), budget)?;
+            geometries_seen += 1;
         }
-        if paths.is_empty() {
+        if geometries_seen == 0 {
             result.diagnostics.push(Diagnostic::unsupported(
                 Some(&node.id),
                 Some("fig-vector"),
                 "No supported vector command geometry",
             ));
         }
-        node.properties
-            .insert("path".into(), json!(paths.join(" ")));
+        if budget.is_some() {
+            path_reservation = path.capacity();
+        }
+        node.properties.insert("path".into(), Value::String(path));
     }
     if kind == NodeKind::Instance {
         let definition = source
@@ -534,6 +775,22 @@ fn visit(
         "extensions".into(),
         json!({"omc.source":{"format":"fig","id":id,"class":class}}),
     );
+    charge(
+        budget,
+        node_bytes(&node).saturating_sub(path_reservation) + id.len() + node.id.len() * 2 + 132,
+    )?;
+    for diagnostic in &result.diagnostics[diagnostic_start..] {
+        charge(
+            budget,
+            std::mem::size_of::<Diagnostic>()
+                + diagnostic.code.len()
+                + diagnostic.severity.len()
+                + diagnostic.node_id.as_ref().map_or(0, String::len)
+                + diagnostic.property.as_ref().map_or(0, String::len)
+                + diagnostic.original.len()
+                + diagnostic.action.len(),
+        )?;
+    }
     let target = node.id.clone();
     result
         .source_map
@@ -550,9 +807,10 @@ fn visit(
                 ids,
                 children,
                 decoded,
-                files,
+                images,
                 result,
                 options,
+                budget,
                 active,
                 depth + 1,
             )?;
@@ -561,10 +819,47 @@ fn visit(
     active.remove(id);
     Ok(())
 }
+// Logical retained-allocation accounting, matching the decoder reservation model.
+// This guards materialized output as well as decoded input; it is not a process RSS cap.
+fn charge(budget: Option<&Cell<usize>>, bytes: usize) -> Result<(), ImportError> {
+    if let Some(budget) = budget {
+        budget.set(budget.get().checked_sub(bytes).ok_or_else(|| {
+            ImportError::ResourceLimit("FIG conversion reservation exceeded".into())
+        })?);
+    }
+    Ok(())
+}
+fn value_bytes(value: &Value) -> usize {
+    match value {
+        Value::String(text) => text.capacity(),
+        Value::Array(values) => {
+            values.capacity() * std::mem::size_of::<Value>()
+                + values.iter().map(value_bytes).sum::<usize>()
+        }
+        Value::Object(values) => values
+            .iter()
+            .map(|(key, value)| key.capacity() + 64 + value_bytes(value))
+            .sum(),
+        _ => 0,
+    }
+}
+fn node_bytes(node: &Node) -> usize {
+    std::mem::size_of::<Node>()
+        + node.id.capacity()
+        + node.parent_id.as_ref().map_or(0, String::capacity)
+        + node.rank.capacity()
+        + node.home_shard.capacity()
+        + node
+            .properties
+            .iter()
+            .map(|(key, value)| key.capacity() + 64 + value_bytes(value))
+            .sum::<usize>()
+}
+
 fn paints(
     values: Option<&Value>,
     decoded: &super::kiwi::Decoded,
-    files: &BTreeMap<String, Vec<u8>>,
+    images: &mut ImageLookup<'_>,
     result: &mut ImportResult,
     id: &str,
     gradient_size: Option<(f64, f64)>,
@@ -589,25 +884,7 @@ fn paints(
                 let key = source.as_str().map(str::to_owned)
                     .or_else(|| decoded.bytes(source).map(|bytes| bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>()))
                     .ok_or_else(|| invalid("FIG image hash encoding"))?;
-                if let Some(bytes) = files.get(&format!("images/{key}")) {
-                    let media = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-                        "image/png"
-                    } else if bytes.starts_with(b"\xff\xd8\xff") {
-                        "image/jpeg"
-                    } else if bytes.starts_with(b"GIF") {
-                        "image/gif"
-                    } else if bytes.starts_with(b"RIFF") {
-                        "image/webp"
-                    } else {
-                        return Err(ImportError::Unsupported("FIG image encoding".into()));
-                    };
-                    let resource = resource(&format!(
-                        "data:{media};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)
-                    ))?;
-                    let hash = resource.hash.clone();
-                    if !result.resources.iter().any(|asset| asset.hash == hash) {
-                        result.resources.push(resource);
-                    }
+                if let Some(hash) = images(&key, &mut result.resources)? {
                     output.push(json!({"type":"image","image":{"hash":hash},"opacity":opacity}));
                 } else {
                     result.diagnostics.push(Diagnostic::unsupported(Some(id), Some("fig-image"), &key));
@@ -636,6 +913,89 @@ fn paints(
         }
     }
     Ok(output)
+}
+
+fn image_identity(bytes: &[u8]) -> Result<(String, &'static str), ImportError> {
+    let media_type = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        "image/jpeg"
+    } else if bytes.starts_with(b"GIF") {
+        "image/gif"
+    } else if bytes.starts_with(b"RIFF") {
+        "image/webp"
+    } else {
+        return Err(ImportError::Unsupported("FIG image encoding".into()));
+    };
+    // Preserve the existing data-URI byte ceiling without allocating encoded intermediates.
+    if bytes.len().div_ceil(3).saturating_mul(4) > 64 * 1024 * 1024 {
+        return Err(ImportError::ResourceLimit("inline resource limit".into()));
+    }
+    let valid = match media_type {
+        "image/gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+        "image/webp" => bytes.get(8..12) == Some(b"WEBP"),
+        _ => true,
+    };
+    if !valid {
+        return Err(invalid("declared image type does not match its signature"));
+    }
+    Ok((digest(bytes), media_type))
+}
+
+fn image_resource(
+    bytes: &[u8],
+    resources: &mut Vec<ImportedResource>,
+) -> Result<String, ImportError> {
+    let (hash, media_type) = image_identity(bytes)?;
+    if !resources.iter().any(|resource| resource.hash == hash) {
+        resources.push(ImportedResource {
+            hash: hash.clone(),
+            media_type: media_type.into(),
+            bytes: bytes.to_vec(),
+        });
+    }
+    Ok(hash)
+}
+
+#[cfg(test)]
+mod image_resource_tests {
+    use super::*;
+
+    #[test]
+    fn image_resource_matches_inline_import_and_keeps_one_copy() {
+        for (bytes, media) in [
+            (b"\x89PNG\r\n\x1a\n".as_slice(), "image/png"),
+            (b"\xff\xd8\xff".as_slice(), "image/jpeg"),
+            (b"GIF89a".as_slice(), "image/gif"),
+            (b"RIFF\x04\x00\x00\x00WEBP".as_slice(), "image/webp"),
+        ] {
+            let inline = resource(&format!(
+                "data:{media};base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            ))
+            .unwrap();
+            let mut resources = Vec::new();
+            assert_eq!(image_resource(bytes, &mut resources).unwrap(), inline.hash);
+            let allocation = resources[0].bytes.as_ptr();
+            assert_eq!(image_resource(bytes, &mut resources).unwrap(), inline.hash);
+            assert_eq!(resources.len(), 1);
+            assert_eq!(resources[0].bytes.as_ptr(), allocation);
+            assert_eq!(resources[0].bytes, inline.bytes);
+            assert_eq!(resources[0].media_type, inline.media_type);
+        }
+    }
+
+    #[test]
+    fn image_resource_rejects_invalid_signatures_before_retaining_bytes() {
+        let mut resources = Vec::new();
+        for bytes in [b"GIFxxx".as_slice(), b"RIFF\0\0\0\0JPEG".as_slice()] {
+            assert!(matches!(
+                image_resource(bytes, &mut resources),
+                Err(ImportError::Invalid(_))
+            ));
+            assert!(resources.is_empty());
+        }
+    }
 }
 
 fn gradient(
@@ -796,9 +1156,48 @@ fn rgba(value: &Value) -> Result<String, ImportError> {
 fn invalid(message: &str) -> ImportError {
     ImportError::Invalid(message.into())
 }
+#[cfg(test)]
 fn path_bytes(bytes: &[u8]) -> Result<String, ImportError> {
-    let mut at = 0;
     let mut result = String::new();
+    append_path_bytes(bytes, &mut result, None)?;
+    Ok(result)
+}
+
+fn append_path_text(
+    result: &mut String,
+    text: &str,
+    budget: Option<&Cell<usize>>,
+) -> Result<(), ImportError> {
+    let length = result
+        .len()
+        .checked_add(text.len())
+        .ok_or_else(|| ImportError::ResourceLimit("FIG path allocation overflow".into()))?;
+    if length > result.capacity() {
+        let available = budget.map_or(usize::MAX, Cell::get);
+        let maximum = result.capacity().saturating_add(available);
+        let capacity = result.capacity().saturating_mul(2).max(length).min(maximum);
+        if capacity < length {
+            return Err(ImportError::ResourceLimit(
+                "FIG path reservation exceeded".into(),
+            ));
+        }
+        charge(budget, capacity - result.capacity())?;
+        result
+            .try_reserve_exact(capacity - result.len())
+            .map_err(|_| ImportError::ResourceLimit("FIG path allocation failed".into()))?;
+        // Allocators may round a requested allocation upward.
+        charge(budget, result.capacity().saturating_sub(capacity))?;
+    }
+    result.push_str(text);
+    Ok(())
+}
+
+fn append_path_bytes(
+    bytes: &[u8],
+    result: &mut String,
+    budget: Option<&Cell<usize>>,
+) -> Result<(), ImportError> {
+    let mut at = 0;
     let mut count = 0;
     while at < bytes.len() {
         count += 1;
@@ -808,17 +1207,17 @@ fn path_bytes(bytes: &[u8]) -> Result<String, ImportError> {
         let opcode = bytes[at];
         at += 1;
         let (command, numbers) = match opcode {
-            0 => ('Z', 0),
-            1 => ('M', 2),
-            2 => ('L', 2),
-            4 => ('C', 6),
+            0 => ("Z", 0),
+            1 => ("M", 2),
+            2 => ("L", 2),
+            4 => ("C", 6),
             _ => {
                 return Err(ImportError::Unsupported(format!(
                     "FIG path opcode {opcode}"
                 )));
             }
         };
-        result.push(command);
+        append_path_text(result, command, budget)?;
         for _ in 0..numbers {
             let value = f32::from_le_bytes(
                 bytes
@@ -831,15 +1230,30 @@ fn path_bytes(bytes: &[u8]) -> Result<String, ImportError> {
                 return Err(invalid("nonfinite FIG path"));
             }
             at += 4;
-            result.push_str(&format!("{value} "));
+            append_path_text(result, &format!("{value} "), budget)?;
         }
     }
-    Ok(result)
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn repeated_geometry_stops_at_the_shared_output_reservation() {
+        let mut bytes = vec![4];
+        for _ in 0..6 {
+            bytes.extend(f32::MAX.to_le_bytes());
+        }
+        let budget = Cell::new(1024);
+        let mut path = String::new();
+        let error = (0..1000)
+            .try_for_each(|_| append_path_bytes(&bytes, &mut path, Some(&budget)))
+            .unwrap_err();
+        assert!(matches!(error, ImportError::ResourceLimit(_)));
+        assert!(path.capacity() <= 1024);
+        assert_eq!(path.capacity() + budget.get(), 1024);
+    }
     #[test]
     fn cubic_blob_preserves_control_points_and_rejects_truncation() {
         let mut bytes = vec![1];

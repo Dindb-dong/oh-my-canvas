@@ -6,7 +6,7 @@ mod kiwi;
 mod native;
 mod sketch;
 mod svg;
-pub use fig::import_fig;
+pub use fig::{import_fig, import_fig_reader};
 pub use html::import_html;
 pub use native::import_json;
 pub use sketch::import_sketch;
