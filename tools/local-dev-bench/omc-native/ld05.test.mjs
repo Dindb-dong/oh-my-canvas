@@ -25,6 +25,11 @@ test('all three browser/source cycles preserve the same card component and regis
       const manifest = command('patch','--cycle',String(cycle));
       const before = await sourceProbe(root,fixture,manifest,cycle,item.source_state);
       assert.equal(before.states.length,3);
+      for (const state of before.states) {
+        assert.deepEqual([state.controlName,state.beforePress,state.statusVisible],
+          [item.source_state.check_control_name,item.source_state.keyboard_before,true]);
+        if (cycle>=2) assert.equal(state.form.fieldName,item.source_state.field_name);
+      }
       const {result} = item;
       const values = cycle===1
         ? {gap:result.gap+'px',radius:result.radius+'px',heading_size:result.heading_size+'px'}

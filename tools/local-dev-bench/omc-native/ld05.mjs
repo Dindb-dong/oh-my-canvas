@@ -50,7 +50,10 @@ export async function sourceProbe(root, fixture, manifest, cycle, target, export
       await control.waitFor();
       const status = page.locator('#state');
       assert.equal(await status.getAttribute('role'), 'status');
-      assert.equal(await status.innerText(), target.keyboard_before);
+      const [controlName,beforePress,statusVisible] = await Promise.all([control.innerText(),status.innerText(),status.isVisible()]);
+      assert.equal(controlName,target.check_control_name);
+      assert.equal(beforePress, target.keyboard_before);
+      assert.ok(statusVisible);
       await control.press('Space');
       const afterPress = await status.innerText();
       assert.equal(afterPress, target.keyboard_after);
@@ -81,12 +84,14 @@ export async function sourceProbe(root, fixture, manifest, cycle, target, export
         await field.press('Enter');
         const saved = await page.locator('#saved').innerText();
         assert.equal(saved, target.valid_result + ': ' + target.submitted_value);
-        assert.equal(await field.inputValue(), target.submitted_value);
+        const retainedValue = await field.inputValue();
+        assert.equal(retainedValue, target.submitted_value);
         // Capture the source-visible validation state for the editable refresh.
         await field.fill('');
         await submit.press('Enter');
         assert.equal(await error.innerText(), target.invalid_result);
-        form = {invalid, saved, retainedValue: target.submitted_value};
+        form = {invalid, saved, retainedValue,
+          fieldName:await page.locator('label[for="fixture-value"]').innerText()};
       }
       let conditional;
       if (cycle === 3) {
@@ -121,7 +126,7 @@ export async function sourceProbe(root, fixture, manifest, cycle, target, export
         if (width === fixture.widths.at(-1)) assert.equal(styles.rowCount, 1);
       }
       assert.deepEqual(errors, []);
-      states.push({width, cards, afterPress, form, conditional, styles});
+      states.push({width, cards, controlName, beforePress, statusVisible, afterPress, form, conditional, styles});
       evaluatedHtml ??= await page.content();
 
       if (exportedHtml && staticBehavior === undefined) {

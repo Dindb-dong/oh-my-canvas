@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import test from 'node:test';
-import {awaitNativeReopen} from './ld05-run.mjs';
+import {awaitNativeReopen,normalizeNativeCycle,normalizeSourceCycle} from './ld05-run.mjs';
 import {publishCandidate} from '../publish-candidate.mjs';
 
 // These temp-directory receipts model the root observer and never enter live evidence.
@@ -66,4 +66,30 @@ test('an absent UI receipt expires within the existing deadline and preserves th
     assert.ok(performance.now()-deadline<150);
     assert.equal(JSON.parse(await readFile(join(output,'cycle-1-await-editor-reopen.json'),'utf8')).cycle,1);
   } finally {await rm(output,{recursive:true,force:true});}
+});
+
+test('cycle results are assembled from actual canvas and source observations and reject missing proof',()=>{
+  const expected={check_control_name:'Toggle',keyboard_before:'Off',keyboard_after:'On',component:'Card',
+    status_visible:true,cards:['One','Two'],asset:'one.png',gap:20,radius:14,heading_size:24};
+  const assets={'one.png':Buffer.from([137,80,78,71,1,2,3,4,5]),'two.png':Buffer.from([137,80,78,71,5,4,3,2,1])};
+  const labels={title:'Board',check_control_name:'Toggle',keyboard_before:'Off',keyboard_after:'On',component:'Card'};
+  const observed={labels,gap:20,direction:'VERTICAL',cards:['One','Two'].map(title=>({title,detail:'Detail',
+    variant:'standard',radius:14,headingSize:24,accent:'#253357',imageBytes:[...assets['one.png']]}))};
+  assert.deepEqual(normalizeNativeCycle(expected,observed,assets),expected);
+  assert.throws(()=>normalizeNativeCycle(expected,{...observed,gap:8},assets),/semantics differ/);
+  assert.throws(()=>normalizeNativeCycle(expected,{...observed,labels:{...labels,keyboard_after:undefined}},assets),/Missing observed/);
+  assert.throws(()=>normalizeNativeCycle(expected,{...observed,cards:observed.cards.map(card=>({...card,imageBytes:undefined}))},assets),/asset bytes/);
+  const fixture={title:'Board',widths:[360,768,1200]};
+  const browser={evaluatedHtml:'<h1>Board</h1>',states:fixture.widths.map(width=>({width,controlName:'Toggle',
+    beforePress:'Off',statusVisible:true,afterPress:'On',
+    cards:observed.cards.map(card=>({label:card.title,detail:card.detail,variant:card.variant,
+      src:'./assets/one.png',loaded:true})),styles:{gap:'20px',radius:'14px',heading:'24px',wrap:'nowrap',
+      accent:'rgb(37, 51, 87)',variantBorder:'rgba(0, 0, 0, 0)'}}))};
+  assert.deepEqual(normalizeSourceCycle(fixture,expected,browser,assets),expected);
+  const changed=structuredClone(browser);
+  changed.states[0].styles.gap='8px';
+  assert.throws(()=>normalizeSourceCycle(fixture,expected,changed,assets),/semantics differ/);
+  const missing=structuredClone(browser);
+  delete missing.states[0].beforePress;
+  assert.throws(()=>normalizeSourceCycle(fixture,expected,missing,assets),/actual initial source status/);
 });

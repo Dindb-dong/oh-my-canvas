@@ -76,7 +76,7 @@ test('browser-observed refresh and independent native readback preserve real sou
   const fixture={title:'Source board',widths:[360,768,1200]};
   const wanted={cards:['One','Two'],keyboard_before:'Idle',keyboard_after:'Done',component:'Card',check_control_name:'Toggle'};
   const state={cards:wanted.cards.map(label=>({label,detail:'Body',variant:'standard',src:'./assets/first.png',loaded:true})),
-    afterPress:'Done',styles:{gap:'12px',radius:'6px',heading:'20px',wrap:'nowrap',accent:'rgb(37, 51, 87)',
+    controlName:'Toggle',beforePress:'Idle',statusVisible:true,afterPress:'Done',styles:{gap:'12px',radius:'6px',heading:'20px',wrap:'nowrap',accent:'rgb(37, 51, 87)',
       variantBorder:'rgba(0, 0, 0, 0)'}};
   const assets={'first.png':Buffer.from(rawPng)};
   const source=projectSource(fixture,wanted,{evaluatedHtml:'<h1>Source board</h1>',states:

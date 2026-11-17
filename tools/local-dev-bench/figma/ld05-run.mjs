@@ -14,7 +14,7 @@ import {publishCandidate} from '../publish-candidate.mjs';
 const bench = fileURLToPath(new URL('..',import.meta.url));
 const sha = bytes=>createHash('sha256').update(bytes).digest('hex');
 
-function inheritedDeadline() {
+export function inheritedDeadline() {
   const deadline = process.env.OMC_BENCH_DEADLINE_NS;
   assert.match(deadline ?? '', /^\d+$/, 'Native reopen requires the attempt runner deadline');
   const began = performance.now();
@@ -72,22 +72,28 @@ const px = value => {
 
 export function projectSource(fixture,wanted,browser,assets) {
   assert.deepEqual(browser.states.map(row=>row.width),fixture.widths);
-  const [{cards,afterPress,form,conditional,styles}] = browser.states;
+  const [{cards,controlName,beforePress,statusVisible,afterPress,form,conditional,styles}] = browser.states;
   assert.deepEqual(cards.map(card=>card.label),wanted.cards);
+  assert.equal(controlName,wanted.check_control_name,'Missing actual source control name');
+  assert.equal(beforePress,wanted.keyboard_before,'Missing actual initial source status');
+  assert.equal(statusVisible,true,'Missing visible source status');
   assert.equal(afterPress,wanted.keyboard_after);
+  assert.ok(browser.states.every(state=>state.controlName===controlName && state.beforePress===beforePress && state.statusVisible),
+    'Source control observations differ across widths');
   assert.ok(browser.evaluatedHtml.includes('<h1>'+fixture.title+'</h1>'));
-  const labels = {title:fixture.title, check_control_name:wanted.check_control_name,
-    keyboard_before:wanted.keyboard_before, keyboard_after:afterPress, component:wanted.component};
+  const labels = {title:fixture.title, check_control_name:controlName,
+    keyboard_before:beforePress, keyboard_after:afterPress, component:wanted.component};
   if (form) {
     assert.equal(form.saved,wanted.valid_result+': '+form.retainedValue);
-    Object.assign(labels,{field_name:wanted.field_name,invalid_result:form.invalid.message,
-      submitted_value:form.retainedValue,valid_result:wanted.valid_result});
+    assert.equal(form.fieldName,wanted.field_name);
+    Object.assign(labels,{field_name:form.fieldName,invalid_result:form.invalid.message,
+      submitted_value:form.retainedValue,valid_result:form.saved.slice(0,-form.retainedValue.length-2)});
   }
   if (conditional) {
     assert.deepEqual(conditional,{keyboardShows:true,keyboardHides:true});
     labels.conditional='Show extra item';
   }
-  return {labels,cards:cards.map(card=>{
+  return {labels,statusVisible,cards:cards.map(card=>{
     const image=card.src.match(/^\.\/assets\/([a-z-]+\.png)$/)?.[1];
     assert.ok(image && assets[image] && card.loaded);
     return {title:card.label,detail:card.detail,variant:card.variant,image};
@@ -114,6 +120,53 @@ export function verifyProjection(scope,observed,source,assets) {
     assert.equal(sha(Buffer.from(row.imageBytes)),sha(assets[card.image]),'Native source asset differs');
     if (source.wrap) assert.equal(row.flexBasis,224);
   }
+}
+
+function cycleSemantics(expected,observed) {
+  const {title,conditional,...labels}=observed.labels;
+  for (const name of ['check_control_name','keyboard_before','keyboard_after','component']) {
+    assert.ok(typeof labels[name]==='string' && labels[name].length>0, 'Missing observed '+name);
+  }
+  const value={...labels,status_visible:observed.statusVisible,cards:observed.cards.map(card=>card.title),
+    asset:observed.cards.at(-1).image};
+  if (Object.hasOwn(expected,'gap')) Object.assign(value,
+    {gap:observed.gap,radius:observed.cards[0].radius,heading_size:observed.cards[0].headingSize});
+  const matchCase=(color,reference)=>reference===reference.toUpperCase()?color.toUpperCase():color.toLowerCase();
+  if (Object.hasOwn(expected,'wrap')) Object.assign(value,
+    {wrap:observed.wrap,accent:matchCase(observed.cards[0].accent,expected.accent)});
+  if (Object.hasOwn(expected,'variant')) {
+    const card=observed.cards.at(-1);
+    Object.assign(value,{variant:card.variant,copy:card.detail,
+      variant_border:matchCase(card.border,expected.variant_border)});
+  }
+  assert.deepEqual(value,expected,'Observed canvas/source semantics differ from the registered cycle');
+  return value;
+}
+
+export function normalizeNativeCycle(expected,observed,assets) {
+  assert.ok(observed.cards.length>0);
+  const cards=observed.cards.map(card=>{
+    assert.ok(card.radius===observed.cards[0].radius && card.headingSize===observed.cards[0].headingSize &&
+      card.accent===observed.cards[0].accent,'Card styles diverged within the observed canvas');
+    assert.ok(Array.isArray(card.imageBytes) && card.imageBytes.every(byte=>Number.isInteger(byte)&&byte>=0&&byte<=255),
+      'Missing observed original asset bytes');
+    const digest=sha(Buffer.from(card.imageBytes));
+    const names=Object.entries(assets).filter(([,bytes])=>sha(bytes)===digest).map(([name])=>name);
+    assert.equal(names.length,1,'Native original does not identify exactly one registered asset');
+    return {...card,image:names[0]};
+  });
+  if (expected.wrap) {
+    assert.equal(observed.direction,'HORIZONTAL');
+    assert.ok(cards.every(card=>card.flexBasis===224),'Native wrapping basis differs');
+  }
+  return cycleSemantics(expected,{...observed,cards,statusVisible:Object.hasOwn(observed.labels,'keyboard_before'),
+    wrap:observed.direction==='HORIZONTAL'&&observed.wrap==='WRAP'});
+}
+
+export function normalizeSourceCycle(fixture,expected,browser,assets) {
+  const source=projectSource(fixture,expected,browser,assets);
+  return cycleSemantics(expected,{...source,cards:source.cards.map(card=>({...card,radius:source.radius,
+    headingSize:source.headingSize,accent:source.accent,border:source.variantBorder}))});
 }
 
 const resultOf = response=>{
@@ -186,11 +239,13 @@ export async function runFigmaLD05(family,atlasScope,output,candidate,{nativeReo
         const plan=planLD05NativeCycle({fileKey,sessionId,scope,cycle,changes});
         const refreshed=await call(observe,'refresh-read',plan.read);
         verifyProjection(scope,refreshed,source,assets);
+        const refreshedState=normalizeNativeCycle(rules.source_state,refreshed,assets);
         await call(write,'edit',plan.edit);
         const lifecycle = nativeReopen ? await awaitNativeReopen({output,runId,cycle,fileKey,pageId:scope.page,
           writtenAt:new Date().toISOString(),deadline}) : null;
         const reobserved=await call(observe,'persisted-read',plan.read);
         assert.deepEqual(reobserved.labels,source.labels);
+        const persistedState=normalizeNativeCycle(rules.result,reobserved,assets);
         const [css,data]=await Promise.all(['theme.css','data.mjs'].map(name=>readFile(join(sourceDir,name),'utf8')));
         const merged=await mergeLD05NativeHandoff({fixture,scope,cycle,reobserved,css,data,
           assetSha256:sha(assets[rules.result.asset])});
@@ -211,12 +266,13 @@ export async function runFigmaLD05(family,atlasScope,output,candidate,{nativeReo
         }
         const reproduced=await sourceProbe(clean,fixture,manifest,cycle,rules.result);
         await save(prefix+'browser-clean.json',reproduced.states);
+        const sourceState=normalizeSourceCycle(fixture,rules.result,reproduced,assets);
         const result={source_parent_sha256:previous.source_sha256,source_patch_sha256:patched.source_sha256,
           result_checkout_sha256:manifest.source_sha256,source_patch_commit:sourceCommit,result_commit:resultCommit,
-          refreshed_canvas:rules.source_state,persisted_canvas:rules.result,source_result:rules.result,
+          refreshed_canvas:refreshedState,persisted_canvas:persistedState,source_result:sourceState,
           checked_widths:reproduced.states.map(row=>row.width),canvas_editable:true,clean_build:true,
           behavior_tests_passed:true,component_reused:true,no_missing_assets:true,
-          ...(lifecycle ? {normal_editor_reopen:'OBSERVED',editor_lifecycle:lifecycle,reopened_canvas:rules.result} :
+          ...(lifecycle ? {normal_editor_reopen:'OBSERVED',editor_lifecycle:lifecycle,reopened_canvas:persistedState} :
             {normal_editor_reopen:'NOT_OBSERVED'})};
         evidence.cycles.push(result);
         await save(prefix+'result.json',result);
