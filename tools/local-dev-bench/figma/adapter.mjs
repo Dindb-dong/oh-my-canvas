@@ -23,6 +23,14 @@ function verifyFixture(fixture) {
   assert.ok(['LD01', 'LD03'].includes(fixture.workload), 'Expected LD01 or LD03');
 }
 
+const nativeStyleName = key => key.replaceAll('.', '/');
+
+function logicalStyleKeys(styles) {
+  const names = new Map(styles.map(({ key }) => [nativeStyleName(key), key]));
+  assert.equal(names.size, styles.length, 'Figma variable names collide');
+  return names;
+}
+
 function plannedNodes(workload, start) {
   const byKey = new Map(start.nodes.map(node => [node.key, node]));
   const children = new Map();
@@ -61,6 +69,7 @@ export function makePlan(fixture, original, copy, assetsDir) {
   }
   assert.notEqual(original, copy, 'Verification edits must target a separate copy');
   const initial = fixture.workload === 'LD01' ? fixture.expected : fixture.start;
+  for (const state of [initial, fixture.expected, fixture.probe]) logicalStyleKeys(state.styles);
   const assets = fixture.assets.map(asset => {
     assert.ok(assetsDir && /^[a-zA-Z0-9_.-]+\.png$/.test(asset.name), 'Provide the generated fixture asset directory');
     const bytes = readFileSync(join(assetsDir, asset.name));
@@ -70,10 +79,12 @@ export function makePlan(fixture, original, copy, assetsDir) {
   const images = new Map(assets.map(({ asset, base64 }) => [asset.rgba_sha256, base64]));
   const styles = fixture.workload === 'LD03' ? fixture.expected.styles.filter((style, index) =>
     style.value !== initial.styles[index].value) : [];
+  const mutation = action => action.op === 'set_style' ? { ...action, name: nativeStyleName(action.key) } : action;
   const candidate = payload(`Create named editable ${fixture.workload} fixture layers`, seed,
-    { fileKey: original, nodes: plannedNodes(fixture.workload, initial), styles: initial.styles, images: [...images] }, true);
+    { fileKey: original, nodes: plannedNodes(fixture.workload, initial),
+      styles: initial.styles.map(style => ({ ...style, name: nativeStyleName(style.key) })), images: [...images] }, true);
   const commit = styles.length ? payload('Update the existing shared accent and spacing variables', mutate,
-    { fileKey: original, actions: styles.map(({ key, value }) => ({ op: 'set_style', key, value })) }, true) : null;
+    { fileKey: original, actions: styles.map(({ key, value }) => mutation({ op: 'set_style', key, value })) }, true) : null;
 
   const capture = (fileKey, state) => ({
     header: payload('Read Figma identity, actual layer count and shared variable values', inspect, { fileKey, styles: true }),
@@ -94,7 +105,7 @@ export function makePlan(fixture, original, copy, assetsDir) {
     setup: fixture.workload === 'LD03' ? candidate : null,
     candidate: commit ?? candidate,
     probe: copy ? payload('Apply registered independent verification edits to the disposable Figma copy', mutate,
-      { fileKey: copy, actions: fixture.probe_actions }, true) : null,
+      { fileKey: copy, actions: fixture.probe_actions.map(mutation) }, true) : null,
     captures: {
       before: capture(original, fixture.start),
       candidate: capture(original, fixture.expected),
@@ -122,7 +133,7 @@ function concat(parts, field) {
   return ordered.flatMap(part => part[field]);
 }
 
-function normalizeSnapshot(raw, assets) {
+function normalizeSnapshot(raw, assets, keys) {
   const { document_id, page_id, node_count, styles } = decode(raw.header);
   assert.equal(typeof document_id, 'string', 'Missing Figma file identity');
   assert.equal(typeof page_id, 'string', 'Missing Figma page identity');
@@ -148,22 +159,24 @@ function normalizeSnapshot(raw, assets) {
     assert.ok(match, `Stored image bytes do not match a fixture PNG for ${row.key}`);
     row.asset_rgba_sha256 = match.rgba_sha256;
   }
-  return { document_id, nodes, styles };
+  return { document_id, nodes, styles: styles.map(style => ({ ...style, key: keys.get(style.key) ?? style.key })) };
 }
 
 export function normalizeEvidence(fixture, raw) {
   verifyFixture(fixture);
   const phases = ['before', 'candidate', 'reopened', 'probe', 'after_probe_original'];
-  const evidence = Object.fromEntries(phases.map(phase => [phase, normalizeSnapshot(raw[phase], fixture.assets)]));
+  const keys = logicalStyleKeys(fixture.expected.styles);
+  const evidence = Object.fromEntries(phases.map(phase => [phase, normalizeSnapshot(raw[phase], fixture.assets, keys)]));
   const probe = decode(raw.probe_actions);
   assert.equal(probe.document_id, evidence.probe.document_id, 'Probe actions targeted a different file');
   assert.equal(probe.actions.length, probe.mutatedNativeIds.length, 'Missing observed mutation IDs');
-  for (const [index, action] of probe.actions.entries()) {
+  const actions = probe.actions.map(action => action.op === 'set_style' ? { ...action, key: keys.get(action.key) ?? action.key } : action);
+  for (const [index, action] of actions.entries()) {
     const rows = action.op === 'set_style' ? evidence.probe.styles : evidence.probe.nodes;
     assert.equal(rows.find(row => row.key === action.key)?.native_id, probe.mutatedNativeIds[index],
       'Probe action targeted a different object');
   }
-  return { ...evidence, probe_actions: probe.actions };
+  return { ...evidence, probe_actions: actions };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

@@ -111,7 +111,7 @@ export async function seed(figma, input) {
     const collection = figma.variables.createVariableCollection('Synthetic LD03 values');
     for (const style of input.styles) {
       const color = style.kind === 'color';
-      const variable = figma.variables.createVariable(style.key, collection, color ? 'COLOR' : 'FLOAT');
+      const variable = figma.variables.createVariable(style.name, collection, color ? 'COLOR' : 'FLOAT');
       variable.setValueForMode(collection.defaultModeId, color ? rgb(style.value) : style.value);
       variables.set(style.key, variable);
     }
@@ -174,7 +174,7 @@ export async function mutate(figma, input) {
   const changes = [];
   for (const action of input.actions) {
     if (action.op === 'set_style') {
-      const matches = variables.filter(variable => variable.name === action.key);
+      const matches = variables.filter(variable => variable.name === action.name);
       const [variable] = matches;
       if (matches.length !== 1 || (typeof action.value === 'string' ? 'COLOR' : 'FLOAT') !== variable.resolvedType) {
         throw new Error('Expected one shared variable of the prescribed type');

@@ -50,6 +50,7 @@ function mockFigma(fileKey) {
         return item;
       },
       createVariable(name, collection, resolvedType) {
+        assert.doesNotMatch(name, /\./, 'Figma variable names reject periods');
         const item = { name, id: id(), resolvedType, variableCollectionId: collection.id, valuesByMode: {},
           setValueForMode(mode, value) { this.valuesByMode[mode] = value; } };
         variables.push(item);
@@ -126,6 +127,12 @@ for (const [workload, variant] of [
       const fixture = JSON.parse(result.stdout);
       const plan = makePlan(fixture, 'original', 'copy', assets);
       assert.throws(() => makePlan(fixture, 'original', 'original', assets), /separate copy/);
+      if (workload === 'LD03') {
+        const colliding = structuredClone(fixture);
+        const style = colliding.start.styles[0];
+        colliding.start.styles.push({ ...style, key: style.key.replaceAll('.', '/') });
+        assert.throws(() => makePlan(colliding, 'original', 'copy', assets), /variable names collide/);
+      }
       const original = mockFigma('original');
       const copy = mockFigma('copy');
       if (plan.setup) await run(original, plan.setup);
