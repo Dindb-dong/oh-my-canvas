@@ -12,6 +12,7 @@ import {parseArgs} from 'node:util';
 import {makeFixture, targetNodeName} from './fixture.mjs';
 import {historySchedule, measureHistory} from './history.mjs';
 import {collectDesktopTrace, measureRendering} from './rendering.mjs';
+import {contentionSchedule, measureContention} from './contention.mjs';
 
 const {values} = parseArgs({options: {
   experiment: {type: 'string'},
@@ -22,17 +23,21 @@ const {values} = parseArgs({options: {
   'css-rules': {type: 'string', default: '0'},
   'history-edits': {type: 'string'},
   'history-shape': {type: 'string'},
+  'ui-docs': {type: 'string'},
+  'background-streams': {type: 'string'},
   'fixture-only': {type: 'boolean', default: false},
 }});
 const {experiment} = values;
 const isHistory = experiment === 'N-C';
 const isRendering = experiment === 'N-D';
-const desktop = values.desktop ?? (isRendering ? 'attached' : 'headless');
-const nodeCount = Number(values.nodes ?? (isHistory ? 17 : isRendering ? 1000 : NaN));
+const isContention = ['N-E', 'LD08'].includes(experiment);
+const desktop = values.desktop ?? (isRendering || isContention ? 'attached' : 'headless');
+const nodeCount = Number(values.nodes ?? (isHistory ? 17 : isRendering || isContention ? 1000 : NaN));
 const depth = Number(values.depth);
 const sampleCount = Number(values.samples);
 const cssRules = Number(values['css-rules']);
-assert.ok(['N-A', 'N-B', 'N-C', 'N-D'].includes(experiment), '--experiment must be N-A, N-B, N-C or N-D');
+assert.ok(['N-A', 'N-B', 'N-C', 'N-D', 'N-E', 'LD08'].includes(experiment),
+  '--experiment must be N-A, N-B, N-C, N-D, N-E or LD08');
 assert.ok(isHistory ? nodeCount === 17 : [1000, 10000, 100000].includes(nodeCount) || (experiment === 'N-B' && nodeCount === 100),
   '--nodes must be 1000, 10000, 100000, 100 for the N-B baseline, or 17 for N-C');
 assert.ok([1, 32].includes(depth), '--depth must be 1 or 32');
@@ -44,13 +49,21 @@ assert.ok(isHistory || (values['history-edits'] === undefined && values['history
   '--history-edits and --history-shape are specific to N-C');
 assert.ok(!isHistory || (depth === 1 && desktop === 'headless'), 'N-C uses a fixed headless fixture at depth 1');
 assert.ok(!isRendering || desktop === 'attached', 'N-D requires the isolated background desktop');
+assert.ok(isContention || (values['ui-docs'] === undefined && values['background-streams'] === undefined),
+  '--ui-docs and --background-streams are specific to N-E/LD08');
+assert.ok(!isContention || (desktop === 'attached' && nodeCount === 1000 && depth === 1),
+  'N-E/LD08 uses the fixed 1,000-node depth-1 fixture and the isolated background desktop');
+const uiDocs = Number(values['ui-docs'] ?? 1);
+const streams = Number(values['background-streams'] ?? 0);
+assert.ok([1, 5, 10].includes(uiDocs), '--ui-docs must be 1, 5 or 10');
+assert.ok([0, 1, 4].includes(streams), '--background-streams must be 0, 1 or 4');
 const historyEdits = Number(values['history-edits'] ?? 0);
 const historyPlacement = values['history-shape'] ?? 'concentrated';
 assert.ok(Number.isInteger(historyEdits) && historyEdits >= 0 && historyEdits <= 100_000 && historyEdits % 2 === 0,
   '--history-edits must be an even number from 0 through 100000');
 assert.ok(['concentrated', 'distributed'].includes(historyPlacement), '--history-shape must be concentrated or distributed');
 
-let {document, summary} = makeFixture({experiment: isRendering ? 'N-A' : experiment, nodeCount, depth, cssRules});
+let {document, summary} = makeFixture({experiment: isRendering || isContention ? 'N-A' : experiment, nodeCount, depth, cssRules});
 let input = JSON.stringify(document);
 const expectedCss = document.metadata.css;
 const authoredShapes = isHistory
@@ -103,6 +116,12 @@ if (isRendering) {
   report.unavailable.frameSubmitMs = 'No submission is linked to an individual automation command.';
   report.unavailable.gpuCompletion = 'Metal phase traces record CPU-side calls only.';
 }
+if (isContention) {
+  report.contention = {uiDocs, streams, schedule: contentionSchedule(sampleCount, streams)};
+  report.unavailable.activeInteractionP95Ms = 'No physical input-to-visible observations from the isolated background desktop.';
+  report.unavailable.serviceQueueWaitMs = 'Only client offer, dispatch, and response times are observed per request.';
+  report.unavailable.assetResidency = 'The qualification fixture contains geometry only.';
+}
 
 async function hashFile(path) {
   const hash = createHash('sha256');
@@ -147,6 +166,7 @@ async function run() {
   let auth;
   try {
     const source = join(profile, 'fixture.json');
+    const contentionSource = isContention ? Buffer.from(input).toString('base64') : undefined;
     await writeFile(source, input, {mode: 0o600});
     input = null;
     const descriptorPath = join(profile, 'native-v1/service.json');
@@ -176,14 +196,14 @@ async function run() {
 
     report.stages.serviceDescriptorMs = await startService();
 
-    async function rpc(method, params = {}, session) {
+    async function rpc(method, params = {}, session, timeout = 120_000) {
       const body = JSON.stringify({id: randomUUID(), method, params});
       const start = performance.now();
       const response = await fetch(new URL('/rpc', endpoint), {
         method: 'POST',
         headers: {...auth, 'Content-Type': 'application/json', ...(session ? {'X-OMC-Session': session} : {})},
         body,
-        signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(timeout)]),
       });
       const bytes = await response.arrayBuffer();
       const receivedAt = performance.now();
@@ -273,11 +293,20 @@ async function run() {
       });
       return;
     }
-    if (isRendering) {
+    if (isRendering || isContention) {
       renderingClient = new Client({name: 'omc-native-rendering-probe', version: '1'});
       await renderingClient.connect(new StreamableHTTPClientTransport(new URL('/mcp/figcraft', endpoint), {
         requestInit: {headers: auth},
       }), {signal, timeout: 10_000});
+    }
+    if (isContention) {
+      await measureContention({
+        report, rpc, legacy: call, figcraft: (name, args, timeout) => call(name, args, timeout, renderingClient),
+        signal, contentBase64: contentionSource, foreground: initial, sessionId,
+      });
+      return;
+    }
+    if (isRendering) {
       await measureRendering({
         call: (name, args) => call(name, args, 15_000, renderingClient),
         documentId: external, report, sampleCount, signal, trace,

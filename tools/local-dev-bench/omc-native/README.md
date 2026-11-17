@@ -36,3 +36,15 @@ node tools/local-dev-bench/omc-native/native-probe.mjs --experiment N-D --sample
 N-D defaults to the 1,000-node fixture in an isolated unfocused desktop. It uses the FigCraft MCP viewport automation and verifies each pan and zoom step, the return to the original camera, and the unchanged document snapshot. It records client round trips and desktop draw counters. The trace is enabled for this diagnostic. If emitted during the command window, the Metal CPU phases cover drawable acquisition, surface wrap, canvas paint, flush/submit and present command submission. These phase records have no per-command identifiers. An empty trace or unchanged draw count leaves actual submit/presentation latency unobserved.
 
 Three separate timed PNG captures observe the offscreen window raster path at repeated static and zoomed camera states, including PNG encoding and MCP transport. This path bypasses retained gesture caches. The run leaves cache outcomes, visible/physical frame presentation, GPU completion, native OS gesture timing, drag, mixed-content/remote-edit pressure and scale variants unmeasured.
+
+## Distinct-document contention
+
+```sh
+node --test tools/local-dev-bench/omc-native/contention.test.mjs
+node tools/local-dev-bench/omc-native/native-probe.mjs --experiment N-E --ui-docs 1 --background-streams 0 --samples 2
+node tools/local-dev-bench/omc-native/native-probe.mjs --experiment LD08 --ui-docs 5 --background-streams 4 --samples 2
+```
+
+N-E and LD08 use the same diagnostic. Run with 1, 5 or 10 independently imported UI-open documents and 0, 1 or 4 background-only streams on additional distinct documents. Each document has 1,000 nodes. The isolated desktop stays unfocused. The schedule offers foreground selection, pan/zoom and durable scalar edits at fixed offsets. The camera and edit steps have completion barriers, so dispatch can lag the offered time. Each background stream offers a full read at 0ms and an independent two-node batch at 10ms against its own document and session. Those operations can overlap. Every offer has a 5-second deadline and its status stays in the report.
+
+Report fields include scheduled/actual offer, dispatch and completion times, the drain after the last offer, per-client outcomes and terminal checks of every distinct document. Runtime admission/workers are sampled before work, after work, at close and after a 250ms post-close window. Raw offer-to-completion times are client timings. Use the outer collector for process-group resources. Asset residency, server-internal per-request queue wait and physical presentation remain unmeasured.
