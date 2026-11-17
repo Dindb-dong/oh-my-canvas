@@ -16,11 +16,13 @@ export function withLD02Broker(path, {query, find, edit}, events, run) {
     if (!line(selector.name) || typeof selector.receipt !== 'string' || !/^[A-Z]{2}-[0-9]{3}$/.test(selector.receipt)) {
       throw new Error('Expected a station name and receipt');
     }
-    const isTarget = selector.name === query.name && selector.receipt === query.receipt;
+    const isTarget = selector.name.toLowerCase() === query.name.toLowerCase() && selector.receipt === query.receipt;
+    // The live lookup still has to return the unique native title and exact receipt.
+    const nativeSelector = isTarget ? query : selector;
     event.arguments = args;
     if (name === findTool && keys === 'name,receipt') {
       event.status = 'running';
-      const state = await find(selector);
+      const state = await find(nativeSelector);
       if (isTarget && state) targetFound = true;
       return state ?? {found: false};
     }
@@ -32,6 +34,6 @@ export function withLD02Broker(path, {query, find, edit}, events, run) {
     if (writeAttempted) throw new Error('The station edit was already attempted');
     writeAttempted = true;
     event.status = 'running';
-    return edit(selector, {text: args.text, gap: args.gap_px, radius: args.radius_px});
+    return edit(nativeSelector, {text: args.text, gap: args.gap_px, radius: args.radius_px});
   }, events, run);
 }

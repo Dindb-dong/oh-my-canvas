@@ -15,6 +15,7 @@ test('Atlas MCP requires actual semantic lookup and only one committed scope', a
   const decoy = {...query, receipt: 'ES-300'};
   const before = {text: 'Current', gap_px: 8, radius_px: 4};
   const desired = {...query, text: 'Wrong but valid text', gap_px: 21, radius_px: 11};
+  const lowercase = {...query, name: query.name.toLowerCase()};
   const audit = [];
   let writes = 0;
   try {
@@ -31,8 +32,8 @@ test('Atlas MCP requires actual semantic lookup and only one committed scope', a
       const requests = [
         ['edit_section', desired], ['find_section', decoy],
         ['edit_section', {...desired, ...decoy}], ['edit_section', desired],
-        ['find_section', query], ['edit_section', {...desired, documentId: 'out-of-scope'}],
-        ['edit_section', desired], ['edit_section', desired],
+        ['find_section', lowercase], ['edit_section', {...desired, documentId: 'out-of-scope'}],
+        ['edit_section', {...desired, ...lowercase}], ['edit_section', desired],
       ];
       const replies = await new Promise((resolve, reject) => {
         const python = execFile('python3', ['-B', entry, path], (error, stdout) => {

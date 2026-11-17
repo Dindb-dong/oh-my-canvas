@@ -93,11 +93,16 @@ class Admission:
 
 class BudgetGate:
     def __init__(self, token_cap, *, minimum_output_tokens=1, max_json_bytes=8 * 1024 * 1024,
-                 require_exact_input=False):
+                 require_exact_input=False, max_request_output_tokens=None):
         self.token_cap = _count(token_cap)
         self.minimum_output_tokens = _count(minimum_output_tokens)
         self.max_json_bytes = _count(max_json_bytes)
         self.require_exact_input = require_exact_input
+        self.max_request_output_tokens = (
+            None if max_request_output_tokens is None else _count(max_request_output_tokens)
+        )
+        if self.max_request_output_tokens is not None and self.max_request_output_tokens < self.minimum_output_tokens:
+            raise ValueError("per-request output cap is below the provider minimum")
         if min(self.token_cap, self.minimum_output_tokens, self.max_json_bytes) == 0:
             raise ValueError("limits must be positive")
         self._lock = Lock()
@@ -136,6 +141,8 @@ class BudgetGate:
             output_cap = self.token_cap - self._total_tokens - minimum_input
             if requested_output is not None:
                 output_cap = min(output_cap, requested_output)
+            if self.max_request_output_tokens is not None:
+                output_cap = min(output_cap, self.max_request_output_tokens)
             if output_cap < self.minimum_output_tokens:
                 raise ValueError("insufficient budget for input and provider output minimum")
             self._active = Admission(

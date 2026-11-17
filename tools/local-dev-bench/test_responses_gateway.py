@@ -125,6 +125,39 @@ class GatewayTest(unittest.TestCase):
             self.assertFalse(partial["usage_complete"])
             self.assertIsNotNone(partial["in_flight_request_id"])
 
+    def test_opt_in_shutdown_drains_the_active_title_and_preserves_its_exact_usage(self):
+        self.setup_gateway(40, {"title": 20}, {"title": terminal("title", 20, 2, 4)}, pause=True)
+        self.addCleanup(self.mock.continue_generation.set)
+        with tempfile.TemporaryDirectory() as output:
+            ledger = Path(output) / "ledger.json"
+            driver = Path(__file__).with_name("responses_gateway.py")
+            deadline = time.monotonic_ns() + 2_000_000_000
+            argv = [sys.executable, str(driver), "--upstream-port", str(self.mock.server_port),
+                    "--token-cap", "40", "--ledger", str(ledger), "--drain-in-flight"]
+            env = {**os.environ, "OMC_BENCH_DEADLINE_NS": str(deadline)}
+            with subprocess.Popen(argv, stdout=subprocess.PIPE, text=True, env=env) as proc:
+                try:
+                    port = int(json.loads(proc.stdout.readline())["base_url"].split(":")[-1].split("/")[0])
+                    with closing(HTTPConnection(LOOPBACK, port, timeout=2)) as conn:
+                        conn.request("POST", CREATE_PATH,
+                                     json_bytes({"model": "mock-model", "stream": True, "input": "title"}),
+                                     {"Content-Type": "application/json"})
+                        self.assertEqual(conn.getresponse().status, 200)
+                        self.assertTrue(self.mock.generating.wait(1))
+                    proc.terminate()
+                    with self.assertRaises(subprocess.TimeoutExpired):
+                        proc.wait(timeout=0.35)
+                    self.mock.continue_generation.set()
+                    self.assertEqual(proc.wait(timeout=1), 0)
+                finally:
+                    if proc.poll() is None:
+                        proc.kill()
+            snapshot = json.loads(ledger.read_text())
+            self.assertIsNone(snapshot["in_flight_request_id"])
+            self.assertTrue(snapshot["usage_complete"])
+            self.assertEqual(snapshot["observed_total_tokens"], 22)
+            self.assertEqual(snapshot["observed_cached_input_tokens"], 4)
+
     def test_upstream_socket_timeout_is_scoped_and_positive(self):
         with ResponsesGateway(12345, 40) as default, ResponsesGateway(12345, 40, upstream_timeout=60) as opted_in:
             with closing(default.connection()) as default_connection, closing(opted_in.connection()) as longer_connection:
@@ -366,6 +399,24 @@ class GatewayTest(unittest.TestCase):
         snapshot = self.gateway.gate.snapshot()
         self.assertFalse(snapshot["usage_complete"])
         self.assertEqual(snapshot["observed_total_tokens"], 37)
+
+    def test_configured_output_ceiling_respects_lower_request_and_remaining_limits(self):
+        self.setup_gateway(70, {"main": 20, "title": 10, "followup": 18}, {
+            "main": terminal("main", 20, 13, 0),
+            "title": terminal("title", 10, 4, 5),
+            "followup": terminal("followup", 18, 5, 12),
+        }, max_request_output_tokens=16)
+        self.assertEqual(self.post("main")[0], 200)
+        self.assertEqual(self.post("title", max_output_tokens=6)[0], 200)
+        self.assertEqual(self.post("followup")[0], 200)
+        self.assertEqual(self.post("denied")[0], 400)
+        creates = [request for route, request, _ in self.mock.events if route == CREATE_PATH]
+        self.assertEqual([request["max_output_tokens"] for request in creates], [16, 6, 5])
+        snapshot = self.gateway.gate.snapshot()
+        self.assertTrue(snapshot["usage_complete"])
+        self.assertEqual(snapshot["budget_status"], "AT_LIMIT")
+        self.assertEqual(snapshot["observed_total_tokens"], 70)
+        self.assertEqual(snapshot["observed_cached_input_tokens"], 17)
 
     def test_title_and_main_are_serialized_and_share_the_live_cap(self):
         self.setup_gateway(100, {"main": 60, "title": 30}, {

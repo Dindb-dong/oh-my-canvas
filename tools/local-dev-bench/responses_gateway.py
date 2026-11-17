@@ -195,7 +195,7 @@ class ResponsesHandler(BaseHTTPRequestHandler):
 class ResponsesGateway(ThreadingHTTPServer):
     def __init__(self, upstream_port, token_cap, *, port=0, minimum_output_tokens=1,
                  upstream_timeout=TIMEOUT_SECONDS, llama_synthetic_canary=False,
-                 llama_ld03=False, llama_ld02_atlas=False):
+                 llama_ld03=False, llama_ld02_atlas=False, max_request_output_tokens=None):
         if type(upstream_port) is not int or not 0 < upstream_port < 65536:
             raise ValueError("invalid loopback upstream port")
         if type(upstream_timeout) is not int or upstream_timeout <= 0:
@@ -209,7 +209,8 @@ class ResponsesGateway(ThreadingHTTPServer):
             raise ValueError("choose at most one local tool bridge")
         self.tool_bridge = next(iter(bridges), None)
         self.gate = BudgetGate(token_cap, minimum_output_tokens=minimum_output_tokens,
-                               require_exact_input=self.tool_bridge is not None)
+                               require_exact_input=self.tool_bridge is not None,
+                               max_request_output_tokens=max_request_output_tokens)
         self.admissions = Lock()
         self.stopping = Event()
         super().__init__((LOOPBACK, port), ResponsesHandler)
@@ -255,6 +256,8 @@ def main():
     parser.add_argument("--upstream-port", type=int, required=True)
     parser.add_argument("--token-cap", type=int, required=True)
     parser.add_argument("--minimum-output-tokens", type=int, default=1)
+    parser.add_argument("--max-request-output-tokens", type=int,
+                        help="Optional per-request generation limit within the shared attempt token cap")
     parser.add_argument("--upstream-timeout", type=int, default=TIMEOUT_SECONDS,
                         help="Upstream socket inactivity timeout in seconds")
     bridges = parser.add_mutually_exclusive_group()
@@ -265,14 +268,20 @@ def main():
     bridges.add_argument("--llama-ld02-atlas", action="store_true",
                          help="Expose only the registered LD02 Atlas lookup and edit tools to a local llama-server")
     parser.add_argument("--ledger", type=Path, required=True, help="New private JSON evidence file")
+    parser.add_argument("--drain-in-flight", action="store_true",
+                        help="At shutdown, await an admitted request's terminal usage up to the outer deadline")
     args = parser.parse_args()
+    deadline = os.environ.get("OMC_BENCH_DEADLINE_NS")
+    if args.drain_in_flight and (deadline is None or not deadline.isdecimal()):
+        parser.error("--drain-in-flight requires OMC_BENCH_DEADLINE_NS")
     signal.signal(signal.SIGTERM, interrupted)
     with (
         ResponsesGateway(args.upstream_port, args.token_cap,
                          minimum_output_tokens=args.minimum_output_tokens,
                          upstream_timeout=args.upstream_timeout,
                          llama_synthetic_canary=args.llama_synthetic_canary, llama_ld03=args.llama_ld03,
-                         llama_ld02_atlas=args.llama_ld02_atlas) as gateway,
+                         llama_ld02_atlas=args.llama_ld02_atlas,
+                         max_request_output_tokens=args.max_request_output_tokens) as gateway,
         open(args.ledger, "x", encoding="utf-8", opener=private_open) as ledger,
     ):
         print(json.dumps({"base_url": f"http://{LOOPBACK}:{gateway.server_port}/v1"}), flush=True)
@@ -282,12 +291,13 @@ def main():
             pass
         finally:
             gateway.stopping.set()
-            deadline = os.environ.get("OMC_BENCH_DEADLINE_NS")
             if deadline is None:
                 locked = gateway.admissions.acquire()
             else:
                 remaining = max(0, (int(deadline) - time.monotonic_ns()) / 1e9)
-                locked = gateway.admissions.acquire(timeout=min(0.25, remaining))
+                # Reserve time to seal the ledger within the same absolute deadline.
+                drain_seconds = max(0, remaining - 0.05) if args.drain_in_flight else min(0.25, remaining)
+                locked = gateway.admissions.acquire(timeout=drain_seconds)
             try:
                 # A deadline can interrupt an upstream stream before its usage arrives.
                 json.dump(gateway.gate.snapshot(), ledger, indent=2)

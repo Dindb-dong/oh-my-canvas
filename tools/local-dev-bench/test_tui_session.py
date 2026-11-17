@@ -6,7 +6,7 @@ import tempfile
 import time
 import unittest
 
-from tui_session import deadline_ns, drive
+from tui_session import completed_main_messages, deadline_ns, drive
 from run_attempt import run
 
 
@@ -39,6 +39,16 @@ else:
             self.assertEqual(result['native_exit'], 0)
             self.assertIsNotNone(result['main_completed_at_ns'])
             self.assertIn(b'Session outcome', (root / 'terminal.log').read_bytes())
+
+    def test_main_terminal_marker_retains_transport_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            main = root / "interactive/trace/main/payloads"
+            main.mkdir(parents=True)
+            (main / "request.json").write_text('{"input":[],"stream":true,"tools":["fixture"]}')
+            (main / "complete.json").write_text('{"type":"task_complete","error":{"message":"stream disconnected"}}')
+            self.assertEqual(completed_main_messages(root),
+                             [{"task_complete": None, "error": {"message": "stream disconnected"}}])
 
     def test_timeout_reaps_the_detached_terminal_and_descendant(self):
         code = """

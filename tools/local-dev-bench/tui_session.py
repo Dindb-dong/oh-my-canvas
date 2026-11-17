@@ -10,6 +10,7 @@ import re
 import select
 import signal
 import struct
+from subprocess import TimeoutExpired
 import termios
 import time
 
@@ -23,6 +24,17 @@ def deadline_ns(seconds):
 
 def remaining(deadline):
     return max(0, (deadline - time.monotonic_ns()) / 1e9)
+
+
+def finish_gateway(process, deadline):
+    """Close admission and await the gateway's final meter with the existing wall budget."""
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=remaining(deadline))
+    except TimeoutExpired:
+        process.kill()
 
 
 @contextmanager
@@ -51,8 +63,13 @@ def completed_main_messages(root, cache=None):
                     continue  # Retry a payload that is still being written.
             payloads.append(cache[path])
         if any(p.get("tools") and "input" in p and "stream" in p for p in payloads):
-            messages.extend(p.get("last_agent_message") or {"task_complete": p.get("status")}
-                            for p in payloads if p.get("type") == "task_complete")
+            for payload in payloads:
+                if payload.get("type") != "task_complete":
+                    continue
+                if payload.get("error"):
+                    messages.append({"task_complete": payload.get("status"), "error": payload["error"]})
+                else:
+                    messages.append(payload.get("last_agent_message") or {"task_complete": payload.get("status")})
     return messages
 
 
