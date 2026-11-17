@@ -4,7 +4,7 @@ import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
-import {changeFieldRelay, planFieldRelay, readFieldRelay, seedFieldRelay, stateDifferences} from './ld03.mjs';
+import {changeFieldRelay, planFieldRelay, readFieldRelay, refreshFieldRelay, seedFieldRelay, stateDifferences} from './ld03.mjs';
 
 const generator = 'tools/local-dev-bench/workloads/synthetic.py';
 const fixture = JSON.parse(execFileSync('python3', [generator,'fixture','LD03','--variant','field-relay'], {encoding:'utf8'}));
@@ -37,14 +37,20 @@ function fakePenpot(documentId) {
     sets:[],
     addSet({name}) {
       const set = {
-        name, active:false, tokens:[],
+        name, tokens:[],
+        activeStatus:false,
+        get active() { return this.activeStatus; },
+        set active(value) {
+          this.activeStatus = value;
+          if (value) for (const token of this.tokens) token.apply();
+        },
         toggleActive() { this.active = !this.active; },
         addToken({type,name,value}) {
           let currentValue = value;
           const token = {
             id:`${documentId}-token-${counter++}`, name, type, shapes:[],
             get value() { return currentValue; },
-            set value(value) { currentValue = value; this.apply(); },
+            set value(value) { currentValue = value; },
             apply() {
               for (const {shape,property} of this.shapes) {
                 if (property === 'rowGap') shape.flex.rowGap = Number(this.value);
@@ -96,12 +102,16 @@ test('field-relay uses native editable objects, four real override omissions and
   const after = fixture.expected.styles.filter(style => style.key.startsWith('target.'));
   assert.throws(() => changeFieldRelay(fileId, [...after, {key:'keep.accent'}]));
   await run(changeFieldRelay(fileId,after), original);
+  const unpropagated = await run(readFieldRelay(fileId), original);
+  assert.equal(stateDifferences(fixture.expected, unpropagated).length, 76);
+  assert.equal(await run(refreshFieldRelay(fileId), original), true);
   const candidate = await run(readFieldRelay(fileId), original);
 
   const copy = fakePenpot(copyId);
   await run(seedFieldRelay(fixture,copyId), copy);
   await run(changeFieldRelay(copyId,after), copy);
   const probeActions = await run(changeFieldRelay(copyId,fixture.probe_actions), copy);
+  assert.equal(await run(refreshFieldRelay(copyId), copy), true);
   const probe = await run(readFieldRelay(copyId), copy);
   const afterProbeOriginal = await run(readFieldRelay(fileId), original);
   const evidence = {before,candidate,reopened:candidate,probe,probe_actions:probeActions,after_probe_original:afterProbeOriginal};
@@ -113,6 +123,10 @@ test('field-relay uses native editable objects, four real override omissions and
     await writeFile(path, JSON.stringify(evidence));
     const result = JSON.parse(execFileSync('python3', [generator,'grade','LD03',path,'--variant','field-relay'], {encoding:'utf8'}));
     assert.deepEqual(result, {passed:true, failures:[]});
+    const originalOnly = JSON.parse(execFileSync('python3', [
+      'tools/local-dev-bench/penpot/ld03-original.py', path,
+    ], {encoding:'utf8'}));
+    assert.deepEqual(originalOnly, {scope:'original-edit-and-reopen', passed:true, failures:[]});
   } finally {
     await rm(tmp,{recursive:true,force:true});
   }

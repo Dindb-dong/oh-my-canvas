@@ -157,6 +157,28 @@ export function changeFieldRelay(fileId, changes) {
   `;
 }
 
+export function refreshFieldRelay(fileId) {
+  return `${guard(fileId)}
+    const set = penpot.library.local.tokens.sets.find(candidate => candidate.name === ${JSON.stringify(tokenSet)});
+    if (!set?.active) throw new Error("Missing active benchmark tokens");
+    // The Penpot 2.19.2 plugin value setter commits the definition. The
+    // idempotent public activation setter invokes native workspace propagation.
+    set.active = true;
+    return set.active;
+  `;
+}
+
+function identities(state) {
+  return Object.fromEntries(['nodes','styles'].map(collection => [collection,
+    Object.fromEntries(state[collection].map(row => [row.key,row.native_id])),
+  ]));
+}
+
+async function storeObservation(name, evidence) {
+  const output = process.env.OMC_BENCH_OUTPUT_DIR;
+  if (output) await writeFile(join(output, name), JSON.stringify(evidence) + '\n', {flag:'wx', mode:0o600});
+}
+
 export function stateDifferences(spec, state) {
   const differences = [];
   const styles = new Map(state.styles.map(style => [style.key,style]));
@@ -172,6 +194,7 @@ export function stateDifferences(spec, state) {
       differences.push(node.key + '.missing');
       continue;
     }
+    if (row.editable !== true) differences.push(node.key + '.editable');
     const {bindings, ...properties} = node;
     for (const [key, value] of Object.entries(properties)) {
       if (row[key] !== value) differences.push(node.key + '.' + key);
@@ -186,11 +209,7 @@ export function stateDifferences(spec, state) {
 async function requireState(spec, state, phase) {
   const differences = stateDifferences(spec, state);
   if (!differences.length) return;
-  const output = process.env.OMC_BENCH_OUTPUT_DIR;
-  if (output) {
-    await writeFile(join(output, `ld03-${phase}-failure.json`),
-      JSON.stringify({phase, differences, state}) + '\n', {flag:'wx', mode:0o600});
-  }
+  await storeObservation(`ld03-${phase}-failure.json`, {phase, differences, state});
   throw new Error(`${phase}: ${differences.length} differences (${differences.slice(0,8).join(', ')})`);
 }
 
@@ -246,7 +265,7 @@ async function duplicateFromDashboard(page, context, origin) {
   const url = new URL(opened.url());
   assert.equal(url.origin, origin);
   await connectEditor(opened);
-  return {opened, id:url.searchParams.get('file-id')};
+  return {opened, url, id:url.searchParams.get('file-id')};
 }
 
 async function replay(origin, fixture) {
@@ -297,7 +316,9 @@ async function replay(origin, fixture) {
     const started = performance.now();
     const saved = watchSave(editor, origin);
     await execute(changeFieldRelay(id, changes));
+    assert.equal(await execute(refreshFieldRelay(id)), true);
     const candidate = await takeState(execute, id, fixture.expected);
+    await requireState(fixture.expected, candidate, 'edited-original');
     const editedMs = performance.now() - started;
     const saveResult = await saved;
     if (saveResult instanceof Error) throw saveResult;
@@ -305,19 +326,36 @@ async function replay(origin, fixture) {
     editor = await reopenPage(editor, context, workspace);
     const reopened = await takeState(execute, id, fixture.expected);
     const reopenedMs = performance.now() - started;
+    await storeObservation('ld03-original-observations.json', {before,candidate,reopened});
+    await requireState(fixture.expected, reopened, 'reopened-original');
+    for (const state of [candidate,reopened]) {
+      assert.equal(state.document_id, id);
+      assert.deepEqual(identities(state), identities(before), 'Native references in the original were replaced');
+    }
 
     phase = 'native verification duplicate';
-    const {opened:copy, id:copyId} = await duplicateFromDashboard(editor, context, origin);
+    const {opened, id:copyId, url:copyUrl} = await duplicateFromDashboard(editor, context, origin);
     assert.notEqual(copyId, id, 'Propagation probe must edit a distinct native copy');
-    const copyBefore = await takeState(execute, copyId, fixture.expected);
+    let copy = opened;
+    const copyImmediate = await readAfterAttach(() => execute(readFieldRelay(copyId)));
+    let copyBefore = copyImmediate;
+    if (stateDifferences(fixture.expected, copyImmediate).length) {
+      const settled = await takeState(execute, copyId, fixture.expected);
+      copyBefore = settled;
+      let copyReopened = null;
+      if (stateDifferences(fixture.expected, settled).length) {
+        copy = await reopenPage(copy, context, copyUrl);
+        copyReopened = await takeState(execute, copyId, fixture.expected);
+        copyBefore = copyReopened;
+      }
+      await storeObservation('ld03-copy-settle.json', {immediate:copyImmediate, settled, reopened:copyReopened});
+    }
     await requireState(fixture.expected, copyBefore, 'copy-baseline');
     phase = 'repeat shared token edits on the copy';
     const probeActions = await execute(changeFieldRelay(copyId, fixture.probe_actions));
+    assert.equal(await execute(refreshFieldRelay(copyId)), true);
     const probe = await takeState(execute, copyId, fixture.probe);
-    for (const collection of ['nodes','styles']) {
-      const ids = state => Object.fromEntries(state[collection].map(row => [row.key,row.native_id]));
-      assert.deepEqual(ids(probe), ids(copyBefore), 'Native references in the verification copy were replaced');
-    }
+    assert.deepEqual(identities(probe), identities(copyBefore), 'Native references in the verification copy were replaced');
     phase = 'reread the protected original';
     editor = await reopenPage(copy, context, workspace);
     const afterProbeOriginal = await takeState(execute, id, fixture.expected);
@@ -326,7 +364,7 @@ async function replay(origin, fixture) {
     await writeFile(process.env.OMC_BENCH_CANDIDATE, JSON.stringify(evidence) + '\n', {flag:'wx', mode:0o600});
     console.log(JSON.stringify({workload:'LD03', sourceFamily:fixture.source_family_id,
       setupMs, editedMs, reopenedMs, saveResponseObserved:saveResult,
-      scope:'deterministic native color and row-gap token replay'}));
+      scope:'native color and row-gap token edits with idempotent native propagation refresh'}));
   } catch (error) {
     const secrets = [email,password,endpoint?.searchParams.get('userToken')].filter(Boolean);
     const message = secrets.reduce((value, secret) => value.replaceAll(secret, '[redacted]'), String(error));
