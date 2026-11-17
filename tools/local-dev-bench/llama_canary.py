@@ -43,6 +43,10 @@ ATLAS_FIND_PARAMETERS = parameters(ATLAS_SELECTOR)
 ATLAS_EDIT_PARAMETERS = parameters({**ATLAS_SELECTOR, "text": PRINTABLE_LINE, "gap_px": PIXELS, "radius_px": PIXELS})
 
 
+def codex_projection(schema):
+    return {**schema, "properties": {key: {"type": field["type"]} for key, field in schema["properties"].items()}}
+
+
 def matches_field(value, field):
     if field["type"] == "string":
         return (
@@ -175,9 +179,11 @@ LD03 = ToolBridge(LD03_NAMESPACE, (
 
 LD02_ATLAS = ToolBridge(LD02_ATLAS_NAMESPACE, (
     Function(LD02_ATLAS_FIND, "bench_find_section", ATLAS_FIND_PARAMETERS,
-             "Find a section by its exact name and receipt in the current synthetic Atlas document."),
+             "Find a section by its exact name and receipt in the current synthetic Atlas document.",
+             codex_projection(ATLAS_FIND_PARAMETERS)),
     Function(LD02_ATLAS_EDIT, "bench_edit_section", ATLAS_EDIT_PARAMETERS,
-             "Set the status text, section gap and marker radius of a section already found by name and receipt."),
+             "Set the status text, section gap and marker radius of a section already found by name and receipt.",
+             codex_projection(ATLAS_EDIT_PARAMETERS)),
 ))
 
 

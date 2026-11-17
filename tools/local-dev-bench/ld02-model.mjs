@@ -2,7 +2,8 @@ import {withProductBroker} from './ld03-model.mjs';
 
 const findTool = 'find_section';
 const editTool = 'edit_section';
-const line = value => typeof value === 'string' && /^[\x20-\x7e]{1,128}$/.test(value);
+const line = value => typeof value === 'string' && value.length > 0 && Array.from(value).length <= 128
+  && !/[\x00-\x1f\x7f]/.test(value);
 const pixels = value => Number.isInteger(value) && value >= 0 && value <= 128;
 
 export function withLD02Broker(path, {query, find, edit}, events, run) {

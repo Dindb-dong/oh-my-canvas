@@ -222,6 +222,17 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual(CANARY.normalize_request({"tools": [codex_namespace(LD03_NAMESPACE, LD03_TOOLS)]})["tools"], [])
         self.assertEqual(LD03.normalize_request({"tools": []})["tools"], [])
 
+    def test_atlas_restores_native_registration_after_codex_projection(self):
+        declared = {"type": "namespace", "name": LD02_ATLAS.namespace, "tools": [
+            {"type": "function", "name": function.name, "description": function.description,
+             "strict": False, "parameters": {**function.parameters, "properties": {
+                 name: {"type": field["type"]} for name, field in function.parameters["properties"].items()
+             }}}
+            for function in reversed(LD02_ATLAS.functions)
+        ]}
+        output = LD02_ATLAS.normalize_request({"tools": [declared]})["tools"]
+        self.assertEqual([tool["parameters"] for tool in output], [f.parameters for f in LD02_ATLAS.functions])
+
     def test_atlas_stdio_exports_the_pinned_model_schema(self):
         request = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
         entry = Path(__file__).with_name("ld02_atlas_model_stdio.py")
