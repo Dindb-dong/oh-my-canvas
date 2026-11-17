@@ -190,28 +190,48 @@ export function verifyWidthSelection(fileId, canvasId) {
   return `${guard(fileId)}
   const [canvas] = root.children;
   if (root.children.length !== 1 || canvas.id !== ${JSON.stringify(canvasId)} || keyOf(canvas) !== "canvas" ||
-      canvas.flex?.horizontalSizing !== "fix" || canvas.proportionLock || penpot.selection.length !== 1 ||
-      penpot.selection[0].id !== canvas.id) throw new Error("Wrong native width target or inspector selection");
-  return canvas.id;`;
+      canvas.flex?.horizontalSizing !== "fix" || canvas.flex.verticalSizing !== "auto" || canvas.proportionLock ||
+      penpot.selection.length !== 1 || penpot.selection[0].id !== canvas.id) {
+    throw new Error("Wrong native width target or inspector selection");
+  }
+  return {id:canvas.id,width:canvas.width,height:canvas.height};`;
+}
+
+function represents(value, dimension) {
+  const text = value.trim();
+  return /^-?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(text) &&
+    Math.abs(Number(text.replaceAll(',',''))-dimension) <= 0.011;
+}
+
+export function uniqueWidthInput(inputs, {width,height}) {
+  const visible = inputs.filter(input => input.visible && input.type === 'text');
+  const pairs = visible.filter((input,index) => !input.disabled && represents(input.value,width) &&
+    visible[index+1]?.disabled && represents(visible[index+1].value,height));
+  return pairs.length === 1 ? pairs[0].index : null;
 }
 
 async function widthInspector(page, execute, fileId, canvasId, evidence) {
-  const panel = page.locator('section[aria-label="shape-measures-section"]');
-  const field = panel.locator('input[aria-label="Width"], [title="Width"] input').filter({visible:true});
-  try {
-    // Select the same native layer through the editor sidebar so the inspector updates with it.
-    const layer = page.locator(`span#layer-name-${canvasId}`);
-    assert.equal(await layer.textContent({timeout:5000}),marker+'canvas');
-    await layer.click({timeout:5000});
-    await field.waitFor({state:'visible',timeout:5000});
-    assert.equal(await execute(verifyWidthSelection(fileId,canvasId)),canvasId);
-    assert.ok(await field.isEnabled(),'The native Width input is disabled');
-    return field;
-  } catch (error) {
-    evidence.width_inspector_diagnostics = await page.locator('section[aria-label="shape-measures-section"]')
-      .locator('input').evaluateAll(inputs => inputs.map(input => ({label:input.getAttribute('aria-label'),
-        parentTitle:input.parentElement?.getAttribute('title'),disabled:input.disabled,visible:input.getClientRects().length > 0})));
-    throw error;
+  // The pinned editor emits its Width and hug-Height inputs in that order.
+  const inputs = page.locator('section[aria-label="shape-measures-section"] input');
+  const deadline = performance.now()+5000;
+  const dimensions = await execute(verifyWidthSelection(fileId,canvasId));
+  assert.equal(dimensions.id,canvasId);
+  for (;;) {
+    const controls = await inputs.evaluateAll(rows => rows.map((input,index) => ({index,type:input.type,
+      value:input.value,disabled:input.disabled,visible:input.getClientRects().length > 0 &&
+        getComputedStyle(input).visibility !== 'hidden'})));
+    const index = uniqueWidthInput(controls,dimensions);
+    if (index !== null) {
+      const field = inputs.nth(index);
+      assert.ok(await field.isEnabled() && represents(await field.inputValue(),dimensions.width),
+        'Native width input changed while resolving the inspector');
+      return field;
+    }
+    if (performance.now() >= deadline) {
+      evidence.width_inspector_diagnostics = {dimensions,controls};
+      throw new Error('Expected one enabled Width reading beside the disabled native hug-Height reading');
+    }
+    await delay(200);
   }
 }
 
@@ -294,13 +314,19 @@ async function replay(origin, fixture, plan, output) {
     evidence.probe = await capture(execute,copyId,1440);
     phase = 'open width-only inspector for the verified duplicate canvas';
     const copyCanvas = evidence.probe.nodes.find(node => node.key === 'canvas');
-    const widthField = await widthInspector(copy,execute,copyId,copyCanvas.native_id,evidence);
+    const layer = copy.locator(`span#layer-name-${copyCanvas.native_id}`);
+    assert.equal(await layer.textContent({timeout:5000}),marker+'canvas');
+    await layer.click({timeout:5000});
     for (const width of plan.widths) {
       phase = `change only the width of the native duplicate (step ${evidence.probe_actions.length+1})`;
+      const widthField = await widthInspector(copy,execute,copyId,copyCanvas.native_id,evidence);
       await widthField.fill(String(width));
       await widthField.press('Enter');
       const state = await capture(execute,copyId,width);
-      const observedWidth = Math.round(state.nodes.find(node => node.key === 'canvas').bounds[2]);
+      const observedCanvas = state.nodes.find(node => node.key === 'canvas');
+      assert.equal(observedCanvas.native_id,copyCanvas.native_id);
+      assert.equal(observedCanvas.native_vertical,'auto','The width action changed the native hug-height constraint');
+      const observedWidth = Math.round(observedCanvas.bounds[2]);
       evidence.probe_actions.push({op:'set_node',key:'canvas',property:'width',value:observedWidth});
       evidence.width_observations.push({width:observedWidth,...state});
     }

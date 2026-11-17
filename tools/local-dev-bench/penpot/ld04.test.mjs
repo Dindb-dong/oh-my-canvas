@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import test from 'node:test';
 import {runInNewContext} from 'node:vm';
-import {adaptResponsive,planResponsive,readResponsive,seedResponsive,verifyWidthSelection} from './ld04.mjs';
+import {adaptResponsive,planResponsive,readResponsive,seedResponsive,uniqueWidthInput,verifyWidthSelection} from './ld04.mjs';
 
 const fileId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const canvasId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
@@ -83,7 +83,7 @@ test('native layout and visibility readback preserve identity without inventing 
   app.selection = [];
   assert.throws(() => execute(verifyWidthSelection(fileId,canvasId),app),/Wrong native width target/);
   app.selection = [canvas];
-  assert.equal(execute(verifyWidthSelection(fileId,canvasId),app),canvasId);
+  assert.deepEqual(execute(verifyWidthSelection(fileId,canvasId),app),{id:canvasId,width:1440,height:282});
   assert.equal(canvas.flex.verticalSizing,'auto');
   const collection = canvas.children.find(node => node.name === 'LD04 collection');
   const line = collection.children[0].children[0];
@@ -93,4 +93,14 @@ test('native layout and visibility readback preserve identity without inventing 
   assert.throws(() => execute(verifyWidthSelection(fileId,canvasId),app),/Wrong native width target/);
   app.currentFile.id = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
   assert.throws(() => execute(readResponsive(fileId),app),/Wrong isolated LD04 file/);
+});
+
+test('the unlabeled inspector must expose exactly one editable width beside disabled hug-height', () => {
+  const field = (index,value,disabled=false,visible=true,type='text') => ({index,value,disabled,visible,type});
+  const dims = {width:1440,height:281.995};
+  const rows = [field(0,'1440',false,false),field(1,'1,440'),field(2,'282',true),field(3,'1440'),field(4,'282')];
+  assert.equal(uniqueWidthInput(rows,dims),1);
+  assert.equal(uniqueWidthInput([...rows,field(5,'1440'),field(6,'282',true)],dims),null);
+  assert.equal(uniqueWidthInput(rows,{...dims,height:200}),null);
+  assert.equal(uniqueWidthInput([field(0,'1,440',false,true,'checkbox'),field(1,'282',true)],dims),null);
 });
