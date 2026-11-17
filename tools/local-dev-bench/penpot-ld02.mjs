@@ -222,12 +222,18 @@ function validateBaseline(pages) {
     for (const card of spec.children) {
       const native = page.cards.find(native => native.name === card.name);
       assert.ok(native, `Missing ${spec.name} / ${card.name}`);
-      const {id, name, children, ...properties} = native;
+      const {id, name, children, x, y, width, height, ...properties} = native;
       identity(id);
+      // A native resize can introduce floating-point residue in otherwise identical fixture dimensions.
+      for (const [dimension, actual, expected] of [['width', width, card.width], ['height', height, card.height]]) {
+        assert.ok(Number.isFinite(actual) && Math.abs(actual - expected) <= 1e-9,
+          `Native board ${dimension} for ${spec.name} / ${name}: expected ${expected}, got ${actual}`);
+      }
       assert.deepEqual(properties, {
-        type:'board', x:card.x, y:card.y, width:card.width, height:card.height, fills:[['#ffffff', 1]],
+        type:'board', fills:[['#ffffff', 1]],
         direction:'column', gap:card.gap, align:'start', padding:Array(4).fill(card.padding),
       }, `Native board properties for ${spec.name} / ${name}`);
+      assert.deepEqual({x, y}, {x:card.x, y:card.y}, `Native board position for ${spec.name} / ${name}`);
       const expectedChildren = [
         {type:'text', name:'Caption', text:card.children[0].text, fontSize:'16'},
         {type:'text', name:'Reference', text:card.children[1].text, fontSize:'16'},
@@ -439,6 +445,8 @@ async function selfTestEvidence() {
   for (const page of fixture.pages) {
     assert.deepEqual(await execute(seedCode(guard, page)), {cards:25, objects:100});
   }
+  const firstBoard = penpot.currentFile.pages[1].root.children[0];
+  firstBoard.width = 224.00000000000003;
   const before = await snapshotFile(execute, guard);
   await execute(guard + editTargetCode);
   assert.equal(undoBlock, undefined);
@@ -446,6 +454,12 @@ async function selfTestEvidence() {
   const evidence = {schema:'penpot-ld02-v1', workload:fixture.workload,
     before, changed, undone:before, redone:changed, reopened:changed};
   validateEvidence(evidence);
+  const invalidBefore = structuredClone(before);
+  invalidBefore[1].cards[0].width = 225;
+  assert.throws(() => validateEvidence({...evidence, before:invalidBefore}), /Native board width/);
+  const invalidRedo = structuredClone(changed);
+  invalidRedo[1].cards[0].width = 224;
+  assert.throws(() => validateEvidence({...evidence, redone:invalidRedo}), /Redo differs/);
   assert.throws(() => validateEvidence({...evidence, undone:changed}), /Undo differs/);
   assert.throws(() => validateEvidence({...evidence, redone:before}), /Redo differs/);
   const reopened = structuredClone(changed);
