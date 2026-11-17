@@ -202,3 +202,26 @@ on the duplicate and reads all four widths. The observer records native sizing
 and rendered text bounds. Penpot 2.19.2 exposes fill, min and max sizing. The
 observer reports the independent basis as unavailable and forwards all actual
 geometry to the common oracle.
+
+## LD06 metro-stories native assets
+
+Prepare the canonical fixture and assets with `workloads/synthetic.py fixture
+LD06 --variant metro-stories`, the licensed `--font-file` and `--font-license`,
+and a new `--assets-dir`. Reuse the local browser and a task-owned Penpot
+origin. The adapter uploads the TTF through the disposable team's Fonts panel.
+It uploads the eight PNGs from verified local bytes, reads the stored image
+bytes through the native plugin, and exports the loaded, edited and reopened
+board PNGs. Use a new, existing private output directory:
+
+```sh
+node tools/local-dev-bench/penpot/ld06.mjs http://localhost:19001 "$FIXTURE" "$ASSETS" "$OUTPUT"
+python3 tools/local-dev-bench/penpot/ld06-raster.py "$FIXTURE" "$ASSETS" "$OUTPUT/penpot-native-observations.json" "$CANDIDATE"
+python3 tools/local-dev-bench/workloads/synthetic.py grade LD06 "$CANDIDATE" --variant metro-stories --font-file "$FONT" --font-license OFL-1.1
+node --test tools/local-dev-bench/penpot/ld06.test.mjs
+```
+
+The raster observer requires Pillow and checks interior pixels against the
+center crop predicted from observed native bounds and stored bytes. It records
+rendered text ink, the native face identity and local font response hashes.
+Exact renderer font-byte attribution, per-glyph attribution and two clean
+source builds remain required by the common oracle.
