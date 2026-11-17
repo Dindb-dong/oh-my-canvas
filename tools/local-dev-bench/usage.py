@@ -2,6 +2,9 @@
 
 import json
 from pathlib import Path
+import re
+
+from budget_gate import TERMINAL_EVENTS, _identity, _object
 
 COUNTERS = (
     "input_tokens", "output_tokens", "total_tokens",
@@ -9,6 +12,8 @@ COUNTERS = (
     "cache_write_input_tokens", "reasoning_output_tokens",
 )
 TERMINAL_REQUEST_STATES = {"completed", "failed", "cancelled", "aborted"}
+RESPONSES_LEDGER_FORMAT = "responses-budget-ledger-v1"
+MAX_LEDGER_BYTES = 8 * 1024 * 1024
 
 
 def _amount(usage, field, optional=False):
@@ -155,8 +160,120 @@ def _rollout(state):
     return _result(source, records, issues)
 
 
-def summarize_usage(path):
-    """Read one JSONL turn ledger or same-binary reducer state JSON.
+def _responses_ledger(state, expected_token_cap):
+    source = RESPONSES_LEDGER_FORMAT
+    records, issues = [], []
+    seen_admissions, seen_responses = set(), set()
+    rows = state.get("requests")
+    if not isinstance(rows, list) or not rows:
+        return _result(source, [], ["no per-request provider ledger records"])
+    try:
+        cap = _amount(state, "token_cap")
+        if cap == 0 or (expected_token_cap is not None and cap != expected_token_cap):
+            raise ValueError("ledger cap does not match a positive registered token budget")
+    except ValueError as error:
+        issues.append(str(error))
+        cap = None
+    if state.get("usage_complete") is not True or state.get("in_flight_request_id", "") is not None:
+        issues.append("provider ledger did not close with complete metering")
+
+    cumulative = 0
+    for index, row in enumerate(rows, 1):
+        label = f"provider request {index}"
+        try:
+            admission = row.get("admission") if isinstance(row, dict) else None
+            if not isinstance(admission, dict):
+                raise ValueError("admission is missing")
+            request_id = _identity(admission.get("request_id"))
+            response_id = _identity(row.get("provider_response_id"))
+            if request_id in seen_admissions or response_id in seen_responses:
+                raise ValueError("duplicate admission or provider response ID")
+        except ValueError as error:
+            issues.append(f"{label}: {error}")
+            continue
+
+        retry = admission.get("retry_of")
+        if (
+            "retry_of" not in admission or
+            (retry is not None and (not isinstance(retry, str) or retry not in seen_admissions))
+        ):
+            issues.append(f"{label}: retry does not reference an earlier admission")
+        seen_admissions.add(request_id)
+        seen_responses.add(response_id)
+        digest = admission.get("body_sha256")
+        if admission.get("kind") != "responses" or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            issues.append(f"{label}: invalid Responses admission record")
+        outcome = row.get("outcome")
+        if not isinstance(outcome, str) or outcome not in TERMINAL_EVENTS.values() or row.get("issue", "") is not None:
+            issues.append(f"{label}: missing or incomplete terminal evidence")
+
+        raw = row.get("raw_usage")
+        try:
+            if not isinstance(raw, dict):
+                raise ValueError("metered usage is missing")
+            usage = _normalize({key: raw.get(key) for key in ("input_tokens", "output_tokens")})
+            if _amount(raw, "total_tokens") != usage["total_tokens"]:
+                raise ValueError("raw total does not equal input plus output")
+        except ValueError as error:
+            issues.append(f"{label}: {error}")
+            continue
+        records.append(usage)
+        details = raw.get("input_tokens_details")
+        try:
+            if not isinstance(details, dict):
+                raise ValueError("provider input cache details are missing")
+            cached = _amount(details, "cached_tokens")
+            if cached > usage["input_tokens"]:
+                raise ValueError("provider cached tokens exceed input")
+            usage["cache_read_input_tokens"] = cached
+            usage["uncached_input_tokens"] = usage["input_tokens"] - cached
+        except ValueError as error:
+            issues.append(f"{label}: {error}")
+        cached = usage["cache_read_input_tokens"]
+
+        try:
+            minimum = _amount(admission, "minimum_input_tokens")
+            maximum = _amount(admission, "max_output_tokens")
+            if maximum == 0 or (cap is not None and cumulative + minimum + maximum > cap):
+                raise ValueError("admission exceeds the remaining token cap")
+            if usage["input_tokens"] != minimum or usage["output_tokens"] > maximum:
+                raise ValueError("raw usage disagrees with exact pre-count or admitted output cap")
+            for key, observed in (("input_tokens", usage["input_tokens"]), ("output_tokens", usage["output_tokens"]),
+                                  ("cached_input_tokens", cached)):
+                if _amount(row, key) != observed:
+                    raise ValueError("copied request counters disagree with raw terminal usage")
+        except ValueError as error:
+            issues.append(f"{label}: {error}")
+        cumulative += usage["total_tokens"]
+
+    for key, count in (
+        ("observed_input_tokens", sum(row["input_tokens"] for row in records)),
+        ("observed_output_tokens", sum(row["output_tokens"] for row in records)),
+        ("observed_total_tokens", cumulative),
+        ("observed_cached_input_tokens", sum(row["cache_read_input_tokens"] or 0 for row in records)),
+    ):
+        reported = state.get(key)
+        if type(reported) is not int or reported != count:
+            issues.append(f"{key} disagrees with reconciled raw records")
+    if cap is not None:
+        overshoot = max(0, cumulative - cap)
+        status = "WITHIN_BUDGET"
+        if overshoot:
+            status = "TIMEOUT_BUDGET"
+        elif state.get("usage_complete") is not True:
+            status = "UNKNOWN"
+        elif cumulative == cap:
+            status = "AT_LIMIT"
+        if (
+            type(state.get("overshoot_tokens")) is not int or state["overshoot_tokens"] != overshoot
+            or state.get("budget_status") != status
+        ):
+            issues.append("budget disposition disagrees with reconciled raw records")
+    return _result(source, records, issues)
+
+
+def summarize_usage(path, *, usage_format=None, expected_token_cap=None):
+    """Read turn JSONL, a reducer state JSON, or an explicitly registered Responses ledger.
 
     Numeric counters are observed totals, including on incomplete attempts.
     Keep the private source log or trace bundle for per-request reconciliation.
@@ -166,6 +283,12 @@ def summarize_usage(path):
     path = Path(path)
     try:
         with path.open("rb") as stream:
+            if usage_format == RESPONSES_LEDGER_FORMAT:
+                try:
+                    ledger = _object(stream.read(MAX_LEDGER_BYTES + 1), MAX_LEDGER_BYTES)
+                except ValueError:
+                    return _result(RESPONSES_LEDGER_FORMAT, [], ["malformed provider ledger"])
+                return _responses_ledger(ledger, expected_token_cap)
             if path.suffix.lower() == ".json":
                 try:
                     return _rollout(json.load(stream))

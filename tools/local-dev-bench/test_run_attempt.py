@@ -7,6 +7,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from run_attempt import run, validate_manifest
+from test_usage import gateway_ledger
+from usage import RESPONSES_LEDGER_FORMAT
 
 
 def python(code):
@@ -141,6 +143,20 @@ class AttemptTests(unittest.TestCase):
         self.assertEqual(result["measurement_completeness"]["tokens"], "INCOMPLETE")
         self.assertEqual(json.loads((self.output / "stdout.log").read_text())["usage"], usage)
 
+    def test_attempt_certifies_the_explicit_responses_ledger(self):
+        ledger = json.dumps(gateway_ledger())
+        write_ledger = f"\nPath(os.environ['OMC_BENCH_OUTPUT_DIR'], 'ledger.json').write_text({ledger!r})"
+        self.manifest.update(
+            argv=python(WRITE + write_ledger), acceptance_argv=python(GRADE),
+            usage_path="ledger.json", usage_format=RESPONSES_LEDGER_FORMAT, token_budget=100,
+        )
+        result = run(self.manifest, self.output)
+        self.assertEqual(result["execution_status"], "PASS")
+        self.assertEqual(result["measurement_completeness"]["tokens"], "COMPLETE")
+        self.assertEqual(result["provider_input_tokens"], 20)
+        self.assertEqual(result["provider_output_tokens"], 6)
+        self.assertEqual((self.output / "ledger.json").read_text(), ledger)
+
     def test_final_token_overshoot_cannot_accept_candidate(self):
         usage = json.dumps({"type": "turn.completed", "usage": {"input_tokens": 60, "output_tokens": 45}})
         self.manifest.update(
@@ -162,6 +178,7 @@ class AttemptTests(unittest.TestCase):
             {"timeout_seconds": float("nan")}, {"timeout_seconds": True},
             {"resource_root_pids": [1]}, {"resource_tail_seconds": 20},
             {"token_budget": 30}, {"token_budget": True, "usage_path": "stdout"},
+            {"usage_format": RESPONSES_LEDGER_FORMAT}, {"usage_format": "unknown", "usage_path": "ledger.json"},
         ):
             with self.subTest(extra=extra), self.assertRaises(ValueError):
                 validate_manifest({**self.manifest, **extra})

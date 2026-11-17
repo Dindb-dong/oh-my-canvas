@@ -3,7 +3,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from usage import summarize_usage
+from budget_gate import BudgetGate
+from usage import RESPONSES_LEDGER_FORMAT, summarize_usage
 
 
 USAGE = {
@@ -95,12 +96,76 @@ class UsageTest(unittest.TestCase):
         self.assertTrue(any("compaction usage" in issue for issue in result["issues"]))
         self.assertTrue(any("metered usage" in issue for issue in result["issues"]))
 
+    def provider_ledger(self, state, cap=100):
+        path = self.root / "ledger.json"
+        path.write_text(json.dumps(state))
+        return summarize_usage(path, usage_format=RESPONSES_LEDGER_FORMAT, expected_token_cap=cap)
+
+    def test_responses_ledger_uses_terminal_usage_and_exact_admissions(self):
+        state = gateway_ledger()
+        result = self.provider_ledger(state)
+        self.assertEqual(result["status"], "COMPLETE")
+        self.assertEqual(result["record_count"], 2)
+        self.assertEqual(result["source"], RESPONSES_LEDGER_FORMAT)
+        self.assertEqual(result["input_tokens"], 20)
+        self.assertEqual(result["output_tokens"], 6)
+        self.assertEqual(result["total_tokens"], 26)
+        self.assertEqual(result["cache_read_input_tokens"], 8)
+        self.assertEqual(result["uncached_input_tokens"], 12)
+        self.assertIsNone(result["cache_write_input_tokens"])
+        self.assertIsNone(result["reasoning_output_tokens"])
+        self.assertEqual(summarize_usage(self.root / "ledger.json")["status"], "INCOMPLETE")
+
+    def test_responses_ledger_rejects_admission_and_cumulative_mismatches(self):
+        state = gateway_ledger()
+        state["requests"][0]["admission"]["minimum_input_tokens"] = 9
+        state["requests"][1]["input_tokens"] = 1
+        state["observed_cached_input_tokens"] = 1
+        result = self.provider_ledger(state, cap=99)
+        self.assertEqual(result["status"], "INCOMPLETE")
+        self.assertEqual(result["total_tokens"], 26)
+        for issue in ("registered token budget", "exact pre-count", "copied request", "observed_cached_input_tokens"):
+            self.assertTrue(any(issue in observed for observed in result["issues"]), result["issues"])
+
+    def test_responses_ledger_deduplicates_ids_and_retains_spend_on_missing_terminal(self):
+        state = gateway_ledger()
+        first, second = state["requests"]
+        state["requests"].append({**first, "provider_response_id": "third"})
+        state["requests"].append({**first, "admission": {**first["admission"], "request_id": "another"}})
+        second.update(outcome="stream_ended", raw_usage=None, issue="unmetered")
+        state.update(usage_complete=False, in_flight_request_id="not-closed")
+        result = self.provider_ledger(state)
+        self.assertEqual(result["status"], "INCOMPLETE")
+        self.assertEqual(result["total_tokens"], 13)
+        self.assertEqual(sum("duplicate admission" in issue for issue in result["issues"]), 2)
+        self.assertIn("provider ledger did not close with complete metering", result["issues"])
+
+    def test_responses_ledger_preserves_actual_final_overshoot(self):
+        result = self.provider_ledger(gateway_ledger(cap=12, single=True), cap=12)
+        self.assertEqual(result["status"], "INCOMPLETE")
+        self.assertEqual(result["total_tokens"], 13)
+        self.assertTrue(any("admitted output cap" in issue for issue in result["issues"]))
+
     def test_unsealed_or_unsupported_rollout(self):
         state = trace(3)
         state["recording_status"] = "closed_with_partial_payloads"
         self.assertEqual(self.rollout(state)["status"], "INCOMPLETE")
         state["schema_version"] = 42
         self.assertIsNone(self.rollout(state)["total_tokens"])
+
+
+def gateway_ledger(cap=100, single=False):
+    gate = BudgetGate(cap, require_exact_input=True)
+    for index in range(1 if single else 2):
+        uid = f"request-{index}"
+        gate.admit(uid, "responses", b'{"model":"llama","stream":true}', minimum_input_tokens=10)
+        raw = {"input_tokens": 10, "output_tokens": 3, "total_tokens": 13,
+               "input_tokens_details": {"cached_tokens": 8 * index}}
+        event = {"type": "response.completed", "response": {
+            "id": f"provider-{index}", "usage": raw, "status": "completed",
+        }}
+        gate.record_event(uid, json.dumps(event).encode())
+    return gate.snapshot()
 
 
 def trace(version):

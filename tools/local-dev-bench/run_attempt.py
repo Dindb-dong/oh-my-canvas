@@ -10,6 +10,8 @@ import signal
 import subprocess
 import time
 
+from usage import RESPONSES_LEDGER_FORMAT, summarize_usage
+
 SCHEMA = "omc-local-dev/1"
 
 
@@ -50,6 +52,9 @@ def validate_manifest(manifest):
         if (not isinstance(value, str) or not value or "\0" in value
                 or Path(value).name != value or value in {".", ".."}):
             raise ValueError("usage_path must be 'stdout' or a file name in the output directory")
+    if "usage_format" in manifest:
+        if manifest["usage_format"] != RESPONSES_LEDGER_FORMAT or "usage_path" not in manifest:
+            raise ValueError("usage_format must name the supported Responses ledger and requires usage_path")
     if "token_budget" in manifest:
         budget = manifest["token_budget"]
         if type(budget) is not int or budget <= 0 or "usage_path" not in manifest:
@@ -218,13 +223,13 @@ def run(manifest, output):
                 result["returncode"] = proc.returncode
 
         if "usage_path" in manifest:
-            from usage import summarize_usage
             leaf = manifest["usage_path"]
             path = output / ("stdout.log" if leaf == "stdout" else leaf)
             usage = (
                 {"status": "INCOMPLETE", "issues": ["usage path is not a regular file"]}
                 if path.is_symlink() or (path.exists() and not path.is_file())
-                else summarize_usage(path)
+                else summarize_usage(path, usage_format=manifest.get("usage_format"),
+                                     expected_token_cap=manifest.get("token_budget"))
             )
             result["usage"] = usage
             result["measurement_completeness"]["tokens"] = usage["status"]
