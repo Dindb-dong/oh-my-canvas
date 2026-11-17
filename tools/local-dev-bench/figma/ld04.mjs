@@ -23,11 +23,17 @@ async function adapt(figma, input) {
   const canvas = byName('canvas');
   const collection = byName('collection');
   const title = byName('title');
-  if (page.children.length !== 1 || canvas.children.length !== 2 ||
+  const heading = input.footer ? byName('heading') : null;
+  const footer = input.footer ? byName('footer') : null;
+  if (page.children.length !== 1 || canvas.children.length !== (footer ? 3 : 2) ||
       canvas.type !== 'FRAME' || collection.type !== 'FRAME' || title.type !== 'TEXT' ||
-      title.parent !== canvas || collection.parent !== canvas ||
+      title.parent !== (heading ?? canvas) || collection.parent !== canvas ||
       canvas.layoutMode !== 'NONE' || collection.layoutMode !== 'NONE') {
-    throw new Error('Expected the street-market desktop starting hierarchy');
+    throw new Error('Expected the registered responsive desktop starting hierarchy');
+  }
+  if (heading && (heading.type !== 'FRAME' || heading.layoutMode !== 'NONE' || heading.parent !== canvas ||
+      heading.children.length !== 1 || footer.type !== 'TEXT' || footer.parent !== canvas)) {
+    throw new Error('Expected the lab-queue heading and footer');
   }
 
   const cards = input.cards.map(spec => ({ node: byName(spec.key), spec }));
@@ -40,7 +46,15 @@ async function adapt(figma, input) {
   canvas.counterAxisSizingMode = 'FIXED';
   canvas.paddingTop = canvas.paddingRight = canvas.paddingBottom = canvas.paddingLeft = input.canvasPad;
   canvas.itemSpacing = input.headingGap;
-  title.layoutSizingHorizontal = 'FILL';
+  if (heading) {
+    heading.layoutSizingHorizontal = 'FILL';
+    title.constraints = { horizontal: 'STRETCH', vertical: 'MIN' };
+    // Reserve the footer's separate gap and height in the content-hugging canvas.
+    footer.layoutPositioning = 'ABSOLUTE';
+    canvas.paddingBottom = input.canvasPad + input.footer.gap + input.footer.height;
+  } else {
+    title.layoutSizingHorizontal = 'FILL';
+  }
 
   collection.layoutMode = 'HORIZONTAL';
   collection.layoutWrap = 'WRAP';
@@ -65,8 +79,14 @@ async function adapt(figma, input) {
     node.layoutSizingHorizontal = 'FILL';
     for (const line of node.children) line.layoutSizingHorizontal = 'FILL';
   }
+  if (footer) {
+    footer.resize(canvas.width - 2 * input.canvasPad, input.footer.height);
+    footer.x = input.canvasPad;
+    footer.y = canvas.height - input.canvasPad - input.footer.height;
+    footer.constraints = { horizontal: 'STRETCH', vertical: 'MAX' };
+  }
   return { document_id: figma.fileKey, canvas_id: canvas.id, collection_id: collection.id,
-    card_ids: cards.map(({ node }) => node.id) };
+    card_ids: cards.map(({ node }) => node.id), ...(footer && { heading_id: heading.id, footer_id: footer.id }) };
 }
 
 async function changeWidth(figma, { fileKey, width }) {
@@ -124,7 +144,7 @@ async function inspectResponsive(figma, { fileKey }) {
 
 export function planResponsive(fixture, original, copy) {
   assert.equal(fixture.workload, 'LD04');
-  assert.equal(fixture.source_family_id, 'street-market');
+  assert.ok(['street-market', 'lab-queue'].includes(fixture.source_family_id));
   assert.equal(fixture.private_width_registered, true, 'Freeze a private width before planning');
   assert.match(original ?? '', /^[a-zA-Z0-9_-]{1,128}$/);
   if (copy != null) assert.match(copy, /^[a-zA-Z0-9_-]{1,128}$/);
@@ -137,15 +157,18 @@ export function planResponsive(fixture, original, copy) {
   });
   const cards = fixture.expected.nodes.filter(node => node.parent === 'collection' && node.kind === 'frame')
     .map(({ key, min_width, max_width, basis_width }) => ({ key, min_width, max_width, basis_width }));
-  const [first, second] = start.get('card/0') ? [...start.values()].filter(node => node.parent === 'card/0') : [];
+  const [first, second] = [...start.values()].filter(node => node.parent === 'card/0');
   const firstCard = start.get('card/0');
   const collection = start.get('collection');
-  const title = start.get('title');
-  const layout = { cards, gap: collection.gap, canvasPad: title.bounds[0],
-    headingGap: collection.bounds[1] - title.bounds[1] - title.bounds[3],
+  const heading = start.get('heading') ?? start.get('title');
+  const footer = start.get('footer');
+  const footerLayout = footer && { height: footer.bounds[3],
+    gap: footer.bounds[1] - collection.bounds[1] - collection.bounds[3] };
+  const layout = { cards, gap: collection.gap, canvasPad: heading.bounds[0], footer: footerLayout,
+    headingGap: collection.bounds[1] - heading.bounds[1] - heading.bounds[3],
     cardPad: first.bounds[0] - firstCard.bounds[0], lineGap: second.bounds[1] - first.bounds[1] - first.bounds[3] };
   const makeFilePlan = fileKey => ({
-    seed: payload('Create independent editable street-market baseline', seed, { fileKey, nodes, styles: [], images: [] }, true),
+    seed: payload('Create independent editable responsive baseline', seed, { fileKey, nodes, styles: [], images: [] }, true),
     adapt: payload('Enable native wrapping Auto Layout on the existing frames', adapt, { fileKey, ...layout }, true),
     read: payload('Observe actual native responsive tree, geometry and sizing modes', inspectResponsive, { fileKey }),
   });
