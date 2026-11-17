@@ -242,6 +242,6 @@ test('FigCraft file and page commands persist edits and keep imported layers edi
       child.kill();
       await exited;
     }
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

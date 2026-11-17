@@ -60,7 +60,7 @@ async function withClient(work, existingProfile) {
     await client.close().catch(() => {});
     if (service.exitCode === null) service.kill();
     await exited;
-    if (!existingProfile) await rm(profile, { recursive: true, force: true });
+    if (!existingProfile) await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 
@@ -217,7 +217,7 @@ test('Authenticated SDK publishes, browses, installs, runs, updates and removes 
       }
     });
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -268,7 +268,7 @@ test('The credential-free online server preference persists and supplies a direc
   } finally {
     for (const client of fixture.clients) client.terminate();
     await new Promise((resolve, reject) => fixture.close(error => error ? reject(error) : resolve()));
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -501,7 +501,7 @@ test('Authenticated SDK edits an online file in both directions and revokes real
         await owner('collab.manageFile', { file, action: 'remove' });
       }, profile).catch(() => {});
     }
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -576,7 +576,7 @@ for (const method of ['hosted', 'keyed']) {
           await owner('collab.manageFile', { file, action: 'remove' });
         }, profile).catch(() => {});
       }
-      await rm(profile, { recursive: true, force: true });
+      await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 }
@@ -670,7 +670,7 @@ test('Online recovery opens a divergent local archive beside the server document
       }
     });
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
