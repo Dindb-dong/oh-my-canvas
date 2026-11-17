@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {collectLifecycle, makeCase, parsePlan, validateEvidence} from './ld09.mjs';
-import {seedCode, seedReadbackCode} from './seed-small.mjs';
+import {scaleBatches, scaleCode, seedCode, seedReadbackCode} from './seed.mjs';
 
 function prepared(size = 'small', count = 0) {
   const testCase = makeCase(size, count);
@@ -95,6 +95,7 @@ test('small seeder rejects the wrong file and prepares four independently native
   const shape = (type, properties = {}) => ({
     id:`mock-shape-${sequence++}`, type, ...properties,
     resize(width, height) { Object.assign(this, {width, height}); },
+    bringToFront() {},
   });
   const penpot = {
     currentPage:page,
@@ -113,12 +114,46 @@ test('small seeder rejects the wrong file and prepares four independently native
   };
   const AsyncFunction = (async () => {}).constructor;
   const execute = code => new AsyncFunction('penpot', code)(penpot);
-  await assert.rejects(execute(seedCode('unrelated-file')), /Wrong blank benchmark file/);
+  await assert.rejects(execute(seedCode('unrelated-file')), /Wrong synthetic fixture start state/);
   assert.deepEqual(page.root.children, []);
   const state = await execute(seedCode('mock-fixture'));
   assert.deepEqual(page.root.children[0].children.map(child => child.type), ['text','rectangle','ellipse']);
   assert.equal(await execute(seedReadbackCode({...fixture, fileId:'mock-fixture', ...state})), true);
-  await assert.rejects(execute(seedCode('mock-fixture')), /Wrong blank benchmark file/);
+  await assert.rejects(execute(seedCode('mock-fixture')), /Wrong synthetic fixture start state/);
   page.root.children[0].children[0].characters = 'Unexpected';
   await assert.rejects(execute(seedReadbackCode({...fixture, fileId:'mock-fixture', ...state})), /did not survive reopen/);
+
+  const large = makeCase('large', 100);
+  penpot.currentFile.name = large.targetName;
+  page.root.children = [];
+  const batches = scaleBatches(large);
+  assert.equal(batches.length, 10);
+  await assert.rejects(execute(scaleCode(large, 'mock-fixture', batches[1])), /Wrong synthetic scale seed state/);
+  for (const batch of batches) {
+    assert.ok(batch.end - batch.start <= 25);
+    assert.equal(await execute(scaleCode(large, 'mock-fixture', batch)), batch.end);
+  }
+  assert.equal(new Set(page.root.children.map(card => card.name)).size, 249);
+  const scaled = await execute(seedCode('mock-fixture', large));
+  assert.equal(page.root.children.length, 250);
+  assert.equal(await execute(seedReadbackCode({...large, fileId:'mock-fixture', ...scaled})), true);
+  page.root.children[20].children.pop();
+  await assert.rejects(execute(seedReadbackCode({...large, fileId:'mock-fixture', ...scaled})), /did not survive reopen/);
+});
+
+test('preparation binds native catalog order and complete inventory to acceptance evidence', async () => {
+  const raw = prepared('small', 15);
+  const catalogUrl = `${raw.origin}/?screen=dashboard-files&project-id=00000000-0000-4000-8000-000000000004`;
+  const [target, ...distractors] = raw.savedCatalog;
+  const input = {...raw, catalogUrl, catalogOrder:'modified-desc',
+    savedCatalog:[target, ...distractors.reverse()]};
+  const plan = parsePlan(input);
+  assert.throws(() => parsePlan({...input, savedCatalog:raw.savedCatalog}), /modification order/);
+  assert.throws(() => parsePlan({...input, savedCatalog:input.savedCatalog.slice(0,-1)}), /modification order/);
+  assert.throws(() => parsePlan({...input, catalogUrl:input.workspaceUrl}), /catalog URL/);
+  const driver = mocked(plan);
+  const evidence = await collectLifecycle(plan, driver, driver.now);
+  validateEvidence(plan, evidence);
+  evidence.catalogEvidence.savedNames = raw.savedCatalog;
+  assert.throws(() => validateEvidence(plan, evidence));
 });

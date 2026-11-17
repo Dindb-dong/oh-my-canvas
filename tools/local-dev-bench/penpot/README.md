@@ -18,31 +18,40 @@ saved-project inventory with the preparation record. The probe checks the
 declared catalog names and count, and verifies the opened file live by native
 IDs and object count. Catalog verification is part of fixture setup.
 
-To prepare the small, zero-distractor case on an already running, task-owned
-Penpot stack, supply a new private directory outside version control:
+To prepare one registered case on an already running task-owned Penpot
+stack, pass a new private directory outside version control:
 
 ```sh
-node tools/local-dev-bench/penpot/seed-small.mjs http://localhost:19001 /private/evidence/new-ld09-seed
+node tools/local-dev-bench/penpot/seed-small.mjs http://localhost:19001 /private/evidence/new-ld09-small-0
+node tools/local-dev-bench/penpot/seed.mjs http://localhost:19001 /private/evidence/new-ld09-small-15 small 15
+node tools/local-dev-bench/penpot/seed.mjs http://localhost:19001 /private/evidence/new-ld09-large-100 large 100
 ```
 
-This creates a fresh synthetic account and native file using headless Chrome.
-It verifies the saved catalog and checks the fixture after normal reopen. The
-directory contains `prepared.json`, `storage-state.json`, and
-`mcp-endpoint.txt`. Keep all three private. The generated case uses simple
-native solid shapes and carries no image/font readiness registration.
+The seeder creates a fresh synthetic account and its private Drafts project in
+headless Chrome. It creates distractors sequentially, with one saved native
+tile per file, then creates and verifies the native target after normal reopen.
+The large page contains 249 additional four-object cards so the target and
+distractors total 1,000 native objects on one page. It seeds these extra cards
+in batches of up to 25 boards. The Project Files UI supplies the full observed
+saved-name order, newest modification first, including the target. Keep seed
+time separate from lifecycle timing. Larger catalogs may need several minutes
+of preparation because each file is created and saved through Penpot.
 
-For other cases, prepare a disposable local Penpot account and project. Create the target file
-and one page with the plan's exact names. Create a top-level board named
-`LD09 lifecycle board` with a text child named `LD09 editable caption` containing
-`Library status: awaiting review`. Put the registered native object count on that
-page and keep the other content fixed across equivalent repetitions. Keep the
-fixture file private, with these fields:
+The output directory contains `prepared.json`, `storage-state.json`, and
+`mcp-endpoint.txt`. Keep all three private and remove the short-lived auth
+files when the run is complete. The generated cases use simple native solid
+shapes and carry no image/font readiness registration. To register a prepared
+case with observable assets, use the same names, IDs and native object counts
+in its fixture manifest. The
+fixture manifest has these fields:
 
 - `size` and `savedLibraryEntries` from the plan
 - `origin`, the task-owned HTTP loopback Penpot origin
 - `workspaceUrl`, the exact prepared URL, including the native file and page IDs
 - `fileId`, `pageId`, `textId`, the guarded native fixture identities
 - `savedCatalog`, the observed isolated project's saved names, including the target
+- `catalogOrder` and `catalogUrl`, the seeder's observed order and exact Project
+  Files URL. Manually prepared older manifests may omit these two fields.
 - Optional `assetFont` with `assetPaths` mapping known same-origin `/assets/` image
   response paths to SHA-256 digests, and exact `fontFamily` and native `fontId`
   for the editable caption

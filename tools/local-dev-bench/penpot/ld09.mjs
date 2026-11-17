@@ -46,7 +46,16 @@ export function parsePlan(plan) {
     workspace.searchParams.get('screen') === 'workspace' && workspace.searchParams.get('file-id') === plan.fileId &&
     workspace.searchParams.get('page-id') === plan.pageId, 'Provide the exact prepared native workspace URL');
   assert.ok(Array.isArray(plan.savedCatalog), 'Provide the observed isolated project catalog');
-  assert.deepEqual([...plan.savedCatalog].sort(), [testCase.targetName, ...testCase.distractorNames].sort());
+  if (plan.catalogOrder !== undefined || plan.catalogUrl !== undefined) {
+    const catalog = new URL(plan.catalogUrl);
+    assert.ok(catalog.origin === url.origin && catalog.searchParams.get('screen') === 'dashboard-files' &&
+      uuid.test(catalog.searchParams.get('project-id')), 'Provide the isolated Project Files catalog URL');
+    assert.equal(plan.catalogOrder, 'modified-desc');
+    assert.deepEqual(plan.savedCatalog, [testCase.targetName, ...testCase.distractorNames.toReversed()],
+      'Project catalog differs from the expected modification order');
+  } else {
+    assert.deepEqual([...plan.savedCatalog].sort(), [testCase.targetName, ...testCase.distractorNames].sort());
+  }
   if (plan.assetFont) {
     const {assetPaths, fontFamily, fontId} = plan.assetFont;
     assert.ok(assetPaths && Object.keys(assetPaths).length > 0, 'Provide registered workspace image response paths');
@@ -75,6 +84,11 @@ function checkState(plan, actual, text) {
 export function validateEvidence(plan, evidence) {
   assert.equal(evidence.schema, schema);
   assert.deepEqual(evidence.testCase, makeCase(plan.size, plan.savedLibraryEntries));
+  if (plan.catalogOrder) {
+    assert.deepEqual(evidence.catalogEvidence, {
+      source:'penpot-project-files', order:plan.catalogOrder, savedNames:plan.savedCatalog,
+    });
+  }
   checkState(plan, evidence.before, beforeText);
   checkState(plan, evidence.edited, afterText);
   checkState(plan, evidence.reopened, afterText);
@@ -135,7 +149,10 @@ export async function collectLifecycle(plan, driver, now = performance.now.bind(
   return {
     schema, testCase:makeCase(plan.size, plan.savedLibraryEntries), events, before, edited, reopened,
     browserCache:'fresh-browser-process; warm reopen in the same browser context', hostCache:'uncontrolled',
-    catalogEvidence:'operator-prepared saved-project inventory', saveResponseObserved,
+    catalogEvidence:plan.catalogOrder ? {
+      source:'penpot-project-files', order:plan.catalogOrder, savedNames:plan.savedCatalog,
+    } : 'operator-prepared saved-project inventory',
+    saveResponseObserved,
   };
 }
 
