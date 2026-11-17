@@ -14,7 +14,7 @@ from threading import Event, Lock
 from uuid import uuid4
 
 from budget_gate import BudgetGate, _object
-from llama_canary import CANARY, LD03
+from llama_canary import CANARY, LD02_ATLAS, LD03
 
 
 LOOPBACK = "127.0.0.1"
@@ -190,16 +190,20 @@ class ResponsesHandler(BaseHTTPRequestHandler):
 
 class ResponsesGateway(ThreadingHTTPServer):
     def __init__(self, upstream_port, token_cap, *, port=0, minimum_output_tokens=1,
-                 upstream_timeout=TIMEOUT_SECONDS, llama_synthetic_canary=False, llama_ld03=False):
+                 upstream_timeout=TIMEOUT_SECONDS, llama_synthetic_canary=False,
+                 llama_ld03=False, llama_ld02_atlas=False):
         if type(upstream_port) is not int or not 0 < upstream_port < 65536:
             raise ValueError("invalid loopback upstream port")
         if type(upstream_timeout) is not int or upstream_timeout <= 0:
             raise ValueError("invalid loopback upstream socket timeout")
         self.upstream_port = upstream_port
         self.upstream_timeout = upstream_timeout
-        if llama_synthetic_canary and llama_ld03:
-            raise ValueError("choose exactly one local tool bridge")
-        self.tool_bridge = CANARY if llama_synthetic_canary else LD03 if llama_ld03 else None
+        bridges = [bridge for enabled, bridge in (
+            (llama_synthetic_canary, CANARY), (llama_ld03, LD03), (llama_ld02_atlas, LD02_ATLAS),
+        ) if enabled]
+        if len(bridges) > 1:
+            raise ValueError("choose at most one local tool bridge")
+        self.tool_bridge = next(iter(bridges), None)
         self.gate = BudgetGate(token_cap, minimum_output_tokens=minimum_output_tokens,
                                require_exact_input=self.tool_bridge is not None)
         self.admissions = Lock()
@@ -253,6 +257,8 @@ def main():
                          help="Expose only the synthetic read-only canary to a local llama-server")
     bridges.add_argument("--llama-ld03", action="store_true",
                          help="Expose only the registered LD03 shared-value tools to a local llama-server")
+    bridges.add_argument("--llama-ld02-atlas", action="store_true",
+                         help="Expose only the registered LD02 Atlas lookup and edit tools to a local llama-server")
     parser.add_argument("--ledger", type=Path, required=True, help="New private JSON evidence file")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, interrupted)
@@ -260,7 +266,8 @@ def main():
         ResponsesGateway(args.upstream_port, args.token_cap,
                          minimum_output_tokens=args.minimum_output_tokens,
                          upstream_timeout=args.upstream_timeout,
-                         llama_synthetic_canary=args.llama_synthetic_canary, llama_ld03=args.llama_ld03) as gateway,
+                         llama_synthetic_canary=args.llama_synthetic_canary, llama_ld03=args.llama_ld03,
+                         llama_ld02_atlas=args.llama_ld02_atlas) as gateway,
         open(args.ledger, "x", encoding="utf-8", opener=private_open) as ledger,
     ):
         print(json.dumps({"base_url": f"http://{LOOPBACK}:{gateway.server_port}/v1"}), flush=True)

@@ -12,6 +12,9 @@ LLAMA_NAME = "bench_get_canary"
 LD03_NAMESPACE = "mcp__bench_ld03"
 LD03_INSPECT = "inspect_shared_values"
 LD03_APPLY = "set_shared_values"
+LD02_ATLAS_NAMESPACE = "mcp__bench_ld02_atlas"
+LD02_ATLAS_FIND = "find_section"
+LD02_ATLAS_EDIT = "edit_section"
 EMPTY_PARAMETERS = {"type": "object", "properties": {}, "additionalProperties": False}
 LD03_APPLY_PARAMETERS = {
     "type": "object",
@@ -28,20 +31,35 @@ LD03_CODEX_PARAMETERS = {
 }
 
 
+def parameters(properties):
+    return {"type": "object", "properties": properties, "required": list(properties),
+            "additionalProperties": False}
+
+
+PRINTABLE_LINE = {"type": "string", "minLength": 1, "maxLength": 128, "pattern": r"^[^\u0000-\u001F\u007F]+$"}
+PIXELS = {"type": "integer", "minimum": 0, "maximum": 128}
+ATLAS_SELECTOR = {"name": PRINTABLE_LINE, "receipt": {"type": "string", "pattern": "^[A-Z]{2}-[0-9]{3}$"}}
+ATLAS_FIND_PARAMETERS = parameters(ATLAS_SELECTOR)
+ATLAS_EDIT_PARAMETERS = parameters({**ATLAS_SELECTOR, "text": PRINTABLE_LINE, "gap_px": PIXELS, "radius_px": PIXELS})
+
+
+def matches_field(value, field):
+    if field["type"] == "string":
+        return (
+            isinstance(value, str)
+            and field.get("minLength", 0) <= len(value) <= field.get("maxLength", 4096)
+            and re.fullmatch(field["pattern"], value) is not None
+        )
+    return type(value) is int and field["minimum"] <= value <= field["maximum"]
+
+
 def validate_arguments(raw, *, parameters):
     if not isinstance(raw, str):
         raise ValueError("invalid local tool arguments")
     arguments = _object(raw.encode(), 4096)
-    if parameters == EMPTY_PARAMETERS and arguments == {}:
-        return
-    if parameters == LD03_APPLY_PARAMETERS and arguments.keys() == {"accent", "spacing_px"}:
-        accent, spacing = arguments["accent"], arguments["spacing_px"]
-        if (
-            isinstance(accent, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", accent)
-            and type(spacing) is int and 0 <= spacing <= 128
-        ):
-            return
-    raise ValueError("local tool arguments do not match the registered schema")
+    fields = parameters["properties"]
+    if arguments.keys() != fields.keys() or any(not matches_field(arguments[key], field) for key, field in fields.items()):
+        raise ValueError("local tool arguments do not match the registered schema")
 
 
 @dataclass(frozen=True)
@@ -155,7 +173,20 @@ LD03 = ToolBridge(LD03_NAMESPACE, (
              LD03_CODEX_PARAMETERS),
 ))
 
-LD03_TOOLS = [
-    {"name": function.name, "description": function.description, "inputSchema": function.parameters}
-    for function in LD03.functions
-]
+LD02_ATLAS = ToolBridge(LD02_ATLAS_NAMESPACE, (
+    Function(LD02_ATLAS_FIND, "bench_find_section", ATLAS_FIND_PARAMETERS,
+             "Find a section by its exact name and receipt in the current synthetic Atlas document."),
+    Function(LD02_ATLAS_EDIT, "bench_edit_section", ATLAS_EDIT_PARAMETERS,
+             "Set the status text, section gap and marker radius of a section already found by name and receipt."),
+))
+
+
+def mcp_tools(bridge):
+    return [
+        {"name": function.name, "description": function.description, "inputSchema": function.parameters}
+        for function in bridge.functions
+    ]
+
+
+LD03_TOOLS = mcp_tools(LD03)
+LD02_ATLAS_TOOLS = mcp_tools(LD02_ATLAS)

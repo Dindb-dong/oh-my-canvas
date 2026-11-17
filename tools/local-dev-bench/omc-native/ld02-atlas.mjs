@@ -8,6 +8,8 @@ import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {pathToFileURL} from 'node:url';
 import {parseArgs} from 'node:util';
+import {withLD02Broker} from '../ld02-model.mjs';
+import {runLD03Agent} from '../ld03-model.mjs';
 
 const id = (kind, n) => `${kind}_${n.toString(16).padStart(32, '0')}`;
 const rank = n => n.toString(16).padStart(8, '0') + '0'.repeat(24);
@@ -90,11 +92,12 @@ function rankedChildren(raw) {
   return children;
 }
 
-export function findStation(raw, query) {
+export function findStation(raw, query, required = true) {
   const children = rankedChildren(raw);
   const matches = Object.values(raw.nodes).filter(node => node.kind === 'frame' && node.properties.name === query.name
     && children.get(node.id)?.some(child => child.kind === 'text' && child.properties.name === 'receipt'
       && child.properties.text === query.receipt));
+  if (!matches.length && !required) return null;
   assert.equal(matches.length, 1, 'Name and receipt must identify one real station');
   const [frame] = matches;
   const one = (name, kind) => {
@@ -199,7 +202,7 @@ export function verifyWrites(before, after, targets, changes) {
   assert.deepEqual(after.nodes, expected, 'Unexpected current node structure or property changes');
 }
 
-async function execute(fixture, index, report, signal) {
+async function execute(fixture, index, report, signal, modelCommand) {
   const {Client, StreamableHTTPClientTransport} = await import('../replays/mcp.mjs');
   const binaryDir = process.env.OMC_BENCH_BIN_DIR ?? '/Applications/Oh My Canvas.app/Contents/MacOS';
   const serviceBinary = join(binaryDir, 'omc-service');
@@ -325,18 +328,18 @@ async function execute(fixture, index, report, signal) {
     return {raw, normalized};
   }
 
-  async function edit(documentId, captureBefore) {
+  async function edit(documentId, captureBefore, query = index.query, requested = null) {
     const {rpc, writer} = environment;
     const discoveryStarted = performance.now();
     const raw = await rpc('document.snapshot', {documentId}, writer);
     assert.deepEqual(raw, captureBefore.raw);
-    const target = findStation(raw, index.query);
+    const target = findStation(raw, query);
     const keyByNative = new Map(captureBefore.normalized.nodes.map(node => [node.native_id, node.key]));
     const ledger = fixture.edit.map(change => ({
       key: keyByNative.get(target[change.field].id), field: change.field,
-      from: observedValue(change.field, target[change.field]), to: change.to,
+      from: observedValue(change.field, target[change.field]), to: requested ? requested[change.field] : change.to,
     }));
-    assert.deepEqual(ledger, fixture.edit);
+    if (!requested) assert.deepEqual(ledger, fixture.edit);
     const discoveryMs = performance.now() - discoveryStarted;
     const requestId = randomUUID();
     const commands = ledger.map(({field, to}) => {
@@ -354,6 +357,11 @@ async function execute(fixture, index, report, signal) {
     assert.equal(receipt.revision.epoch, raw.epoch);
     assert.equal(BigInt(receipt.revision.sequence), BigInt(raw.sequence) + 1n);
     return {ledger, target, discoveryMs, revision: receipt.revision};
+  }
+
+  function stationValues(selector, station) {
+    return {...selector, text: observedValue('text', station.text),
+      gap_px: observedValue('gap', station.gap), radius_px: observedValue('radius', station.radius)};
   }
 
   async function phase(name, fn) {
@@ -381,13 +389,37 @@ async function execute(fixture, index, report, signal) {
       assert.notEqual(distinct, original.id);
       return distinct;
     });
-    const primary = await phase('candidateDiscoveryAndEdit', () => edit(original.id, before));
-    report.elapsedMs.candidateDiscoveryOnly = primary.discoveryMs;
-    report.edit = primary.ledger;
-    report.candidateRevision = primary.revision;
+    let primary;
+    await phase('candidateDiscoveryAndEdit', async () => {
+      if (!modelCommand) {
+        primary = await edit(original.id, before);
+        return;
+      }
+      report.modelTools = [];
+      const socket = join(profile, 'model.sock');
+      await withLD02Broker(socket, {
+        query: index.query,
+        find: async selector => {
+          const raw = await environment.rpc('document.snapshot', {documentId: original.id}, environment.writer);
+          const station = findStation(raw, selector, false);
+          return station && stationValues(selector, station);
+        },
+        edit: async (selector, requested) => {
+          primary = await edit(original.id, before, selector, requested);
+          const raw = await environment.rpc('document.snapshot', {documentId: original.id}, environment.writer);
+          return stationValues(selector, findStation(raw, selector));
+        },
+      }, report.modelTools, () => runLD03Agent(modelCommand, socket, signal));
+    });
+    if (primary) {
+      report.elapsedMs.candidateDiscoveryOnly = primary.discoveryMs;
+      report.candidateRevision = primary.revision;
+    }
+    report.edit = primary?.ledger ?? [];
     await phase('candidateSave', () => environment.rpc('document.save', {documentId: original.id}, environment.writer));
     const candidate = await phase('candidateReadback', () => capture(original.id));
-    verifyWrites(before.raw, candidate.raw, primary.target, primary.ledger);
+    if (primary) verifyWrites(before.raw, candidate.raw, primary.target, primary.ledger);
+    else assert.deepEqual(before.raw, candidate.raw);
     report.candidate = candidate.normalized;
 
     await phase('normalServiceReopen', async () => {
@@ -435,11 +467,13 @@ async function execute(fixture, index, report, signal) {
 }
 
 async function main() {
-  const {values} = parseArgs({options: {fixture: {type: 'string'}, 'fixture-only': {type: 'boolean'}}});
+  const {values} = parseArgs({options: {
+    fixture: {type: 'string'}, 'fixture-only': {type: 'boolean'}, 'model-command': {type: 'string'},
+  }});
   assert.ok(values.fixture, 'Provide the canonical LD02 conservation-atlas fixture');
   const fixture = JSON.parse(await readFile(values.fixture, 'utf8'));
   const index = atlasIndex(fixture);
-  const report = {measurementKind: 'installed-omc-canonical-deterministic-atlas', workload: fixture.workload,
+  const report = {measurementKind: values['model-command'] ? 'installed-omc-model-atlas' : 'installed-omc-canonical-deterministic-atlas', workload: fixture.workload,
     variant: fixture.source_family_id, fixtureSha256: fixture.fixture_sha256, elapsedMs: {}};
   const controller = new AbortController();
   for (const event of ['SIGINT', 'SIGTERM']) process.once(event, () => controller.abort(new Error(event)));
@@ -452,7 +486,7 @@ async function main() {
       findStation(document, index.query);
       report.status = 'fixture-only';
     } else {
-      await execute(fixture, index, report, controller.signal);
+      await execute(fixture, index, report, controller.signal, values['model-command']);
       report.status = 'awaiting-canonical-grade';
     }
   } catch (error) {

@@ -7,7 +7,7 @@ import sys
 from llama_canary import LD03_TOOLS
 
 
-def call(path, params):
+def call(path, params, server_name):
     request = {"name": params.get("name"), "arguments": params.get("arguments", {})}
     try:
         with socket.socket(socket.AF_UNIX) as connection:
@@ -20,13 +20,13 @@ def call(path, params):
             raise ValueError("Incomplete reply")
         reply = json.loads(raw)
     except (OSError, ValueError):
-        reply = {"error": "LD03 broker unavailable"}
+        reply = {"error": f"{server_name.removeprefix('bench_').upper()} broker unavailable"}
     error = reply.get("error")
     message = error if error else json.dumps(reply["result"], sort_keys=True)
     return {"content": [{"type": "text", "text": message}], "isError": bool(error)}
 
 
-def main(path):
+def main(path, *, server_name="bench_ld03", tools=LD03_TOOLS):
     for line in sys.stdin:
         event = json.loads(line)
         if "id" not in event:
@@ -36,11 +36,11 @@ def main(path):
         reply = {"jsonrpc": "2.0", "id": event["id"]}
         if method == "initialize":
             result = {"protocolVersion": params.get("protocolVersion", "2025-06-18"),
-                      "capabilities": {"tools": {}}, "serverInfo": {"name": "bench_ld03", "version": "1"}}
+                      "capabilities": {"tools": {}}, "serverInfo": {"name": server_name, "version": "1"}}
         elif method == "tools/list":
-            result = {"tools": LD03_TOOLS}
+            result = {"tools": tools}
         elif method == "tools/call":
-            result = call(path, params)
+            result = call(path, params, server_name)
         elif method == "ping":
             result = {}
         else:

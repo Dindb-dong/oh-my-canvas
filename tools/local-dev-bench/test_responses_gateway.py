@@ -4,10 +4,16 @@ from hashlib import sha256
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from pathlib import Path
+import subprocess
+import sys
 from threading import Event, Thread
 import unittest
 
-from llama_canary import CANARY, FUNCTION, LD03, LD03_APPLY, LD03_INSPECT, LD03_NAMESPACE, LD03_TOOLS, LLAMA_NAME, NAMESPACE
+from llama_canary import (
+    CANARY, FUNCTION, LD02_ATLAS, LD02_ATLAS_NAMESPACE, LD02_ATLAS_TOOLS,
+    LD03, LD03_APPLY, LD03_INSPECT, LD03_NAMESPACE, LD03_TOOLS, LLAMA_NAME, NAMESPACE,
+)
 from responses_gateway import COUNT_PATH, CREATE_PATH, LOOPBACK, TIMEOUT_SECONDS, ResponsesGateway, json_bytes
 
 
@@ -29,12 +35,12 @@ def terminal(name, input_tokens, output_tokens, cached_tokens, *, status="comple
     }, multiline=True)
 
 
-def codex_ld03_namespace():
+def codex_namespace(name, tools):
     return {
-        "type": "namespace", "name": LD03_NAMESPACE, "tools": [
+        "type": "namespace", "name": name, "tools": [
             {"type": "function", "name": tool["name"], "description": tool["description"],
              "parameters": tool["inputSchema"], "strict": False}
-            for tool in LD03_TOOLS
+            for tool in tools
         ],
     }
 
@@ -163,7 +169,7 @@ class GatewayTest(unittest.TestCase):
         ]
         stream = b"".join(b"data: " + json_bytes(event) + b"\n\n" for event in events)
         self.setup_gateway(60, {"ld03": 32}, {"ld03": stream}, llama_ld03=True)
-        tools = [{"type": "function", "name": "create_goal"}, codex_ld03_namespace(),
+        tools = [{"type": "function", "name": "create_goal"}, codex_namespace(LD03_NAMESPACE, LD03_TOOLS),
                  {"type": "namespace", "name": NAMESPACE, "tools": []}]
         status, data = self.post("ld03", tools=tools)
         self.assertEqual(status, 200)
@@ -187,13 +193,13 @@ class GatewayTest(unittest.TestCase):
 
     def test_ld03_rejects_schema_changes_before_counting(self):
         self.setup_gateway(60, {}, {}, llama_ld03=True)
-        changed = codex_ld03_namespace()
+        changed = codex_namespace(LD03_NAMESPACE, LD03_TOOLS)
         changed["tools"][1]["description"] = "Write any value anywhere"
         self.assertEqual(self.post("ld03", tools=[changed])[0], 400)
         self.assertEqual(self.mock.events, [])
 
     def test_ld03_restores_validation_after_codex_projects_mcp_parameters(self):
-        namespace = codex_ld03_namespace()
+        namespace = codex_namespace(LD03_NAMESPACE, LD03_TOOLS)
         params = namespace["tools"][1]["parameters"]
         namespace["tools"][1]["parameters"] = {**params, "properties": {
             "accent": {"type": "string"}, "spacing_px": {"type": "integer"},
@@ -213,8 +219,77 @@ class GatewayTest(unittest.TestCase):
             with self.subTest(arguments=arguments), self.assertRaisesRegex(ValueError, "JSON|schema"):
                 LD03.restore_event({"type": "response.output_item.done", "item": {**call, "arguments": arguments}},
                                    enabled=True)
-        self.assertEqual(CANARY.normalize_request({"tools": [codex_ld03_namespace()]})["tools"], [])
+        self.assertEqual(CANARY.normalize_request({"tools": [codex_namespace(LD03_NAMESPACE, LD03_TOOLS)]})["tools"], [])
         self.assertEqual(LD03.normalize_request({"tools": []})["tools"], [])
+
+    def test_atlas_stdio_exports_the_pinned_model_schema(self):
+        request = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        entry = Path(__file__).with_name("ld02_atlas_model_stdio.py")
+        result = subprocess.run([sys.executable, "-B", entry, "unused-socket"],
+                                input=json.dumps(request) + "\n", check=True, text=True,
+                                capture_output=True, timeout=3)
+        exported = json.loads(result.stdout)["result"]["tools"]
+        self.assertEqual(exported, LD02_ATLAS_TOOLS)
+        canonical = json.dumps(exported, sort_keys=True, separators=(",", ":")).encode()
+        self.assertEqual(sha256(canonical).hexdigest(),
+                         "41b58bae36b801b33c150da58e204116783400f47fe620967bb4b097028d50a8")
+
+    def test_atlas_gateway_routes_the_semantic_selector_and_typed_edit_only(self):
+        fields = {"name": "Ceramics review", "receipt": "AC-270"}
+        calls = [
+            {"type": "function_call", "id": "fc_1", "call_id": "call_1",
+             "name": "bench_find_section", "arguments": json.dumps(fields)},
+            {"type": "function_call", "id": "fc_2", "call_id": "call_2",
+             "name": "bench_edit_section", "arguments": json.dumps({
+                 **fields, "text": "Ready for registrar review", "gap_px": 14, "radius_px": 10,
+             })},
+        ]
+        terminal = {
+            "type": "response.completed", "response": {
+                "id": "resp-atlas", "status": "completed", "output": calls,
+                "usage": {"input_tokens": 32, "output_tokens": 6, "total_tokens": 38,
+                          "input_tokens_details": {"cached_tokens": 2}},
+            },
+        }
+        frames = b"".join(b"data: " + json_bytes(event) + b"\n\n" for event in (
+            *({"type": "response.output_item.done", "item": call} for call in calls), terminal,
+        ))
+        namespace = codex_namespace(LD02_ATLAS_NAMESPACE, LD02_ATLAS_TOOLS)
+        tools = [codex_namespace(LD03_NAMESPACE, LD03_TOOLS), namespace]
+        self.setup_gateway(60, {"atlas": 32}, {"atlas": frames}, llama_ld02_atlas=True)
+        status, data = self.post("atlas", tools=tools)
+        self.assertEqual(status, 200)
+        responses = [json.loads(line[6:]) for line in data.splitlines() if line.startswith(b"data: ")]
+        restored = [
+            {**call, "name": tool["name"], "namespace": LD02_ATLAS_NAMESPACE}
+            for tool, call in zip(LD02_ATLAS_TOOLS, calls)
+        ]
+        self.assertEqual([event["item"] for event in responses[:-1]], restored)
+        self.assertEqual(responses[-1]["response"]["output"], restored)
+        count_payload, create_payload = [item[1] for item in self.mock.events]
+        self.assertEqual(count_payload["tools"], create_payload["tools"])
+        self.assertEqual([tool["name"] for tool in count_payload["tools"]], [call["name"] for call in calls])
+        self.assertEqual(LD02_ATLAS.normalize_request({"tools": tools, "input": restored})["input"], calls)
+        self.assertEqual(self.gateway.gate.snapshot()["observed_total_tokens"], 38)
+
+    def test_atlas_arguments_keep_lookup_semantic_and_write_fields_bounded(self):
+        def restore(tool, arguments):
+            event = {"type": "response.output_item.done", "item": {
+                "type": "function_call", "name": tool, "arguments": json.dumps(arguments),
+            }}
+            return LD02_ATLAS.restore_event(event, enabled=True)
+
+        selector = {"name": "Ceramics review", "receipt": "IN-270"}
+        self.assertEqual(restore("bench_find_section", selector)["item"]["name"], "find_section")
+        self.assertEqual(LD03.normalize_request({"tools": [codex_namespace(LD02_ATLAS_NAMESPACE,
+                                                                            LD02_ATLAS_TOOLS)]})["tools"], [])
+        fields = {**selector, "text": "Changed", "gap_px": 14, "radius_px": 10}
+        for update in (
+            {"native_id": "node_1"}, {"receipt": "AC-27"}, {"name": "Group\nOther"},
+            {"text": ""}, {"text": "x" * 129}, {"gap_px": True}, {"radius_px": -1},
+        ):
+            with self.subTest(update=update), self.assertRaisesRegex(ValueError, "registered schema"):
+                restore("bench_edit_section", {**fields, **update})
 
     def test_llama_bridge_drops_hallucinated_tool_but_drains_usage(self):
         unsupported = {"type": "response.output_item.done", "item": {

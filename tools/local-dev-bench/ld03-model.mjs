@@ -17,9 +17,30 @@ function values(args) {
   return {accent: args.accent.toLowerCase(), spacing_px: args.spacing_px};
 }
 
-// Callers put the socket in their private temporary profile or run directory.
 export async function withLD03Broker(path, {inspect, apply}, events, run) {
   let writes = 0;
+  async function execute(name, args, event) {
+    let state;
+    if (name === inspectTool && args && !Array.isArray(args) && typeof args === 'object' && !Object.keys(args).length) {
+      event.status = 'running';
+      state = await inspect();
+    } else if (name === applyTool) {
+      const request = values(args);
+      if (writes >= writeLimit) throw new Error('Write limit reached');
+      writes += 1;
+      event.arguments = request;
+      event.status = 'running';
+      state = await apply(request);
+    } else {
+      throw new Error('Unsupported tool or arguments');
+    }
+    return {target: values(state.target), archive: values(state.archive)};
+  }
+  return withProductBroker(path, execute, events, run);
+}
+
+// The caller supplies operation validation and a path inside a private temporary directory.
+export async function withProductBroker(path, execute, events, run) {
   let active;
   const sockets = new Set();
   const server = createServer(socket => {
@@ -47,22 +68,8 @@ export async function withLD03Broker(path, {inspect, apply}, events, run) {
         const start = performance.now();
         try {
           const {name, arguments: args} = JSON.parse(input);
-          let invoke;
-          if (name === inspectTool && args && !Array.isArray(args) && typeof args === 'object' && !Object.keys(args).length) {
-            invoke = inspect;
-          } else if (name === applyTool) {
-            const request = values(args);
-            if (writes >= writeLimit) throw new Error('Write limit reached');
-            writes += 1;
-            event.arguments = request;
-            invoke = () => apply(request);
-          } else {
-            throw new Error('Unsupported tool or arguments');
-          }
-          event.name = name;
-          event.status = 'running';
-          const state = await invoke();
-          const result = {target: values(state.target), archive: values(state.archive)};
+          event.name = typeof name === 'string' ? name : undefined;
+          const result = await execute(name, args, event);
           event.status = 'ok';
           reply({result});
         } catch (error) {
