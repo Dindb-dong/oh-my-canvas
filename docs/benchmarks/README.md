@@ -4,7 +4,7 @@
 
 **Design date:** 2026-11-17
 
-**Status:** proposed measurement protocol; comparative results **NOT_RUN**
+**Status:** exploratory pilot results published for 78 indexed attempts. Confirmatory qualification remains incomplete. [Results and dataset](results/2026-11-18/README.md).
 
 **Inspected OMC source:** [`ad7a58d147d1987589e147fb92b51155118b90a5`](https://github.com/Dindb-dong/oh-my-canvas/commit/ad7a58d147d1987589e147fb92b51155118b90a5)
 
@@ -34,7 +34,7 @@ This directory specifies a study and the remaining collector work. The [runner g
 
 A study must implement and freeze the complete set; the overview alone is not an executable experiment. The source map and competitor review are completed documentation. Fixture generation, cross-product adapters, new collectors, acceptance automation, pilot and confirmation are future implementation/execution work. No comparative measurements accompany this protocol.
 
-The existing [native qualification guide](../native-engine/QUALIFICATION.md) remains authoritative for native release qualification W1-W7 and correctness obligations. This protocol adds **cross-product local-development comparisons**. It neither marks the older qualification complete nor weakens its gates. Its own result set starts at NOT_RUN. Existing benchmark scripts are diagnostic starting points, not comparative evidence.
+The existing [native qualification guide](../native-engine/QUALIFICATION.md) remains authoritative for native release qualification W1-W7 and correctness obligations. This protocol adds **cross-product local-development comparisons**. It neither marks the older qualification complete nor weakens its gates. The [published pilot](results/2026-11-18/README.md) records measured outcomes and incomplete qualification separately. Existing diagnostics retain their declared scope.
 
 ## 3. Product arms and scope
 

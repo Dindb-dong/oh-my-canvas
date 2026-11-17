@@ -1,0 +1,2 @@
+In the section called Ceramics review whose receipt reads AC-270, change the status to “Ready for registrar review”, set the section gap to 14 px, and set the condition marker radius to 10 px. Preserve all unrelated content.
+This is an authorized experiment on a disposable synthetic document. Call find_section first and wait for its result. Then call edit_section with the requested values, using the same name and receipt. Verify the edit tool result before reporting completion.

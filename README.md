@@ -142,7 +142,22 @@ The current run passed **353 editor tests across 14 files**, **40 host tests**, 
 
 [Current verification and limits →](docs/independent/VERIFICATION.md) · [How to run checks →](docs/TESTING.md)
 
-[Local development benchmark protocol →](docs/benchmarks/README.md) specifies how to compare native OMC with Paper and Figma on agent tokens, accepted task time, whole-product resource use, and source preservation. It includes a source audit and proposed measurement/acceptance rules; comparative results remain **NOT_RUN**.
+## Local development benchmark results
+
+In our project-authored 60-second pilot, **OMC completed the accepted LD02, prepared-start LD03 and two LD05 tasks 21–55% sooner than Penpot**. Paper and Figma attempts in those tasks ended with unmet acceptance checks or the deadline. The pilot retained all 78 indexed attempts, including failures and retries.
+
+| Measured task | OMC accepted time | Penpot accepted time |
+| --- | ---: | ---: |
+| Scoped edit, LD02 | 41.63 s | 53.55 s |
+| Shared style edit, LD03 | 40.09 s | 50.80 s |
+| Three source round trips, LD05 Route Board | 22.71 s | 47.53 s |
+| Three source round trips, LD05 Supply Ledger | 20.34 s | 45.05 s |
+
+Provider tokens were close. OMC used 8,916 tokens on LD02, compared with Paper 8,915, Figma 9,080 and Penpot 8,919. On LD03, OMC used 8,640, compared with Paper 8,575, Figma 8,567 and Penpot 8,578. Deterministic LD05 adapters invoked zero generation-model calls. Complete operator-agent token usage remains unobserved.
+
+OMC recorded smaller sampled local RAM peaks than Paper and Penpot in the selected LD02/LD03 attempts. CPU/RAM observations are incomplete and include different process sets, model/client work and shared-host activity. The report states these boundaries, preparation differences, failed quality gates and Figma's later MCP quota exhaustion. Single-attempt pilot observations leave broad token, compute and statistical superiority unqualified.
+
+[Results, limitations and all measured attempts →](docs/benchmarks/results/2026-11-18/README.md) · [Benchmark protocol →](docs/benchmarks/README.md)
 
 <a id="contributing"></a>
 

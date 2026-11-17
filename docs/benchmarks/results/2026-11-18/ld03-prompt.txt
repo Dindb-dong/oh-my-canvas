@@ -1,0 +1,1 @@
+This is an authorized benchmark on a disposable synthetic document. Use the registered LD03 inspect_shared_values and set_shared_values tools for this task. Change the target accent to #136b62 and target spacing to 20 px using the existing shared references. Preserve all four local property overrides, the visually similar archive family, and reference identities.
