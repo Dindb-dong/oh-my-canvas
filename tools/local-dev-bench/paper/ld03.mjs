@@ -245,7 +245,7 @@ export async function capture(read, ts, fixture, scope) {
   }
 }
 
-async function screenshot(read, fixture, scope) {
+export async function screenshot(read, fixture, scope) {
   validate(fixture, scope);
   const home = await read(tool('get_basic_info', scope.fileId, {}));
   assert.equal(home.fileName, scope.fileName);

@@ -24,7 +24,7 @@ const compact = get => ({
   archive: {accent: get('keep.accent'), spacing_px: get('keep.spacing')},
 });
 
-function verifyRegistration({scope, originalScope, cloneReceipt, baseline, fixture}) {
+export function verifyPaperLd03Clone({scope, originalScope, cloneReceipt, fixture}) {
   assert.equal(fixture.workload, 'LD03');
   assert.equal(fixture.source_family_id, 'field-relay');
   assert.equal(fixture.fixture_sha256, expectedDigest);
@@ -39,6 +39,11 @@ function verifyRegistration({scope, originalScope, cloneReceipt, baseline, fixtu
   assert.equal(scope.pageId, cloneReceipt.candidatePage.id);
   assert.equal(cloneReceipt.candidatePage.name, pageName);
   assert.ok(typeof scope.boardId === 'string' && scope.boardId);
+}
+
+function verifyRegistration(registration) {
+  verifyPaperLd03Clone(registration);
+  const {baseline, scope, fixture} = registration;
   assert.equal(baseline.document_id, scope.fileId);
   assert.equal(baseline.style_identity, 'paper-file-scoped-custom-property-name');
   assert.match(baseline.raster_sha256, /^[0-9a-f]{64}$/);
