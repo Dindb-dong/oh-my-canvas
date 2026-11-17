@@ -3,6 +3,7 @@ import {randomBytes} from 'node:crypto';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
 import {fixture, target} from './replays/ld02-fixture.mjs';
 
 const name = 'OMC Benchmark';
@@ -18,10 +19,34 @@ function loopbackOrigin(input) {
   return url.origin;
 }
 
+async function waitForBackend(origin, fetchProfile = fetch) {
+  const deadline = performance.now() + 45000;
+  let lastStatus = 'unreachable';
+  while (performance.now() < deadline) {
+    const response = await fetchProfile(new URL('/api/main/methods/get-profile', origin), {
+      redirect:'error', signal:AbortSignal.timeout(2500),
+    }).catch(() => null);
+    if (response) {
+      const ready = response.ok && response.headers.get('content-type')?.includes('application/transit+json');
+      lastStatus = `HTTP ${response.status}`;
+      await response.body?.cancel();
+      if (ready) return;
+    }
+    await delay(500);
+  }
+  throw new Error(`Penpot profile API was not ready after 45 seconds (${lastStatus})`);
+}
+
 async function createAccount(page, origin, email, password) {
-  await page.goto(origin);
+  const response = await page.goto(origin);
   assert.equal(new URL(page.url()).origin, origin);
-  await page.getByText('Create an account', {exact:false}).click();
+  const signup = page.getByText('Create an account', {exact:false});
+  try {
+    await signup.click();
+  } catch (error) {
+    const loginVisible = await page.getByRole('heading', {name:'Log into my account'}).isVisible();
+    throw new Error(`Penpot signup unavailable (page HTTP ${response?.status()}, login heading visible: ${loginVisible}, signup matches: ${await signup.count()}): ${error.message}`);
+  }
   await page.getByRole('textbox', {name:'Full Name'}).fill(name);
   await page.getByRole('textbox', {name:'Work email'}).fill(email);
   await page.getByRole('textbox', {name:'Password'}).fill(password);
@@ -139,6 +164,7 @@ const readTargetCode = `
 `;
 
 async function replay(origin) {
+  await waitForBackend(origin);
   const {benchRequire, Client, StreamableHTTPClientTransport} = await import('./replays/mcp.mjs');
   const {chromium} = benchRequire('playwright');
   const profile = await mkdtemp(join(tmpdir(), 'omc-penpot-ld02-'));
@@ -238,6 +264,13 @@ if (process.argv.length !== 3) {
   const page = fixture.pages.find(candidate => candidate.name === batch);
   assert.equal(page.children.length, 25);
   assert.ok(seedCode('if (false) throw new Error();', page).includes(cardName));
+  let requests = 0;
+  await waitForBackend('http://localhost:19001', async url => {
+    assert.equal(url.href, 'http://localhost:19001/api/main/methods/get-profile');
+    if (++requests === 1) return new Response('bad gateway', {status:502});
+    return new Response('{}', {headers:{'content-type':'application/transit+json'}});
+  });
+  assert.equal(requests, 2);
 } else {
   await replay(loopbackOrigin(process.argv[2]));
 }
