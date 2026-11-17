@@ -192,6 +192,15 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual(self.post("ld03", tools=[changed])[0], 400)
         self.assertEqual(self.mock.events, [])
 
+    def test_ld03_restores_validation_after_codex_projects_mcp_parameters(self):
+        namespace = codex_ld03_namespace()
+        params = namespace["tools"][1]["parameters"]
+        namespace["tools"][1]["parameters"] = {**params, "properties": {
+            "accent": {"type": "string"}, "spacing_px": {"type": "integer"},
+        }}
+        [_, apply] = LD03.normalize_request({"tools": [namespace]})["tools"]
+        self.assertEqual(apply["parameters"], params)
+
     def test_ld03_rejects_out_of_contract_completed_arguments(self):
         call = {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "bench_set_shared_values"}
         bad = (

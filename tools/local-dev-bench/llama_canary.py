@@ -22,6 +22,10 @@ LD03_APPLY_PARAMETERS = {
     "required": ["accent", "spacing_px"],
     "additionalProperties": False,
 }
+LD03_CODEX_PARAMETERS = {
+    **LD03_APPLY_PARAMETERS,
+    "properties": {"accent": {"type": "string"}, "spacing_px": {"type": "integer"}},
+}
 
 
 def validate_arguments(raw, *, parameters):
@@ -46,12 +50,15 @@ class Function:
     alias: str
     parameters: dict
     description: str | None = None
+    codex_parameters: dict | None = None
 
     def flatten(self, declared):
         description = declared.get("description")
         strict = declared.get("strict")
+        parameters = declared.get("parameters")
         if (
-            declared.get("type") != "function" or declared.get("parameters") != self.parameters
+            declared.get("type") != "function"
+            or (parameters != self.parameters and (self.codex_parameters is None or parameters != self.codex_parameters))
             or not isinstance(description, str) or type(strict) is not bool
             or (self.description is not None and (description != self.description or strict))
         ):
@@ -143,7 +150,9 @@ LD03 = ToolBridge(LD03_NAMESPACE, (
     Function(LD03_INSPECT, "bench_inspect_shared_values", EMPTY_PARAMETERS,
              "Read the four shared values in the current synthetic LD03 document."),
     Function(LD03_APPLY, "bench_set_shared_values", LD03_APPLY_PARAMETERS,
-             "Set the target accent and target spacing in the current synthetic LD03 document."),
+             "Set the target accent and target spacing in the current synthetic LD03 document.",
+             # Codex strips MCP pattern/range keywords before advertising namespace tools.
+             LD03_CODEX_PARAMETERS),
 ))
 
 LD03_TOOLS = [
