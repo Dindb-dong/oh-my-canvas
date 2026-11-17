@@ -182,7 +182,7 @@ impl App {
 
     pub fn left_width(&self) -> f64 {
         let view = &self.automation.view;
-        if !self.library_open && (self.ui_hidden() || view.compact || view.hide_left) {
+        if self.shows_library() || self.ui_hidden() || view.compact || view.hide_left {
             0.
         } else {
             view.left
@@ -197,7 +197,7 @@ impl App {
     }
     pub fn header_height(&self) -> f64 {
         let view = &self.automation.view;
-        if !self.library_open && (self.ui_hidden() || view.compact) {
+        if !self.shows_library() && (self.ui_hidden() || view.compact) {
             0.
         } else {
             HEADER
@@ -206,7 +206,7 @@ impl App {
     pub fn ui_hidden(&self) -> bool {
         let view = &self.automation.view;
         (view.hide_ui || view.presenting && self.prototype_playback.options["hideUi"] != false)
-            && !self.library_open
+            && !self.shows_library()
     }
     pub fn show_layout_grids(&self) -> bool {
         self.automation.view.grids

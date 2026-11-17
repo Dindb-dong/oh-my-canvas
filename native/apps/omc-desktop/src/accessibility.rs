@@ -3,6 +3,7 @@
 use crate::{
     app::{Action, App, EditTarget, FOOTER, HEADER},
     geometry::Rect,
+    paint::{LIBRARY_CARD_FIRST, POPUP_FIRST, library_grid},
 };
 use accesskit::{
     Action as AxAction, ActionData, Node, NodeId, Rect as AxRect, Role, TextPosition,
@@ -13,6 +14,7 @@ const ROOT: NodeId = NodeId(1);
 const EDITOR: NodeId = NodeId(1_u64 << 60);
 const TEXT_RUN: NodeId = NodeId((1_u64 << 60) + 1);
 const STATUS: NodeId = NodeId((1_u64 << 60) + 2);
+const LIBRARY: NodeId = NodeId((1_u64 << 60) + 3);
 const INSPECTOR_DETAIL_START: u64 = (1_u64 << 60) + 100;
 
 fn bounds(r: Rect, scale: f64) -> AxRect {
@@ -30,10 +32,15 @@ pub fn tree(app: &App) -> TreeUpdate {
     root.set_label("Oh My Canvas");
     root.set_bounds(AxRect::new(0., 0., app.width * scale, app.height * scale));
     let mut children = vec![];
+    let mut library_children = vec![];
     let mut nodes = vec![];
     for control in &app.controls {
         let id = NodeId(control.id);
-        children.push(id);
+        if (LIBRARY_CARD_FIRST..POPUP_FIRST).contains(&control.id) {
+            library_children.push(id);
+        } else {
+            children.push(id);
+        }
         let layer_toggle = matches!(
             control.action,
             Action::LayerVisibility(_) | Action::LayerLock(_) | Action::ToggleFontDownloads
@@ -77,6 +84,30 @@ pub fn tree(app: &App) -> TreeUpdate {
             node.set_selected(true);
         }
         nodes.push((id, node));
+    }
+    if app.shows_library() {
+        let grid = library_grid(app);
+        let mut library = Node::new(Role::ScrollView);
+        library.set_label(crate::localization::label(
+            &app.interface_language,
+            "Your canvases",
+        ));
+        library.set_bounds(bounds(grid.area, scale));
+        library.set_children(library_children.clone());
+        if grid.max_scroll > 0 {
+            let y = app.library_scroll.floor().min(grid.max_scroll as f64);
+            library.set_scroll_y(y);
+            library.set_scroll_y_min(0.);
+            library.set_scroll_y_max(grid.max_scroll as f64);
+            if y > 0. {
+                library.add_action(AxAction::ScrollUp);
+            }
+            if y < grid.max_scroll as f64 {
+                library.add_action(AxAction::ScrollDown);
+            }
+        }
+        children.push(LIBRARY);
+        nodes.push((LIBRARY, library));
     }
     for (index, (rect, label)) in crate::inspector::detail_text(app).into_iter().enumerate() {
         let id = NodeId(INSPECTOR_DETAIL_START + index as u64);
@@ -147,7 +178,8 @@ pub fn tree(app: &App) -> TreeUpdate {
         nodes.push((TEXT_RUN, run));
         children.push(EDITOR);
         EDITOR
-    } else if children.contains(&NodeId(app.focus)) {
+    } else if children.contains(&NodeId(app.focus)) || library_children.contains(&NodeId(app.focus))
+    {
         NodeId(app.focus)
     } else {
         ROOT
@@ -222,6 +254,12 @@ pub fn handle(app: &mut App, event: accesskit_winit::Event) {
                     }
                 }
                 app.refresh_path_text_scene();
+            } else if request.target_node == LIBRARY {
+                match request.action {
+                    AxAction::ScrollUp => app.scroll_library(-1.),
+                    AxAction::ScrollDown => app.scroll_library(1.),
+                    _ => false,
+                };
             } else if let Some(control) = app
                 .controls
                 .iter()

@@ -501,6 +501,7 @@ pub struct App {
     pub interface_language: String,
     pub board_grid: Value,
     pub library_open: bool,
+    pub library_scroll: f64,
     pub modifiers: ModifiersState,
     pub space_pan: bool,
     pub pending: bool,
@@ -736,6 +737,7 @@ impl App {
             interface_language,
             board_grid: Value::Null,
             library_open,
+            library_scroll: 0.,
             modifiers: ModifiersState::empty(),
             space_pan: false,
             pending: false,
@@ -1027,14 +1029,18 @@ impl App {
             .and_then(|id| self.snapshots.get(id))
             .map(Arc::as_ref)
     }
+    pub(crate) fn shows_library(&self) -> bool {
+        self.library_open || self.active.is_none()
+    }
     pub fn node(&self) -> Option<&Node> {
         let id = self.selected.iter().next()?;
         self.document()?.nodes.get(id)
     }
     pub fn inspector_visible(&self) -> bool {
         let view = &self.automation.view;
-        !self.ui_hidden()
-            && (!view.compact || self.library_open || !self.selected.is_empty())
+        !self.shows_library()
+            && !self.ui_hidden()
+            && (!view.compact || !self.selected.is_empty())
             && (self.width >= 960. || self.inspector != Inspector::Design)
     }
     pub fn uses_pan_raster(&self) -> bool {
@@ -2668,7 +2674,8 @@ impl App {
                 return;
             }
         }
-        if self.prototype_frame.is_some()
+        if self.shows_library()
+            || self.prototype_frame.is_some()
             || !canvas_only
                 && crate::paint::palette_rect(self).is_some_and(|area| area.contains(x, y))
         {
@@ -3141,6 +3148,18 @@ impl App {
 
     fn wheel(&mut self, delta: MouseScrollDelta, scale: f64, phase: TouchPhase) -> bool {
         let (dx, dy) = scroll_delta(delta, scale, self.modifiers.shift_key());
+        if self.shows_library() {
+            let grid = crate::paint::library_grid(self);
+            if self.popup.is_some() || !grid.area.contains(self.cursor.0, self.cursor.1) {
+                return false;
+            }
+            let units = if matches!(delta, MouseScrollDelta::LineDelta(_, _)) {
+                30.
+            } else {
+                72.
+            };
+            return self.scroll_library(-dy / units);
+        }
         if self.scroll_dev_comparison(dy) {
             return true;
         }
@@ -3210,6 +3229,64 @@ impl App {
             }
             _ => return false,
         }
+        true
+    }
+    pub(crate) fn scroll_library(&mut self, rows: f64) -> bool {
+        if !self.shows_library() || self.popup.is_some() || !rows.is_finite() || rows == 0. {
+            return false;
+        }
+        let max = crate::paint::library_grid(self).max_scroll as f64;
+        let before = self.library_scroll.min(max);
+        self.library_scroll = (before + rows).clamp(0., max);
+        before.floor() != self.library_scroll.floor()
+    }
+
+    fn library_key(&mut self, key: &Key) -> bool {
+        if !self.shows_library() || self.popup.is_some() {
+            return false;
+        }
+        let grid = crate::paint::library_grid(self);
+        if grid.count == 0 {
+            return false;
+        }
+        let first = crate::paint::LIBRARY_CARD_FIRST;
+        let index = self
+            .focus
+            .checked_sub(first)
+            .map(|id| id as usize)
+            .filter(|index| *index < grid.count);
+        let top = (self.library_scroll.floor() as usize).min(grid.max_scroll);
+        let current = index.unwrap_or(top * grid.columns);
+        let next = match key {
+            Key::Named(NamedKey::Tab) if index.is_some() => {
+                if self.modifiers.shift_key() {
+                    current.checked_sub(1)
+                } else {
+                    Some(current + 1).filter(|next| *next < grid.count)
+                }
+            }
+            Key::Named(NamedKey::ArrowLeft) => Some(current.saturating_sub(1)),
+            Key::Named(NamedKey::ArrowRight) => Some(current + 1),
+            Key::Named(NamedKey::ArrowUp) => Some(current.saturating_sub(grid.columns)),
+            Key::Named(NamedKey::ArrowDown) => Some(current + grid.columns),
+            Key::Named(NamedKey::PageUp) => {
+                Some(current.saturating_sub(grid.columns * grid.visible_rows))
+            }
+            Key::Named(NamedKey::PageDown) => Some(current + grid.columns * grid.visible_rows),
+            Key::Named(NamedKey::Home) => Some(0),
+            Key::Named(NamedKey::End) => Some(grid.count - 1),
+            _ => None,
+        };
+        let Some(next) = next else {
+            return false;
+        };
+        let next = next.min(grid.count - 1);
+        let row = next / grid.columns;
+        self.library_scroll = top
+            .clamp(row.saturating_add(1).saturating_sub(grid.visible_rows), row)
+            .min(grid.max_scroll) as f64;
+        self.focus = first + next as u64;
+        self.keyboard_focus_visible = true;
         true
     }
     fn keyboard(&mut self, event: &winit::event::KeyEvent) {
@@ -3359,6 +3436,9 @@ impl App {
                     _ => {}
                 }
             }
+            return;
+        }
+        if self.library_key(key) {
             return;
         }
         if self.tool == Tool::Pen && !self.pen_vertices.is_empty() {
@@ -3745,6 +3825,8 @@ impl App {
                     self.pan_view = false;
                     if let Some(id) = self.tabs.last().cloned() {
                         self.switch(id);
+                    } else {
+                        self.library_open = true;
                     }
                 }
                 self.finish_workspace_tab(&id, Some(false), None);
@@ -4106,7 +4188,8 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::PinchGesture { delta, .. } => {
                 let r = self.canvas_rect();
-                needs_redraw = delta.is_finite()
+                needs_redraw = !self.shows_library()
+                    && delta.is_finite()
                     && delta != 0.
                     && self.prototype_frame.is_none()
                     && self.drag.is_none()

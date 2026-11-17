@@ -488,8 +488,11 @@
     "Instance": "인스턴스",
     "Layers": "레이어",
     "Layout": "레이아웃",
+    "New canvas": "새 캔버스",
+    "No canvases yet.": "아직 캔버스가 없습니다.",
     "Opacity": "불투명도",
     "Open": "열기",
+    "Open file": "파일 열기",
     "Pages": "페이지",
     "Position": "위치",
     "Preferences": "환경설정",
@@ -502,7 +505,8 @@
     "Stroke": "선",
     "Text": "텍스트",
     "Typography": "타이포그래피",
-    "Variables": "변수"
+    "Variables": "변수",
+    "Your canvases": "내 캔버스"
   },
   "nl": {
     "Alignment": "Uitlijning",

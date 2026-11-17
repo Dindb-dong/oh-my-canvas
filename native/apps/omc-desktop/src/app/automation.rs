@@ -496,7 +496,7 @@ impl App {
         result["canvas"] = json!([canvas.x, canvas.y, canvas.width, canvas.height]);
         result["panels"] = json!({
             "left": self.left_width(), "right": self.right_width(),
-            "leftCollapsed": self.left_width() == 0., "leftTab": if self.library_open { "assets" } else { "file" },
+            "leftCollapsed": self.left_width() == 0., "leftTab": if self.shows_library() { "assets" } else { "file" },
             "rightTab":format!("{:?}",self.inspector).to_lowercase()
         });
         result["frameMs"] = json!(self.automation.last_frame);
@@ -508,7 +508,7 @@ impl App {
         result["proofSrgb"] = json!({"on":self.proof_enabled(),"ready":self.proof_scene.is_some()});
         result["language"] = json!(self.interface_language);
         result["windowMotionReduced"] = json!(self.window_animation_reduced());
-        result["home"] = self.library_open.into();
+        result["home"] = self.shows_library().into();
         result["textPreview"] = json!(
             self.automation
                 .text_preview
