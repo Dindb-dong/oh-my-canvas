@@ -125,23 +125,72 @@ impl Catalog {
         Ok(())
     }
     pub fn list(&self, include_archived: bool) -> Result<Vec<Value>> {
+        self.list_documents(include_archived, false)
+    }
+
+    pub(super) fn list_for_home(&self) -> Result<Vec<Value>> {
+        self.list_documents(true, true)
+    }
+
+    fn list_documents(&self, include_archived: bool, include_trashed: bool) -> Result<Vec<Value>> {
         let mut statement = self
             .connection
             .prepare(
                 "SELECT id,title,epoch,sequence,archived,starred,folder_id,updated_ms,
-                strftime('%Y-%m-%dT%H:%M:%fZ',updated_ms/1000.0,'unixepoch')
-             FROM documents WHERE trashed=0 AND (?1 OR archived=0) ORDER BY lower(title),id",
+                strftime('%Y-%m-%dT%H:%M:%fZ',updated_ms/1000.0,'unixepoch'),trashed
+             FROM documents WHERE (?2 OR trashed=0) AND (?1 OR archived=0) ORDER BY lower(title),id",
             )
             .map_err(sql_error)?;
-        let rows = statement.query_map([include_archived], |r| Ok(json!({
-            "id":r.get::<_,String>(0)?,"title":r.get::<_,String>(1)?,"epoch":r.get::<_,String>(2)?,
-            "sequence":r.get::<_,String>(3)?,"archived":r.get::<_,bool>(4)?,"starred":r.get::<_,bool>(5)?,
-            "folderId":r.get::<_,Option<String>>(6)?,"updatedAtMs":r.get::<_,i64>(7)?,
-            "updatedAt":r.get::<_,Option<String>>(8)?,
-        }))).map_err(sql_error)?;
+        let rows = statement.query_map([include_archived, include_trashed], |r| {
+            let mut row = json!({
+                "id":r.get::<_,String>(0)?,"title":r.get::<_,String>(1)?,"epoch":r.get::<_,String>(2)?,
+                "sequence":r.get::<_,String>(3)?,"archived":r.get::<_,bool>(4)?,"starred":r.get::<_,bool>(5)?,
+                "folderId":r.get::<_,Option<String>>(6)?,"updatedAtMs":r.get::<_,i64>(7)?,
+                "updatedAt":r.get::<_,Option<String>>(8)?,
+            });
+            if include_trashed {
+                row["trashed"] = r.get::<_,bool>(9)?.into();
+            }
+            Ok(row)
+        }).map_err(sql_error)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(sql_error)
     }
+
+    pub(super) fn is_trashed(&self, id: &str) -> Result<bool> {
+        self.connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM documents WHERE id=?1 AND trashed=1)",
+                [id],
+                |r| r.get(0),
+            )
+            .map_err(sql_error)
+    }
+
+    pub(super) fn restore_trashed(&self, id: &str) -> Result<()> {
+        let changed = self
+            .connection
+            .execute(
+                "UPDATE documents SET trashed=0 WHERE id=?1 AND trashed=1",
+                [id],
+            )
+            .map_err(sql_error)?;
+        if changed == 0 {
+            return Err(EngineError::invalid("document not found in Trash"));
+        }
+        Ok(())
+    }
+
+    pub fn is_home_canvas(&self, id: &str) -> Result<bool> {
+        self.connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM documents WHERE id=?1 AND trashed=0 AND archived=0)",
+                [id],
+                |r| r.get(0),
+            )
+            .map_err(sql_error)
+    }
+
     pub fn exists(&self, id: &str) -> Result<bool> {
         self.connection
             .query_row(
@@ -167,13 +216,18 @@ impl Catalog {
         self.connection.execute("INSERT INTO meta VALUES('preferences',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[value.to_string()]).map_err(sql_error)?;
         Ok(())
     }
-    pub fn organization(&mut self, args: &Value) -> Result<Value> {
+    pub(super) fn require_epoch(&self, args: &Value) -> Result<()> {
         if args["targetEpoch"].as_str() != Some(&self.epoch) {
             return Err(EngineError::new(
                 "epoch_mismatch",
                 "workspace generation required",
             ));
         }
+        Ok(())
+    }
+
+    pub fn organization(&mut self, args: &Value) -> Result<Value> {
+        self.require_epoch(args)?;
         match args["action"].as_str().unwrap_or("") {
             "create_folder" => {
                 let title = args["title"]
@@ -235,6 +289,23 @@ impl Catalog {
                     return Err(EngineError::invalid("document not found"));
                 }
                 Ok(json!({"documentId":id,"folderId":folder}))
+            }
+            "set_starred" => {
+                let id = string(args, "documentId")?;
+                let starred = args["starred"]
+                    .as_bool()
+                    .ok_or_else(|| EngineError::invalid("starred must be a boolean"))?;
+                let changed = self
+                    .connection
+                    .execute(
+                        "UPDATE documents SET starred=?2 WHERE id=?1 AND trashed=0",
+                        params![id, starred],
+                    )
+                    .map_err(sql_error)?;
+                if changed == 0 {
+                    return Err(EngineError::invalid("document not found"));
+                }
+                Ok(json!({"documentId":id,"starred":starred}))
             }
             "archive" | "restore" => {
                 let id = string(args, "documentId")?;

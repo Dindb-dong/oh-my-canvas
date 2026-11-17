@@ -161,6 +161,14 @@ impl ToolRouter {
     }
 
     pub fn thumbnail_png(&self, snapshot: &DocumentSnapshot) -> Result<Option<Vec<u8>>> {
+        self.designated_thumbnail_png(snapshot, 128.)
+    }
+
+    fn designated_thumbnail_png(
+        &self,
+        snapshot: &DocumentSnapshot,
+        max_pixels: f64,
+    ) -> Result<Option<Vec<u8>>> {
         let Some(id) = snapshot
             .nodes
             .values()
@@ -192,11 +200,36 @@ impl ToolRouter {
             return Ok(None);
         }
         let args = json!({
-            "format":"png","pageId":page.id,"ids":[id],"scale":(128. / width.max(height)).min(4.),
+            "format":"png","pageId":page.id,"ids":[id],"scale":(max_pixels / width.max(height)).min(4.),
             "bounds":{"x":x,"y":y,"width":width,"height":height},"strict":false,
         });
         self.export_snapshot_native(snapshot.clone(), &args)
             .map(|artifact| Some(artifact.bytes))
+    }
+
+    pub fn home_thumbnail_png(&self, snapshot: &DocumentSnapshot) -> Result<Option<Vec<u8>>> {
+        let _fonts = omc_text::font_scope(omc_text::profile_font_manager(&self.workspace.profile));
+        if let Some(bytes) = self.designated_thumbnail_png(snapshot, 320.)? {
+            return Ok(Some(bytes));
+        }
+        for page in &snapshot.pages {
+            let mut scene = crate::paths::scene(snapshot, &page.id)?;
+            if let Some([x, y, width, height]) = home_thumbnail_bounds(&scene) {
+                // Crop the solved scene without reflowing percentage and viewport-based layouts.
+                let root = &mut scene.items[scene.root];
+                root.local = omc_scene::Affine::translation(-x, -y).multiply(root.local);
+                scene.width = width;
+                scene.height = height;
+                let options = omc_render::RenderOptions {
+                    scale: (320. / width.max(height)).min(4.),
+                    ..Default::default()
+                };
+                return omc_render::render_png(&scene, &options, &self.resources()?)
+                    .map(Some)
+                    .map_err(|error| EngineError::new("unsupported_feature", error.to_string()));
+            }
+        }
+        Ok(None)
     }
 
     pub(crate) fn export_snapshot_native(
@@ -688,6 +721,49 @@ fn include_pattern_sources<'a>(
         }
     }
     Ok(())
+}
+
+fn home_thumbnail_bounds(scene: &omc_scene::Scene) -> Option<[f64; 4]> {
+    let mut extent: Option<[f64; 4]> = None;
+    let mut covered = vec![false; scene.items.len()];
+    for (index, item) in scene.items.iter().enumerate() {
+        if index == scene.root {
+            continue;
+        }
+        if item.hidden
+            || item.is_slice()
+            || item.properties.get("patternOnly") == Some(&Value::Bool(true))
+            || item.parent.is_some_and(|parent| covered[parent])
+        {
+            covered[index] = true;
+            continue;
+        }
+        // The clipping layer's own bounds already cover its descendants.
+        covered[index] = item.clip;
+        let [x, y, width, height] = item.bounds;
+        if !item.bounds.iter().all(|value| value.is_finite()) || width < 0. || height < 0. {
+            continue;
+        }
+        let (right, bottom) = (x + width, y + height);
+        if !right.is_finite() || !bottom.is_finite() {
+            continue;
+        }
+        extent = Some(match extent {
+            Some([left, top, max_x, max_y]) => {
+                [left.min(x), top.min(y), max_x.max(right), max_y.max(bottom)]
+            }
+            None => [x, y, right, bottom],
+        });
+    }
+    let [x, y, right, bottom] = extent?;
+    let width = (right - x).max(1.);
+    let height = (bottom - y).max(1.);
+    let pad = width.max(height) * 0.04;
+    let bounds = [x - pad, y - pad, width + 2. * pad, height + 2. * pad];
+    bounds
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(bounds)
 }
 
 fn apply_export_scale(args: &Value, options: &mut ExportOptions) -> Result<()> {
