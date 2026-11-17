@@ -15,6 +15,11 @@ const atlas = {x: 0, y: 0, width: 736, height: 480};
 const dimensions = {'2mp': [1600, 1250], '1mp': [1152, 900], small: [160, 125]};
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
+export function assetToolDocumentId(nativeId) {
+  assert.match(nativeId, /^doc_[0-9a-f]{32}$/);
+  return nativeId.slice(4).replace(/^(........)(....)(....)(....)(............)$/, '$1-$2-$3-$4-$5');
+}
+
 function chunk(type, bytes) {
   const packet = Buffer.alloc(bytes.length + 12);
   packet.writeUInt32BE(bytes.length);
@@ -202,7 +207,10 @@ async function run(fixture, report, signal, artifactDir) {
     const {result: base, ...creation} = await rpc('workspace.create', {title: 'Synthetic 20-image native atlas'});
     report.stages.create = creation;
     const documentId = base.id;
-    const assetCall = arguments_ => rpc('tool.call', {name: 'document_assets', arguments: {documentId, ...arguments_}});
+    const assetDocumentId = assetToolDocumentId(documentId);
+    const assetCall = arguments_ => rpc('tool.call', {
+      name: 'document_assets', arguments: {documentId: assetDocumentId, ...arguments_},
+    });
     const ids = new Map();
     for (const asset of fixture.assets) {
       const {result, ...metrics} = await assetCall({action: 'add', kind: 'image',
