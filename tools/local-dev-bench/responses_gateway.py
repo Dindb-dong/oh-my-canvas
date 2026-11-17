@@ -229,10 +229,12 @@ class ResponsesGateway(ThreadingHTTPServer):
         self.completion = None
         self.dispatch_closed = Event()
         if completion_config is not None:
-            if not llama_ld02_atlas:
-                raise ValueError("completion receipt requires the LD02 Atlas bridge")
+            if not (llama_ld02_atlas or llama_ld03):
+                raise ValueError("completion receipt requires a registered LD02/LD03 bridge")
             from ld02_completion import EditCompletion
             self.completion = EditCompletion(completion_config)
+            if self.completion.workload != ("LD03" if llama_ld03 else "LD02"):
+                raise ValueError("completion registration does not match the tool bridge")
             if self.completion.path.exists():
                 raise ValueError("completion receipt must start absent")
         self.upstream_port = upstream_port
@@ -309,7 +311,7 @@ def main():
                          help="Expose only the registered LD02 Atlas lookup and edit tools to a local llama-server")
     parser.add_argument("--ledger", type=Path, required=True, help="New private JSON evidence file")
     parser.add_argument("--completion-config", type=Path,
-                        help="Private expected-edit registration for the opt-in LD02 completion boundary")
+                        help="Private expected-edit registration for the opt-in LD02/LD03 completion boundary")
     parser.add_argument("--drain-in-flight", action="store_true",
                         help="At shutdown, await an admitted request's terminal usage up to the outer deadline")
     args = parser.parse_args()

@@ -34,9 +34,12 @@ def call(path, params, server_name, completion=None):
 
 def main(path, *, server_name="bench_ld03", tools=LD03_TOOLS):
     completion = None
-    if server_name == "bench_ld02_atlas" and os.environ.get("LD02_COMPLETION_CONFIG"):
+    config = {"bench_ld02_atlas": "LD02_COMPLETION_CONFIG", "bench_ld03": "LD03_COMPLETION_CONFIG"}.get(server_name)
+    if config and os.environ.get(config):
         from ld02_completion import EditCompletion
-        completion = EditCompletion(os.environ["LD02_COMPLETION_CONFIG"])
+        completion = EditCompletion(os.environ[config])
+        if completion.workload != ("LD03" if server_name == "bench_ld03" else "LD02"):
+            raise ValueError("completion registration does not match the MCP server")
     for line in sys.stdin:
         event = json.loads(line)
         if "id" not in event:

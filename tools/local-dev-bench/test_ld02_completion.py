@@ -1,13 +1,16 @@
 from contextlib import closing
 from http.client import HTTPConnection
+from email.message import Message
 import json
 from pathlib import Path
+import io
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 from ld02_completion import EditCompletion
 import test_responses_gateway as fixtures
-from responses_gateway import LOOPBACK
+from responses_gateway import LOOPBACK, ResponsesGateway, ResponsesHandler
 from ld03_model_stdio import call
 
 
@@ -84,6 +87,98 @@ class CompletionTests(unittest.TestCase):
         self.gateway.gate.end_unmetered("q", "cancelled")
         self.assertIsNone(self.status()["completion"])
         self.assertFalse(self.status()["usage_complete"])
+
+
+class LD03CompletionTests(unittest.TestCase):
+    def registration(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        path = Path(temp.name) / "config.json"
+        self.arguments = {"accent": "#136b62", "spacing_px": 20}
+        self.observed = {"target": self.arguments, "archive": {"accent": "#2864dc", "spacing_px": 12}}
+        path.write_text(json.dumps({"workload": "LD03", "expected_arguments": self.arguments,
+            "expected_result": self.observed, "receipt_path": str(Path(temp.name) / "receipt.json")}))
+        return path, EditCompletion(path)
+
+    def gateway(self, path, **kwargs):
+        # Exercise the real gate/handler without binding any socket or starting a server.
+        with patch("responses_gateway.ThreadingHTTPServer.__init__",
+                   lambda server, *_: setattr(server, "server_port", 10001)):
+            return ResponsesGateway(10002, 100, completion_config=path, **kwargs)
+
+    def status(self, gateway):
+        handler = Mock(server=gateway, path="/benchmark/completion", headers={}, wfile=io.BytesIO())
+        ResponsesHandler.do_GET(handler)
+        return json.loads(handler.wfile.getvalue())
+
+    def test_exact_edit_and_protected_archive_required(self):
+        _, completion = self.registration()
+        request = {"name": "set_shared_values", "arguments": self.arguments}
+        for params, result in (
+            ({**request, "name": "inspect_shared_values"}, self.observed),
+            ({**request, "arguments": {**self.arguments, "spacing_px": 21}}, self.observed),
+            ({**request, "arguments": {**self.arguments, "spacing_px": float("nan")}}, self.observed),
+            (request, {**self.observed, "archive": self.arguments}),
+            (request, {**self.observed, "extra": True}),
+        ):
+            completion.observe(params, {"result": result})
+            self.assertFalse(completion.completed())
+        completion.observe(request, {"error": "native failure", "result": self.observed})
+        self.assertFalse(completion.completed())
+        completion.observe({**request, "arguments": {**self.arguments, "accent": "#136B62"}},
+                           {"result": self.observed})
+        self.assertTrue(completion.completed())
+        self.assertTrue(call("absent", request, "bench_ld03", completion)["isError"])
+
+    def test_invalid_finite_registration_or_wrong_bridge_rejected(self):
+        path, _ = self.registration()
+        with self.assertRaises(ValueError):
+            self.gateway(path, llama_ld02_atlas=True)
+        config = json.loads(path.read_text())
+        config["expected_arguments"]["spacing_px"] = float("nan")
+        path.write_text(json.dumps(config))
+        with self.assertRaises(ValueError):
+            EditCompletion(path)
+
+    def test_main_and_admitted_title_must_both_settle(self):
+        path, completion = self.registration()
+        gateway = self.gateway(path, llama_ld03=True)
+        def finish(request_id, inputs, outputs, cached):
+            gateway.gate.record_event(request_id, json.dumps({"type": "response.completed", "response": {
+                "id": "resp-" + request_id, "status": "completed", "usage": {
+                    "input_tokens": inputs, "output_tokens": outputs, "total_tokens": inputs + outputs,
+                    "input_tokens_details": {"cached_tokens": cached}}}}).encode())
+        main = gateway.gate.admit("main", "responses", b'{"model":"llama","stream":true}',
+                                  minimum_input_tokens=20)
+        finish(main.request_id, 20, 3, 0)
+        title = gateway.gate.admit("title", "responses", b'{"model":"llama","stream":true}',
+                                   minimum_input_tokens=10)
+        completion.observe({"name": "set_shared_values", "arguments": self.arguments}, {"result": self.observed})
+        self.assertTrue(gateway.edit_completed())
+        self.assertIsNone(self.status(gateway)["completion"])
+        body = b'{"model":"llama","stream":true,"tools":[]}'
+        headers = Message()
+        headers["Content-Type"] = "application/json"
+        headers["Content-Length"] = str(len(body))
+        handler = Mock(server=gateway, path="/v1/responses", headers=headers, rfile=io.BytesIO(body))
+        gateway.count_input = Mock()
+        ResponsesHandler.handle_response_request(handler)
+        handler.reply_error.assert_called_once_with(409, "guarded_edit_completed")
+        gateway.count_input.assert_not_called()
+        finish(title.request_id, 10, 2, 4)
+        with gateway.admissions:
+            self.assertIsNone(self.status(gateway)["completion"])
+        self.assertEqual(self.status(gateway)["completion"], "guarded_edit_metered")
+        self.assertEqual(gateway.gate.snapshot()["observed_total_tokens"], 35)
+
+    def test_cancelled_title_cannot_complete_even_after_valid_edit(self):
+        path, completion = self.registration()
+        gateway = self.gateway(path, llama_ld03=True)
+        gateway.gate.admit("title", "responses", b'{"model":"llama","stream":true}', minimum_input_tokens=10)
+        completion.observe({"name": "set_shared_values", "arguments": self.arguments}, {"result": self.observed})
+        gateway.gate.end_unmetered("title", "cancelled")
+        self.assertIsNone(self.status(gateway)["completion"])
+        self.assertFalse(self.status(gateway)["usage_complete"])
 
 
 if __name__ == "__main__":
