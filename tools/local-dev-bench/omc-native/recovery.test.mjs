@@ -60,3 +60,16 @@ test('N-H checks the crash boundary, semantic recovery, receipt replay, and expo
 test('N-H rejects a recovered document that lost the acknowledged edit', async () => {
   await assert.rejects(measureAcknowledgedRecovery(mock({loseEdit: true})), {code: 'ERR_ASSERTION'});
 });
+
+test('N-H verifies exactly-once recovery without recording an unconsumed receipt', async () => {
+  const args = mock();
+  await measureAcknowledgedRecovery({...args, dropReceipt: async (envelope, session) => {
+    await args.rpc('document.command', {envelope}, session);
+    return {httpStatus: 200, crashAndRestart: await args.crashAndRestart()};
+  }});
+  const {boundary, fault, lastDurable, idempotentRetransmission} = args.report.recovery;
+  assert.equal(boundary, 'response-headers-before-caller-receipt');
+  assert.equal(fault.applicationReceiptConsumed, false);
+  assert.equal(lastDurable, undefined);
+  assert.equal(idempotentRetransmission, true);
+});

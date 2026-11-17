@@ -26,6 +26,7 @@ const {values} = parseArgs({options: {
   'history-shape': {type: 'string'},
   'ui-docs': {type: 'string'},
   'background-streams': {type: 'string'},
+  'drop-receipt': {type: 'boolean'},
   'fixture-only': {type: 'boolean', default: false},
 }});
 const {experiment} = values;
@@ -57,6 +58,7 @@ assert.ok(!isContention || (desktop === 'attached' && nodeCount === 1000 && dept
   'N-E/LD08 uses the fixed 1,000-node depth-1 fixture and the isolated background desktop');
 assert.ok(!isRecovery || (desktop === 'headless' && nodeCount === 1000 && depth === 1 && process.platform !== 'win32'),
   'N-H uses the fixed 1,000-node headless fixture and POSIX process groups');
+assert.ok(isRecovery || !values['drop-receipt'], '--drop-receipt is specific to N-H');
 const uiDocs = Number(values['ui-docs'] ?? 1);
 const streams = Number(values['background-streams'] ?? 0);
 assert.ok([1, 5, 10].includes(uiDocs), '--ui-docs must be 1, 5 or 10');
@@ -129,7 +131,7 @@ if (isContention) {
   report.unavailable.assetResidency = 'The qualification fixture contains geometry only.';
 }
 if (isRecovery) {
-  report.unavailable.otherCrashPhases = 'This diagnostic injects process death after an acknowledged durable edit.';
+  report.unavailable.otherCrashPhases = 'Pre-commit and background-work crash boundaries are unmeasured.';
   report.unavailable.networkAndConvergence = 'No product network interruption or other replicas in this case.';
   report.unavailable.powerLoss = 'SIGKILL of the task-owned service group is not OS or power failure.';
 }
@@ -209,15 +211,19 @@ async function run() {
 
     report.stages.serviceDescriptorMs = await startService();
 
-    async function rpc(method, params = {}, session, timeout = 120_000) {
+    async function request(method, params, session, timeout) {
       const body = JSON.stringify({id: randomUUID(), method, params});
-      const start = performance.now();
-      const response = await fetch(new URL('/rpc', endpoint), {
+      return fetch(new URL('/rpc', endpoint), {
         method: 'POST',
         headers: {...auth, 'Content-Type': 'application/json', ...(session ? {'X-OMC-Session': session} : {})},
         body,
         signal: AbortSignal.any([signal, AbortSignal.timeout(timeout)]),
       });
+    }
+
+    async function rpc(method, params = {}, session, timeout = 120_000) {
+      const start = performance.now();
+      const response = await request(method, params, session, timeout);
       const bytes = await response.arrayBuffer();
       const receivedAt = performance.now();
       assert.ok(response.ok, `${method}: HTTP ${response.status}`);
@@ -300,7 +306,19 @@ async function run() {
     assert.equal(initial.pages.length, summary.pageCount);
     assert.equal(Object.keys(initial.nodes).length, summary.documentNodeCount);
     if (isRecovery) {
-      await measureAcknowledgedRecovery({rpc, crashAndRestart, documentId, report});
+      const dropReceipt = values['drop-receipt'] ? async (envelope, session) => {
+        const started = performance.now();
+        const response = await request('document.command', {envelope}, session, 120_000);
+        assert.ok(response.ok && response.body, 'Unexpected transport response before fault injection');
+        assert.equal(response.bodyUsed, false, 'The caller must not consume the application receipt');
+        const fault = {httpStatus: response.status, headersMs: performance.now() - started};
+        try {
+          return {...fault, crashAndRestart: await crashAndRestart()};
+        } finally {
+          await response.body.cancel().catch(() => {});
+        }
+      } : undefined;
+      await measureAcknowledgedRecovery({rpc, crashAndRestart, dropReceipt, documentId, report});
       return;
     }
     if (isHistory) {
