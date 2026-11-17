@@ -11,6 +11,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
 import {benchRequire, Client, StreamableHTTPClientTransport} from '../replays/mcp.mjs';
+import {publishCandidate} from '../publish-candidate.mjs';
 
 const scriptDirectory = fileURLToPath(new URL('..', import.meta.url));
 const {chromium} = benchRequire('playwright');
@@ -216,8 +217,38 @@ function nativeCardLayout(snapshot, expected) {
     const detail = only(children(card).filter(node => node.properties.tag === 'p'));
     return {item, card, heading, image, detail};
   });
+  assert.deepEqual(children(list).sort((a,b) => a.rank.localeCompare(b.rank)).map(node => node.id),
+    cards.map(row => row.item.id));
   assert.equal(cards.length, nodes.filter(node => hasClass(node, 'card')).length);
   return {list, cards, nodes};
+}
+
+function verifyEditableState(snapshot, expected, stylesheet, assetHashes, cycle) {
+  const {cards, nodes} = nativeCardLayout(snapshot, expected);
+  assert.equal(snapshot.metadata.css.trim(), stylesheet.trim());
+  assert.ok(nodes.every(row => row.properties.locked !== true && row.properties.visible !== false));
+  assert.deepEqual(cards.map(row => row.image.properties.assetHash), assetHashes);
+  const byId = id => nodes.find(node => node.properties.htmlId === id);
+  const status = byId('state');
+  const toggle = byId('toggle');
+  assert.equal(status?.properties.text, expected.keyboard_before);
+  assert.equal(status.properties.attributes.role, 'status');
+  assert.equal(toggle?.properties.tag, 'button');
+  assert.ok([toggle.properties.text, ...nodes.filter(row => row.parentId === toggle.id)
+    .map(row => row.properties.text)].includes(expected.check_control_name));
+  if (expected.field_name) {
+    const input = byId('fixture-value');
+    assert.equal(input?.properties.tag, 'input');
+    assert.equal(input.properties.attributes['aria-describedby'], 'field-error');
+    assert.equal(byId('field-error')?.properties.text, expected.invalid_result);
+    assert.equal(byId('saved')?.properties.text, `${expected.valid_result}: ${expected.submitted_value}`);
+    assert.ok(nodes.some(node => node.properties.tag === 'label' && node.properties.text === expected.field_name));
+  }
+  if (cycle === 3) {
+    assert.equal(byId('show-extra')?.properties.attributes.type, 'checkbox');
+    assert.ok(nodes.some(node => node.properties.tag === 'label' && node.properties.text === 'Show extra item'));
+  }
+  return cards;
 }
 
 function replaceOne(text, find, replacement) {
@@ -259,7 +290,7 @@ export function mergeExtraCard(data, variant, asset, detail) {
   return replaceOne(data, declaration, prefix + JSON.stringify({...card, variant, image: asset, detail}) + ';');
 }
 
-async function diagnose(api, fixture, cycle, root, manifest, save, report) {
+async function diagnose(api, fixture, cycle, root, manifest, save, report, common) {
   const {source_state: expected, result: edits} = fixture.cycles[cycle - 1];
   const rawHtml = await readFile(join(root, 'index.html'), 'utf8');
   const css = await readFile(join(root, 'theme.css'), 'utf8');
@@ -277,7 +308,7 @@ async function diagnose(api, fixture, cycle, root, manifest, save, report) {
   await save('native-import-rendered.html', materialized);
 
   let native;
-  for (const [route, markup] of (cycle === 1 ? [['raw',rawHtml], ['rendered',materialized]] : [['rendered',materialized]])) {
+  for (const [route, markup] of (cycle === 1 && !common ? [['raw',rawHtml], ['rendered',materialized]] : [['rendered',materialized]])) {
     const args = {format: 'html', contentBase64: Buffer.from(markup).toString('base64'), title: `LD05 cycle ${cycle} ${route}`};
     let snapshot;
     let strictRejection;
@@ -308,6 +339,7 @@ async function diagnose(api, fixture, cycle, root, manifest, save, report) {
     report.rendered.fieldMarkup = field ? field.properties.attributes : null;
   }
   if (cycle === 3) assert.ok(report.rendered.text.includes('Show extra item'), 'The conditional-list label did not reach canvas');
+  if (common) verifyEditableState(native, expected, css, cards.map(() => report.sourceAssetSha256), cycle);
   const variant = cards.at(-1);
   const patches = [];
   const nodeSet = (node, properties) => patches.push({type:'node.set',nodeId:node.id,properties});
@@ -370,7 +402,7 @@ async function diagnose(api, fixture, cycle, root, manifest, save, report) {
   await save('edited-native.json',after);
   const exports = {};
   let exportedHtml;
-  for (const format of ['html','react','png']) {
+  for (const format of (common ? ['html'] : ['html','react','png'])) {
     let artifact;
     let strictRejection;
     try {
@@ -404,6 +436,15 @@ async function diagnose(api, fixture, cycle, root, manifest, save, report) {
   report.staticExportBehavior={...staticBehavior,exportAssetHashes,emittedStylesMatch,
     exportedAssetsMatch:JSON.stringify(exportAssetHashes)===JSON.stringify(expectedAssetHashes),
     eventHandlerPreserved:typeof staticBehavior.before==='string' && staticBehavior.after===expected.keyboard_after};
+  if (common) {
+    const reopenedCards = verifyEditableState(reopened, edits, css, expectedAssetHashes, cycle);
+    assert.ok(emittedStylesMatch && report.staticExportBehavior.exportedAssetsMatch);
+    if (cycle === 3) {
+      const extra = reopenedCards.at(-1);
+      assert.equal(extra.detail.properties.text, edits.copy);
+      assert.equal(extra.card.properties.attributes['data-variant'], edits.variant);
+    }
+  }
 
   // Merge only reopened native properties into the registered component source.
   const props = node => reopened.nodes[node.id].properties;
@@ -440,9 +481,12 @@ async function diagnose(api, fixture, cycle, root, manifest, save, report) {
 }
 
 async function main() {
-  const [family, output] = process.argv.slice(2);
-  assert.ok(['route-board', 'supply-ledger'].includes(family) && output,
-    'Usage: ld05.mjs route-board|supply-ledger NEW_EVIDENCE_DIRECTORY');
+  const [family, output, mode] = process.argv.slice(2);
+  assert.ok(['route-board', 'supply-ledger'].includes(family) && output && (!mode || mode === '--common'),
+    'Usage: ld05.mjs route-board|supply-ledger NEW_EVIDENCE_DIRECTORY [--common]');
+  const common = mode === '--common';
+  const candidate = process.env.OMC_BENCH_CANDIDATE;
+  if (common) assert.ok(candidate, 'The common arm must publish to OMC_BENCH_CANDIDATE');
   const evidence = resolve(output);
   await mkdir(evidence, {mode: 0o700});
   const root = join(evidence, 'source');
@@ -455,8 +499,24 @@ async function main() {
   const sourceCommand = (action, ...args) => readJSON('ld05_source.py', action, family, root, ...args);
   const fixture = readJSON('ld05_contract.py', family);
   const initial = sourceCommand('prepare');
+  function git(...args) {
+    return execFileSync('git', ['-C', root, '-c', 'user.name=LD05 Benchmark', '-c', 'user.email=ld05@example.invalid',
+      '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', ...args], {
+      encoding: 'utf8', env: {...env, GIT_CONFIG_GLOBAL:'/dev/null', GIT_CONFIG_NOSYSTEM:'1'},
+    });
+  }
+  function commit(message, files) {
+    git('add', '--', ...files);
+    git('commit', '--quiet', '-m', message);
+    return git('rev-parse', 'HEAD').trim();
+  }
+  if (common) {
+    git('init', '--quiet', '--template=');
+    await save('initial-source-commit.txt', commit('Seed the registered source fixture', Object.keys(initial.files)) + '\n');
+  }
   const report = {workload: 'LD05', sourceFamily: family, fixtureSha256: fixture.fixture_sha256,
     initialSource: initial, fullAcceptance: false, cycles: []};
+  const neutral = {fixture_sha256:fixture.fixture_sha256, starting_source_sha256:initial.source_sha256, cycles:[]};
   await save('registered-fixture.json', fixture);
   const profile = await mkdtemp(join(tmpdir(), 'omc-ld05-'));
   const binary = join(process.env.OMC_BENCH_BIN_DIR ?? '/Applications/Oh My Canvas.app/Contents/MacOS', 'omc-service');
@@ -531,16 +591,33 @@ async function main() {
       const began = performance.now();
       const result = {cycle, sourceParent, patchedSource:manifest, scheduledFiles, status:'started'};
       report.cycles.push(result);
+      if (common) result.sourcePatchCommit = commit(`Apply source patch for cycle ${cycle}`, scheduledFiles);
       await saveCycle('theme-before.css', await readFile(join(root,'theme.css')));
-      await diagnose({rpc, reopen, sourceCommand}, fixture, cycle, root, manifest, saveCycle, result);
+      await diagnose({rpc, reopen, sourceCommand}, fixture, cycle, root, manifest, saveCycle, result, common);
       previous = result.mergedSource.manifest;
       assert.notEqual(previous.source_sha256, sourceParent.source_sha256);
       await saveCycle('theme-after.css', await readFile(join(root,'theme.css')));
       await saveCycle('data-after.mjs', await readFile(join(root,'data.mjs')));
+      if (common) {
+        const checked = fixture.cycles[cycle-1];
+        const widths = result.mergedSource.observedWidths.map(state => state.width);
+        assert.deepEqual(widths, fixture.widths);
+        assert.equal(previous.files['card.mjs'], initial.files['card.mjs']);
+        assert.ok(result.nativeReopenVerified && result.mergedSource.cleanStaticSourceVerified);
+        await saveCycle('design-source.diff', git('diff', '--binary', '--', ...result.mergedSource.changedFiles));
+        result.designCommit = commit(`Merge reopened canvas properties for cycle ${cycle}`, result.mergedSource.changedFiles);
+        assert.equal(git('status', '--porcelain'), '');
+        // The semantic assertions in diagnose check browser behavior and each required native field.
+        neutral.cycles.push({source_parent_sha256:sourceParent.source_sha256, source_patch_sha256:manifest.source_sha256,
+          result_checkout_sha256:previous.source_sha256, refreshed_canvas:checked.source_state,
+          reopened_canvas:checked.result, source_result:checked.result, checked_widths:widths,
+          canvas_editable:true, clean_build:true, behavior_tests_passed:true, component_reused:true, no_missing_assets:true});
+      }
       result.elapsedMs = performance.now() - began;
       result.status = 'controlled-cycle-complete';
     }
-    report.status = 'controlled-three-cycle-diagnostic-complete';
+    if (common) await publishCandidate(candidate, neutral);
+    report.status = common ? 'awaiting-independent-common-grade' : 'controlled-three-cycle-diagnostic-complete';
   } catch (error) {
     report.error = error.stack;
     if (report.cycles.at(-1)?.status === 'started') report.cycles.at(-1).status = 'failed';
