@@ -1,17 +1,50 @@
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {createHash, randomUUID} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 
 import {fixture, target as edit} from './ld02-fixture.mjs';
-import {Client, StreamableHTTPClientTransport} from './mcp.mjs';
 
-const [mode, extra] = process.argv.slice(2);
-assert.ok(extra === undefined && [undefined, '--seed-only', '--verify-only'].includes(mode),
-  'Usage: node paper-ld02.mjs [--seed-only | --verify-only]');
+function compareSnapshots(before, after) {
+  assert.equal(before.measurement, 'snapshot-before');
+  assert.equal(after.measurement, 'snapshot-after');
+  assert.equal(before.workload, fixture.workload);
+  assert.equal(after.workload, before.workload);
+  assert.ok(before.pagePrefix?.startsWith('LD02 '));
+  assert.equal(after.pagePrefix, before.pagePrefix);
+  assert.equal(Object.keys(before.snapshot?.protectedContent ?? {}).length, fixture.pages.length);
+  assert.deepEqual(after.snapshot, before.snapshot, 'Paper changed identities or content outside the scoped edit');
+}
+
+const [mode, extra, afterPath, extraPath] = process.argv.slice(2);
+if (mode === '--compare') {
+  assert.ok(extra && afterPath && !extraPath, 'Usage: paper-ld02.mjs --compare BEFORE.json AFTER.json');
+  compareSnapshots(JSON.parse(readFileSync(extra, 'utf8')), JSON.parse(readFileSync(afterPath, 'utf8')));
+  console.log(JSON.stringify({protectedContentMatches: true}));
+  process.exit(0);
+}
+if (mode === '--self-test') {
+  const pagePrefix = 'LD02 demo / ';
+  const snapshot = {
+    targetIds: {card: 'card-1'},
+    protectedContent: Object.fromEntries(fixture.pages.map(page => [page.name, {pageId: page.name}])),
+  };
+  const before = {measurement: 'snapshot-before', workload: fixture.workload, pagePrefix, snapshot};
+  const after = {...before, measurement: 'snapshot-after', snapshot: structuredClone(snapshot)};
+  compareSnapshots(before, after);
+  after.snapshot.targetIds.card = 'replacement-id';
+  assert.throws(() => compareSnapshots(before, after), /changed identities or content/);
+  console.log('Paper scoped snapshot comparison passed');
+  process.exit(0);
+}
+const snapshots = new Map([['--snapshot-before', edit.before], ['--snapshot-after', edit.after]]);
+assert.ok(extra === undefined && [undefined, '--seed-only', '--verify-only', ...snapshots.keys()].includes(mode),
+  'Usage: node paper-ld02.mjs [--seed-only | --verify-only | --snapshot-before | --snapshot-after]');
 const fileId = process.env.PAPER_BENCH_FILE_ID;
 const expectedName = process.env.PAPER_BENCH_FILE_NAME;
 const runId = process.env.PAPER_BENCH_RUN_ID ?? randomUUID();
 assert.ok(fileId?.trim() && expectedName?.trim(), 'Set PAPER_BENCH_FILE_ID and PAPER_BENCH_FILE_NAME');
-assert.ok(mode !== '--verify-only' || process.env.PAPER_BENCH_RUN_ID, 'Verification requires PAPER_BENCH_RUN_ID');
+const readOnly = mode === '--verify-only' || snapshots.has(mode);
+assert.ok(!readOnly || process.env.PAPER_BENCH_RUN_ID, 'Verification requires PAPER_BENCH_RUN_ID');
 assert.match(runId, /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$/);
 const endpoint = new URL(process.env.PAPER_BENCH_URL ?? 'http://127.0.0.1:29979/mcp');
 assert.ok(endpoint.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname),
@@ -19,6 +52,7 @@ assert.ok(endpoint.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].i
 assert.ok(!endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash,
   'Paper endpoint must not carry credentials or selectors');
 
+const {Client, StreamableHTTPClientTransport} = await import('./mcp.mjs');
 const pagePrefix = `LD02 ${runId} / `;
 const client = new Client({name: 'paper-ld02-replay', version: '1'});
 const workingNodes = new Set();
@@ -73,6 +107,51 @@ async function verify({card, label, reference, swatch}, expected) {
   assert.equal(styles[swatch.id].backgroundColor.toLowerCase(), expected.fill);
 }
 
+async function snapshotProtectedFixture(found) {
+  const {pages} = await call('get_basic_info');
+  const runPages = pages.filter(page => page.name.startsWith(pagePrefix));
+  assert.deepEqual(runPages.map(page => page.name).sort(),
+    fixture.pages.map(page => pagePrefix + page.name).sort());
+  const protectedContent = {};
+  async function digest(nodeId, expectedIds) {
+    const tree = await call('get_tree_summary', {nodeId, depth: 3});
+    const jsx = await call('get_jsx', {nodeId, includeNodeIds: true, includeRootPositioning: true});
+    const treeText = JSON.stringify(tree);
+    const jsxText = JSON.stringify(jsx);
+    assert.ok(tree && jsx && expectedIds.every(id => treeText.includes(id) && jsxText.includes(id)),
+      'Paper readback did not identify the requested subtree');
+    return createHash('sha256').update(JSON.stringify([tree, jsx])).digest('hex');
+  }
+  for (const page of runPages) {
+    const {rootNodeId} = await call('get_basic_info', {pageId: page.id});
+    assert.ok(rootNodeId);
+    const {children} = await call('get_children', {nodeId: rootNodeId});
+    const expectedPage = fixture.pages.find(item => pagePrefix + item.name === page.name);
+    assert.deepEqual(children.map(node => node.name), expectedPage.children.map(card => card.name));
+    const target = page.name === pagePrefix + edit.page;
+    if (target) assert.ok(children.some(node => node.id === found.card.id));
+    const subtrees = [];
+    if (target) {
+      for (const node of children) {
+        if (node.id !== found.card.id) subtrees.push([node.id, await digest(node.id, [node.id])]);
+      }
+    } else {
+      subtrees.push([rootNodeId, await digest(rootNodeId, children.map(node => node.id))]);
+    }
+    protectedContent[page.name] = {
+      pageId: page.id,
+      rootNodeId,
+      cardIds: children.map(node => node.id),
+      subtrees,
+    };
+  }
+  return {
+    pageOrder: runPages.map(page => page.name),
+    targetIds: Object.fromEntries(Object.entries(found).map(([key, node]) => [key, node.id])),
+    protectedContent,
+  };
+}
+
 try {
   await client.connect(new StreamableHTTPClientTransport(endpoint), {timeout: 10_000});
   await call('get_guide', {topic: 'paper-mcp-instructions'});
@@ -87,7 +166,7 @@ try {
   }
   assert.ok(hasControlScene, 'Designated file lacks the synthetic CAP Editable Scene');
 
-  if (mode !== '--verify-only') {
+  if (!readOnly) {
     assert.ok(!home.pages.some(page => page.name.startsWith(pagePrefix)),
       'Run ID already exists in Paper; choose a fresh run ID');
     await call('get_font_family_info', {familyNames: ['Inter']});
@@ -112,11 +191,13 @@ try {
   }
 
   let editReadbackMs = null;
+  let snapshot = null;
   if (mode !== '--seed-only') {
     const started = performance.now();
     const found = await locate();
-    if (mode === '--verify-only') {
-      await verify(found, edit.after);
+    if (readOnly) {
+      await verify(found, snapshots.get(mode) ?? edit.after);
+      if (snapshots.has(mode)) snapshot = await snapshotProtectedFixture(found);
     } else {
       await verify(found, edit.before);
       const {card, label, swatch} = found;
@@ -132,11 +213,14 @@ try {
   }
   console.log(JSON.stringify({
     workload: fixture.workload,
-    measurement: mode === '--seed-only' ? 'seed-only' : mode === '--verify-only' ? 'scoped-verification' : 'deterministic-replay',
+    measurement: snapshots.has(mode) ? mode.slice(2)
+      : mode === '--seed-only' ? 'seed-only'
+      : readOnly ? 'scoped-verification' : 'deterministic-replay',
     pagePrefix,
     editReadbackMs,
     pages: fixture.pages.length,
     logicalObjects: fixture.logicalObjects,
+    ...(snapshot && {snapshot}),
     toolCalls,
   }));
 } finally {

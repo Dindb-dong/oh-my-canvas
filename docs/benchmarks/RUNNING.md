@@ -95,7 +95,13 @@ node tools/local-dev-bench/penpot-ld02.mjs http://localhost:19001
 
 Use a new `PAPER_BENCH_RUN_ID` with `--seed-only` to prepare a baseline
 for a later agent run. Use the same ID with `--verify-only` for its scoped
-readback. The Figma plan contains the inspection, page creation, page seeding,
+readback. For protected-scope evidence, retain `--snapshot-before` before
+the attempt and `--snapshot-after` after the supported reopen. Use
+`paper-ld02.mjs --compare BEFORE.json AFTER.json` to compare the target
+identities and protected subtree hashes. Capture normal editor close/reopen
+and the Undo/Redo check on a test copy separately.
+
+The Figma plan contains the inspection, page creation, page seeding,
 edit, and readback calls. Bind those payloads to the approved file and
 session at dispatch. Code that starts from this fixture still needs a
 complete acceptance adapter for a scored attempt.
