@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
-import {readFile, writeFile} from 'node:fs/promises';
+import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
+import {parseArgs} from 'node:util';
+import {withLD02Broker} from '../ld02-model.mjs';
+import {runLD03Agent} from '../ld03-model.mjs';
 import {
   connectEditor, createAccount, getMcpEndpoint, loopbackOrigin, newFile, waitForBackend,
 } from '../penpot-ld02.mjs';
@@ -13,8 +17,7 @@ import {decodeNativeResult, readAfterAttach} from './ld09.mjs';
 const scope = 'OMC Benchmark LD02 / conservation-atlas';
 const nativeKey = 'atlas-logical-key';
 const nativeId = /^[a-f0-9-]{36}$/i;
-const targetName = 'Ceramics review';
-const targetReceipt = 'AC-270';
+const target = {name:'Ceramics review',receipt:'AC-270'};
 
 export function validateFixture(fixture) {
   assert.equal(fixture.workload,'LD02');
@@ -125,27 +128,40 @@ export function readAtlasPage(page, fileId) {
   `;
 }
 
-export function atlasTarget(fileId, edit = false, fixture) {
-  const changes = Object.fromEntries(fixture.edit.map(row => [row.field,{from:row.from,to:row.to}]));
+export function atlasTarget(fileId, edit = false, fixture, {selector, requested, nativeScope} = {}) {
+  const {name,receipt} = selector ?? target;
+  const changes = Object.fromEntries(fixture.edit.map(({field,from,to}) =>
+    [field,{from,to:requested ? requested[field] : to}]));
   return `${guard(fileId)}
     const matches = [];
     for (const page of penpot.currentFile.pages) {
       for (const zone of page.root.children) {
         for (const station of zone.children ?? []) {
-          if (station.name === ${JSON.stringify(targetName)} && station.children?.some(child =>
-            child.name === "receipt" && child.type === "text" && child.characters === ${JSON.stringify(targetReceipt)})) {
+          if (station.name === ${JSON.stringify(name)} && station.children?.some(child =>
+            child.name === "receipt" && child.type === "text" && child.characters === ${JSON.stringify(receipt)})) {
             matches.push({page,station});
           }
         }
       }
     }
+    ${selector && !edit ? 'if (!matches.length) return null;' : ''}
     if (matches.length !== 1) throw new Error("Semantic Atlas target is absent or ambiguous");
-    const {page} = matches[0];
-    const stationId = matches[0].station.id;
-    if (penpot.currentPage.id !== page.id) await penpot.openPage(page);
-    const station = penpot.currentPage.getShapeById(stationId);
+    const {page,station:discovered} = matches[0];
+    ${nativeScope ? `
+      const permitted = ${JSON.stringify(nativeScope)};
+      if (page.id !== permitted.page || penpot.currentPage.id !== permitted.page) {
+        throw new Error("Atlas edit is outside the permitted working page");
+      }
+      if (penpot.selection.length !== 0) throw new Error("Atlas edit requires cleared selection");
+    ` : selector ? '' : 'if (penpot.currentPage.id !== page.id) await penpot.openPage(page);'}
+    const station = ${selector && !edit ? 'discovered' : 'penpot.currentPage.getShapeById(discovered.id)'};
     const caption = station.children.find(shape => shape.name === "status" && shape.type === "text");
     const marker = station.children.find(shape => shape.name === "marker" && shape.type === "rectangle");
+    ${nativeScope ? `
+      if (station.id !== permitted.gap || caption?.id !== permitted.text || marker?.id !== permitted.radius) {
+        throw new Error("Atlas edit would replace or change an unregistered native shape");
+      }
+    ` : ''}
     const key = ${JSON.stringify(nativeKey)};
     const before = {text:caption.characters,gap:station.flex.rowGap,radius:marker.borderRadius};
     ${edit ? `
@@ -166,6 +182,46 @@ export function atlasTarget(fileId, edit = false, fixture) {
       ];
     ` : 'return before;'}
   `;
+}
+
+export async function runAtlasModel({execute,fixture,fileId,before,modelCommand,modelTools,beforeWrite}) {
+  assert.equal(before.document_id,fileId);
+  assert.deepEqual(before.selected_native_ids,[]);
+  const nativeScope = Object.fromEntries(fixture.edit.map(({key,field}) =>
+    [field,before.nodes.find(node => node.key === key)?.native_id]));
+  nativeScope.page = before.pages.find(page => page.key === fixture.working_page)?.native_id;
+  assert.ok(Object.values(nativeScope).every(value => typeof value === 'string' && value));
+  assert.equal(new Set(Object.values(nativeScope)).size,4);
+  const find = async selector => {
+    const state = await readAfterAttach(() => execute(atlasTarget(fileId,false,fixture,{selector})));
+    return state && {...selector,text:state.text,gap_px:state.gap,radius_px:state.radius};
+  };
+
+  const dir = await mkdtemp(join(tmpdir(),'omc-penpot-atlas-'));
+  const socket = join(dir,'agent.sock');
+  const controller = new AbortController();
+  const interrupt = () => controller.abort();
+  const signals = ['SIGINT','SIGTERM'];
+  for (const signal of signals) process.once(signal,interrupt);
+  let actions = [];
+  try {
+    await withLD02Broker(socket,{
+      query:target,
+      find,
+      edit:async (selector,requested) => {
+        beforeWrite();
+        const observed = await execute(atlasTarget(fileId,true,fixture,{selector,requested,nativeScope}));
+        assert.deepEqual(observed,fixture.edit.map(({key,field,from}) => ({key,field,from,to:requested[field]})),
+          'Penpot did not commit the requested values to the permitted native shapes');
+        actions = observed;
+        return find(selector);
+      },
+    },modelTools,() => runLD03Agent(modelCommand,socket,controller.signal));
+    return actions;
+  } finally {
+    for (const signal of signals) process.off(signal,interrupt);
+    await rm(dir,{recursive:true,force:true});
+  }
 }
 
 export function atlasDifferences(spec, state, tolerance) {
@@ -240,7 +296,7 @@ function waitSave(page, origin) {
     .then(() => true,error => error.name === 'TimeoutError' ? false : error);
 }
 
-async function replay(origin, fixture) {
+async function replay(origin, fixture, modelCommand) {
   await waitForBackend(origin);
   const {benchRequire, Client, StreamableHTTPClientTransport} = await import('../replays/mcp.mjs');
   const {chromium} = benchRequire('playwright');
@@ -249,6 +305,8 @@ async function replay(origin, fixture) {
   const client = new Client({name:'omc-ld02-atlas',version:'1'});
   let browser, endpoint;
   let phase = 'synthetic account setup';
+  const modelTools = [];
+  let edit = [];
   try {
     browser = await chromium.launch({channel:'chrome',headless:true});
     const context = await browser.newContext({locale:'en-US',viewport:{
@@ -304,10 +362,18 @@ async function replay(origin, fixture) {
 
     phase = 'three semantic edits on original';
     const started = performance.now();
-    await waitValues(execute,fixture,id,'from');
-    const saved = waitSave(editor,origin);
-    const edit = await execute(atlasTarget(id,true,fixture));
-    await waitValues(execute,fixture,id,'to');
+    let saved;
+    if (modelCommand) {
+      edit = await runAtlasModel({
+        execute,fixture,fileId:id,before,modelCommand,modelTools,
+        beforeWrite:() => { saved = waitSave(editor,origin); },
+      });
+    } else {
+      await waitValues(execute,fixture,id,'from');
+      saved = waitSave(editor,origin);
+      edit = await execute(atlasTarget(id,true,fixture));
+      await waitValues(execute,fixture,id,'to');
+    }
     const editMs = performance.now()-started;
     const candidate = await capture(execute,fixture,id);
     const saveObserved = await saved;
@@ -336,22 +402,29 @@ async function replay(origin, fixture) {
     const evidence = {
       before,candidate,reopened,edit,copy_before:copyBefore,copy_edited:copyEdited,copy_undo:copyUndo,copy_redo:copyRedo,
       copy_history:{undo_count:1,redo_count:1},after_probe_original:afterProbeOriginal,
+      ...(modelCommand ? {modelTools} : {}),
     };
     await writeFile(process.env.OMC_BENCH_CANDIDATE,JSON.stringify(evidence)+'\n',{flag:'wx',mode:0o600});
     console.log(JSON.stringify({workload:'LD02',sourceFamily:fixture.source_family_id,setupMs,editMs,reopenMs,
-      initialSaveObserved,saveObserved,scope:'native product-only canonical Atlas gate'}));
+      initialSaveObserved,saveObserved,
+      scope:modelCommand ? 'model-assisted canonical native Atlas edit' : 'native product-only canonical Atlas gate'}));
   } catch (error) {
     const secrets = [email,password,endpoint?.searchParams.get('userToken')].filter(Boolean);
     const message = secrets.reduce((value,secret) => value.replaceAll(secret,'[redacted]'),String(error));
     throw new Error(`Penpot LD02 ${phase}: ${message}`);
   } finally {
     await Promise.allSettled([client.close(),browser?.close()]);
+    const output = process.env.OMC_BENCH_OUTPUT_DIR;
+    if (modelCommand && output) await writeFile(join(output,'ld02-model-actions.json'),
+      JSON.stringify({edit,modelTools}) + '\n',{flag:'wx',mode:0o600});
   }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  assert.equal(process.argv.length,4,'Use ld02-atlas.mjs LOOPBACK_ORIGIN CANONICAL_ATLAS.json');
+  const {positionals,values} = parseArgs({allowPositionals:true,options:{'model-command':{type:'string'}}});
+  assert.equal(positionals.length,2,
+    'Use ld02-atlas.mjs LOOPBACK_ORIGIN CANONICAL_ATLAS.json [--model-command EXECUTABLE]');
   assert.ok(process.env.OMC_BENCH_CANDIDATE,'Set OMC_BENCH_CANDIDATE for the independent neutral grader');
-  const fixture = validateFixture(JSON.parse(await readFile(process.argv[3],'utf8')));
-  await replay(loopbackOrigin(process.argv[2]),fixture);
+  const fixture = validateFixture(JSON.parse(await readFile(positionals[1],'utf8')));
+  await replay(loopbackOrigin(positionals[0]),fixture,values['model-command']);
 }

@@ -4,7 +4,9 @@ import {mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
-import {atlasDifferences,atlasInventory,atlasTarget,readAtlasPage,seedAtlasPage,validateFixture} from './ld02-atlas.mjs';
+import {
+  atlasDifferences,atlasInventory,atlasTarget,readAtlasPage,runAtlasModel,seedAtlasPage,validateFixture,
+} from './ld02-atlas.mjs';
 
 const generator = 'tools/local-dev-bench/workloads/synthetic.py';
 const fixture = validateFixture(JSON.parse(execFileSync('python3',[generator,'fixture','LD02',
@@ -133,4 +135,98 @@ test('Atlas seeds actual native structure and locates only exact station and rec
   } finally {
     await rm(temp,{recursive:true,force:true});
   }
+});
+
+const selector = {name:'Ceramics review',receipt:'AC-270'};
+
+async function fakeAgent(operations) {
+  const dir = await mkdtemp(join(tmpdir(),'omc-atlas-agent-'));
+  const executable = join(dir,'agent.mjs');
+  await writeFile(executable,`#!${process.execPath}
+import assert from 'node:assert/strict';
+import {connect} from 'node:net';
+async function send(name,args) {
+  const client = connect(process.argv[2]);
+  client.on('connect',()=>client.write(JSON.stringify({name,arguments:args})+'\\n'));
+  let body = '';
+  for await (const chunk of client) body += chunk;
+  return JSON.parse(body);
+}
+for (const [name,args,expected] of ${JSON.stringify(operations)}) {
+  const reply = await send(name,args);
+  if (typeof expected === 'string') assert.match(reply.error,new RegExp(expected));
+  else assert.deepEqual(reply.result,expected);
+}
+`,{mode:0o700});
+  return {executable,cleanup:() => rm(dir,{recursive:true,force:true})};
+}
+
+test('Atlas model lookup reads native distractors without switching pages and guards current file/selection/IDs', async () => {
+  const work = synthetic(id);
+  await seed(work);
+  const startingPage = work.currentPage.id;
+  const read = station => evalScript(atlasTarget(id,false,fixture,{selector:station}),work);
+  const before = await snapshot(work);
+  await assert.rejects(read({...selector,receipt:'AC-207'}),/absent or ambiguous/);
+  const other = before.nodes.find(node => node.kind === 'frame' && node.name !== selector.name &&
+    before.nodes.some(row => row.parent === node.key && row.name === 'receipt'));
+  const otherReceipt = before.nodes.find(node => node.parent === other.key && node.name === 'receipt').text;
+  assert.ok(await read({name:other.name,receipt:otherReceipt}));
+  assert.deepEqual(await read(selector),{text:'Condition check pending',gap:8,radius:4});
+  assert.equal(work.currentPage.id,startingPage);
+  assert.equal(await read({...selector,receipt:'AC-999'}),null);
+  await assert.rejects(evalScript(atlasTarget(copyId,false,fixture,{selector}),work),/Wrong isolated Atlas/);
+  const scoped = Object.fromEntries(fixture.edit.map(({key,field}) =>
+    [field,before.nodes.find(node => node.key === key).native_id]));
+  scoped.page = before.pages.find(page => page.key === fixture.working_page).native_id;
+  const requested = {text:'Model-selected change',gap:15,radius:11};
+  const edit = scope => evalScript(atlasTarget(id,true,fixture,{selector,requested,nativeScope:scope}),work);
+  await assert.rejects(edit(scoped),/outside the permitted working page/);
+  await work.openPage(work.currentFile.pages.find(page => page.id === scoped.page));
+  work.selection = [{id:scoped.gap}];
+  await assert.rejects(edit(scoped),/requires cleared selection/);
+  work.selection = [];
+  await assert.rejects(edit({...scoped,text:'unregistered'}),/unregistered native shape/);
+  assert.deepEqual(await snapshot(work),before);
+});
+
+test('Atlas model command performs one native batch and does not substitute the grader values', async () => {
+  const work = synthetic(id);
+  await seed(work);
+  const pageName = fixture.start.pages.find(page => page.key === fixture.working_page).name;
+  await work.openPage(work.currentFile.pages.find(page => page.name === pageName));
+  const before = await snapshot(work);
+  const edits = {text:'Model-selected change',gap_px:15,radius_px:11};
+  const command = await fakeAgent([
+    ['edit_section',{...selector,...edits},'Locate the permitted station'],
+    ['find_section',selector,{...selector,text:'Condition check pending',gap_px:8,radius_px:4}],
+    ['edit_section',{...selector,...edits},{...selector,...edits}],
+    ['edit_section',{...selector,...edits},'already attempted'],
+  ]);
+  const modelTools = [];
+  let writes = 0;
+  const actions = await runAtlasModel({
+    execute:code => evalScript(code,work),fixture,fileId:id,before,modelCommand:command.executable,modelTools,
+    beforeWrite:() => { writes++; },
+  }).finally(command.cleanup);
+  assert.equal(writes,1);
+  assert.deepEqual(modelTools.map(event => event.status),['rejected','ok','ok','rejected']);
+  assert.deepEqual(actions.map(action => action.to),['Model-selected change',15,11]);
+  const after = await snapshot(work);
+  assert.deepEqual(before.nodes.map(node => node.native_id),after.nodes.map(node => node.native_id));
+  assert.notDeepEqual(actions,fixture.edit);
+  assert.ok(atlasDifferences(fixture.expected,after,2).some(issue => issue.endsWith('/status.text')));
+});
+
+test('Atlas model completion without a tool write preserves the entire original', async () => {
+  const work = synthetic(id);
+  await seed(work);
+  const before = await snapshot(work);
+  const command = await fakeAgent([]);
+  const actions = await runAtlasModel({
+    execute:code => evalScript(code,work),fixture,fileId:id,before,modelCommand:command.executable,modelTools:[],
+    beforeWrite:() => assert.fail('No fallback write is allowed'),
+  }).finally(command.cleanup);
+  assert.deepEqual(actions,[]);
+  assert.deepEqual(await snapshot(work),before);
 });
