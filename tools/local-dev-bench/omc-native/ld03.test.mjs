@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 
-import {captureLD03, observedGap, planLD03, seedLD03, sharedLD03Values} from './ld03.mjs';
+import {captureLD03, observedGap, planLD03, seedLD03, sharedLD03Values, validateLD03Baseline, validatePreparedLD03} from './ld03.mjs';
 
 const generator = fileURLToPath(new URL('../workloads/synthetic.py', import.meta.url));
 const fixture = variant => JSON.parse(execFileSync('python3', [generator, 'fixture', 'LD03', '--variant', variant], {
@@ -121,4 +122,37 @@ test('same-document readbacks overlap with bounded concurrency and keep source o
   assert.equal(active, 0);
   assert.deepEqual(result.nodes.map(node => node.native_id), raws.map(node => node.id));
   assert.ok(result.nodes.filter(node => node.layout === 'vertical').every(node => node.gap === 14));
+});
+
+test('prepared baseline verifies native values, token references, overrides and editable identity',()=>{
+  const source=fixture('field-relay');
+  const before={document_id:'01234567-89ab-cdef-0123-456789abcdef',
+    styles:source.start.styles.map(row=>({...row,native_id:'variable/'+row.key})),
+    nodes:source.start.nodes.map((row,index)=>({...row,native_id:'node/'+index,editable:true,
+      ...(row.bindings&&{bindings:Object.fromEntries(Object.entries(row.bindings).map(([field,key])=>[field,'variable/'+key]))})}))};
+  validateLD03Baseline(source,before);
+  for(const mutate of [
+    value=>{value.styles[0].value='#000000';},
+    value=>{value.nodes.find(row=>row.bindings?.fill).bindings.fill='wrong-variable';},
+    value=>{value.nodes.find(row=>row.bindings&&!row.bindings.gap).gap=999;},
+    value=>{value.nodes[0].editable=false;},
+    value=>{value.nodes[1].native_id=value.nodes[0].native_id;},
+  ]) {
+    const changed=structuredClone(before); mutate(changed);
+    assert.throws(()=>validateLD03Baseline(source,changed));
+  }
+  const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const prepared={schema:'omc-ld03-prepared/1',profile:'/tmp/omc-ld03-unit',
+    ownershipToken:'01234567-89ab-cdef-0123-456789abcdef',documentId:before.document_id,
+    fixtureContentSha256:hash(source),binarySha256:'binary',sourceSha256:'runner',
+    before,beforeSha256:hash(before),variableIds:before.styles.map(row=>[row.key,row.native_id])};
+  const loaded=validatePreparedLD03(prepared,source,'binary','runner');
+  assert.equal(loaded.id,before.document_id);
+  assert.equal(loaded.variableIds.get('target.accent'),'variable/target.accent');
+  assert.throws(()=>validatePreparedLD03(prepared,source,'changed-binary','runner'));
+  assert.throws(()=>validatePreparedLD03(prepared,source,'binary','changed-runner'));
+  assert.throws(()=>validatePreparedLD03({...prepared,beforeSha256:'changed'},source,'binary','runner'));
+  assert.throws(()=>validatePreparedLD03({...prepared,variableIds:[]},source,'binary','runner'));
+  const changedFixture=structuredClone(source); changedFixture.brief+='changed';
+  assert.throws(()=>validatePreparedLD03(prepared,changedFixture,'binary','runner'));
 });

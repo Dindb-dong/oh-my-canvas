@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {createHash, randomUUID} from 'node:crypto';
 import {once} from 'node:events';
-import {mkdtemp, readFile, rm} from 'node:fs/promises';
+import {mkdtemp, open, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -13,6 +13,7 @@ import {publishCandidate} from '../publish-candidate.mjs';
 
 const marker = 'LD03 ';
 const styleProperties = {accent: 'fill', spacing: 'gap'};
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const storedId = id => {
   assert.match(id, /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/);
   return `doc_${id.replaceAll('-', '')}`;
@@ -119,6 +120,48 @@ export function sharedLD03Values(variables, ids) {
   return {target: family('target'), archive: family('keep')};
 }
 
+export function validateLD03Baseline(fixture, observation) {
+  assert.ok(typeof observation.document_id === 'string');
+  const styles = new Map(observation.styles.map(row => [row.key, row]));
+  assert.equal(styles.size, fixture.start.styles.length);
+  assert.equal(styles.size, observation.styles.length);
+  assert.equal(new Set(observation.styles.map(row => row.native_id)).size, styles.size);
+  for (const expected of fixture.start.styles) {
+    const actual = styles.get(expected.key);
+    assert.ok(actual?.native_id);
+    for (const [key, value] of Object.entries(expected)) assert.deepEqual(actual[key], value);
+  }
+  const nodes = new Map(observation.nodes.map(row => [row.key, row]));
+  assert.equal(nodes.size, fixture.start.nodes.length);
+  assert.equal(nodes.size, observation.nodes.length);
+  assert.equal(new Set(observation.nodes.map(row => row.native_id)).size, nodes.size);
+  for (const expected of fixture.start.nodes) {
+    const actual = nodes.get(expected.key);
+    assert.ok(actual?.native_id);
+    assert.equal(actual.editable, true);
+    for (const [key, value] of Object.entries(expected)) {
+      const required = key === 'bindings' ? Object.fromEntries(Object.entries(value)
+        .map(([field, style]) => [field, styles.get(style).native_id])) : value;
+      assert.deepEqual(actual[key], required, `Prepared baseline differs: ${expected.key}.${key}`);
+    }
+  }
+}
+
+export function validatePreparedLD03(prepared, fixture, binarySha256, sourceSha256) {
+  assert.equal(prepared.schema, 'omc-ld03-prepared/1');
+  assert.equal(prepared.fixtureContentSha256, sha256(JSON.stringify(fixture)));
+  assert.equal(prepared.binarySha256, binarySha256);
+  assert.equal(prepared.sourceSha256, sourceSha256);
+  assert.ok(typeof prepared.profile === 'string' && prepared.profile.startsWith('/'));
+  assert.match(prepared.ownershipToken, /^[a-f0-9-]{36}$/);
+  assert.equal(prepared.beforeSha256, sha256(JSON.stringify(prepared.before)));
+  assert.equal(prepared.documentId, prepared.before.document_id);
+  storedId(prepared.documentId);
+  validateLD03Baseline(fixture, prepared.before);
+  assert.deepEqual(prepared.variableIds, prepared.before.styles.map(row => [row.key, row.native_id]));
+  return {id: prepared.documentId, variableIds: new Map(prepared.variableIds)};
+}
+
 export async function captureLD03(api, documentId, fixture) {
   await api.bind(documentId);
   const raw = await api.snapshot(documentId);
@@ -215,11 +258,20 @@ export async function captureLD03(api, documentId, fixture) {
   return {document_id: documentId, nodes, styles};
 }
 
-async function runLD03(fixture, plan, report, modelCommand) {
+async function runLD03(fixture, plan, report, modelCommand, preparation = {}) {
   const {Client, StreamableHTTPClientTransport} = await import('../replays/mcp.mjs');
   const serviceBinary = join(process.env.OMC_BENCH_BIN_DIR ?? '/Applications/Oh My Canvas.app/Contents/MacOS', 'omc-service');
-  report.binarySha256 = createHash('sha256').update(await readFile(serviceBinary)).digest('hex');
-  const profile = await mkdtemp(join(tmpdir(), 'omc-ld03-'));
+  report.binarySha256 = sha256(await readFile(serviceBinary));
+  const sourceSha256 = sha256(await readFile(new URL(import.meta.url)));
+  const preparedBytes = preparation.prepared && await readFile(preparation.prepared);
+  const prepared = preparedBytes && JSON.parse(preparedBytes);
+  const preparedOriginal = prepared && validatePreparedLD03(prepared, fixture, report.binarySha256, sourceSha256);
+  const profile = prepared?.profile ?? await mkdtemp(join(tmpdir(), 'omc-ld03-'));
+  const ownershipPath = join(profile, '.ld03-owner');
+  const ownershipToken = prepared?.ownershipToken ?? randomUUID();
+  const lockPath = join(profile, '.ld03-measured.lock');
+  let lease;
+  let preserveProfile = Boolean(prepared);
   const descriptorPath = join(profile, 'native-v1/service.json');
   const cancellation = new AbortController();
   const {signal} = cancellation;
@@ -345,9 +397,34 @@ async function runLD03(fixture, plan, report, modelCommand) {
   }
 
   try {
+    if (prepared) {
+      assert.equal(await readFile(ownershipPath, 'utf8'), ownershipToken, 'Prepared profile ownership differs');
+      lease = await open(lockPath, 'wx', 0o600);
+      report.preparedStart = {descriptorSha256: sha256(preparedBytes), profile,
+        beforeSha256: prepared.beforeSha256, cleanupOwner: 'operator', fixtureSeedingInMeasuredWindow: false};
+    } else if (preparation.prepare) {
+      await writeFile(ownershipPath, ownershipToken, {flag: 'wx', mode: 0o600});
+    }
     await phase('serviceStart', async () => { await start(); await connect(); });
-    const original = await phase('setup', () => seedLD03(api, fixture, plan));
+    const original = preparedOriginal ?? await phase('setup', () => seedLD03(api, fixture, plan));
+    if (preparation.prepare) await phase('startingSave', () => rpc('document.save', original.id));
     report.before = await phase('startingReadback', () => captureLD03(api, original.id, fixture));
+    if (prepared || preparation.prepare) validateLD03Baseline(fixture, report.before);
+    if (prepared) assert.deepEqual(report.before, prepared.before, 'Prepared native identities or values changed');
+    if (preparation.prepare) {
+      await phase('preparedServiceStop', stop);
+      assert.equal(service.exitCode, 0, 'Prepared service did not exit normally');
+      const descriptor = {schema: 'omc-ld03-prepared/1', createdAt: new Date().toISOString(), profile, ownershipToken,
+        documentId: original.id, variableIds: report.before.styles.map(row => [row.key, row.native_id]),
+        fixtureContentSha256: sha256(JSON.stringify(fixture)), fixtureSha256: fixture.fixture_sha256,
+        binarySha256: report.binarySha256, sourceSha256, before: report.before,
+        beforeSha256: sha256(JSON.stringify(report.before)), cleanupOwner: 'operator'};
+      await writeFile(preparation.prepare, JSON.stringify(descriptor, null, 2) + '\n', {flag: 'wx', mode: 0o600});
+      preserveProfile = true;
+      report.prepared = {descriptor: preparation.prepare, profile, cleanupOwner: 'operator'};
+      report.currentPhase = 'prepared';
+      return;
+    }
     report.candidateActions = [];
     await phase('candidateEdit', async () => {
       if (!modelCommand) return change(plan.candidate, original.variableIds, report.candidateActions);
@@ -386,7 +463,11 @@ async function runLD03(fixture, plan, report, modelCommand) {
     try {
       await stop();
     } finally {
-      await rm(profile, {recursive: true, force: true, maxRetries: 10});
+      if (lease) {
+        await lease.close();
+        await rm(lockPath);
+      }
+      if (!preserveProfile) await rm(profile, {recursive: true, force: true, maxRetries: 10});
     }
   }
 }
@@ -394,8 +475,12 @@ async function runLD03(fixture, plan, report, modelCommand) {
 async function main() {
   const {values} = parseArgs({options: {
     fixture: {type: 'string'}, 'fixture-only': {type: 'boolean'}, 'model-command': {type: 'string'},
+    prepare: {type: 'string'}, prepared: {type: 'string'},
   }});
   assert.ok(values.fixture, 'Supply --fixture from synthetic.py fixture LD03');
+  assert.ok(!(values.prepare && values.prepared), 'Choose --prepare or --prepared');
+  assert.ok(!values.prepare || (!values['model-command'] && !values['fixture-only']), 'Preparation does not run a model');
+  assert.ok(!values.prepared || !values['fixture-only']);
   const fixture = JSON.parse(await readFile(values.fixture, 'utf8'));
   const plan = planLD03(fixture);
   const report = {
@@ -410,8 +495,8 @@ async function main() {
       report.status = 'fixture-only';
       report.bindingsPerVariable = Object.fromEntries(plan.bindingGroups.map(row => [row.style.key, row.keys.length]));
     } else {
-      await runLD03(fixture, plan, report, values['model-command']);
-      report.status = 'awaiting-canonical-grade';
+      await runLD03(fixture, plan, report, values['model-command'], values);
+      report.status = values.prepare ? 'prepared' : 'awaiting-canonical-grade';
     }
   } catch (error) {
     report.status = 'failed';
