@@ -107,7 +107,13 @@ async function connectEditor(editor) {
   const connected = editor.getByText('MCP connected', {exact:true});
   await connect.or(connected).first().waitFor();
   if (await connect.isVisible()) {
-    await connect.click();
+    try {
+      await connect.click({timeout:1500});
+    } catch (error) {
+      // Reconnect can replace the action while Playwright is waiting to click it.
+      if (error.name !== 'TimeoutError' || !(await connected.isVisible())) throw error;
+      return;
+    }
     await editor.getByText(/Connected to MCP/i).first().waitFor({timeout:3000}).catch(() => {});
   }
 }
