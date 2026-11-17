@@ -3,11 +3,16 @@
 These fixtures describe useful design work in product-independent terms. Each
 variant is a separately authored source family for fixture development. The
 current set supplies two variants each for LD01, LD03, LD04, LD06, and LD07.
+LD02 has the conservation catalog plus the separate legacy returns replay.
 Confirmatory sample size and per-product capability require separate evidence.
 
 ```sh
 python3 tools/local-dev-bench/workloads/synthetic.py fixture LD01 \
   --variant harbor-ops --assets-dir /path/to/new-assets
+python3 tools/local-dev-bench/workloads/synthetic.py brief LD02 \
+  --variant conservation-atlas
+python3 tools/local-dev-bench/workloads/synthetic.py grade LD02 \
+  /path/to/observations.json --variant conservation-atlas
 python3 tools/local-dev-bench/workloads/synthetic.py fixture LD03 \
   --variant edition-grid
 python3 tools/local-dev-bench/workloads/synthetic.py brief LD04 \
@@ -32,6 +37,16 @@ relationships, exact strings, allowed logical geometry, and two generated
 uncompressed PNG assets. The original PNG and decoded top-to-bottom RGBA
 hashes are included in each manifest. Before scored use, freeze the actual
 installed Inter font bytes and prove equivalent rendering and no clipping.
+
+LD02 `conservation-atlas` is a catalog with ten pages, four nested zones
+per page, and sixteen stations per page. Each page has 100 logical objects.
+The target has a visible receipt code and an exact section name. Across pages,
+some distractors share the exact section name. A nearby near-name distractor
+also shares the receipt code. Seed the normalized `start` fixture outside the
+timed attempt and clear selection. Supply only the public brief and prepared
+product document to the agent, keeping the source fixture, working-page key,
+and grading evidence private. The legacy returns replay in
+`../replays/ld02-fixture.mjs` retains its own fixture and capture format.
 
 LD03 variants `field-relay` and `edition-grid` have different department
 groupings and board structures. Each starts with forty cards in the target
@@ -98,6 +113,23 @@ grader-only data or generated expected snapshots to the measured model.
 The semantic checker does not implement native UI capture, compare raster
 clipping, or generate evidence from an app on its own.
 
+
+For LD02 each snapshot also has ten `pages` with actual `native_id`, logical
+`key`, and `name`. Every node has a `page` set to the corresponding logical
+page key. Keep absolute bounds page-local. The independent observer records
+`selected_native_ids: []` before the timed task and in `copy_before`.
+Store the actual three measured field changes in `edit` as logical `key`,
+`field`, `from`, and `to` records. Normalize native automatic layout changes
+to their observed positions in the snapshots. Keep the write trace used to
+derive the records and include any additional writes it reveals.
+
+Verify native Undo and Redo on a distinct copy seeded from the starting
+document. Capture `copy_before`, apply the same three edits, and capture
+`copy_edited`. Then capture `copy_undo` after the complete Undo sequence and
+`copy_redo` after the corresponding Redo sequence. Record the observed
+`undo_count` and `redo_count` in `copy_history`. Read back
+`after_probe_original` after the copy check, preserving page and node IDs
+in each document throughout its respective checks.
 
 For LD04 also capture the locked `withheld_width_commitment` and ordered
 `width_observations` snapshots. Each snapshot has the observed `width`.

@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 import ld01
+import ld02
 import ld03
 import ld04
 import ld06
@@ -14,7 +15,7 @@ from font_asset import read_font
 
 
 SCHEMA = "omc-local-dev/workload-fixture/1"
-WORKLOADS = {"LD01": ld01, "LD03": ld03, "LD04": ld04, "LD06": ld06, "LD07": ld07}
+WORKLOADS = {"LD01": ld01, "LD02": ld02, "LD03": ld03, "LD04": ld04, "LD06": ld06, "LD07": ld07}
 GEOMETRY_TOLERANCE = 2
 
 
@@ -66,7 +67,8 @@ def _phase(phase, expected, observation, failures):
         return None
     actual = {}
     ids = {}
-    for collection in ("nodes", "styles"):
+    collections = ("nodes", "styles", "pages") if "pages" in expected else ("nodes", "styles")
+    for collection in collections:
         actual[collection] = _indexed(observation.get(collection))
         expected_index = _indexed(expected[collection])
         if actual[collection] is None or actual[collection].keys() != expected_index.keys():
@@ -77,7 +79,7 @@ def _phase(phase, expected, observation, failures):
             failures.append(f"{phase}: {collection} have missing or duplicate native IDs")
             return None
 
-    for collection in ("nodes", "styles"):
+    for collection in collections:
         for required in expected[collection]:
             key = required["key"]
             row = actual[collection][key]
@@ -190,6 +192,9 @@ def grade(contract, evidence, *, symptom_screenshot=None):
         specs.update(probe="probe", after_probe_original="expected")
     if "loaded" in contract:
         specs["loaded"] = "loaded"
+    if contract["workload"] == "LD02":
+        specs.update(copy_before="start", copy_edited="expected", copy_undo="start",
+                     copy_redo="expected", after_probe_original="expected")
     phases = {
         phase: _phase(phase, contract[reference], evidence.get(phase), failures)
         for phase, reference in specs.items()
@@ -204,12 +209,17 @@ def grade(contract, evidence, *, symptom_screenshot=None):
                 failures.append(f"{name}: document or native identities changed")
         if phases["before"] and phases["before"][0] != candidate[0]:
             failures.append("candidate: document identity differs from the prepared starting document")
-        if contract["workload"] in {"LD03", "LD04", "LD07"} and phases["before"] and phases["before"] != candidate:
-            failures.append("candidate: shared references or native object identities were replaced")
+        if phases["before"] and phases["before"] != candidate:
+            if contract["workload"] == "LD02":
+                failures.append("candidate: page or native object identities were replaced")
+            elif contract["workload"] in {"LD03", "LD04", "LD07"}:
+                failures.append("candidate: shared references or native object identities were replaced")
         if phases.get("probe") and phases["probe"][0] == candidate[0]:
             failures.append("probe: verification edits were not performed on a distinct copy")
 
-    if contract["workload"] == "LD04":
+    if contract["workload"] == "LD02":
+        ld02.acceptance(contract, evidence, phases, failures)
+    elif contract["workload"] == "LD04":
         _responsive(contract, evidence, phases["probe"], failures)
     elif contract["workload"] == "LD06":
         _handoff(contract, evidence, phases, failures)
@@ -219,8 +229,10 @@ def grade(contract, evidence, *, symptom_screenshot=None):
 
 
 def public_brief(contract):
-    if contract["workload"] == "LD07":
-        keys = ("schema", "workload", "source_family_id", "fixture_sha256", "brief", "symptom_screenshot_name")
+    if contract["workload"] in {"LD02", "LD07"}:
+        keys = ("schema", "workload", "source_family_id", "fixture_sha256", "brief")
+        if contract["workload"] == "LD07":
+            keys += ("symptom_screenshot_name",)
         return {key: contract[key] for key in keys}
     private = {"probe", "probe_actions", "responsive_steps", "handoff_values"}
     return {key: value for key, value in contract.items() if key not in private}

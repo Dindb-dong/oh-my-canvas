@@ -15,6 +15,8 @@ def snapshot(spec, document):
     styles = {style["key"]: f"{document}/style/{style['key']}" for style in data["styles"]}
     for style in data["styles"]:
         style["native_id"] = styles[style["key"]]
+    for page in data.get("pages", []):
+        page["native_id"] = f"{document}/page/{page['key']}"
     for node in data["nodes"]:
         node.update(native_id=f"{document}/node/{node['key']}", editable=True)
         if "bindings" in node:
