@@ -30,6 +30,8 @@ pub(crate) enum Event {
     AutomationQuit,
     Scene(app::SceneReply),
     PanRasterReady,
+    #[cfg(target_os = "macos")]
+    MetalDrawableReady(Option<gpu_presenter::ReadyDrawable>),
     Accessibility(accesskit_winit::Event),
 }
 #[derive(Clone)]
