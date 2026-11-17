@@ -1,0 +1,155 @@
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
+from http.client import HTTPConnection
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+from threading import Event, Thread
+import unittest
+
+from responses_gateway import COUNT_PATH, CREATE_PATH, LOOPBACK, ResponsesGateway, json_bytes
+
+
+def frame(event_type, response, *, multiline=False):
+    data = json_bytes({"type": event_type, "response": response})
+    if multiline:
+        data = data.replace(b',"response":', b',\r\ndata:"response":', 1)
+    return b"event: " + event_type.encode() + b"\r\ndata: " + data + b"\r\n\r\n"
+
+
+def terminal(name, input_tokens, output_tokens, cached_tokens, *, status="completed"):
+    return frame(f"response.{status}", {
+        "id": "resp-" + name, "status": status, "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "input_tokens_details": {"cached_tokens": cached_tokens},
+        },
+    }, multiline=True)
+
+
+class FixtureHandler(BaseHTTPRequestHandler):
+    def log_message(self, *_):
+        pass
+
+    def do_POST(self):
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        self.server.events.append((self.path, request, set(self.headers.keys())))
+        if self.path == COUNT_PATH:
+            data = json_bytes({"input_tokens": self.server.counts[request["input"]]})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(data)
+        elif self.path == CREATE_PATH:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.server.generating.set()
+            if not self.server.continue_generation.wait(3):
+                return
+            self.wfile.write(self.server.responses[request["input"]])
+
+
+class GatewayTest(unittest.TestCase):
+    def start_server(self, server):
+        thread = Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02})
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server
+
+    def setup_gateway(self, cap, counts, responses, *, pause=False):
+        mock = ThreadingHTTPServer((LOOPBACK, 0), FixtureHandler)
+        mock.events, mock.counts, mock.responses = [], counts, responses
+        mock.generating, mock.continue_generation = Event(), Event()
+        if not pause:
+            mock.continue_generation.set()
+        self.mock = self.start_server(mock)
+        self.gateway = self.start_server(ResponsesGateway(mock.server_port, cap))
+
+    def post(self, name, *, path=CREATE_PATH, headers=None, **extra):
+        body = json_bytes({"model": "mock-model", "stream": True, "input": name, **extra})
+        with closing(HTTPConnection(LOOPBACK, self.gateway.server_port, timeout=5)) as conn:
+            conn.request("POST", path, body, {"Content-Type": "application/json", **(headers or {})})
+            response = conn.getresponse()
+            return response.status, response.read()
+
+    def test_title_and_main_are_serialized_and_share_the_live_cap(self):
+        self.setup_gateway(100, {"main": 60, "title": 30}, {
+            "main": terminal("main", 60, 15, 20),
+            "title": terminal("title", 30, 1, 12),
+        }, pause=True)
+        with ThreadPoolExecutor(max_workers=2) as clients:
+            main = clients.submit(self.post, "main", client_metadata={"test": "synthetic"})
+            self.assertTrue(self.mock.generating.wait(2))
+            title = clients.submit(self.post, "title")
+            self.mock.continue_generation.set()
+            status, main_stream = main.result()
+            denied = title.result()
+        self.assertEqual(status, 200)
+        self.assertIn(b"response.completed", main_stream)
+        self.assertEqual(denied[0], 400)
+        self.assertEqual(json.loads(denied[1])["error"]["code"], "budget_reached")
+        self.assertEqual([row[0] for row in self.mock.events], [COUNT_PATH, CREATE_PATH, COUNT_PATH])
+        self.assertNotIn("client_metadata", self.mock.events[0][1])
+        self.assertEqual(self.mock.events[1][1]["max_output_tokens"], 40)
+        snapshot = self.gateway.gate.snapshot()
+        self.assertEqual(snapshot["observed_total_tokens"], 75)
+        self.assertEqual(snapshot["observed_cached_input_tokens"], 20)
+
+    def test_overshoot_charges_terminal_usage_then_blocks_count_and_generation(self):
+        self.setup_gateway(80, {"main": 60}, {
+            "main": terminal("main", 75, 10, 70, status="incomplete"),
+        })
+        self.assertEqual(self.post("main")[0], 200)
+        self.assertEqual(self.post("retry")[0], 400)
+        self.assertEqual([row[0] for row in self.mock.events], [COUNT_PATH, CREATE_PATH])
+        snapshot = self.gateway.gate.snapshot()
+        self.assertEqual(snapshot["budget_status"], "TIMEOUT_BUDGET")
+        self.assertEqual(snapshot["overshoot_tokens"], 5)
+        self.assertEqual(snapshot["observed_cached_input_tokens"], 70)
+
+    def test_end_of_stream_without_usage_locks_out_retries(self):
+        self.setup_gateway(80, {"main": 10}, {
+            "main": frame("response.created", {"id": "resp-main"}) + b"data: [DONE]\n\n",
+        })
+        self.assertEqual(self.post("main")[0], 200)
+        status, data = self.post("retry")
+        self.assertEqual(status, 503)
+        self.assertEqual(json.loads(data)["error"]["code"], "budget_meter_incomplete")
+        self.assertEqual(len(self.mock.events), 2)
+        self.assertFalse(self.gateway.gate.snapshot()["usage_complete"])
+
+    def test_metered_cancellation_and_retry_each_receive_a_budget_slot(self):
+        self.setup_gateway(80, {"main": 20, "retry": 25}, {
+            "main": terminal("main", 20, 5, 13, status="cancelled"),
+            "retry": terminal("retry", 25, 15, 17, status="completed"),
+        })
+        self.assertEqual(self.post("main")[0], 200)
+        self.assertEqual(self.post("retry", max_output_tokens=20)[0], 200)
+        self.assertEqual([row[0] for row in self.mock.events], [COUNT_PATH, CREATE_PATH] * 2)
+        self.assertEqual(self.mock.events[3][1]["max_output_tokens"], 20)
+        snapshot = self.gateway.gate.snapshot()
+        self.assertEqual(snapshot["requests"][0]["outcome"], "cancelled")
+        self.assertEqual(snapshot["observed_total_tokens"], 65)
+        self.assertEqual(snapshot["observed_cached_input_tokens"], 30)
+
+    def test_credentials_other_routes_and_browser_requests_are_never_forwarded(self):
+        self.setup_gateway(100, {}, {})
+        for name in ("Authorization", "Proxy-Authorization", "X-API-Key", "Cookie", "Origin"):
+            with self.subTest(name=name):
+                self.assertEqual(self.post("main", headers={name: "mock-sentinel"})[0], 400)
+        self.assertEqual(self.post("main", path="/v1/responses/compact")[0], 404)
+        self.assertEqual(self.mock.events, [])
+
+    def test_missing_or_noninteger_input_meter_never_dispatches_generation(self):
+        self.setup_gateway(100, {"main": True}, {})
+        status, data = self.post("main")
+        self.assertEqual(status, 502)
+        self.assertEqual(json.loads(data)["error"]["code"], "input_meter_unavailable")
+        self.assertEqual([row[0] for row in self.mock.events], [COUNT_PATH])
+
+
+if __name__ == "__main__":
+    unittest.main()
