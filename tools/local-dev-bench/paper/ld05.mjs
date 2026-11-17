@@ -113,6 +113,24 @@ function setting(nodeIds, styles) {
   return {nodeIds, styles};
 }
 
+export async function resolvePaperFlex(style) {
+  assert.equal(style.display, 'flex');
+  const {chromium} = benchRequire('playwright');
+  const browser = await chromium.launch({channel: 'chrome', headless: true});
+  try {
+    const page = await browser.newPage();
+    return await page.evaluate(styles => {
+      const element = document.createElement('div');
+      Object.assign(element.style, styles);
+      document.body.append(element);
+      const actual = getComputedStyle(element);
+      return {direction: actual.flexDirection, wrap: actual.flexWrap};
+    }, style);
+  } finally {
+    await browser.close();
+  }
+}
+
 export async function paperLD05Cycle(read, scope, pageId, name, source, edits, cycle, assetPaths, save,
   {observeImage = verifyImage} = {}) {
   assert.equal(scope.fileName, approvedCanvas);
@@ -186,6 +204,7 @@ export async function paperLD05Cycle(read, scope, pageId, name, source, edits, c
       await call('rename_nodes', {updates: [{nodeId: last.id, name: 'Variant ' + edits.variant}]});
     }
     const {styles} = await call('get_computed_styles', {nodeIds: [list.id, ...cards.flatMap(row => [row.id, row.headingId])]});
+    await save('native-style-readback.json', styles);
     const observed = {};
     if (cycle === 1) {
       observed.gap = styles[list.id].gap;
@@ -196,8 +215,7 @@ export async function paperLD05Cycle(read, scope, pageId, name, source, edits, c
         styles[row.headingId].fontSize === `${edits.heading_size}px`));
     } else if (cycle === 2) {
       observed.accent = color(styles[cards[0].headingId].color);
-      observed.direction = styles[list.id].flexDirection;
-      observed.wrap = styles[list.id].flexWrap;
+      Object.assign(observed, await resolvePaperFlex(styles[list.id]));
       observed.flex = ['flexGrow', 'flexShrink', 'flexBasis'].map(key => styles[cards[0].id][key]).join(' ');
       assert.equal(observed.direction, 'row');
       assert.equal(observed.wrap, 'wrap');

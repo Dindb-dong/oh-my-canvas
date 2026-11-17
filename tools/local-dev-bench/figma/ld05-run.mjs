@@ -130,7 +130,8 @@ export async function runFigmaLD05(family,atlasScope,output,candidate) {
           return resultOf(response);
         };
         scope=await call(write,'refresh',planLD05Refresh({fileKey,sessionId,pageName,scope,source,anchors}));
-        const changes={...rules.result,imageHash:scope.imageHashes[rules.result.asset]};
+        const changes={...rules.result,imageHash:scope.imageHashes[rules.result.asset],
+          ...(cycle===3?{imageBytes:[...assets[rules.result.asset]]}:{})};
         const plan=planLD05NativeCycle({fileKey,sessionId,scope,cycle,changes});
         const refreshed=await call(observe,'refresh-read',plan.read);
         verifyProjection(scope,refreshed,source,assets);

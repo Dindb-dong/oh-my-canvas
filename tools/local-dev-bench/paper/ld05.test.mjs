@@ -4,7 +4,7 @@ import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
-import {paperLD05Markup, verifyImage} from './ld05.mjs';
+import {paperLD05Markup, resolvePaperFlex, verifyImage} from './ld05.mjs';
 
 const head = '<h1>Service route board</h1><button id="toggle">Pin route</button><p id="state">Route unpinned</p>';
 const validation = '<label for="fixture-value">Dispatch note</label><p id="field-error">Enter four characters.</p>' +
@@ -50,4 +50,10 @@ test('native image waits for upload before fetching exact original bytes', async
   assert.equal(fetch.mock.callCount(), 1);
   assert.equal(reads, 2);
   await assert.rejects(verifyImage(async () => ({originalUrl: 'https://example.com/other'}), 'synthetic', path));
+});
+
+test('native CSS omission resolves through browser CSS defaults', async () => {
+  assert.deepEqual(await resolvePaperFlex({width: '100%', display: 'flex', gap: '20px', flexWrap: 'wrap'}),
+    {direction: 'row', wrap: 'wrap'});
+  await assert.rejects(resolvePaperFlex({display: 'block'}));
 });
