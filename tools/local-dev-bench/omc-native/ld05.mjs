@@ -68,13 +68,20 @@ async function sourceProbe(root, fixture, manifest, exportedHtml) {
       if (exportedHtml && staticBehavior === undefined) {
         await page.setContent(exportedHtml);
         const button = page.getByRole('button', {name: target.check_control_name});
-        const status = page.getByRole('status');
-        if (await button.count() === 1 && await status.count() === 1) {
-          const before = await status.innerText();
+        const status = page.locator('#state');
+        const staticStyles = await page.locator('.cards').evaluate(list => ({
+          gap: getComputedStyle(list).gap,
+          radius: getComputedStyle(list.querySelector('.card')).borderTopLeftRadius,
+          heading: getComputedStyle(list.querySelector('h2')).fontSize,
+        }));
+        const embeddedImages = await page.locator('.card img').evaluateAll(images => images.map(image => image.getAttribute('src')));
+        staticBehavior = {styles: staticStyles, embeddedImages,
+          hasNativeButton: await button.count() === 1, hasStatusRole: await page.getByRole('status').count() === 1};
+        if (staticBehavior.hasNativeButton && await status.count() === 1) {
+          staticBehavior.before = await status.innerText();
+          staticBehavior.ariaPressed = await button.getAttribute('aria-pressed');
           await button.press('Space');
-          staticBehavior = {before, after: await status.innerText(), controlAndStatusPresent: true};
-        } else {
-          staticBehavior = {controlAndStatusPresent: false};
+          staticBehavior.after = await status.innerText();
         }
       }
       await page.close();
@@ -164,10 +171,19 @@ async function diagnose(api, fixture, root, manifest, save, report) {
 
   const exports = {};
   for (const format of ['html', 'react', 'png']) {
-    const artifact = await api.rpc('document.export', {documentId: native.id, format});
+    let artifact;
+    let strictRejection;
+    try {
+      artifact = await api.rpc('document.export', {documentId: native.id, format});
+    } catch (error) {
+      if (format !== 'png' || !error.message.includes('unsupported scene feature:')) throw error;
+      strictRejection = error.message;
+      report.strictRasterRejection = strictRejection;
+      artifact = await api.rpc('document.export', {documentId: native.id, format, strict: false});
+    }
     const bytes = Buffer.from(artifact.contentBase64, 'base64');
-    await save(`edited-native.${artifact.extension}`, bytes);
-    exports[format] = {extension: artifact.extension, sha256: digest(bytes), diagnostics: artifact.diagnostics};
+    await save(`edited-native${strictRejection ? '-permissive' : ''}.${artifact.extension}`, bytes);
+    exports[format] = {extension: artifact.extension, sha256: digest(bytes), diagnostics: artifact.diagnostics, strictRejection};
     if (format === 'html') exports.html.code = bytes.toString('utf8');
   }
   const exportedHtml = exports.html.code;
@@ -179,13 +195,19 @@ async function diagnose(api, fixture, root, manifest, save, report) {
   await save('reopened-native.json', reopened);
   report.nativeReopenVerified = true;
   const observed = await sourceProbe(root, fixture, manifest, exportedHtml);
-  report.staticExportBehavior = observed.staticBehavior;
-  assert.ok(!observed.staticBehavior.controlAndStatusPresent ||
-    observed.staticBehavior.before === observed.staticBehavior.after,
-  'Static export unexpectedly implemented fixture behavior');
+  const {styles: exportedStyles, embeddedImages, ...staticBehavior} = observed.staticBehavior;
+  assert.equal(embeddedImages.length, expected.cards.length);
+  const exportAssetHashes = embeddedImages.map(src => {
+    assert.ok(src.startsWith('data:image/png;base64,'));
+    return digest(Buffer.from(src.slice('data:image/png;base64,'.length), 'base64'));
+  });
+  assert.ok(exportAssetHashes.every(hash => hash === report.sourceAssetSha256));
+  report.staticExportBehavior = {...staticBehavior, computed: exportedStyles, exportAssetHashes};
+  assert.ok(staticBehavior.before === staticBehavior.after, 'Static export unexpectedly implemented fixture behavior');
 
-  // Merge only values observed in the reopened native design into the original stylesheet.
-  const authored = Object.fromEntries(modifications.map(([node, field]) => [field, reopened.nodes[node.id].properties.style[field]]));
+  // Merge the emitted CSS values only after matching the reopened native properties.
+  const authored = {gap: exportedStyles.gap, 'border-radius': exportedStyles.radius, 'font-size': exportedStyles.heading};
+  for (const [node, field] of modifications) assert.equal(reopened.nodes[node.id].properties.style[field], authored[field]);
   let merged = css;
   for (const [name, old, value] of [
     ['card-gap', '12px', authored.gap],
