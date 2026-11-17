@@ -178,6 +178,37 @@ function nativeCode(plan, edit = false) {
   `;
 }
 
+class PenpotWorkspaceUnavailable extends Error {}
+
+export function decodeNativeResult(response) {
+  const text = response.content?.[0]?.text;
+  if (typeof text === 'string' &&
+      /^Tool execution failed: (?:Error: )?No Penpot instance connected for user token\b/.test(text)) {
+    throw new PenpotWorkspaceUnavailable('Penpot MCP workspace is not attached yet');
+  }
+  assert.ok(!response.isError && typeof text === 'string', 'Penpot MCP did not execute the requested operation');
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw new Error('Penpot MCP returned a non-JSON tool failure');
+  }
+  assert.ok(payload && !payload.error && payload.result !== undefined, 'Penpot native fixture operation failed');
+  return payload.result;
+}
+
+export async function readAfterAttach(read, {duration = 5000, pause = delay, now = performance.now.bind(performance)} = {}) {
+  const deadline = now() + duration;
+  for (;;) {
+    try {
+      return await read();
+    } catch (error) {
+      if (!(error instanceof PenpotWorkspaceUnavailable) || now() >= deadline) throw error;
+      await pause(250);
+    }
+  }
+}
+
 async function createDriver(plan, storageState, endpoint) {
   const {benchRequire, Client, StreamableHTTPClientTransport} = await import('../replays/mcp.mjs');
   const {chromium} = benchRequire('playwright');
@@ -218,10 +249,7 @@ async function createDriver(plan, storageState, endpoint) {
   };
   const execute = async code => {
     const response = await client.callTool({name:'execute_code', arguments:{code}}, undefined, {timeout:20000});
-    assert.ok(!response.isError, 'Penpot MCP did not execute the requested read or edit');
-    const payload = JSON.parse(response.content[0].text);
-    assert.ok(!payload.error && payload.result !== undefined, 'Penpot native fixture operation failed');
-    return payload.result;
+    return decodeNativeResult(response);
   };
   return {
     async launch() {
@@ -238,7 +266,7 @@ async function createDriver(plan, storageState, endpoint) {
         await connectEditor();
         editorConnected = true;
       }
-      return execute(nativeCode(plan));
+      return readAfterAttach(() => execute(nativeCode(plan)));
     },
     async assetFontReady() {
       if (!plan.assetFont) return notObserved('No registered image responses or browser-visible font were provided');

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {collectLifecycle, makeCase, parsePlan, validateEvidence} from './ld09.mjs';
+import {
+  collectLifecycle, decodeNativeResult, makeCase, parsePlan, readAfterAttach, validateEvidence,
+} from './ld09.mjs';
 import {scaleBatches, scaleCode, seedCode, seedReadbackCode} from './seed.mjs';
 
 function prepared(size = 'small', count = 0) {
@@ -156,4 +158,23 @@ test('preparation binds native catalog order and complete inventory to acceptanc
   validateEvidence(plan, evidence);
   evidence.catalogEvidence.savedNames = raw.savedCatalog;
   assert.throws(() => validateEvidence(plan, evidence));
+});
+
+test('Penpot workspace attachment retries only known route failures on readback', async () => {
+  let calls = 0;
+  let paused = 0;
+  const response = text => ({content:[{type:'text', text}]});
+  const detached = response('Tool execution failed: Error: No Penpot instance connected for user token.');
+  const timing = {duration:500, now:() => paused, pause:async ms => { paused += ms; }};
+  const result = await readAfterAttach(async () => decodeNativeResult(++calls === 1 ? detached : response('{"result":42}')), timing);
+  assert.equal(result, 42);
+  assert.equal(calls, 2);
+  assert.equal(paused, 250);
+  await assert.rejects(readAfterAttach(async () => decodeNativeResult(detached), timing), /workspace is not attached/);
+  const elapsed = paused;
+  await assert.rejects(readAfterAttach(async () => decodeNativeResult(response('{"error":"wrong target"}')), timing),
+    /native fixture operation failed/);
+  await assert.rejects(readAfterAttach(async () => decodeNativeResult(response('Tool execution failed: unclassified')), timing),
+    /non-JSON tool failure/);
+  assert.equal(paused, elapsed);
 });
