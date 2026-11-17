@@ -44,6 +44,31 @@ export function authoredDocument(doc) {
   return document;
 }
 
+export async function verifyFirstEdit(rpc, documentId, before) {
+  const targets = Object.values(before.nodes).filter(node => node.properties?.name === targetNodeName);
+  assert.equal(targets.length, 1);
+  const [node] = targets;
+  const x = node.properties.x + 1;
+  assert.ok(Number.isFinite(x));
+  const requestId = randomUUID();
+  const {epoch, sequence} = before;
+  const {result: receipt, ...edit} = await rpc('document.command', {envelope: {
+    protocol: 'omc.engine/1', requestId, idempotencyKey: requestId, documentId, targetEpoch: epoch,
+    preconditions: {revision: {epoch, sequence}},
+    command: {type: 'node.set', nodeId: node.id, properties: {x}},
+  }});
+  assert.equal(receipt.status, 'durable');
+  assert.equal(receipt.revision.epoch, epoch);
+  assert.equal(BigInt(receipt.revision.sequence), BigInt(sequence) + 1n);
+  const {result: after, ...readback} = await rpc('document.snapshot', {documentId});
+  assert.equal(after.epoch, epoch);
+  assert.equal(BigInt(after.sequence), BigInt(receipt.revision.sequence));
+  assert.deepEqual(after.pages, before.pages);
+  assert.deepEqual(after.metadata, before.metadata);
+  assert.deepEqual(after.nodes, {...before.nodes, [node.id]: {...node, properties: {...node.properties, x}}});
+  return {after, edit, readback};
+}
+
 async function stop(child) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   const exited = once(child, 'exit');
@@ -59,7 +84,7 @@ async function stop(child) {
 async function run(fixture, binary, report, signal) {
   const {Client, StreamableHTTPClientTransport} = await import('../replays/mcp.mjs');
   const profile = await mkdtemp(join(tmpdir(), 'omc-native-startup-'));
-  let child, client, endpoint, headers, sessionId;
+  let child, client, endpoint, headers, sessionId, launchedAt;
 
   async function rpc(method, params = {}) {
     const started = performance.now();
@@ -77,7 +102,7 @@ async function run(fixture, binary, report, signal) {
   }
 
   async function start() {
-    const started = performance.now();
+    const started = launchedAt = performance.now();
     child = spawn(binary, ['--profile', profile, '--port', '0'], {stdio: ['ignore', 2, 2]});
     await once(child, 'spawn');
     let descriptor;
@@ -180,6 +205,19 @@ async function run(fixture, binary, report, signal) {
     assert.equal(names.length, fixture.target.nodes);
     assert.equal(names.filter(name => name === targetNodeName).length, 1);
     report.targetStart.openSnapshot = {...open, verifiedNodes: names.length};
+    report.targetStart.firstContentMs = performance.now() - launchedAt;
+    const {after, edit, readback} = await verifyFirstEdit(rpc, documentId, result);
+    report.targetStart.firstVerifiedEdit = {edit, readback, sinceProcessLaunchMs: performance.now() - launchedAt};
+    const {result: _saved, ...save} = await rpc('document.save', {documentId});
+    const {result: _closed, ...close} = await rpc('workspace.close', {documentId});
+    const {result: opened, ...warmOpen} = await rpc('workspace.open', {documentId});
+    assert.equal(opened.id, documentId);
+    assert.equal(opened.epoch, after.epoch);
+    assert.equal(opened.sequence, after.sequence);
+    assert.deepEqual(opened.pages, after.pages);
+    assert.deepEqual(opened.metadata, after.metadata);
+    assert.deepEqual(opened.nodes, after.nodes);
+    report.targetStart.warmReopen = {save, close, open: warmOpen, verifiedNodes: names.length};
     report.targetStart.thumbnails = await list(allTitles, true);
     report.status = 'verified';
   } finally {
@@ -203,7 +241,7 @@ async function main() {
   const report = {
     experiment: 'N-F', measurementKind: 'installed-headless-startup-diagnostic',
     osCache: 'uncontrolled', fixture,
-    unavailable: ['first visible window/content', 'physical I/O', 'first accepted edit', 'true cold disk cache'],
+    unavailable: ['first visible window/content', 'physical I/O', 'first accepted visual edit', 'true cold disk cache'],
   };
   if (!values['fixture-only']) {
     const binary = join(process.env.OMC_BENCH_BIN_DIR ?? '/Applications/Oh My Canvas.app/Contents/MacOS', 'omc-service');

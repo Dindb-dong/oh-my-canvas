@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {authoredDocument, plan, verifyCatalog} from './startup.mjs';
+import {authoredDocument, plan, verifyCatalog, verifyFirstEdit} from './startup.mjs';
 
 test('N-F varies saved count, document size, and target size independently', () => {
   for (const count of [0, 15, 100]) {
@@ -24,4 +24,25 @@ test('N-F preserves real library identity and its supported thumbnail cap', () =
   assert.deepEqual(verifyCatalog(withThumbnails, titles, true), {count: 100, thumbnails: 15});
   assert.throws(() => verifyCatalog(rows, titles, true));
   assert.throws(() => verifyCatalog([{...rows[0], thumbnail: 'bm90LXBuZw=='}, ...withThumbnails.slice(1)], titles, true));
+});
+
+test('N-F accepts the durable first edit and rejects an unrelated change', async () => {
+  const before = {epoch: 'e', sequence: '9', pages: [], metadata: {}, nodes: {
+    a: {id: 'a', properties: {name: 'Probe edit target', x: 0}},
+    b: {id: 'b', properties: {x: 50}},
+  }};
+  const after = {...before, sequence: '10', nodes: {...before.nodes,
+    a: {...before.nodes.a, properties: {...before.nodes.a.properties, x: 1}}}};
+  async function rpc(method, params) {
+    if (method === 'document.command') {
+      assert.equal(params.envelope.documentId, 'fixture-id');
+      assert.equal(params.envelope.command.nodeId, 'a');
+      return {result: {status: 'durable', revision: {epoch: 'e', sequence: '10'}}};
+    }
+    assert.equal(method, 'document.snapshot');
+    return {result: after};
+  }
+  assert.deepEqual((await verifyFirstEdit(rpc, 'fixture-id', before)).after, after);
+  after.nodes.b = {id: 'b', properties: {x: 51}};
+  await assert.rejects(verifyFirstEdit(rpc, 'fixture-id', before), {code: 'ERR_ASSERTION'});
 });
