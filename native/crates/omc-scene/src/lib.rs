@@ -254,28 +254,7 @@ impl SceneItem {
                 if x < 0. || y < 0. || x > self.width || y > self.height {
                     return false;
                 }
-                let radius = self
-                    .style
-                    .get("border-radius")
-                    .and_then(|v| {
-                        resolve_length(
-                            v,
-                            LengthContext {
-                                percent_basis: self.width.min(self.height),
-                                ..Default::default()
-                            },
-                        )
-                    })
-                    .unwrap_or(0.)
-                    .max(0.)
-                    .min(self.width.min(self.height) / 2.);
-                if radius > 0. {
-                    let cx = x.clamp(radius, self.width - radius);
-                    let cy = y.clamp(radius, self.height - radius);
-                    (x - cx).hypot(y - cy) <= radius
-                } else {
-                    true
-                }
+                shape_path(self).is_some_and(|path| path.contains((x as f32, y as f32)))
             }
         }
     }
@@ -678,6 +657,39 @@ fn parse_transform(value: &str, width: f64, height: f64) -> Result<Affine, Scene
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn individual_corner_radii_apply_to_paths_and_hit_testing() {
+        let mut content = omc_model::DocumentContent::empty("Corners");
+        let page = content.pages[0].clone();
+        let mut rect = omc_model::Node::new(NodeKind::Rect);
+        rect.parent_id = Some(page.root_node_id);
+        rect.properties.extend([
+            ("width".into(), json!(80)),
+            ("height".into(), json!(60)),
+            ("radii".into(), json!([20, 0, 10, 0])),
+        ]);
+        let id = rect.id.clone();
+        content.nodes.insert(id.clone(), rect);
+        let snapshot = DocumentSnapshot {
+            id: "test".into(),
+            epoch: "epoch".into(),
+            sequence: 0,
+            title: content.title,
+            pages: content.pages,
+            nodes: content.nodes,
+            metadata: content.metadata,
+        };
+        let scene = build_scene(&snapshot, &SceneOptions::default()).unwrap();
+        let item = scene.items.iter().find(|item| item.id == id).unwrap();
+        let path = shape_path(item).unwrap();
+        assert!(!path.contains((1., 1.)));
+        assert!(!item.contains(1., 1.));
+        assert!(item.contains(79., 1.));
+        assert!(!item.contains(79., 59.));
+    }
+
     #[test]
     fn transform_and_inverse_share_convention() {
         let a = Affine::translation(100., 50.).multiply(Affine([0., 1., -1., 0., 0., 0.]));

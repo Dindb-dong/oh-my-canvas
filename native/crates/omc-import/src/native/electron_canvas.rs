@@ -181,6 +181,12 @@ fn add_layer(
         "flipX",
         "flipY",
         "radii",
+        "radius",
+        "cornerRadius",
+        "radiusTopLeft",
+        "radiusTopRight",
+        "radiusBottomRight",
+        "radiusBottomLeft",
         "cornerSmoothing",
         "clipContent",
         "fontFamily",
@@ -310,12 +316,49 @@ fn add_layer(
 fn migrate_text(source: &Map<String, Value>, node: &mut Node, import: &mut ImportResult) {
     let visible = source.get("text").and_then(Value::as_str).unwrap_or("");
     node.properties.insert("text".into(), json!(visible));
-    let Some(paragraphs) = source
-        .get("editorText")
-        .and_then(|value| value["content"]["children"].as_array())
-    else {
+    if let Some(height) = source.get("lineHeight").and_then(line_height) {
+        node.properties.insert("lineHeight".into(), height);
+    }
+    let content = source.get("editorText").map(|text| &text["content"]);
+    if let Some(vertical) = content
+        .and_then(|rich| rich["verticalAlign"].as_str())
+        .or_else(|| source.get("verticalAlign").and_then(Value::as_str))
+    {
+        let vertical = if vertical == "center" {
+            "middle"
+        } else {
+            vertical
+        };
+        node.properties
+            .insert("textVerticalAlign".into(), json!(vertical));
+    }
+    let Some(paragraphs) = content.and_then(|rich| rich["children"].as_array()) else {
         return;
     };
+    let fallback = source
+        .get("textAlign")
+        .and_then(Value::as_str)
+        .unwrap_or("left");
+    let align = |paragraph: &Value| match paragraph["textAlign"].as_str().unwrap_or(fallback) {
+        "start" => "left",
+        "end" => "right",
+        "center" => "center",
+        "right" => "right",
+        "justify" => "justify",
+        _ => "left",
+    };
+    if let Some(first) = paragraphs.first().map(align) {
+        if paragraphs.iter().all(|paragraph| align(paragraph) == first) {
+            node.properties.insert("textAlign".into(), json!(first));
+        } else {
+            report(
+                import,
+                Some(&node.id),
+                "textAlign",
+                "Mixed Electron paragraph alignment requires migration",
+            );
+        }
+    }
     let mut runs = Vec::new();
     let mut text = String::new();
     for (index, paragraph) in paragraphs.iter().enumerate() {
@@ -326,6 +369,10 @@ fn migrate_text(source: &Map<String, Value>, node: &mut Node, import: &mut Impor
         let Some(leaves) = paragraph["children"].as_array() else {
             continue;
         };
+        let height = paragraph
+            .get("lineHeight")
+            .or_else(|| leaves.first().and_then(|leaf| leaf.get("lineHeight")))
+            .and_then(line_height);
         for run in leaves {
             let Some(characters) = run["text"].as_str() else {
                 continue;
@@ -337,11 +384,13 @@ fn migrate_text(source: &Map<String, Value>, node: &mut Node, import: &mut Impor
                 "fontWeight",
                 "fontStyle",
                 "letterSpacing",
-                "lineHeight",
             ] {
                 if let Some(value) = run.get(key) {
                     attributes.insert(key.into(), value.clone());
                 }
+            }
+            if let Some(height) = &height {
+                attributes.insert("lineHeight".into(), height.clone());
             }
             if let Some(color) = run["fills"][0]["color"].as_str() {
                 attributes.insert("color".into(), json!(color));
@@ -362,8 +411,53 @@ fn migrate_text(source: &Map<String, Value>, node: &mut Node, import: &mut Impor
     }
 }
 
+fn line_height(value: &Value) -> Option<Value> {
+    if let Some(number) = value.as_f64() {
+        return Some(if number > 4. {
+            json!(format!("{number}px"))
+        } else {
+            value.clone()
+        });
+    }
+    let number = value["value"].as_f64()?;
+    let unit = if value["unit"] == "percent" {
+        "%"
+    } else {
+        "px"
+    };
+    Some(json!(format!("{number}{unit}")))
+}
+
 fn report(import: &mut ImportResult, node: Option<&str>, field: &str, message: &str) {
     import
         .diagnostics
         .push(Diagnostic::unsupported(node, Some(field), message));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_corner_and_paragraph_alignment_properties() {
+        let input = json!({
+            "editorPages": [{"id":"page"}],
+            "pages": [{"id":"frame","type":"frame","radiusTopLeft":24,"radiusBottomRight":8,
+                "children":[{"id":"text","type":"text","text":"Title","editorText":{"content":{
+                    "verticalAlign":"center","children":[{"textAlign":"right","lineHeight":24,"children":[{"text":"Title"}]}]
+                }}}]
+            }]
+        });
+        let result = import(&input, &ImportOptions::default()).unwrap();
+        let frame = &result.content.nodes[&result.source_map["electron:page:frame"]];
+        let text = &result.content.nodes[&result.source_map["electron:page:text"]];
+        assert_eq!(frame.properties["radiusTopLeft"], 24);
+        assert_eq!(frame.properties["radiusBottomRight"], 8);
+        assert_eq!(text.properties["textAlign"], "right");
+        assert_eq!(text.properties["textVerticalAlign"], "middle");
+        assert_eq!(
+            text.properties["textRuns"][0]["attributes"]["lineHeight"],
+            "24px"
+        );
+    }
 }

@@ -217,7 +217,20 @@ fn add_node(
         .and_then(|id| styles.get(id))
         .and_then(|s| s.get("display"))
         .is_some_and(|d| matches!(d, "flex" | "grid" | "inline-flex" | "inline-grid"));
-    let tstyle = taffy_style(node, &style, viewport, id == root, parent_flow, diagnostics);
+    let legacy_paint_stroke = snapshot
+        .metadata
+        .get("migration")
+        .is_some_and(|migration| migration["source"] == "electron-canvas-json")
+        && node
+            .properties
+            .get("strokeWidth")
+            .and_then(omc_style::css_value)
+            .is_some_and(|stroke| style.get("border-width") == Some(stroke.as_str()));
+    let mut tstyle = taffy_style(node, &style, viewport, id == root, parent_flow, diagnostics);
+    if legacy_paint_stroke {
+        // Electron saves layer positions from the frame edge, independent of the painted stroke.
+        tstyle.border = Rect::ZERO.map(length);
+    }
     order.push(id.into());
     let mut child_ids = Vec::new();
     if let Some(child_list) = children.get(id) {
@@ -655,6 +668,43 @@ mod tests {
     use super::*;
     use omc_model::DocumentContent;
     use serde_json::json;
+
+    #[test]
+    fn imported_electron_strokes_do_not_shift_child_positions() {
+        let mut content = DocumentContent::empty("Legacy stroke");
+        let root = content.pages[0].root_node_id.clone();
+        content
+            .nodes
+            .get_mut(&root)
+            .unwrap()
+            .properties
+            .insert("strokeWidth".into(), json!(8));
+        content
+            .metadata
+            .insert("migration".into(), json!({"source":"electron-canvas-json"}));
+        let mut child = Node::new(NodeKind::Rect);
+        child.parent_id = Some(root);
+        child.properties.extend([
+            ("x".into(), json!(17)),
+            ("y".into(), json!(21)),
+            ("width".into(), json!(40)),
+            ("height".into(), json!(30)),
+        ]);
+        let id = child.id.clone();
+        content.nodes.insert(id.clone(), child);
+        let snapshot = DocumentSnapshot {
+            id: "d".into(),
+            epoch: "e".into(),
+            sequence: 0,
+            title: content.title,
+            pages: content.pages,
+            nodes: content.nodes,
+            metadata: content.metadata,
+        };
+        let resolved = layout(&snapshot, None, (300., 200.)).unwrap();
+        let child = resolved.boxes[&id];
+        assert_eq!((child.x, child.y), (17., 21.));
+    }
 
     #[test]
     fn grid_sizes_mixed_repeats_and_places_spanning_items() {
