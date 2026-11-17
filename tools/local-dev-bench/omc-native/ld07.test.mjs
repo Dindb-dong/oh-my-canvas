@@ -18,11 +18,14 @@ test('healthy native board carries all registered nodes and true row wrapping', 
   assert.equal(board.pages.length, 1);
   assert.equal(Object.keys(board.nodes).length, fixture.logical_objects + 1);
   const flow = getNode(board, 'board/flow');
-  assert.deepEqual(flow.properties.layout, {type: 'flex', direction: 'row', wrap: true, gap: 12, padding: 12});
+  assert.deepEqual(flow.properties.layout, {
+    type: 'flex', direction: 'row', wrap: true, gap: 12, padding: 12, alignContent: 'start',
+  });
   assert.equal(flow.properties.clipContent, false);
   const card = fixture.expected.nodes.find(row => row.parent === 'board/flow');
   assert.equal(getNode(board, card.key).parentId, flow.id);
   assert.equal(getNode(board, card.key).properties.width, card.bounds[2]);
+  assert.equal(getNode(board, card.key).properties.style['flex-shrink'], 0);
 });
 
 test('the two injections and repairs use native references and reject stale starting values', () => {

@@ -42,13 +42,16 @@ export function preparedBoard(fixture) {
       name: 'LD07 ' + row.key, x: left - (parent?.left ?? 0), y: top - (parent?.top ?? 0), width, height,
     };
     if (row.fill !== undefined) properties.fill = row.fill;
+    // The registered cards retain their authored widths when wrapping is disabled.
+    if (row.parent === 'board/flow') properties.style = {'flex-shrink': 0};
     if (row.kind === 'text') Object.assign(properties, {
       text: row.text, fontFamily: 'Inter', fontSize: row.key === 'board/title' ? 20 : 12,
       fill: /\/(service|notice)\/label$/.test(row.key) ? '#ffffff' : '#273549',
     });
     if (row.layout) {
       assert.equal(row.layout, 'horizontal');
-      properties.layout = {type: 'flex', direction: 'row', wrap: row.wrap, gap: row.gap, padding: row.padding};
+      properties.layout = {type: 'flex', direction: 'row', wrap: row.wrap, gap: row.gap,
+        padding: row.padding, alignContent: 'start'};
       properties.clipContent = row.clip;
     }
     const ordinal = (counts.get(row.parent) ?? 0) + 1;
