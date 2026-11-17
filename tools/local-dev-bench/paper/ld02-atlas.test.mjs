@@ -99,6 +99,15 @@ test('native artboard seeding preserves registered zone origins without an HTML 
         boards.push({id: ids(spec.key), name: args.name, width, height});
         return {};
       }
+      if (name === 'update_styles') {
+        assert.equal(args.updates.length, 4);
+        for (const update of args.updates) {
+          const board = boards.find(row => update.nodeIds.includes(row.id));
+          board.worldX = Number.parseFloat(update.styles.left);
+          board.worldY = Number.parseFloat(update.styles.top);
+        }
+        return {updates: args.updates.map(() => ({ignoredStyles: {}}))};
+      }
       if (name === 'write_html') {
         assert.ok(boards.some(board => board.id === args.targetNodeId));
         assert.equal(args.mode, 'insert-children');

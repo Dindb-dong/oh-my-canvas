@@ -98,8 +98,19 @@ export async function seedAtlasPage(read, plan, page, pageId) {
       const written = await call('write_html', {targetNodeId: board.id, mode: 'insert-children', html: zone.html});
       assert.ok(!written.error && !written.errors?.length && written.createdNodes?.length);
     }
+    const positioning = await call('update_styles', {updates: page.zoneArtboards.map((zone, index) => ({
+      nodeIds: [[...working][index]], styles: {left: zone.styles.left, top: zone.styles.top},
+    }))});
+    const positioned = positioning.updates ?? positioning.results ?? [];
+    assert.ok(positioned.every(row => !row.error && !Object.keys(row.ignoredStyles ?? {}).length),
+      'Paper ignored registered artboard positions');
     const complete = await call('get_basic_info', {pageId});
     assert.equal(complete.artboards.length, 4);
+    for (const zone of page.zoneArtboards) {
+      const board = complete.artboards.find(row => row.name === zone.name);
+      assert.equal(board.worldX, Number.parseFloat(zone.styles.left));
+      assert.equal(board.worldY, Number.parseFloat(zone.styles.top));
+    }
     assert.deepEqual(new Set(complete.artboards.map(row => row.id)), working);
   } finally {
     if (working.size) await call('finish_working_on_nodes', {nodeIds: [...working]});
