@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {createConnection} from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { atlasFullPageReads, atlasSnapshot, figmaAtlasModelDriver, normalizeAtlas, planAtlas,
@@ -160,19 +161,22 @@ test('Atlas broker binds model-selected changes to its observed synthetic baseli
   const sessionId = '5bd636ba-7048-4fad-a896-46207a0bac92';
   const invocations = [];
   const edits = [];
+  let observations=0;
   const driver = figmaAtlasModelDriver(fixture, {fileKey, sessionId, before}, async request => {
     invocations.push(request);
     assert.equal(request.sessionId, sessionId);
     assert.equal(request.fileKey, fileKey);
     return wrap(await execute(figma, request));
-  }, edits);
+  }, edits,()=>{observations++;});
   const changes = {text: 'Model selected', gap: 24, radius: 12};
   assert.equal(await driver.find({name: driver.query.name, receipt: 'AA-999'}), null);
   const found = await driver.find(driver.query);
   assert.equal(found.found, true);
+  assert.equal(observations,0);
   assert.deepEqual(Object.keys(found).sort(), ['found', 'gap_px', 'name', 'radius_px', 'receipt', 'text']);
   await assert.rejects(driver.edit({...driver.query, receipt:'AA-999'}, changes), /Only one registered/);
   assert.equal(invocations.length, 2);
+  assert.equal(observations,0);
   const after = await driver.edit(driver.query, changes);
   assert.deepEqual(after, {name:found.name,receipt:found.receipt,text:changes.text,gap_px:changes.gap,radius_px:changes.radius});
   assert.deepEqual(Object.keys(after).sort(),['gap_px','name','radius_px','receipt','text']);
@@ -194,32 +198,53 @@ with tempfile.TemporaryDirectory(prefix='figma-stop-test-') as root:
 `,fileURLToPath(new URL('..',import.meta.url)),JSON.stringify(after)],{encoding:'utf8'});
   assert.equal(completion.status,0,completion.stderr);
   assert.equal(edits.length, 1);
+  assert.equal(observations,1);
   await assert.rejects(driver.edit(driver.query, changes), /Only one registered/);
   assert.throws(() => figmaAtlasModelDriver(fixture, {fileKey:'wrong-draft', sessionId, before}, () => {}));
 });
 
-test('one official transport owns the model then an independent full Atlas observation',async()=>{
+test('guarded edit starts full independent observation during admitted model drain on one transport',async()=>{
   const fixture=JSON.parse(python('fixture','LD02','--variant','conservation-atlas').stdout);
   const fileKey='approved-original',plan=planAtlas(fixture,fileKey),figma=figmaMock(fileKey);
   await seed(figma,plan);
   const before=atlasSnapshot(fixture,await capture(figma,plan.original.read));
   const dir=mkdtempSync(join(tmpdir(),'figma-atlas-session-test-'));
-  let starts=0,closed=false,modelFinished=false,reads=0;
+  let starts=0,closed=false,modelFinished=false,reads=0,observationFinished=false,published=false;
   const invoke=async request=>{assert.equal(closed,false);reads++;return wrap(await execute(figma,request));};
+  const request=args=>new Promise((resolve,reject)=>{
+    const socket=createConnection(join(dir,'b.sock'));let text='';
+    socket.on('connect',()=>socket.write(JSON.stringify(args)+'\n'));
+    socket.on('data',chunk=>{text+=chunk;});socket.on('error',reject);
+    socket.on('end',()=>{try{const reply=JSON.parse(text);if(reply.error)reject(new Error(reply.error));else resolve(reply.result);}catch(error){reject(error);}});
+  });
+  let releaseDrain;
+  const drain=new Promise(resolve=>{releaseDrain=resolve;});
   try {
-    const result=await withFigmaAtlasModelAndObservation(fixture,
+    const pending=withFigmaAtlasModelAndObservation(fixture,
       {fileKey,sessionId:'5bd636ba-7048-4fad-a896-46207a0bac92',before},join(dir,'b.sock'),[],[],
-      async()=>{await execute(figma,plan.original.edit);modelFinished=true;return 'done';},
+      async()=>{
+        const target=fixture.start.nodes.find(node=>node.key===fixture.edit.find(change=>change.field==='gap').key);
+        const selector={name:target.name,receipt:fixture.start.nodes.find(node=>node.key===target.key+'/receipt').text};
+        await request({name:'find_section',arguments:selector});
+        await request({name:'edit_section',arguments:{...selector,text:'Ready for registrar review',gap_px:14,radius_px:10}});
+        await drain;modelFinished=true;return 'done';
+      },
       async transport=>{
-        assert.equal(modelFinished,true);assert.equal(transport,invoke);
+        assert.equal(modelFinished,false);assert.equal(transport,invoke);
         const read=atlasFullPageReads(plan.original.read);
         const inventory=await transport(read.inventory),pages=[];
         for(const item of read.pages)pages.push(await transport(item));
+        observationFinished=true;
         return atlasSnapshot(fixture,{inventory,pages});
-      },{connect:async run=>{starts++;try{return await run(invoke,{startup_ms:1});}finally{closed=true;}}});
-    assert.equal(starts,1);assert.equal(reads,11);assert.equal(closed,true);
+      },{connect:async run=>{starts++;try{return await run(invoke,{startup_ms:1});}finally{closed=true;}}}).then(value=>{published=true;return value;});
+    await Promise.race([pending.then(()=>{throw new Error('Published before drain');}),
+      new Promise((resolve,reject)=>{const until=Date.now()+2000;const check=()=>observationFinished?resolve():Date.now()>until?reject(new Error('No independent observation')):setTimeout(check,1);check();})]);
+    assert.equal(published,false);assert.equal(closed,false);assert.equal(modelFinished,false);
+    releaseDrain();
+    const result=await pending;
+    assert.equal(starts,1);assert.equal(reads,13);assert.equal(closed,true);
     assert.equal(result.model,'done');assert.equal(result.observed.nodes.length,1000);
     assert.notDeepEqual(result.observed,before);
     assert.deepEqual(result.observed,atlasSnapshot(fixture,await capture(figma,plan.original.read)));
-  } finally {rmSync(dir,{recursive:true,force:true});}
+  } finally {releaseDrain();rmSync(dir,{recursive:true,force:true});}
 });

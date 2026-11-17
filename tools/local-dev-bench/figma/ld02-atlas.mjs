@@ -333,7 +333,7 @@ export function planAtlasReset(fixture, after) {
 }
 
 // The trusted runner supplies an independently graded starting capture and the approved Draft.
-export function figmaAtlasModelDriver(fixture, { fileKey, sessionId, before }, invoke, edits = []) {
+export function figmaAtlasModelDriver(fixture, { fileKey, sessionId, before }, invoke, edits = [], onGuardedEdit) {
   assert.match(fileKey ?? '', /^[A-Za-z0-9_-]{1,128}$/);
   assert.match(sessionId ?? '', /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i);
   const {byKey} = fixtureIndex(fixture);
@@ -368,6 +368,7 @@ export function figmaAtlasModelDriver(fixture, { fileKey, sessionId, before }, i
     const {found,...state}=observed.state;
     assert.equal(found,true,'Guarded native edit did not resolve its station');
     assert.deepEqual(Object.keys(state).sort(),['gap_px','name','radius_px','receipt','text']);
+    onGuardedEdit?.();
     return state;
   }
   return {query, find: selector => call(selector), edit: (selector, values) => call(selector, values)};
@@ -382,9 +383,24 @@ export function withOfficialFigmaAtlasModel(fixture, scope, socketPath, events, 
 export function withFigmaAtlasModelAndObservation(fixture, scope, socketPath, events, edits, run, observe,
   {connect = withFigmaMCP, ...options} = {}) {
   return connect(async (invoke, readiness) => {
-    const model = await withLD02Broker(socketPath,figmaAtlasModelDriver(fixture,scope,invoke,edits),events,run);
-    const observed = await observe(invoke);
-    return {model,observed,readiness};
+    let observation;
+    const startObservation=()=>{
+      assert.equal(observation,undefined,'Independent observation was already started');
+      // Keep failures handled while admitted model responses finish their token ledger.
+      observation=Promise.resolve().then(()=>observe(invoke)).then(value=>({value}),error=>({error}));
+    };
+    let model;
+    try {
+      model=await withLD02Broker(socketPath,
+        figmaAtlasModelDriver(fixture,scope,invoke,edits,startObservation),events,run);
+    } catch(error) {
+      await observation;
+      throw error;
+    }
+    assert.ok(observation,'No guarded native edit started independent observation');
+    const observed=await observation;
+    if(observed.error)throw observed.error;
+    return {model,observed:observed.value,readiness};
   },options);
 }
 
