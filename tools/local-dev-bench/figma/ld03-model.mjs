@@ -5,6 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { makePlan } from './adapter.mjs';
 
 const variables = ['target/accent', 'target/spacing', 'keep/accent', 'keep/spacing'];
 
@@ -103,7 +104,7 @@ function isolatedOptions(servers) {
 }
 
 // The existing OAuth credential remains in Codex; there is no model turn in this app-server.
-export async function withOfficialFigmaLD03(scope, run, { binary = 'codex', timeoutMs = 18_000 } = {}) {
+async function withFigmaMCP(run, { binary = 'codex', timeoutMs = 18_000 } = {}) {
   const listed = JSON.parse(execFileSync(binary, ['mcp', 'list', '--json'], { encoding: 'utf8', timeout: timeoutMs }));
   const options = isolatedOptions(listed);
   const dir = await mkdtemp(join(tmpdir(), 'omc-figma-ld03-'));
@@ -170,8 +171,9 @@ export async function withOfficialFigmaLD03(scope, run, { binary = 'codex', time
     assert.deepEqual(Object.keys(active[0].tools), ['use_figma']);
     const readiness = { initialization_ms: initialized - start, ephemeral_thread_ms: threaded - initialized,
       connector_discovery_ms: performance.now() - threaded };
-    return await run(figmaLD03Driver(scope, args =>
-      rpc('mcpServer/tool/call', {threadId, server: 'figma', tool: 'use_figma', arguments: args})), readiness);
+    return await run(args => rpc('mcpServer/tool/call', {
+      threadId, server: 'figma', tool: 'use_figma', arguments: args,
+    }), readiness);
   } finally {
     reader.close();
     if (child.exitCode === null && child.signalCode === null) {
@@ -181,4 +183,28 @@ export async function withOfficialFigmaLD03(scope, run, { binary = 'codex', time
     }
     await rm(dir, {recursive: true, force: true});
   }
+}
+
+export function withOfficialFigmaLD03(scope, run, options) {
+  return withFigmaMCP((invoke, readiness) => run(figmaLD03Driver(scope, invoke), readiness), options);
+}
+
+// The trusted observer controls these predefined read-only payloads outside the model socket.
+export function captureOfficialFigmaLD03(scope, fixture, options) {
+  assert.equal(fixture.workload, 'LD03');
+  assert.equal(fixture.source_family_id, scope.fixture);
+  const plan = makePlan(fixture, scope.fileKey, null).captures.before;
+  return withFigmaMCP(async (invoke, readiness) => {
+    const ms = [];
+    async function read(args) {
+      const start = performance.now();
+      const response = await invoke({...args, fileKey: scope.fileKey, sessionId: scope.sessionId});
+      ms.push(performance.now() - start);
+      assert.notEqual(response?.isError, true, 'Independent Figma read failed');
+      return response;
+    }
+    const capture = {header: await read(plan.header), nodes: [], images: []};
+    for (const batch of plan.nodes) capture.nodes.push(await read(batch));
+    return {capture, ms, readiness};
+  }, options);
 }
