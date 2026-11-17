@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash, randomBytes} from 'node:crypto';
-import {copyFile, mkdir, readFile, writeFile} from 'node:fs/promises';
+import {copyFile, lstat, mkdir, readFile, writeFile} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
+import {setTimeout as delay} from 'node:timers/promises';
 
 import {mergeLD05NativeHandoff, planLD05NativeCycle, planLD05Refresh} from './ld05.mjs';
 import {withFigmaMCP} from './ld03-model.mjs';
@@ -12,6 +13,53 @@ import {publishCandidate} from '../publish-candidate.mjs';
 
 const bench = fileURLToPath(new URL('..',import.meta.url));
 const sha = bytes=>createHash('sha256').update(bytes).digest('hex');
+
+function inheritedDeadline() {
+  const deadline = process.env.OMC_BENCH_DEADLINE_NS;
+  assert.match(deadline ?? '', /^\d+$/, 'Native reopen requires the attempt runner deadline');
+  const began = performance.now();
+  // Python and Node monotonic clocks can have different origins on macOS.
+  const left = Number(execFileSync('python3', ['-B', '-c',
+    'import sys,time; print(max(0,(int(sys.argv[1])-time.monotonic_ns())/1e9))', deadline],
+    {encoding:'utf8',timeout:1000}));
+  assert.ok(Number.isFinite(left) && left > 0 && left <= 60, 'Attempt deadline already expired or exceeds 60 seconds');
+  return began + left * 1000;
+}
+
+export async function awaitNativeReopen({output, runId, cycle, fileKey, pageId, writtenAt, deadline}) {
+  assert.ok(performance.now() < deadline, 'Attempt deadline expired before native reopen');
+  assert.ok([1,2,3].includes(cycle));
+  const request = {run_id:runId, cycle, file_key:fileKey, page_id:pageId,
+    nonce:randomBytes(16).toString('hex'), native_write_completed_at:writtenAt,
+    requested_at:new Date().toISOString()};
+  const prefix = 'cycle-'+cycle+'-';
+  await publishCandidate(join(output,prefix+'await-editor-reopen.json'),request);
+  console.log(JSON.stringify({phase:'AWAIT_NATIVE_REOPEN',...request}));
+  const path = join(output,prefix+'editor-reopen.json');
+  while (performance.now() < deadline) {
+    try {
+      assert.ok((await lstat(path)).isFile(), 'Editor receipt must be an atomic regular JSON file');
+      const receipt = JSON.parse(await readFile(path,'utf8'));
+      for (const key of ['run_id','cycle','file_key','page_id','nonce']) {
+        assert.equal(receipt[key],request[key], 'Native reopen receipt has wrong '+key);
+      }
+      assert.equal(receipt.actor,'root-cua','Native reopen requires the actual UI observer');
+      const closed = Date.parse(receipt.closed_at), reopened = Date.parse(receipt.reopened_at);
+      assert.ok(closed > Date.parse(writtenAt) && closed >= Date.parse(request.requested_at) &&
+        reopened > closed && reopened <= Date.now(), 'Editor close/reopen timestamps must follow the native write and request');
+      for (const key of ['close_observation','reopen_observation']) {
+        assert.ok(typeof receipt[key] === 'string' && receipt[key].trim().length > 0 && receipt[key].length <= 8192,
+          'Missing actual UI '+key);
+      }
+      assert.ok(performance.now() < deadline, 'Attempt deadline expired before the editor receipt');
+      return receipt;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    await delay(Math.min(25,Math.max(0,deadline-performance.now())));
+  }
+  throw new Error('Attempt deadline expired awaiting actual native editor reopen');
+}
 const color = rgb => {
   const match = rgb.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
   assert.ok(match && match.slice(1).every(value=>Number(value)<=255));
@@ -84,8 +132,11 @@ async function createSession(invoke,fileKey) {
   return id;
 }
 
-export async function runFigmaLD05(family,atlasScope,output,candidate) {
+export async function runFigmaLD05(family,atlasScope,output,candidate,{nativeReopen=false}={}) {
   assert.ok(['route-board','supply-ledger'].includes(family));
+  const deadline = nativeReopen ? inheritedDeadline() : null;
+  const runId = nativeReopen ? JSON.parse(await readFile(join(output,'manifest.json'),'utf8')).attempt_id : null;
+  if (nativeReopen) assert.match(runId ?? '',/^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$/);
   const {fileKey,before}=JSON.parse(await readFile(atlasScope,'utf8'));
   assert.equal(before.document_id,fileKey);
   const anchors=before.pages.map(page=>({id:page.native_id,name:page.name}));
@@ -136,6 +187,8 @@ export async function runFigmaLD05(family,atlasScope,output,candidate) {
         const refreshed=await call(observe,'refresh-read',plan.read);
         verifyProjection(scope,refreshed,source,assets);
         await call(write,'edit',plan.edit);
+        const lifecycle = nativeReopen ? await awaitNativeReopen({output,runId,cycle,fileKey,pageId:scope.page,
+          writtenAt:new Date().toISOString(),deadline}) : null;
         const reobserved=await call(observe,'persisted-read',plan.read);
         assert.deepEqual(reobserved.labels,source.labels);
         const [css,data]=await Promise.all(['theme.css','data.mjs'].map(name=>readFile(join(sourceDir,name),'utf8')));
@@ -162,7 +215,9 @@ export async function runFigmaLD05(family,atlasScope,output,candidate) {
           result_checkout_sha256:manifest.source_sha256,source_patch_commit:sourceCommit,result_commit:resultCommit,
           refreshed_canvas:rules.source_state,persisted_canvas:rules.result,source_result:rules.result,
           checked_widths:reproduced.states.map(row=>row.width),canvas_editable:true,clean_build:true,
-          behavior_tests_passed:true,component_reused:true,no_missing_assets:true,normal_editor_reopen:'NOT_OBSERVED'};
+          behavior_tests_passed:true,component_reused:true,no_missing_assets:true,
+          ...(lifecycle ? {normal_editor_reopen:'OBSERVED',editor_lifecycle:lifecycle,reopened_canvas:rules.result} :
+            {normal_editor_reopen:'NOT_OBSERVED'})};
         evidence.cycles.push(result);
         await save(prefix+'result.json',result);
         console.log(JSON.stringify({cycle,phase:'PERSISTED_READ_AND_CLEAN_SOURCE_VERIFIED',pageName}));
@@ -174,8 +229,9 @@ export async function runFigmaLD05(family,atlasScope,output,candidate) {
 }
 
 if (process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
-  const [family,scope]=process.argv.slice(2);
+  const [family,scope,option,...extra]=process.argv.slice(2);
+  assert.ok(!extra.length && (!option || option==='--native-reopen'));
   const {OMC_BENCH_OUTPUT_DIR:output,OMC_BENCH_CANDIDATE:candidate}=process.env;
   assert.ok(scope&&output&&candidate,'Use run_attempt.py with a registered atlas scope');
-  await runFigmaLD05(family,scope,output,candidate);
+  await runFigmaLD05(family,scope,output,candidate,{nativeReopen:option==='--native-reopen'});
 }
