@@ -117,3 +117,36 @@ with `python3 tools/local-dev-bench/penpot/ld03-original.py ORIGINAL_OBSERVATION
 The general LD03 scorer still gates the full trial. If a duplicate shows
 unsettled native properties, the producer preserves immediate, settled,
 and available reopened snapshots before any probe edit.
+
+## LD09 native archive import
+
+Use a separate LD09 manifest for Penpot's dashboard .penpot archive
+round-trip. Start from a fresh, saved small/0 source created by
+seed-small.mjs. Supply an existing private empty directory for the bundle:
+
+```sh
+node tools/local-dev-bench/penpot/archive.mjs prepare "$BUNDLE" "$SOURCE_SEED"
+```
+
+Preparation reads the source's native editable structure and downloads the
+actual archive from the dashboard. It also creates a separate synthetic
+account with an empty destination project on the same loopback stack.
+Record preparation and export separately. Register the measured candidate
+and its independent grader in the attempt runner:
+
+```json
+{
+  "argv": ["node", "tools/local-dev-bench/penpot/archive.mjs", "run", "PRIVATE_BUNDLE"],
+  "acceptance_argv": ["node", "tools/local-dev-bench/penpot/archive.mjs", "accept", "PRIVATE_BUNDLE"]
+}
+```
+
+The imported file is checked against the source archive digest and the source's
+actual native structure, including editability, bounds, text, paint, and
+layout. The grader verifies the resulting native identity across the caption
+edit and normal warm tab reopen. Record archive upload request, review,
+confirmation, import completion, first content, equivalence, first accepted
+edit, and reopen separately. First visible OS window and asset/font rendering
+are unobservable for this headless solid-shape fixture. Keep the archive,
+manifest and both run records. Remove the short-lived storage state and MCP
+endpoint files from the source and destination once the run finishes.
