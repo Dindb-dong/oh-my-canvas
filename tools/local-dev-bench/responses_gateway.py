@@ -14,6 +14,7 @@ from threading import Event, Lock
 from uuid import uuid4
 
 from budget_gate import BudgetGate, _object
+from llama_canary import normalize_request, restore_event
 
 
 LOOPBACK = "127.0.0.1"
@@ -105,6 +106,8 @@ class ResponsesHandler(BaseHTTPRequestHandler):
             background = request.get("background")
             if request.get("stream") is not True or (background is not None and background is not False):
                 raise ValueError
+            if self.server.llama_synthetic_canary:
+                request = normalize_request(request)
         except ValueError:
             return self.reply_error(400, "invalid_request")
 
@@ -149,11 +152,25 @@ class ResponsesHandler(BaseHTTPRequestHandler):
                     started = True
                 except OSError:
                     downstream_gone = True
+                canary_enabled = bool(request.get("tools"))
+                projection_failed = False
                 for frame, data in sse_frames(response, gate.max_json_bytes):
                     if data == b"[DONE]":
                         break
                     ended = gate.record_event(request_id, data)
-                    if not downstream_gone:
+                    if self.server.llama_synthetic_canary and not projection_failed:
+                        try:
+                            original = _object(data, gate.max_json_bytes)
+                            mapped = restore_event(original, canary_enabled=canary_enabled)
+                        except ValueError:
+                            projection_failed = True
+                            frame = b'event: error\ndata: {"type":"error","code":"unsupported_local_tool","message":"Unsupported local tool event"}\n\n'
+                        else:
+                            if mapped is not original:
+                                frame = b"event: " + mapped["type"].encode() + b"\ndata: " + json_bytes(mapped) + b"\n\n"
+                    elif projection_failed:
+                        frame = b""
+                    if not downstream_gone and frame:
                         try:
                             self.wfile.write(frame)
                             self.wfile.flush()
@@ -173,14 +190,16 @@ class ResponsesHandler(BaseHTTPRequestHandler):
 
 class ResponsesGateway(ThreadingHTTPServer):
     def __init__(self, upstream_port, token_cap, *, port=0, minimum_output_tokens=1,
-                 upstream_timeout=TIMEOUT_SECONDS):
+                 upstream_timeout=TIMEOUT_SECONDS, llama_synthetic_canary=False):
         if type(upstream_port) is not int or not 0 < upstream_port < 65536:
             raise ValueError("invalid loopback upstream port")
         if type(upstream_timeout) is not int or upstream_timeout <= 0:
             raise ValueError("invalid loopback upstream socket timeout")
         self.upstream_port = upstream_port
         self.upstream_timeout = upstream_timeout
-        self.gate = BudgetGate(token_cap, minimum_output_tokens=minimum_output_tokens)
+        self.llama_synthetic_canary = llama_synthetic_canary
+        self.gate = BudgetGate(token_cap, minimum_output_tokens=minimum_output_tokens,
+                               require_exact_input=llama_synthetic_canary)
         self.admissions = Lock()
         self.stopping = Event()
         super().__init__((LOOPBACK, port), ResponsesHandler)
@@ -227,13 +246,16 @@ def main():
     parser.add_argument("--minimum-output-tokens", type=int, default=1)
     parser.add_argument("--upstream-timeout", type=int, default=TIMEOUT_SECONDS,
                         help="Upstream socket inactivity timeout in seconds")
+    parser.add_argument("--llama-synthetic-canary", action="store_true",
+                        help="Expose only the synthetic read-only canary to a local llama-server")
     parser.add_argument("--ledger", type=Path, required=True, help="New private JSON evidence file")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, interrupted)
     with (
         ResponsesGateway(args.upstream_port, args.token_cap,
                          minimum_output_tokens=args.minimum_output_tokens,
-                         upstream_timeout=args.upstream_timeout) as gateway,
+                         upstream_timeout=args.upstream_timeout,
+                         llama_synthetic_canary=args.llama_synthetic_canary) as gateway,
         open(args.ledger, "x", encoding="utf-8", opener=private_open) as ledger,
     ):
         print(json.dumps({"base_url": f"http://{LOOPBACK}:{gateway.server_port}/v1"}), flush=True)

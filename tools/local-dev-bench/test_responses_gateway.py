@@ -6,6 +6,7 @@ import json
 from threading import Event, Thread
 import unittest
 
+from llama_canary import FUNCTION, LLAMA_NAME, NAMESPACE, normalize_request
 from responses_gateway import COUNT_PATH, CREATE_PATH, LOOPBACK, TIMEOUT_SECONDS, ResponsesGateway, json_bytes
 
 
@@ -59,14 +60,14 @@ class GatewayTest(unittest.TestCase):
         self.addCleanup(server.shutdown)
         return server
 
-    def setup_gateway(self, cap, counts, responses, *, pause=False):
+    def setup_gateway(self, cap, counts, responses, *, pause=False, **gateway_options):
         mock = ThreadingHTTPServer((LOOPBACK, 0), FixtureHandler)
         mock.events, mock.counts, mock.responses = [], counts, responses
         mock.generating, mock.continue_generation = Event(), Event()
         if not pause:
             mock.continue_generation.set()
         self.mock = self.start_server(mock)
-        self.gateway = self.start_server(ResponsesGateway(mock.server_port, cap))
+        self.gateway = self.start_server(ResponsesGateway(mock.server_port, cap, **gateway_options))
 
     def post(self, name, *, path=CREATE_PATH, headers=None, **extra):
         body = json_bytes({"model": "mock-model", "stream": True, "input": name, **extra})
@@ -83,6 +84,72 @@ class GatewayTest(unittest.TestCase):
         for invalid in (0, -1, True, 1.5):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 ResponsesGateway(12345, 40, upstream_timeout=invalid)
+
+    def test_llama_bridge_reprojects_the_observed_namespace_and_preserves_call_identity(self):
+        call = {"type": "function_call", "id": "fc_1", "call_id": "call_1",
+                "name": LLAMA_NAME, "arguments": "{ }", "status": "completed"}
+        added = {**call, "arguments": "", "status": "in_progress"}
+        done = call
+        terminal_usage = {"input_tokens": 32, "output_tokens": 4, "total_tokens": 36,
+                          "input_tokens_details": {"cached_tokens": 7}}
+        three_events = [
+            {"type": "response.output_item.added", "item": added},
+            {"type": "response.output_item.done", "item": done},
+            {"type": "response.completed", "response": {
+                "id": "resp-tool", "status": "completed", "usage": terminal_usage, "output": [done],
+            }},
+        ]
+        responses = {"tool": b"".join(b"data: " + json_bytes(event) + b"\n\n" for event in three_events)}
+        self.setup_gateway(60, {"tool": 32}, responses, llama_synthetic_canary=True)
+        tools = [
+            {"type": "function", "name": "create_goal"},
+            {"type": "namespace", "name": "mcp__codex_tui", "tools": [{"type": "function", "name": "create_thread"}]},
+            {"type": "namespace", "name": "mcp__bench_readonly", "tools": [{
+                "type": "function", "name": "get_canary", "strict": False,
+                "description": "Return the read-only synthetic canary token. No external operation.",
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            }]},
+        ]
+        status, stream = self.post("tool", tools=tools, tool_choice="auto")
+        self.assertEqual(status, 200)
+        observed = [json.loads(line[6:]) for line in stream.splitlines() if line.startswith(b"data: ")]
+        self.assertEqual(observed[0]["item"], {**added, "namespace": NAMESPACE, "name": FUNCTION})
+        restored = {**done, "namespace": NAMESPACE, "name": FUNCTION}
+        self.assertEqual(observed[1]["item"], restored)
+        self.assertEqual(observed[2]["response"]["output"], [restored])
+        self.assertEqual(observed[2]["response"]["usage"], terminal_usage)
+        count_payload, create_payload = [event[1] for event in self.mock.events]
+        self.assertEqual(count_payload["tools"], create_payload["tools"])
+        self.assertEqual(count_payload["input"], create_payload["input"])
+        self.assertEqual([tool["name"] for tool in create_payload["tools"]], [LLAMA_NAME])
+        tool_reply = {"type": "function_call_output", "call_id": "call_1", "output": "CANARY-K7M2"}
+        continued = normalize_request({"tools": tools, "input": [restored, tool_reply]})
+        self.assertEqual(continued["input"], [done, tool_reply])
+        self.assertEqual(self.gateway.gate.snapshot()["observed_total_tokens"], 36)
+
+    def test_llama_bridge_drops_hallucinated_tool_but_drains_usage(self):
+        unsupported = {"type": "response.output_item.done", "item": {
+            "id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "create_thread", "arguments": "{}",
+        }}
+        self.setup_gateway(60, {"tool": 32}, {
+            "tool": b"data: " + json_bytes(unsupported) + b"\n\n" + terminal("tool", 32, 4, 7),
+        }, llama_synthetic_canary=True)
+        status, stream = self.post("tool", tools=[])
+        self.assertEqual(status, 200)
+        self.assertNotIn(b"create_thread", stream)
+        self.assertIn(b"unsupported_local_tool", stream)
+        snapshot = self.gateway.gate.snapshot()
+        self.assertTrue(snapshot["usage_complete"])
+        self.assertEqual(snapshot["observed_total_tokens"], 36)
+
+    def test_llama_exact_count_mismatch_charges_observed_usage_and_locks_follow_up(self):
+        self.setup_gateway(80, {"tool": 32}, {"tool": terminal("tool", 33, 4, 7)}, llama_synthetic_canary=True)
+        self.assertEqual(self.post("tool", tools=[])[0], 200)
+        self.assertEqual(self.post("tool", tools=[])[0], 503)
+        self.assertEqual([event[0] for event in self.mock.events], [COUNT_PATH, CREATE_PATH])
+        snapshot = self.gateway.gate.snapshot()
+        self.assertFalse(snapshot["usage_complete"])
+        self.assertEqual(snapshot["observed_total_tokens"], 37)
 
     def test_title_and_main_are_serialized_and_share_the_live_cap(self):
         self.setup_gateway(100, {"main": 60, "title": 30}, {

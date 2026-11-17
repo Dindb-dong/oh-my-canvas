@@ -90,10 +90,12 @@ class Admission:
 
 
 class BudgetGate:
-    def __init__(self, token_cap, *, minimum_output_tokens=1, max_json_bytes=8 * 1024 * 1024):
+    def __init__(self, token_cap, *, minimum_output_tokens=1, max_json_bytes=8 * 1024 * 1024,
+                 require_exact_input=False):
         self.token_cap = _count(token_cap)
         self.minimum_output_tokens = _count(minimum_output_tokens)
         self.max_json_bytes = _count(max_json_bytes)
+        self.require_exact_input = require_exact_input
         if min(self.token_cap, self.minimum_output_tokens, self.max_json_bytes) == 0:
             raise ValueError("limits must be positive")
         self._lock = Lock()
@@ -207,7 +209,11 @@ class BudgetGate:
                 except ValueError:
                     cached_tokens = None
                     issue = "provider cached input meter is incomplete or invalid"
-                if input_tokens < admission.minimum_input_tokens or output_tokens > admission.max_output_tokens:
+                if (
+                    input_tokens < admission.minimum_input_tokens
+                    or (self.require_exact_input and input_tokens != admission.minimum_input_tokens)
+                    or output_tokens > admission.max_output_tokens
+                ):
                     issue = "provider usage contradicts the admitted input or output bounds"
         else:
             issue = issue or "provider token usage is unavailable"
