@@ -246,7 +246,10 @@ async function run() {
 
     async function call(name, args, timeout = 120_000, caller = client) {
       const response = await caller.callTool({name, arguments: args}, undefined, {signal, timeout});
-      assert.ok(!response.isError, `${name} returned an MCP error`);
+      if (response.isError) {
+        const message = response.content.find(item => item.type === 'text')?.text;
+        throw new Error(`${name} (${args.action ?? 'call'}) returned an MCP error: ${message?.slice(0, 512) ?? 'no error text'}`);
+      }
       return response.structuredContent ?? JSON.parse(response.content[0].text);
     }
 
