@@ -529,6 +529,7 @@ pub struct App {
     pub height: f64,
     pub layer_scroll: f64,
     layer_scroll_animation: Option<layer_scroll::LayerScrollAnimation>,
+    layer_reveal: Option<(String, String)>,
     pub inspector: Inspector,
     pub inspector_scroll: f64,
     pub prototype_frame: Option<String>,
@@ -774,6 +775,7 @@ impl App {
             height: 900.,
             layer_scroll: 0.,
             layer_scroll_animation: None,
+            layer_reveal: None,
             inspector: Inspector::Design,
             prototype_frame: None,
             prototype_playback: prototype_runtime::Playback::default(),
@@ -1930,6 +1932,7 @@ impl App {
             }
             Action::Layer(id) => {
                 self.layer_scroll_animation = None;
+                self.layer_reveal = None;
                 self.commit_edit();
                 if !self.selected.contains(&id) {
                     self.inspector_scroll = 0.;
@@ -2713,8 +2716,8 @@ impl App {
             if let Some(id) = self.hit_canvas_item(world).map(|item| item.id.clone())
                 && self.current_root().as_ref() != Some(&id)
             {
+                self.reveal_canvas_layer(&id);
                 if !self.selected.contains(&id) {
-                    self.reveal_canvas_layer(&id);
                     self.selected = BTreeSet::from([id]);
                 }
                 self.open_layer_context();

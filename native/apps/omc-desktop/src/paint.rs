@@ -1940,7 +1940,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         } else {
             INK
         };
-        if hovered && !control.selected {
+        if (hovered || app.is_layer_reveal_target(id)) && !control.selected {
             let mut outline = Paint::default();
             outline.set_color(ACCENT);
             outline.set_anti_alias(true);
