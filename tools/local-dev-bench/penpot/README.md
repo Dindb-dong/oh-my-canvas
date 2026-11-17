@@ -88,7 +88,9 @@ conversion, HTML ingestion, first-login timing, or large-case runtime evidence.
 The deterministic adapter prepares the canonical 40-card field-relay scene
 using editable Penpot boards and text. Penpot's local token set binds native
 color to fill and spacing to vertical row gap. The two target token edits
-leave the four local overrides and four archive cards in place. The adapter
+use the public token-value setters plus an idempotent activation setter to
+run Penpot's native propagation pass. The four local overrides and four
+archive cards retain their properties. The adapter
 closes and reopens the original, duplicates it using the Penpot dashboard,
 performs the second token edit on the distinct copy, and rereads the original.
 
@@ -108,3 +110,10 @@ timings on its internal clock. The runner's completion includes duplicate
 and verification actions. This probe measures native editable properties,
 token IDs and bindings. It does not measure visual raster presentation,
 model-assisted work or the native component extension.
+
+The producer saves `ld03-original-observations.json` under the attempt output
+before opening the verification copy. Grade that diagnostic stage independently
+with `python3 tools/local-dev-bench/penpot/ld03-original.py ORIGINAL_OBSERVATIONS.json`.
+The general LD03 scorer still gates the full trial. If a duplicate shows
+unsettled native properties, the producer preserves immediate, settled,
+and available reopened snapshots before any probe edit.
