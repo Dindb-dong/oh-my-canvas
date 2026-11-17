@@ -37,14 +37,16 @@ if (mode === '--self-test') {
   process.exit(0);
 }
 const snapshots = new Map([['--snapshot-before', edit.before], ['--snapshot-after', edit.after]]);
-assert.ok(extra === undefined && [undefined, '--seed-only', '--verify-only', ...snapshots.keys()].includes(mode),
-  'Usage: node paper-ld02.mjs [--seed-only | --verify-only | --snapshot-before | --snapshot-after]');
+assert.ok(extra === undefined && [
+  undefined, '--seed-only', '--verify-only', '--edit-seeded', ...snapshots.keys(),
+].includes(mode), 'Usage: paper-ld02.mjs [--seed-only | --verify-only | --edit-seeded | --snapshot-before | --snapshot-after]');
 const fileId = process.env.PAPER_BENCH_FILE_ID;
 const expectedName = process.env.PAPER_BENCH_FILE_NAME;
 const runId = process.env.PAPER_BENCH_RUN_ID ?? randomUUID();
 assert.ok(fileId?.trim() && expectedName?.trim(), 'Set PAPER_BENCH_FILE_ID and PAPER_BENCH_FILE_NAME');
 const readOnly = mode === '--verify-only' || snapshots.has(mode);
-assert.ok(!readOnly || process.env.PAPER_BENCH_RUN_ID, 'Verification requires PAPER_BENCH_RUN_ID');
+assert.ok(!(readOnly || mode === '--edit-seeded') || process.env.PAPER_BENCH_RUN_ID,
+  'An existing fixture requires PAPER_BENCH_RUN_ID');
 assert.match(runId, /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$/);
 const endpoint = new URL(process.env.PAPER_BENCH_URL ?? 'http://127.0.0.1:29979/mcp');
 assert.ok(endpoint.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname),
@@ -165,7 +167,7 @@ try {
   }
   assert.ok(hasControlScene, 'Designated file lacks the synthetic CAP Editable Scene');
 
-  if (!readOnly) {
+  if (!readOnly && mode !== '--edit-seeded') {
     assert.ok(!home.pages.some(page => page.name.startsWith(pagePrefix)),
       'Run ID already exists in Paper; choose a fresh run ID');
     await call('get_font_family_info', {familyNames: ['Inter']});
