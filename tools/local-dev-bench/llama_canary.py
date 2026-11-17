@@ -1,5 +1,7 @@
 """Project narrowly approved benchmark namespaces through local llama Responses."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 import re
 

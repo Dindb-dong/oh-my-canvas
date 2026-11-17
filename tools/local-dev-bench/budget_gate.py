@@ -10,6 +10,8 @@ room for a final input overshoot, which the ledger retains in full.
 This component performs no transport, credential handling, or approval actions.
 """
 
+from __future__ import annotations
+
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from hashlib import sha256
