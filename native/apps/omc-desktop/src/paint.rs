@@ -55,70 +55,12 @@ const TAB_LABEL_X: f64 = 35.;
 const TAB_LABEL_RIGHT_PAD: f64 = 2.;
 const LAYER_FIRST: u64 = 1 << 32;
 const LAYER_CONTROLS: u64 = 4;
-pub(crate) const LIBRARY_CARD_FIRST: u64 = 1 << 40;
-const LIBRARY_OPEN: u64 = LIBRARY_CARD_FIRST - 2;
-const LIBRARY_NEW: u64 = LIBRARY_CARD_FIRST - 1;
-const LIBRARY_PADDING: f64 = 28.;
-const LIBRARY_GAP: f64 = 24.;
 const MCP_BUTTON_WIDTH: f64 = 62.;
 const MCP_HEADER_SPACE: f64 = 198.;
 pub(crate) const POPUP_FIRST: u64 = 1 << 48;
 
-pub(crate) struct LibraryGrid {
-    pub area: Rect,
-    pub columns: usize,
-    pub visible_rows: usize,
-    pub count: usize,
-    pub max_scroll: usize,
-    card_width: f64,
-    card_height: f64,
-}
-
-impl LibraryGrid {
-    fn new(width: f64, height: f64, count: usize) -> Self {
-        let top = HEADER + 92.;
-        let area = Rect::new(
-            LIBRARY_PADDING,
-            top,
-            (width - 2. * LIBRARY_PADDING).max(1.),
-            (height - top - FOOTER - 10.).max(1.),
-        );
-        let columns = ((area.width + LIBRARY_GAP) / (220. + LIBRARY_GAP)).floor() as usize;
-        let columns = columns.max(1);
-        let card_width = (area.width - (columns - 1) as f64 * LIBRARY_GAP) / columns as f64;
-        let card_height = (card_width * 0.58 + 32.).min(area.height);
-        let visible_rows = ((area.height + LIBRARY_GAP) / (card_height + LIBRARY_GAP))
-            .floor()
-            .max(1.) as usize;
-        Self {
-            area,
-            columns,
-            visible_rows,
-            count,
-            max_scroll: count.div_ceil(columns).saturating_sub(visible_rows),
-            card_width,
-            card_height,
-        }
-    }
-
-    fn card(&self, index: usize, first_row: usize) -> Rect {
-        Rect::new(
-            self.area.x + (index % self.columns) as f64 * (self.card_width + LIBRARY_GAP),
-            self.area.y
-                + (index / self.columns - first_row) as f64 * (self.card_height + LIBRARY_GAP),
-            self.card_width,
-            self.card_height,
-        )
-    }
-}
-
-pub(crate) fn library_grid(app: &App) -> LibraryGrid {
-    LibraryGrid::new(
-        app.width,
-        app.height,
-        app.documents.iter().filter(|doc| !doc.archived).count(),
-    )
-}
+mod home;
+pub(crate) use home::{LIBRARY_CARD_FIRST, library_grid, library_move_scroll_max};
 
 fn sidebar_top() -> f64 {
     HEADER + 60.
@@ -347,8 +289,8 @@ pub fn controls(app: &App) -> Vec<Control> {
             let tab = (46..=50).contains(&id) || (3000..3200).contains(&id);
             let sidebar = matches!(id, 10 | 35..=37 | 40..=42)
                 || (300..500).contains(&id)
-                || (LAYER_FIRST..LIBRARY_OPEN).contains(&id);
-            if tab && header == 0. || sidebar && left == 0. || home && id < LIBRARY_OPEN && !tab {
+                || (LAYER_FIRST..home::FIRST).contains(&id);
+            if tab && header == 0. || sidebar && left == 0. || home && id < home::FIRST && !tab {
                 return;
             }
             controls.push(Control {
@@ -658,50 +600,7 @@ pub fn controls(app: &App) -> Vec<Control> {
             y += 37.;
         }
     } else if home {
-        let grid = library_grid(app);
-        let first_row = (app.library_scroll.floor() as usize).min(grid.max_scroll);
-        let button_y = HEADER + 28.;
-        let button_end = app.width - LIBRARY_PADDING;
-        for (id, bounds, label, action) in [
-            (
-                LIBRARY_OPEN,
-                Rect::new(button_end - 206., button_y, 90., 32.),
-                "Open file",
-                Action::Import,
-            ),
-            (
-                LIBRARY_NEW,
-                Rect::new(button_end - 108., button_y, 108., 32.),
-                "New canvas",
-                Action::New,
-            ),
-        ] {
-            add(
-                id,
-                bounds,
-                crate::localization::label(&app.interface_language, label).into(),
-                action,
-                false,
-                None,
-            );
-        }
-        for (i, doc) in app
-            .documents
-            .iter()
-            .filter(|doc| !doc.archived)
-            .enumerate()
-            .skip(first_row * grid.columns)
-            .take(grid.visible_rows * grid.columns)
-        {
-            add(
-                LIBRARY_CARD_FIRST + i as u64,
-                grid.card(i, first_row),
-                doc.title.clone(),
-                Action::Open(doc.id.clone()),
-                false,
-                None,
-            );
-        }
+        home::controls(app, &mut add);
     }
     for control in crate::inspector::controls(app)
         .into_iter()
@@ -1585,94 +1484,6 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
     use omc_model::NodeKind;
     let r = control.rect;
     let hovered = app.action_available(&control.action) && r.contains(app.cursor.0, app.cursor.1);
-    let focused = app.focus == control.id && app.keyboard_focus_visible;
-    if matches!(control.id, LIBRARY_OPEN | LIBRARY_NEW) {
-        let primary = control.id == LIBRARY_NEW;
-        let color = match (primary, hovered) {
-            (true, true) => ACCENT_HOVER,
-            (true, false) => ACCENT,
-            (false, true) => selection_background(),
-            (false, false) => Color::WHITE,
-        };
-        round(canvas, r, color, 6.);
-        if focused {
-            stroke(canvas, r, selection_ink(), 1.35);
-        }
-        let _foreground = primary.then(|| crate::theme::enter(false));
-        let foreground = if primary { Color::WHITE } else { INK };
-        let mut label_font = font.clone();
-        label_font.set_size(13.);
-        let width = if !control.label.is_ascii() {
-            crate::text_ui::layout(
-                &control.label,
-                13.,
-                crate::theme::color(foreground),
-                10_000.,
-            )
-            .map(|layout| layout.intrinsic_width)
-        } else {
-            None
-        }
-        .unwrap_or_else(|| f64::from(label_font.measure_str(&control.label, None).0));
-        text(
-            canvas,
-            &control.label,
-            r.x + (r.width - width) / 2.,
-            r.y + 21.,
-            13.,
-            foreground,
-            font,
-        );
-        return;
-    }
-    if (LIBRARY_CARD_FIRST..POPUP_FIRST).contains(&control.id) {
-        let preview = Rect::new(r.x, r.y, r.width, (r.height - 29.).max(0.));
-        round(
-            canvas,
-            preview,
-            if hovered || focused {
-                selection_background()
-            } else {
-                WORKSPACE
-            },
-            8.,
-        );
-        if let Action::Open(id) = &control.action
-            && let Some(image) = app
-                .documents
-                .iter()
-                .find(|doc| &doc.id == id)
-                .and_then(|doc| doc.thumbnail.as_ref())
-        {
-            let scale = ((preview.width - 20.) / f64::from(image.width()))
-                .min((preview.height - 20.) / f64::from(image.height()));
-            if scale > 0. {
-                let width = f64::from(image.width()) * scale;
-                let height = f64::from(image.height()) * scale;
-                let dest = Rect::new(
-                    preview.x + (preview.width - width) / 2.,
-                    preview.y + (preview.height - height) / 2.,
-                    width,
-                    height,
-                );
-                canvas.draw_image_rect(image, None, rect(dest), &Paint::default());
-            }
-        }
-        if focused {
-            stroke(canvas, preview, selection_ink(), 1.35);
-        }
-        control_text(
-            canvas,
-            r,
-            &control.label,
-            4.,
-            r.y + r.height - 8.,
-            13.,
-            INK,
-            font,
-        );
-        return;
-    }
     if matches!(
         control.action,
         Action::Mcp | Action::CopyMcpConfiguration | Action::Collaborate | Action::Collaboration(_)
@@ -2303,47 +2114,6 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
     );
 }
 
-fn draw_library(canvas: &Canvas, app: &App, font: &Font) {
-    let label = |key| crate::localization::label(&app.interface_language, key);
-    text(
-        canvas,
-        label("Your canvases"),
-        LIBRARY_PADDING,
-        HEADER + 53.,
-        26.,
-        INK,
-        font,
-    );
-    let grid = library_grid(app);
-    if grid.count == 0 {
-        text(
-            canvas,
-            if app.service_connected {
-                label("No canvases yet.")
-            } else {
-                &app.status
-            },
-            grid.area.x,
-            grid.area.y + 18.,
-            14.,
-            MUTED,
-            font,
-        );
-    } else if grid.max_scroll > 0 {
-        let total_rows = grid.count.div_ceil(grid.columns);
-        let height = (grid.area.height * grid.visible_rows as f64 / total_rows as f64).max(16.);
-        let progress =
-            app.library_scroll.floor().min(grid.max_scroll as f64) / grid.max_scroll as f64;
-        let y = grid.area.y + (grid.area.height - height) * progress;
-        round(
-            canvas,
-            Rect::new(app.width - 12., y, 3., height),
-            Color::from_rgb(198, 198, 198),
-            1.5,
-        );
-    }
-}
-
 fn tool_title(tool: Tool) -> &'static str {
     match tool {
         Tool::Select => "이동",
@@ -2520,11 +2290,14 @@ fn render_to_canvas(
     let font = UI_FONT
         .with(Clone::clone)
         .ok_or("No native UI font is available.")?;
+    let generated_controls = (!allow_pan_preview).then(|| controls(app));
+    let controls = generated_controls.as_deref().unwrap_or(&app.controls);
     let design_font = inspector_font().unwrap_or_else(|| font.clone());
     let viewport = app.canvas_rect();
     let home = app.shows_library();
-    if home {
-        draw_library(canvas, app, &font);
+    let gallery = home.then(|| home::PaintLayout::new(app));
+    if let Some(layout) = &gallery {
+        home::background(canvas, app, layout, &font);
     } else if app
         .document()
         .and_then(|document| document.metadata.get("boardDocument"))
@@ -3340,8 +3113,12 @@ fn render_to_canvas(
             8.,
         );
     }
-    for control in &app.controls {
-        if control.id < POPUP_FIRST {
+    for control in controls {
+        if let Some(layout) = &gallery
+            && home::is_control(control.id)
+        {
+            home::draw(canvas, app, layout, control, &font);
+        } else if control.id < POPUP_FIRST {
             let font = if (600_000..600_003).contains(&control.id)
                 || (660_000..LAYER_FIRST).contains(&control.id)
             {
@@ -3466,11 +3243,7 @@ fn render_to_canvas(
                 &font,
             );
         }
-        for control in app
-            .controls
-            .iter()
-            .filter(|control| control.id >= POPUP_FIRST)
-        {
+        for control in controls.iter().filter(|control| control.id >= POPUP_FIRST) {
             let r = control.rect;
             let hovered = r.contains(app.cursor.0, app.cursor.1);
             if let Action::Tool(tool) = control.action {
@@ -3517,7 +3290,7 @@ fn render_to_canvas(
         && app.drag.is_none()
         && let Some(dock) = palette_rect(app)
         && let Some(control) = dock_tooltip_target(
-            &app.controls,
+            controls,
             dock,
             app.cursor,
             app.keyboard_focus_visible.then_some(app.focus),
@@ -3579,8 +3352,21 @@ fn render_to_canvas(
         }
         canvas.restore();
     }
+    if let Some(layout) = &gallery
+        && app.home_menu.is_some()
+    {
+        for control in controls.iter().filter(|c| home::is_menu_control(c.id)) {
+            home::draw(canvas, app, layout, control, &font);
+        }
+    }
     if let Some(edit) = &app.editing {
-        if matches!(edit.target, EditTarget::LibraryDescription) {
+        if matches!(edit.target, EditTarget::HomeSearch | EditTarget::HomeFolder) {
+            if let Some(area) = crate::text_ui::editor_rect(app)
+                && let Some(prepared) = crate::text_ui::prepare(&edit.buffer, area, 13.)
+            {
+                prepared.paint(canvas, area);
+            }
+        } else if matches!(edit.target, EditTarget::LibraryDescription) {
             if let Some(area) = crate::text_ui::editor_rect(app)
                 && let Some(prepared) = crate::text_ui::prepare(&edit.buffer, area, 14.)
             {

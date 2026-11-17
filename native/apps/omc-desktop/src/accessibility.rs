@@ -1,9 +1,9 @@
 //! A real native accessibility tree for controls and the active text buffer.
 //! OS screen-reader journeys remain separate platform qualification gates.
 use crate::{
-    app::{Action, App, EditTarget, FOOTER, HEADER},
+    app::{Action, App, EditTarget, FOOTER, HEADER, HomeAction},
     geometry::Rect,
-    paint::{LIBRARY_CARD_FIRST, POPUP_FIRST, library_grid},
+    paint::library_grid,
 };
 use accesskit::{
     Action as AxAction, ActionData, Node, NodeId, Rect as AxRect, Role, TextPosition,
@@ -34,21 +34,39 @@ pub fn tree(app: &App) -> TreeUpdate {
     let mut children = vec![];
     let mut library_children = vec![];
     let mut nodes = vec![];
+    let gallery = app.shows_library().then(|| library_grid(app));
     for control in &app.controls {
         let id = NodeId(control.id);
-        if (LIBRARY_CARD_FIRST..POPUP_FIRST).contains(&control.id) {
+        if gallery.as_ref().is_some_and(|grid| {
+            control.rect.x >= grid.area.x && control.rect.y + control.rect.height > grid.area.y
+        }) && matches!(
+            control.action,
+            Action::Open(_)
+                | Action::Home(
+                    HomeAction::Star(_)
+                        | HomeAction::Menu(_)
+                        | HomeAction::Restore(_)
+                        | HomeAction::View(crate::app::HomeView::Folder(_))
+                )
+        ) {
             library_children.push(id);
         } else {
             children.push(id);
         }
         let layer_toggle = matches!(
             control.action,
-            Action::LayerVisibility(_) | Action::LayerLock(_) | Action::ToggleFontDownloads
+            Action::LayerVisibility(_)
+                | Action::LayerLock(_)
+                | Action::ToggleFontDownloads
+                | Action::Home(HomeAction::Star(_))
         );
         let mut node = Node::new(
             if matches!(
                 control.action,
-                Action::Field(_) | Action::EditCatalog { .. } | Action::EditLibraryDescription
+                Action::Field(_)
+                    | Action::EditCatalog { .. }
+                    | Action::EditLibraryDescription
+                    | Action::Home(HomeAction::Search)
             ) && control.field_value.is_some()
             {
                 Role::TextInput
@@ -72,7 +90,9 @@ pub fn tree(app: &App) -> TreeUpdate {
             node.set_value(value.clone());
             if matches!(
                 control.action,
-                Action::Field(_) | Action::EditLibraryDescription
+                Action::Field(_)
+                    | Action::EditLibraryDescription
+                    | Action::Home(HomeAction::Search)
             ) && app.action_available(&control.action)
             {
                 node.add_action(AxAction::SetValue);
@@ -85,8 +105,7 @@ pub fn tree(app: &App) -> TreeUpdate {
         }
         nodes.push((id, node));
     }
-    if app.shows_library() {
-        let grid = library_grid(app);
+    if let Some(grid) = gallery {
         let mut library = Node::new(Role::ScrollView);
         library.set_label(crate::localization::label(
             &app.interface_language,
@@ -94,15 +113,15 @@ pub fn tree(app: &App) -> TreeUpdate {
         ));
         library.set_bounds(bounds(grid.area, scale));
         library.set_children(library_children.clone());
-        if grid.max_scroll > 0 {
-            let y = app.library_scroll.floor().min(grid.max_scroll as f64);
+        if grid.max_scroll > 0. {
+            let y = app.library_scroll.min(grid.max_scroll);
             library.set_scroll_y(y);
             library.set_scroll_y_min(0.);
-            library.set_scroll_y_max(grid.max_scroll as f64);
+            library.set_scroll_y_max(grid.max_scroll);
             if y > 0. {
                 library.add_action(AxAction::ScrollUp);
             }
-            if y < grid.max_scroll as f64 {
+            if y < grid.max_scroll {
                 library.add_action(AxAction::ScrollDown);
             }
         }
@@ -128,6 +147,8 @@ pub fn tree(app: &App) -> TreeUpdate {
         node.set_label(match &edit.target {
             EditTarget::Text { .. } | EditTarget::TextOnPath { .. } => "Canvas text",
             EditTarget::LibraryDescription => "Library description",
+            EditTarget::HomeSearch => "Search canvases",
+            EditTarget::HomeFolder => "Folder name",
             EditTarget::CursorChat => "Cursor chat",
             EditTarget::CanvasComment { .. } => "Canvas comment",
             EditTarget::Title => "Document name",
@@ -255,9 +276,10 @@ pub fn handle(app: &mut App, event: accesskit_winit::Event) {
                 }
                 app.refresh_path_text_scene();
             } else if request.target_node == LIBRARY {
+                let step = library_grid(app).area.height * 0.8;
                 match request.action {
-                    AxAction::ScrollUp => app.scroll_library(-1.),
-                    AxAction::ScrollDown => app.scroll_library(1.),
+                    AxAction::ScrollUp => app.scroll_library(-step),
+                    AxAction::ScrollDown => app.scroll_library(step),
                     _ => false,
                 };
             } else if let Some(control) = app
@@ -275,7 +297,9 @@ pub fn handle(app: &mut App, event: accesskit_winit::Event) {
                     (AxAction::SetValue, Some(ActionData::Value(value))) => {
                         if matches!(
                             control.action,
-                            Action::Field(_) | Action::EditLibraryDescription
+                            Action::Field(_)
+                                | Action::EditLibraryDescription
+                                | Action::Home(HomeAction::Search)
                         ) {
                             app.action(control.action);
                             if let Some(edit) = &mut app.editing {
