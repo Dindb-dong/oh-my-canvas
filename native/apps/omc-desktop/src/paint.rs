@@ -55,6 +55,7 @@ const TAB_LABEL_X: f64 = 35.;
 const TAB_LABEL_RIGHT_PAD: f64 = 2.;
 const LAYER_FIRST: u64 = 1 << 32;
 const LAYER_CONTROLS: u64 = 4;
+pub(crate) const LAYER_ROW_STEP: f64 = 37.;
 const MCP_BUTTON_WIDTH: f64 = 62.;
 const MCP_HEADER_SPACE: f64 = 198.;
 pub(crate) const POPUP_FIRST: u64 = 1 << 48;
@@ -179,6 +180,28 @@ fn layers_heading(app: &App) -> f64 {
     sidebar_top() + 55. + pages as f64 * 36.
 }
 
+pub(crate) fn layer_viewport(app: &App) -> Rect {
+    let y = layers_heading(app) + 41.;
+    Rect::new(
+        RAIL_WIDTH,
+        y,
+        (app.left_width() - RAIL_WIDTH).max(0.),
+        (app.height - FOOTER - y).max(0.),
+    )
+}
+
+pub(crate) fn control_bounds(app: &App, control: &Control) -> Rect {
+    let bounds = control.rect;
+    if (LAYER_FIRST..home::FIRST).contains(&control.id) {
+        let viewport = layer_viewport(app);
+        let top = bounds.y.max(viewport.y);
+        let bottom = (bounds.y + bounds.height).min(viewport.y + viewport.height);
+        Rect::new(bounds.x, top, bounds.width, (bottom - top).max(0.))
+    } else {
+        bounds
+    }
+}
+
 fn rect(r: Rect) -> SkRect {
     SkRect::from_xywh(r.x as f32, r.y as f32, r.width as f32, r.height as f32)
 }
@@ -284,6 +307,7 @@ pub fn controls(app: &App) -> Vec<Control> {
     let home = app.shows_library();
     let left = app.left_width();
     let right_width = app.right_width();
+    let layer_view = layer_viewport(app);
     let mut add =
         |id: u64, r: Rect, label: String, action: Action, selected: bool, value: Option<String>| {
             let tab = (46..=50).contains(&id) || (3000..3200).contains(&id);
@@ -291,6 +315,13 @@ pub fn controls(app: &App) -> Vec<Control> {
                 || (300..500).contains(&id)
                 || (LAYER_FIRST..home::FIRST).contains(&id);
             if tab && header == 0. || sidebar && left == 0. || home && id < home::FIRST && !tab {
+                return;
+            }
+            if (LAYER_FIRST..home::FIRST).contains(&id)
+                && (layer_view.height == 0.
+                    || r.y + r.height <= layer_view.y
+                    || r.y >= layer_view.y + layer_view.height)
+            {
                 return;
             }
             controls.push(Control {
@@ -539,14 +570,12 @@ pub fn controls(app: &App) -> Vec<Control> {
             );
             y += 36.;
         }
-        y = layers_heading(app) + 41.;
-        let visible = ((app.height - FOOTER - y) / 37.).max(0.) as usize;
-        for index in app
-            .visible_layers
-            .iter()
-            .skip(app.layer_scroll)
-            .take(visible)
-        {
+        let first = (app.layer_scroll / LAYER_ROW_STEP).floor() as usize;
+        for (position, index) in app.visible_layers.iter().enumerate().skip(first) {
+            let y = layer_view.y + position as f64 * LAYER_ROW_STEP - app.layer_scroll;
+            if y >= layer_view.y + layer_view.height {
+                break;
+            }
             let row = &app.layers[*index];
             let Some(node) = doc.nodes.get(&row.id) else {
                 continue;
@@ -597,7 +626,6 @@ pub fn controls(app: &App) -> Vec<Control> {
                 hidden,
                 None,
             );
-            y += 37.;
         }
     } else if home {
         home::controls(app, &mut add);
@@ -1179,11 +1207,12 @@ fn draw_utility_popup(canvas: &Canvas, app: &App, panel: UtilityPopup, menu: Rec
 
 fn layer_actions_revealed(app: &App, control: &Control) -> bool {
     let base = control.id - (control.id - LAYER_FIRST) % LAYER_CONTROLS;
-    layer_bounds(
-        app.left_width(),
-        control.rect.y - (32. - control.rect.height) / 2.,
-    )
-    .contains(app.cursor.0, app.cursor.1)
+    layer_viewport(app).contains(app.cursor.0, app.cursor.1)
+        && layer_bounds(
+            app.left_width(),
+            control.rect.y - (32. - control.rect.height) / 2.,
+        )
+        .contains(app.cursor.0, app.cursor.1)
         || app.keyboard_focus_visible && (base..base + LAYER_CONTROLS).contains(&app.focus)
 }
 
@@ -1483,7 +1512,8 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
 
     use omc_model::NodeKind;
     let r = control.rect;
-    let hovered = app.action_available(&control.action) && r.contains(app.cursor.0, app.cursor.1);
+    let hovered = app.action_available(&control.action)
+        && control_bounds(app, control).contains(app.cursor.0, app.cursor.1);
     if matches!(
         control.action,
         Action::Mcp | Action::CopyMcpConfiguration | Action::Collaborate | Action::Collaboration(_)
@@ -3113,6 +3143,7 @@ fn render_to_canvas(
             8.,
         );
     }
+    let layer_view = layer_viewport(app);
     for control in controls {
         if let Some(layout) = &gallery
             && home::is_control(control.id)
@@ -3126,7 +3157,17 @@ fn render_to_canvas(
             } else {
                 &font
             };
-            draw_control(canvas, app, control, font);
+            if (LAYER_FIRST..home::FIRST).contains(&control.id)
+                && (control.rect.y < layer_view.y
+                    || control.rect.y + control.rect.height > layer_view.y + layer_view.height)
+            {
+                canvas.save();
+                canvas.clip_rect(rect(layer_view), None, Some(false));
+                draw_control(canvas, app, control, font);
+                canvas.restore();
+            } else {
+                draw_control(canvas, app, control, font);
+            }
         }
     }
     if !home && let Some(thumb) = crate::inspector::scrollbar(app) {

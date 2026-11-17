@@ -398,7 +398,7 @@ impl App {
                         .filter(|row| row.has_children)
                         .map(|row| row.id.clone()),
                 );
-                self.layer_scroll = 0;
+                self.reset_layer_scroll();
                 self.refresh_visible_layers();
                 Ok(Some(json!({"collapsed":self.collapsed.len()})))
             }

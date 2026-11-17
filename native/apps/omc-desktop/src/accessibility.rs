@@ -79,7 +79,7 @@ pub fn tree(app: &App) -> TreeUpdate {
             },
         );
         node.set_label(control.label.clone());
-        node.set_bounds(bounds(control.rect, scale));
+        node.set_bounds(bounds(crate::paint::control_bounds(app, control), scale));
         if !app.action_available(&control.action) {
             node.set_disabled();
         } else {
