@@ -5,10 +5,40 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
 import {runInNewContext} from 'node:vm';
-import {placeSlot,verifyInputs} from './ld06.mjs';
+import {hashNativeImages,placeSlot,readNative,verifyInputs} from './ld06.mjs';
 
 const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const digest = data => createHash('sha256').update(data).digest('hex');
+
+test('reads exact stored bytes without VM crypto and hashes shared native images on the host',async () => {
+  const mediaId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  const bytes = Uint8Array.from([137,80,78,71,0,255,128]);
+  let reads = 0;
+  const image = {id:mediaId,width:128,height:96,keepAspectRatio:true,
+    async data() { reads++; return bytes; }};
+  const shape = (key,type,extra={}) => ({name:`LD06 ${key}`,id:`native-${key}`,type,
+    x:0,y:0,width:128,height:96,...extra});
+  const caption = shape('caption','text',{characters:'제주 해안',fontFamily:'Noto Sans KR',
+    fontId:'custom-face',fontVariantId:'regular',textBounds:{x:1,y:1,width:80,height:20}});
+  const children = [shape('image-1','rectangle',{fills:[{fillImage:image}]}),
+    shape('image-2','rectangle',{fills:[{fillImage:image}]}),caption];
+  const canvas = shape('canvas','board',{children});
+  const penpot = {currentFile:{id,pages:[{}]},currentPage:{root:{children:[canvas]}}};
+  const observed = JSON.parse(JSON.stringify(await runInNewContext(
+    `(async () => {${readNative(id)}})()`,{penpot})));
+  assert.equal(reads,1);
+  assert.deepEqual(observed.image_bytes,{[mediaId]:Array.from(bytes)});
+  const result = hashNativeImages(observed);
+  assert.deepEqual(result.nodes.filter(node=>node.kind === 'image').map(node=>node.stored_png_sha256),
+    [digest(bytes),digest(bytes)]);
+  assert.deepEqual(result.nodes.at(-1),observed.nodes.at(-1));
+  assert.equal(result.nodes.at(-1).fully_visible,true);
+  assert.equal(result.nodes.at(-1).font_id,'custom-face');
+  assert.equal(result.nodes[1].native_id,'native-image-1');
+  assert.deepEqual(result.image_bytes,observed.image_bytes);
+  assert.throws(()=>hashNativeImages({...observed,image_bytes:{[mediaId]:[256]}}),/Invalid native/);
+  assert.throws(()=>hashNativeImages({...observed,image_bytes:{}}),/Missing stored bytes/);
+});
 
 test('verifies all ten registered local inputs and rejects a changed PNG',async () => {
   const root = await mkdtemp(join(tmpdir(),'penpot-ld06-test-'));

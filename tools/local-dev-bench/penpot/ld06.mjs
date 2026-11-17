@@ -123,8 +123,6 @@ export function readNative(id) {
   if (root.children.length !== 1) throw new Error("Unexpected extra boards");
   const nodes = [], images = new Map();
   const box = shape => [shape.x,shape.y,shape.width,shape.height];
-  const hex = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)),
-    byte => byte.toString(16).padStart(2,"0")).join("");
   const contains = (outer,inner) => outer[0]-2 <= inner[0] && outer[1]-2 <= inner[1] &&
     inner[0]+inner[2] <= outer[0]+outer[2]+2 && inner[1]+inner[3] <= outer[1]+outer[3]+2;
   async function visit(shape,parent,ancestors,editable) {
@@ -139,15 +137,35 @@ export function readNative(id) {
     }
     const fill = shape.type === "rectangle" && shape.fills[0]?.fillImage;
     if (fill) {
-      if (!images.has(fill.id)) images.set(fill.id, hex(await fill.data()));
-      Object.assign(row,{kind:"image",native_image_id:fill.id,stored_png_sha256:await images.get(fill.id),
+      if (!images.has(fill.id)) {
+        const bytes = await fill.data();
+        if (!bytes.length || bytes.length > 8*1024*1024) throw new Error("Invalid LD06 stored PNG byte size");
+        images.set(fill.id,Array.from(bytes));
+      }
+      Object.assign(row,{kind:"image",native_image_id:fill.id,
         native_image_size:[fill.width,fill.height],native_center_cover:fill.keepAspectRatio === true});
     }
     nodes.push(row);
     for (const child of shape.children ?? []) await visit(child,key,[row.bounds,...ancestors],row.editable);
   }
   await visit(canvas,null,[],true);
-  return {document_id:penpot.currentFile.id,nodes,styles:[]};`;
+  return {document_id:penpot.currentFile.id,nodes,styles:[],image_bytes:Object.fromEntries(images)};`;
+}
+
+export function hashNativeImages(observation) {
+  assert.ok(observation.image_bytes && typeof observation.image_bytes === 'object' &&
+    !Array.isArray(observation.image_bytes),'Missing native stored PNG bytes');
+  const hashes = new Map(Object.entries(observation.image_bytes).map(([id,bytes])=>{
+    assert.match(id,fileIdPattern);
+    assert.ok(Array.isArray(bytes) && bytes.length > 0 && bytes.length <= 8*1024*1024 &&
+      bytes.every(byte=>Number.isInteger(byte) && byte >= 0 && byte <= 255),'Invalid native stored PNG bytes');
+    return [id,sha256(Buffer.from(bytes))];
+  }));
+  return {...observation,nodes:observation.nodes.map(node=>{
+    if (node.kind !== 'image') return node;
+    assert.ok(hashes.has(node.native_image_id),'Missing stored bytes for native image');
+    return {...node,stored_png_sha256:hashes.get(node.native_image_id)};
+  })};
 }
 
 export function exportPng(id) {
@@ -159,14 +177,40 @@ export function exportPng(id) {
   return btoa(result);`;
 }
 
-async function uploadTeamFont(page,origin,{path,meta}) {
+async function uploadTeamFont(page,origin,{path,meta},diagnostics,sanitize) {
   const dashboard = page.url();
+  const record = response => {
+    const url = new URL(response.url());
+    const method = url.pathname.split('/').at(-1);
+    if (url.origin === origin && ['create-font-variant','create-upload-session','upload-chunk','complete-upload'].includes(method)) {
+      diagnostics.responses.push({method,status:response.status()});
+    }
+  };
+  page.on('response',record);
+  try {
   await page.getByTestId('fonts').click();
   assert.equal(new URL(page.url()).origin,origin);
   await page.locator('#font-upload').setInputFiles(path);
-  await page.getByRole('button',{name:'Upload',exact:true}).click({timeout:20000});
-  await page.getByText(meta.family,{exact:true}).waitFor({timeout:45000});
+  const uploadDraft = page.locator('[class*="font-item"] input[data-id]');
+  diagnostics.draft_family = await uploadDraft.inputValue({timeout:12000});
+  if (diagnostics.draft_family !== meta.family) {
+    await uploadDraft.fill(meta.family);
+    await uploadDraft.press('Tab');
+    assert.equal(await uploadDraft.inputValue(),meta.family);
+  }
+  const upload = page.getByRole('button',{name:'Upload',exact:true});
+  await upload.click({timeout:12000});
+  const installed = page.getByText(meta.family,{exact:true});
+  const rejected = page.getByText(/upload.*font|font.*upload/i).and(page.getByRole('alert'));
+  await installed.or(rejected).first().waitFor({timeout:35000});
+  if (!await installed.isVisible()) throw new Error('Penpot reported a custom font upload failure');
   await page.goto(dashboard);
+  } catch (error) {
+    diagnostics.alerts = (await page.getByRole('alert').allTextContents()).slice(0,4).map(text => sanitize(text.slice(0,200)));
+    throw error;
+  } finally {
+    page.off('response',record);
+  }
 }
 
 async function replay(origin,fixture,{assets,content},output) {
@@ -177,7 +221,7 @@ async function replay(origin,fixture,{assets,content},output) {
   const email = `omc-bench-${randomBytes(10).toString('hex')}@example.test`;
   const password = randomBytes(20).toString('hex')+'Aa1!';
   let browser,endpoint,phase = 'disposable account setup';
-  const evidence = {source_handoff:null,phases:{},font_requests:[],export_errors:{}};
+  const evidence = {source_handoff:null,phases:{},font_upload:{responses:[]},font_requests:[],export_errors:{}};
   const safeError = error => [email,password,endpoint?.searchParams.get('userToken')].filter(Boolean)
     .reduce((value,secret) => value.replaceAll(secret,'[redacted]'),String(error));
   try {
@@ -194,7 +238,7 @@ async function replay(origin,fixture,{assets,content},output) {
     const dashboard = await context.newPage();
     await createAccount(dashboard,origin,email,password);
     phase = 'upload exact TTF to the disposable Penpot team';
-    await uploadTeamFont(dashboard,origin,assets.get(fixture.font.name));
+    await uploadTeamFont(dashboard,origin,assets.get(fixture.font.name),evidence.font_upload,safeError);
     endpoint = await getMcpEndpoint(dashboard,origin);
     await client.connect(new StreamableHTTPClientTransport(endpoint));
     let editor = await newFile(dashboard,context,origin);
@@ -216,12 +260,12 @@ async function replay(origin,fixture,{assets,content},output) {
     const {count,fontId} = await execute(seedNative(fixture,id));
     assert.equal(count,fixture.start.nodes.length);
     evidence.native_team_font_id = fontId;
-    evidence.phases.before = await execute(readNative(id));
+    evidence.phases.before = hashNativeImages(await execute(readNative(id)));
     const record = async (name,page) => {
       await page.evaluate(async () => {
         await Promise.race([document.fonts.ready,new Promise(resolve => setTimeout(resolve,4000))]);
       });
-      evidence.phases[name] = await readAfterAttach(() => execute(readNative(id)));
+      evidence.phases[name] = hashNativeImages(await readAfterAttach(() => execute(readNative(id))));
       try {
         const bytes = Buffer.from(await execute(exportPng(id)),'base64');
         await writeFile(join(output,`${name}.png`),bytes,{flag:'wx',mode:0o600});
