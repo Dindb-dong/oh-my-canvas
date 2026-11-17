@@ -23,7 +23,7 @@ pub use length::{LengthContext, resolve_length};
 use omc_model::{DocumentSnapshot, Node};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub const PROFILE: &str = "omc.design-css/1";
 
@@ -100,47 +100,43 @@ pub fn compute_styles(
     let mut result = BTreeMap::new();
     let references = ReferenceContext::new(snapshot);
     let (token_variables, token_diagnostics) = references.token_variables();
-    let mut pending: BTreeSet<_> = snapshot.nodes.keys().cloned().collect();
-    while !pending.is_empty() {
-        let ready: Vec<_> = pending
-            .iter()
-            .filter(|id| {
-                snapshot.nodes[*id]
-                    .parent_id
-                    .as_ref()
-                    .is_none_or(|p| result.contains_key(p) || !pending.contains(p))
-            })
-            .cloned()
-            .collect();
-        if ready.is_empty() {
-            // Engine repairs containment cycles. Keep read-only inspection bounded even for an unvalidated caller.
-            break;
-        }
-        for id in ready {
-            let node = &snapshot.nodes[&id];
-            let parent = node.parent_id.as_ref().and_then(|p| result.get(p));
-            let (properties, mut reference_diagnostics) = references.properties(node);
-            let mut effective = node.clone();
-            effective.properties = properties;
-            let mut computed = compute_one(
-                &effective,
-                snapshot,
-                parent,
-                &sheet,
-                viewport,
-                &token_variables,
-            );
-            computed.diagnostics.append(&mut reference_diagnostics);
-            if node.parent_id.is_none() {
-                computed.diagnostics.extend(token_diagnostics.clone());
-                computed.diagnostics.extend(
-                    sheet.unsupported.iter().map(|value| {
-                        Diagnostic::unsupported(Some(&node.id), Some("css-rule"), value)
-                    }),
-                );
+    let mut children = BTreeMap::<&str, Vec<_>>::new();
+    let mut ready = VecDeque::new();
+    for (id, node) in &snapshot.nodes {
+        match node.parent_id.as_deref() {
+            Some(parent) if snapshot.nodes.contains_key(parent) => {
+                children.entry(parent).or_default().push((id, node));
             }
-            result.insert(id.clone(), computed);
-            pending.remove(&id);
+            _ => ready.push_back((id, node)),
+        }
+    }
+    // Starting at roots also leaves unvalidated containment cycles unvisited.
+    while let Some((id, node)) = ready.pop_front() {
+        let parent = node.parent_id.as_ref().and_then(|p| result.get(p));
+        let (properties, mut reference_diagnostics) = references.properties(node);
+        let mut effective = node.clone();
+        effective.properties = properties;
+        let mut computed = compute_one(
+            &effective,
+            snapshot,
+            parent,
+            &sheet,
+            viewport,
+            &token_variables,
+        );
+        computed.diagnostics.append(&mut reference_diagnostics);
+        if node.parent_id.is_none() {
+            computed.diagnostics.extend(token_diagnostics.clone());
+            computed.diagnostics.extend(
+                sheet
+                    .unsupported
+                    .iter()
+                    .map(|value| Diagnostic::unsupported(Some(&node.id), Some("css-rule"), value)),
+            );
+        }
+        result.insert(id.clone(), computed);
+        if let Some(descendants) = children.remove(id.as_str()) {
+            ready.extend(descendants);
         }
     }
     result
@@ -549,6 +545,38 @@ mod tests {
             compute_styles(&s, (1440., 900.))[&id].get("word-spacing"),
             Some("12")
         );
+    }
+    #[test]
+    fn styles_follow_parent_chains_with_missing_parents_and_cycles() {
+        let mut s = snapshot();
+        for (id, parent) in [
+            ("leaf", "middle"),
+            ("middle", "orphan"),
+            ("orphan", "missing"),
+            ("cycle-a", "cycle-b"),
+            ("cycle-b", "cycle-a"),
+            ("blocked", "cycle-a"),
+        ] {
+            let mut node = Node::new(NodeKind::Rect);
+            node.id = id.into();
+            node.parent_id = Some(parent.into());
+            if id == "orphan" {
+                node.properties
+                    .insert("style".into(), json!("color: red; width: 8px;"));
+            }
+            s.nodes.insert(node.id.clone(), node);
+        }
+
+        let styles = compute_styles(&s, (1440., 900.));
+        assert_eq!(styles["leaf"].get("color"), Some("red"));
+        assert_eq!(
+            styles["leaf"].provenance["color"].inherited_from.as_deref(),
+            Some("middle")
+        );
+        assert_eq!(styles["leaf"].get("width"), None);
+        assert!(!styles.contains_key("cycle-a"));
+        assert!(!styles.contains_key("cycle-b"));
+        assert!(!styles.contains_key("blocked"));
     }
     #[test]
     fn invalid_variable_cycle_uses_fallback_without_hanging() {

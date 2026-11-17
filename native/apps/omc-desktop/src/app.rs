@@ -3904,6 +3904,10 @@ impl App {
             Response::HomePreview { key, image } => {
                 self.finish_home_preview(key, image);
             }
+            Response::PollUnchanged => {
+                self.poll_pending = false;
+                return;
+            }
             Response::Snapshot {
                 document,
                 mutation,
@@ -4589,9 +4593,18 @@ impl ApplicationHandler<Event> for App {
             && self.last_poll.elapsed() > Duration::from_millis(750)
             && let Some(id) = &self.active
         {
-            self.poll_pending = true;
+            let request = match self.document() {
+                Some(document) => Request::PollSnapshot {
+                    id: id.clone(),
+                    revision: document.revision(),
+                },
+                None => Request::Snapshot { id: id.clone() },
+            };
             self.last_poll = Instant::now();
-            self.send(Request::Snapshot { id: id.clone() });
+            match self.bridge.send(request) {
+                Ok(()) => self.poll_pending = true,
+                Err(error) => self.error = Some(error),
+            }
         }
         let idle = Instant::now() + Duration::from_millis(100);
         event_loop.set_control_flow(ControlFlow::WaitUntil(

@@ -314,7 +314,15 @@ fn dispatch_rpc(app: &App, session: Option<&str>, method: &str, args: Value) -> 
             Ok(json!(app.workspace.snapshot(id)?))
         }
         "workspace.close" => app.workspace.release(session, string(&args, "documentId")?),
-        "document.snapshot" => Ok(json!(app.workspace.snapshot(string(&args, "documentId")?)?)),
+        "document.snapshot" => {
+            let id = string(&args, "documentId")?;
+            if let Some(revision) = args.get("ifRevision") {
+                let revision = serde_json::from_value(revision.clone())
+                    .map_err(|e| EngineError::invalid(e.to_string()))?;
+                return Ok(json!(app.workspace.snapshot_if_changed(id, &revision)?));
+            }
+            Ok(json!(app.workspace.snapshot(id)?))
+        }
         "document.shapeBuilder" => app.router.native_shape_builder(session, &args),
         "document.boardTool" => app.router.native_board_tool(session, &args),
         "document.command" => {

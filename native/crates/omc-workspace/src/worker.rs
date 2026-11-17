@@ -1,5 +1,6 @@
 //! Four bounded worker processes, with an independent actor per document.
 use omc_engine::DocumentEngine;
+use omc_model::Revision;
 use omc_protocol::{CommandEnvelope, EngineError, RequestContext, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -297,7 +298,16 @@ fn dispatch(engine: &mut DocumentEngine, action: &str, args: Value) -> Reply {
             required(&args, "epoch")?,
             required(&args, "key")?,
         )),
-        "snapshot" => value(engine.snapshot()),
+        "snapshot" => {
+            if let Some(revision) = args.get("ifRevision") {
+                let revision: Revision =
+                    serde_json::from_value(revision.clone()).map_err(json_error)?;
+                if revision == engine.revision() {
+                    return Ok(Value::Null);
+                }
+            }
+            value(engine.snapshot())
+        }
         "node" => value(
             engine.node(
                 args["id"]

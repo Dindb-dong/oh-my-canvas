@@ -1,7 +1,9 @@
 use omc_model::{DocumentContent, DocumentSnapshot, Node, NodeKind};
-use omc_render::{EmptyResources, RenderOptions, render_rgba};
+use omc_render::{EmptyResources, RenderError, RenderOptions, ResourceProvider, render_rgba};
 use omc_scene::{SceneOptions, build_scene};
 use serde_json::json;
+use sha2::{Digest, Sha256};
+use std::{cell::Cell, collections::BTreeMap};
 
 fn document() -> (DocumentSnapshot, String) {
     let c = DocumentContent::empty("pixels");
@@ -36,6 +38,98 @@ fn pixels(snapshot: &DocumentSnapshot) -> Vec<u8> {
 }
 fn at(image: &[u8], x: usize, y: usize) -> &[u8] {
     &image[(y * 128 + x) * 4..(y * 128 + x) * 4 + 4]
+}
+
+#[test]
+fn repeated_images_share_verification_but_each_reserves_pixels() {
+    struct ImageSource {
+        reads: Cell<u32>,
+        bytes: BTreeMap<String, Vec<u8>>,
+    }
+    impl ResourceProvider for ImageSource {
+        fn get(&self, hash: &str) -> Result<Vec<u8>, String> {
+            self.reads.set(self.reads.get() + 1);
+            ResourceProvider::get(&self.bytes, hash)
+        }
+    }
+
+    let mut source_image = skia_safe::surfaces::raster_n32_premul((2, 2)).unwrap();
+    let mut resources = ImageSource {
+        reads: Cell::new(0),
+        bytes: BTreeMap::new(),
+    };
+    let [red, blue] = [skia_safe::Color::RED, skia_safe::Color::BLUE].map(|color| {
+        source_image.canvas().clear(color);
+        let bytes = source_image
+            .image_snapshot()
+            .encode(None, skia_safe::EncodedImageFormat::PNG, 100)
+            .unwrap()
+            .as_bytes()
+            .to_vec();
+        let hash: String = Sha256::digest(&bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        resources.bytes.insert(hash.clone(), bytes);
+        hash
+    });
+    let (mut snapshot, root) = document();
+    for (x, hash) in [(0, &red), (20, &red), (40, &blue)] {
+        let mut node = Node::new(NodeKind::Image);
+        node.parent_id = Some(root.clone());
+        node.properties.extend([
+            ("assetHash".into(), json!(hash)),
+            ("x".into(), json!(x)),
+            ("width".into(), json!(10)),
+            ("height".into(), json!(10)),
+        ]);
+        snapshot.nodes.insert(node.id.clone(), node);
+    }
+    let mut scene = build_scene(
+        &snapshot,
+        &SceneOptions {
+            width: 128.,
+            height: 96.,
+            strict: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let image = render_rgba(&scene, &RenderOptions::default(), &resources).unwrap();
+    assert_eq!(at(&image.pixels, 5, 5), [255, 0, 0, 255]);
+    assert_eq!(at(&image.pixels, 25, 5), [255, 0, 0, 255]);
+    assert_eq!(at(&image.pixels, 45, 5), [0, 0, 255, 255]);
+    assert_eq!(resources.reads.get(), 2);
+
+    let unique_image_budget = RenderOptions {
+        max_surface_bytes: 128 * 96 * 8
+            + resources
+                .bytes
+                .values()
+                .map(|bytes| bytes.len() * 3 + 2 * 2 * 8)
+                .sum::<usize>(),
+        ..Default::default()
+    };
+    assert!(matches!(
+        render_rgba(&scene, &unique_image_budget, &resources),
+        Err(RenderError::ResourceLimit(_))
+    ));
+
+    resources.bytes.insert(red, vec![1]);
+    assert!(matches!(
+        render_rgba(&scene, &RenderOptions::default(), &resources),
+        Err(RenderError::ResourceUnavailable(message)) if message.contains("checksum mismatch")
+    ));
+    scene.strict = false;
+    let preview = render_rgba(&scene, &RenderOptions::default(), &resources).unwrap();
+    assert_eq!(at(&preview.pixels, 5, 5)[3], 0);
+    assert_eq!(at(&preview.pixels, 45, 5), [0, 0, 255, 255]);
+    assert!(
+        preview
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "resource_unavailable")
+    );
 }
 
 #[test]

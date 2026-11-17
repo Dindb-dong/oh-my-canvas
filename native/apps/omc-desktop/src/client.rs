@@ -2,7 +2,7 @@
 //! to omc-service; this module deliberately has no engine/storage dependency.
 use crate::WindowProxy;
 use base64::Engine as _;
-use omc_model::DocumentSnapshot;
+use omc_model::{DocumentSnapshot, Revision};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
@@ -93,6 +93,10 @@ pub enum Request {
     },
     Snapshot {
         id: String,
+    },
+    PollSnapshot {
+        id: String,
+        revision: Revision,
     },
     ShapeBuilder {
         id: String,
@@ -189,6 +193,7 @@ pub enum Response {
         mutation: bool,
         activate: bool,
     },
+    PollUnchanged,
     TextAnchors {
         id: String,
         node_id: String,
@@ -610,8 +615,20 @@ impl Client {
             .ok_or_else(|| "The service returned no result.".to_string())
     }
 
-    fn snapshot(&self, id: &str, mutation: bool) -> Result<Response, String> {
-        let value = self.call("document.snapshot", json!({"documentId":id}))?;
+    fn snapshot(
+        &self,
+        id: &str,
+        mutation: bool,
+        if_revision: Option<Revision>,
+    ) -> Result<Response, String> {
+        let mut params = json!({"documentId":id});
+        if let Some(revision) = &if_revision {
+            params["ifRevision"] = json!(revision);
+        }
+        let value = self.call("document.snapshot", params)?;
+        if if_revision.is_some() && value.is_null() {
+            return Ok(Response::PollUnchanged);
+        }
         let document =
             serde_json::from_value(value).map_err(|e| format!("Invalid document snapshot: {e}"))?;
         Ok(Response::Snapshot {
@@ -910,7 +927,8 @@ impl Client {
                     ),
                 })
             }
-            Request::Snapshot { id } => self.snapshot(&id, false),
+            Request::Snapshot { id } => self.snapshot(&id, false, None),
+            Request::PollSnapshot { id, revision } => self.snapshot(&id, false, Some(revision)),
             Request::PublishLibrary {
                 id,
                 revision,
@@ -920,7 +938,7 @@ impl Client {
                     "document.publish_library",
                     json!({"documentId":id,"revision":revision,"description":description}),
                 )?;
-                self.snapshot(&id, true)
+                self.snapshot(&id, true, None)
             }
             Request::ShapeBuilder {
                 id,
@@ -1012,7 +1030,7 @@ impl Client {
                     envelope["preconditions"]["revision"]["sequence"] = json!(revision.to_string());
                     self.call("document.command", json!({"envelope":envelope}))?;
                 }
-                self.snapshot(&id, true)
+                self.snapshot(&id, true, None)
             }
             Request::Undo { id, epoch, redo } => {
                 self.call(
@@ -1023,7 +1041,7 @@ impl Client {
                     },
                     json!({"documentId":id,"targetEpoch":epoch}),
                 )?;
-                self.snapshot(&id, true)
+                self.snapshot(&id, true, None)
             }
             Request::CaptureText {
                 id,
@@ -1048,7 +1066,7 @@ impl Client {
             } => {
                 let envelope = json!({"protocol":"omc.engine/1","requestId":Uuid::new_v4().to_string(),"documentId":id,"targetEpoch":epoch,"idempotencyKey":Uuid::new_v4().to_string(),"preconditions":{"basis":"latest"},"undoGroup":format!("ime_{}",Uuid::new_v4()),"command":{"type":"text.splice","selection":selection,"text":text,"attributes":{}}});
                 self.call("document.command", json!({"envelope":envelope}))?;
-                self.snapshot(&id, true)
+                self.snapshot(&id, true, None)
             }
             Request::Save { id } => {
                 self.call("document.save", json!({"documentId":id}))?;

@@ -106,6 +106,12 @@ pub(super) fn reserve(
     let mut ancestry = vec![0usize; scene.items.len()];
     let mut image_bytes = 0usize;
     let mut cached = BTreeMap::new();
+    let mut occurrence_costs = BTreeMap::new();
+    let decoded_bytes_per_pixel = if scene.color_profile == omc_style::ColorProfile::DisplayP3 {
+        12
+    } else {
+        8
+    };
     for (index, item) in scene.items.iter().enumerate() {
         if item.hidden {
             continue;
@@ -193,30 +199,36 @@ pub(super) fn reserve(
             }
         }
         for hash in hashes {
-            match image_data(hash, resources) {
-                Ok((data, w, h, encoded)) => {
-                    let decoded_bytes = if scene.color_profile == omc_style::ColorProfile::DisplayP3 {
-                        12
-                    } else {
-                        8
-                    };
-                    image_bytes = image_bytes
-                        .saturating_add(encoded.saturating_mul(3))
-                        .saturating_add(
-                            (w as usize).saturating_mul(h as usize).saturating_mul(decoded_bytes),
-                        );
-                    if peak.saturating_add(image_bytes) > options.max_surface_bytes {
-                        return Err(RenderError::ResourceLimit("compositing, encoded resources and decoded pixels exceed the render reservation".into()));
+            let (cost, new_data) = if let Some(&cost) = occurrence_costs.get(hash) {
+                (cost, None)
+            } else {
+                match image_data(hash, resources) {
+                    Ok((data, w, h, encoded)) => {
+                        let decoded = (w as usize)
+                            .saturating_mul(h as usize)
+                            .saturating_mul(decoded_bytes_per_pixel);
+                        (
+                            encoded.saturating_mul(3).saturating_add(decoded),
+                            Some(data),
+                        )
                     }
-                    cached
-                        .entry(hash.to_owned())
-                        .or_insert_with(|| data.as_bytes().to_vec());
-                }
-                Err(error) => {
-                    if scene.strict || matches!(error, RenderError::ResourceLimit(_)) {
-                        return Err(error);
+                    Err(error) => {
+                        if scene.strict || matches!(error, RenderError::ResourceLimit(_)) {
+                            return Err(error);
+                        }
+                        continue;
                     }
                 }
+            };
+            image_bytes = image_bytes.saturating_add(cost);
+            if peak.saturating_add(image_bytes) > options.max_surface_bytes {
+                return Err(RenderError::ResourceLimit(
+                    "compositing, encoded resources and decoded pixels exceed the render reservation".into(),
+                ));
+            }
+            if let Some(data) = new_data {
+                occurrence_costs.insert(hash, cost);
+                cached.insert(hash.to_owned(), data.as_bytes().to_vec());
             }
         }
     }

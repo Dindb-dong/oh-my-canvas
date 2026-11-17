@@ -323,6 +323,14 @@ impl Workspace {
     pub fn snapshot(&self, id: &str) -> Result<DocumentSnapshot> {
         serde_json::from_value(self.read_call(id, "snapshot", json!({}), 4096)?).map_err(json_error)
     }
+    pub fn snapshot_if_changed(
+        &self,
+        id: &str,
+        revision: &Revision,
+    ) -> Result<Option<DocumentSnapshot>> {
+        serde_json::from_value(self.read_call(id, "snapshot", json!({"ifRevision":revision}), 4096)?)
+            .map_err(json_error)
+    }
     pub fn metadata(&self, id: &str) -> Result<Value> {
         self.read_call(id, "metadata", json!({}), 4096)
     }
