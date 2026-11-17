@@ -110,3 +110,19 @@ IDs for inspection. To retry after a partial run, choose a fresh run ID.
 The seeding mocks exercise the generated inline fragments, structural
 readback, native ID drift checks and scoped token setup. Run the screenshot and raster qualification against each phase whose
 computed styles contain token references.
+
+## Background verification copy
+
+The installed `create_file` schema advertises `cloneFileId`. It copies
+the full document to the explicit folder in the request. The LD03 clone
+utility checks the current approved page inventory before creation and
+reads the returned file ID directly without running `open_file`. An
+unavailable unopened file retains a separate result and the new ID for
+review. The copy alone has no evidence of native close or reopen.
+
+Use `ld03-clone.mjs plan APPROVED_FILE.json PAGE_INVENTORY.json SCOPE.json
+RUN_ID` to inspect the exact request offline. The `clone` action creates
+the copy after the same inventory check. Review the full source page
+inventory and destination before launching the write.
+
+[Paper conservation atlas plan](LD02.md)
