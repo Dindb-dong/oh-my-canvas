@@ -50,6 +50,10 @@ def validate_manifest(manifest):
         if (not isinstance(value, str) or not value or "\0" in value
                 or Path(value).name != value or value in {".", ".."}):
             raise ValueError("usage_path must be 'stdout' or a file name in the output directory")
+    if "token_budget" in manifest:
+        budget = manifest["token_budget"]
+        if type(budget) is not int or budget <= 0 or "usage_path" not in manifest:
+            raise ValueError("token_budget requires a positive integer and usage_path")
 
 
 def stop_group(proc):
@@ -210,7 +214,28 @@ def run(manifest, output):
                 stop_group(proc)
                 result["returncode"] = proc.returncode
 
-        if ready_ns is not None:
+        if "usage_path" in manifest:
+            from usage import summarize_usage
+            leaf = manifest["usage_path"]
+            path = output / ("stdout.log" if leaf == "stdout" else leaf)
+            usage = (
+                {"status": "INCOMPLETE", "issues": ["usage path is not a regular file"]}
+                if path.is_symlink() or (path.exists() and not path.is_file())
+                else summarize_usage(path)
+            )
+            result["usage"] = usage
+            result["measurement_completeness"]["tokens"] = usage["status"]
+            result["provider_input_tokens"] = usage.get("input_tokens")
+            result["provider_output_tokens"] = usage.get("output_tokens")
+            budget = manifest.get("token_budget")
+            actual = usage.get("total_tokens")
+            if (budget is not None and actual is not None and actual > budget
+                    and result["execution_status"] != "INVALID_RUN"):
+                event("budget.exceeded", token_budget=budget, observed_tokens=actual)
+                if result["execution_status"] != "TIMEOUT_BUDGET":
+                    result.update(execution_status="TIMEOUT_BUDGET", reason="token_budget_exceeded")
+
+        if ready_ns is not None and result["execution_status"] != "TIMEOUT_BUDGET":
             try:
                 with (output / "acceptance.stdout.log").open("xb") as stdout, (
                     output / "acceptance.stderr.log"
@@ -245,19 +270,6 @@ def run(manifest, output):
             result["analysis_capped_time_ms"] = (
                 result["accepted_ready_ms"] if status == "PASS" else cap_ms
             )
-        if "usage_path" in manifest:
-            from usage import summarize_usage
-            leaf = manifest["usage_path"]
-            path = output / ("stdout.log" if leaf == "stdout" else leaf)
-            usage = (
-                {"status": "INCOMPLETE", "issues": ["usage path is not a regular file"]}
-                if path.is_symlink() or (path.exists() and not path.is_file())
-                else summarize_usage(path)
-            )
-            result["usage"] = usage
-            result["measurement_completeness"]["tokens"] = usage["status"]
-            result["provider_input_tokens"] = usage.get("input_tokens")
-            result["provider_output_tokens"] = usage.get("output_tokens")
         if manifest.get("sample_resources"):
             resources = result["resources"] or {}
             completeness = resources.get("measurement_completeness", {})

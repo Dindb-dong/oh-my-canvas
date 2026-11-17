@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
+import {isDeepStrictEqual} from 'node:util';
 import {fixture, target} from './replays/ld02-fixture.mjs';
 
 const name = 'OMC Benchmark';
@@ -158,7 +159,7 @@ function seedCode(guard, page) {
 
 const targetCode = `
   const page = penpot.currentFile.pages.find(p => p.name === ${JSON.stringify(prefix + batch)});
-  await penpot.openPage(page);
+  if (penpot.currentPage.id !== page.id) await penpot.openPage(page);
   const card = penpot.currentPage.root.children.find(c => c.name === ${JSON.stringify(cardName)});
   const label = card.children.find(n => n.name === "Caption");
   const reference = card.children.find(n => n.name === "Reference");
@@ -168,6 +169,124 @@ const readTargetCode = `
   return {id:card.id, labelId:label.id, referenceId:reference.id, swatchId:swatch.id,
     label:label.characters, gap:card.flex.rowGap, fill:swatch.fills[0].fillColor, reference:reference.characters};
 `;
+
+// Read the file through the Plugin API without navigating away from the Undo/Redo page.
+const pageInventoryCode = `
+  return penpot.currentFile.pages.map(page => ({id:page.id, name:page.name}));
+`;
+function pageSnapshotCode(pageId) {
+  return `
+    const page = penpot.currentFile.pages.find(page => page.id === ${JSON.stringify(pageId)});
+    const fills = shape => shape.fills.map(fill => [fill.fillColor, fill.fillOpacity]);
+    return page.root.children.map(board => ({
+      id:board.id, type:board.type, name:board.name, x:board.x, y:board.y,
+      width:board.width, height:board.height, fills:fills(board),
+      direction:board.flex.dir, gap:board.flex.rowGap, align:board.flex.alignItems,
+      padding:[board.flex.topPadding, board.flex.rightPadding, board.flex.bottomPadding, board.flex.leftPadding],
+      children:board.children.map(node => {
+        const identity = {id:node.id, type:node.type, name:node.name};
+        if (node.type === "text") {
+          return {...identity, text:node.characters, fontSize:node.fontSize};
+        }
+        return {...identity, width:node.width, height:node.height, fills:fills(node)};
+      }),
+    }));
+  `;
+}
+
+async function snapshotFile(execute, guard) {
+  const pages = await execute(guard + pageInventoryCode);
+  assert.equal(pages.length, fixture.pages.length + 1, 'Unexpected disposable file page count');
+  for (const page of pages) {
+    page.cards = await execute(guard + pageSnapshotCode(page.id));
+  }
+  return pages;
+}
+
+function validateBaseline(pages) {
+  assert.equal(pages.length, fixture.pages.length + 1, 'Expected one empty page plus the fixture');
+  const identities = new Set();
+  const identity = id => {
+    assert.ok(typeof id === 'string' && id.length > 0 && !identities.has(id), 'Invalid or duplicate native identity');
+    identities.add(id);
+  };
+  for (const page of pages) identity(page.id);
+  const pageNames = new Set(fixture.pages.map(page => prefix + page.name));
+  const sparePages = pages.filter(page => !pageNames.has(page.name));
+  assert.equal(sparePages.length, 1, 'Unexpected native file page inventory');
+  assert.deepEqual(sparePages[0].cards, [], 'Expected an empty native default page');
+  let logicalObjects = 0;
+  for (const spec of fixture.pages) {
+    const page = pages.find(page => page.name === prefix + spec.name);
+    assert.equal(page?.cards.length, spec.children.length, `Fixture card count on ${spec.name}`);
+    for (const card of spec.children) {
+      const native = page.cards.find(native => native.name === card.name);
+      assert.ok(native, `Missing ${spec.name} / ${card.name}`);
+      const {id, name, children, ...properties} = native;
+      identity(id);
+      assert.deepEqual(properties, {
+        type:'board', x:card.x, y:card.y, width:card.width, height:card.height, fills:[['#ffffff', 1]],
+        direction:'column', gap:card.gap, align:'start', padding:Array(4).fill(card.padding),
+      }, `Native board properties for ${spec.name} / ${name}`);
+      const expectedChildren = [
+        {type:'text', name:'Caption', text:card.children[0].text, fontSize:'16'},
+        {type:'text', name:'Reference', text:card.children[1].text, fontSize:'16'},
+        {type:'rectangle', name:'Swatch', width:card.children[2].width, height:card.children[2].height,
+          fills:[[card.children[2].fill, 1]]},
+      ];
+      assert.equal(children.length, expectedChildren.length);
+      for (const expectedChild of expectedChildren) {
+        const child = children.find(candidate => candidate.name === expectedChild.name);
+        assert.ok(child, `Missing ${spec.name} / ${name} / ${expectedChild.name}`);
+        const {id, ...properties} = child;
+        identity(id);
+        assert.deepEqual(properties, expectedChild);
+      }
+      logicalObjects += 1 + children.length;
+    }
+  }
+  assert.equal(logicalObjects, fixture.logicalObjects);
+}
+
+function validateEvidence(evidence) {
+  const {schema, workload, before, changed, undone, redone, reopened} = evidence;
+  assert.equal(schema, 'penpot-ld02-v1');
+  assert.equal(workload, fixture.workload);
+  validateBaseline(before);
+  const expectedAfter = structuredClone(before);
+  const card = expectedAfter.find(page => page.name === prefix + batch).cards.find(card => card.name === cardName);
+  card.children.find(node => node.name === 'Caption').text = edited.text;
+  card.children.find(node => node.name === 'Swatch').fills[0][0] = edited.fill;
+  card.gap = edited.gap;
+  for (const [phase, actual, expected] of [
+    ['Initial edit', changed, expectedAfter], ['Undo', undone, before],
+    ['Redo', redone, expectedAfter], ['Normal reopen', reopened, expectedAfter],
+  ]) {
+    assert.ok(isDeepStrictEqual(actual, expected), `${phase} differs from the required full-file semantics or identities`);
+  }
+}
+
+const editTargetCode = targetCode + `
+  const block = penpot.history.undoBlockBegin();
+  try {
+    label.characters = ${JSON.stringify(edited.text)};
+    card.flex.rowGap = ${edited.gap};
+    swatch.fills = [{fillColor:${JSON.stringify(edited.fill)},fillOpacity:1}];
+  } finally {
+    penpot.history.undoBlockFinish(block);
+  }
+  return true;
+`;
+
+async function waitForTarget(execute, code, expected, phase) {
+  const deadline = performance.now() + 5000;
+  do {
+    const actual = await execute(code);
+    if (isDeepStrictEqual(actual, expected)) return;
+    await delay(100);
+  } while (performance.now() < deadline);
+  throw new Error(`${phase} did not produce the expected native target state`);
+}
 
 async function replay(origin) {
   await waitForBackend(origin);
@@ -216,23 +335,34 @@ async function replay(origin) {
     for (const fixturePage of fixture.pages) {
       assert.deepEqual(await execute(seedCode(guard, fixturePage)), {cards:25, objects:100});
     }
+    const evidence = {schema:'penpot-ld02-v1', workload:fixture.workload};
+    evidence.before = await snapshotFile(execute, guard);
+    const readTarget = guard + targetCode + readTargetCode;
+    const card = evidence.before.find(page => page.name === prefix + batch).cards.find(card => card.name === cardName);
+    const targetBefore = {
+      id:card.id, labelId:card.children.find(node => node.name === 'Caption').id,
+      referenceId:card.children.find(node => node.name === 'Reference').id,
+      swatchId:card.children.find(node => node.name === 'Swatch').id,
+      label:initial.text, gap:initial.gap, fill:initial.fill, reference:initial.reference,
+    };
+    const targetAfter = {...targetBefore, ...expected};
+    await editor.keyboard.press('Escape');
     const started = performance.now();
+    await execute(guard + editTargetCode);
+    await waitForTarget(execute, readTarget, targetAfter, 'Edit');
+    const editMs = performance.now() - started;
+    evidence.changed = await snapshotFile(execute, guard);
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await editor.keyboard.press(`${modifier}+z`);
+    await waitForTarget(execute, readTarget, targetBefore, 'Undo');
+    evidence.undone = await snapshotFile(execute, guard);
+
     const saved = editor.waitForResponse(response => response.url().includes('/update-file')
       && response.request().method() === 'POST' && response.ok(), {timeout:8000}).catch(() => null);
-    const changed = await execute(guard + targetCode + `
-      if (label.characters !== ${JSON.stringify(initial.text)} || card.flex.rowGap !== ${initial.gap} ||
-          reference.characters !== ${JSON.stringify(initial.reference)} ||
-          swatch.fills[0].fillColor !== ${JSON.stringify(initial.fill)}) {
-        throw new Error("Unexpected starting state");
-      }
-      label.characters = ${JSON.stringify(edited.text)};
-      card.flex.rowGap = ${edited.gap};
-      swatch.fills = [{fillColor:${JSON.stringify(edited.fill)},fillOpacity:1}];
-    ` + readTargetCode);
-    const editMs = performance.now() - started;
-    const {id, labelId, referenceId, swatchId, ...values} = changed;
-    assert.deepEqual(values, expected);
-    assert.equal(new Set([id, labelId, referenceId, swatchId]).size, 4);
+    await editor.keyboard.press(`${modifier}+Shift+z`);
+    await waitForTarget(execute, readTarget, targetAfter, 'Redo');
+    evidence.redone = await snapshotFile(execute, guard);
     const saveObserved = Boolean(await saved);
 
     await context.close();
@@ -240,11 +370,18 @@ async function replay(origin) {
     const reopened = context.pages()[0];
     await reopened.goto(url.href);
     await connectEditor(reopened);
-    assert.deepEqual(await execute(guard + targetCode + readTargetCode), changed);
+    evidence.reopened = await snapshotFile(execute, guard);
+    const elapsed = performance.now() - started;
+    const candidate = process.env.OMC_BENCH_CANDIDATE;
+    if (candidate) {
+      await writeFile(candidate, JSON.stringify(evidence) + '\n', {flag:'wx', mode:0o600});
+    } else {
+      validateEvidence(evidence);
+    }
     console.log(JSON.stringify({
-      workload:'LD02', logical_objects:1000, pages:10, edit_ms:editMs,
-      edit_to_verified_reopen_ms:performance.now() - started, save_response_observed:saveObserved,
-      target_reopened:true, scope:'deterministic scoped edit and target readback',
+      workload:'LD02', logical_objects:fixture.logicalObjects, pages:fixture.pages.length, edit_ms:editMs,
+      edit_undo_redo_reopen_ms:elapsed, save_response_observed:saveObserved,
+      scope:'isolated deterministic edit with full-file semantic and identity snapshots',
     }));
   } catch (error) {
     const secrets = [email, password, endpoint?.searchParams.get('userToken')].filter(Boolean);
@@ -257,9 +394,83 @@ async function replay(origin) {
   }
 }
 
+async function selfTestEvidence() {
+  let sequence = 0;
+  let undoBlock;
+  const makePage = () => ({id:`page-${sequence++}`, name:'Page 1', root:{children:[]}});
+  const makeShape = (type, properties = {}) => ({
+    id:`shape-${sequence++}`, type, ...properties,
+    resize(width, height) { Object.assign(this, {width, height}); },
+  });
+  const firstPage = makePage();
+  const penpot = {
+    currentPage:firstPage, currentFile:{id:'test-file', pages:[firstPage]},
+    createPage() {
+      const page = makePage();
+      this.currentFile.pages.push(page);
+      return page;
+    },
+    async openPage(page) { this.currentPage = page; },
+    createBoard() {
+      const board = makeShape('board', {
+        children:[],
+        addFlexLayout() {
+          this.flex = {
+            set verticalPadding(pad) { this.topPadding = this.bottomPadding = pad; },
+            set horizontalPadding(pad) { this.leftPadding = this.rightPadding = pad; },
+            appendChild: child => this.children.push(child),
+          };
+          return this.flex;
+        },
+      });
+      this.currentPage.root.children.push(board);
+      return board;
+    },
+    createText(text) { return makeShape('text', {characters:text}); },
+    createRectangle() { return makeShape('rectangle'); },
+    history:{
+      undoBlockBegin() { return undoBlock = Symbol('edit'); },
+      undoBlockFinish(block) { assert.equal(block, undoBlock); undoBlock = undefined; },
+    },
+  };
+  const AsyncFunction = (async () => {}).constructor;
+  const execute = async code => JSON.parse(JSON.stringify(await new AsyncFunction('penpot', code)(penpot)));
+  const guard = 'if (penpot.currentFile.id !== "test-file") throw new Error("Wrong synthetic file");';
+  for (const page of fixture.pages) {
+    assert.deepEqual(await execute(seedCode(guard, page)), {cards:25, objects:100});
+  }
+  const before = await snapshotFile(execute, guard);
+  await execute(guard + editTargetCode);
+  assert.equal(undoBlock, undefined);
+  const changed = await snapshotFile(execute, guard);
+  const evidence = {schema:'penpot-ld02-v1', workload:fixture.workload,
+    before, changed, undone:before, redone:changed, reopened:changed};
+  validateEvidence(evidence);
+  assert.throws(() => validateEvidence({...evidence, undone:changed}), /Undo differs/);
+  assert.throws(() => validateEvidence({...evidence, redone:before}), /Redo differs/);
+  const reopened = structuredClone(changed);
+  reopened[1].cards[0].children[0].id = 'replacement';
+  assert.throws(() => validateEvidence({...evidence, reopened}), /Normal reopen differs/);
+  reopened[1].cards[0].children[0].id = changed[1].cards[0].children[0].id;
+  reopened[1].cards[0].children[1].text = 'unrelated edit';
+  assert.throws(() => validateEvidence({...evidence, reopened}), /Normal reopen differs/);
+}
+
 if (process.argv.length !== 3) {
-  console.error('Usage: node tools/local-dev-bench/penpot-ld02.mjs <loopback-origin|--self-test>');
+  console.error('Usage: node tools/local-dev-bench/penpot-ld02.mjs <loopback-origin|--accept|--self-test>');
   process.exitCode = 2;
+} else if (process.argv[2] === '--accept') {
+  const candidate = process.env.OMC_BENCH_CANDIDATE;
+  assert.ok(candidate, 'Set OMC_BENCH_CANDIDATE to the producer snapshot');
+  try {
+    validateEvidence(JSON.parse(await readFile(candidate, 'utf8')));
+    console.log(JSON.stringify({
+      workload:'LD02', accepted:true, checks:['fixture', 'edit', 'undo', 'redo', 'normal_reopen', 'native_identities', 'protected_scope'],
+    }));
+  } catch (error) {
+    console.log(JSON.stringify({workload:'LD02', accepted:false, reason:error.message}));
+    process.exitCode = 1;
+  }
 } else if (process.argv[2] === '--self-test') {
   assert.equal(loopbackOrigin('http://localhost:19001'), 'http://localhost:19001');
   for (const bad of ['https://localhost:19001', 'http://example.test:19001', 'http://user@localhost:19001',
@@ -277,6 +488,7 @@ if (process.argv.length !== 3) {
     return new Response('{}', {headers:{'content-type':'application/transit+json'}});
   });
   assert.equal(requests, 2);
+  await selfTestEvidence();
 } else {
   await replay(loopbackOrigin(process.argv[2]));
 }

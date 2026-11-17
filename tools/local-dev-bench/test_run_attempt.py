@@ -141,11 +141,27 @@ class AttemptTests(unittest.TestCase):
         self.assertEqual(result["measurement_completeness"]["tokens"], "INCOMPLETE")
         self.assertEqual(json.loads((self.output / "stdout.log").read_text())["usage"], usage)
 
+    def test_final_token_overshoot_cannot_accept_candidate(self):
+        usage = json.dumps({"type": "turn.completed", "usage": {"input_tokens": 60, "output_tokens": 45}})
+        self.manifest.update(
+            argv=python(WRITE + f"\nprint({usage!r})"),
+            acceptance_argv=python(GRADE), usage_path="stdout", token_budget=100,
+        )
+        result = run(self.manifest, self.output)
+        self.assertEqual(result["execution_status"], "TIMEOUT_BUDGET")
+        self.assertEqual(result["reason"], "token_budget_exceeded")
+        self.assertEqual(result["usage"]["total_tokens"], 105)
+        self.assertIsNotNone(result["candidate_sha256"])
+        self.assertIsNone(result["accepted_ready_ms"])
+        self.assertEqual(result["analysis_capped_time_ms"], 2000)
+        self.assertFalse((self.output / "acceptance.stdout.log").exists())
+
     def test_untrusted_manifest_arguments_are_rejected(self):
         for extra in (
             {"argv": "echo x"}, {"argv": [""]}, {"usage_path": "../other"},
             {"timeout_seconds": float("nan")}, {"timeout_seconds": True},
             {"resource_root_pids": [1]}, {"resource_tail_seconds": 20},
+            {"token_budget": 30}, {"token_budget": True, "usage_path": "stdout"},
         ):
             with self.subTest(extra=extra), self.assertRaises(ValueError):
                 validate_manifest({**self.manifest, **extra})

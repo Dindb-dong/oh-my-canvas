@@ -3,6 +3,8 @@
 import ctypes
 import json
 import math
+import os
+import select
 import sys
 import threading
 import time
@@ -97,6 +99,12 @@ class ResourceSampler:
             raise RuntimeError("ResourceSampler instances are single use")
         self._counter = None
         self._failure = None
+        self._queue = None
+        self._wake = None
+        self._pending_events = []
+        self._lifecycle_error = None
+        self._fork_notifications = 0
+        self._exit_observed = set()
         if sys.platform == "darwin":
             try:
                 self._counter = DarwinProcessCounters()
@@ -106,7 +114,7 @@ class ResourceSampler:
         self._first = {}
         self._last = {}
         self._final = set()
-        self._lost = 0
+        self._lost = set()
         self._counter_anomalies = set()
         self._read_failures = 0
         self._sample_count = 0
@@ -120,6 +128,8 @@ class ResourceSampler:
         self._start_abstime = self._counter.absolute_time() if self._counter else None
         self._output = self.path.open("x", encoding="utf-8", buffering=1)
         try:
+            if self._counter and hasattr(select, "kqueue"):
+                self._open_lifecycle()
             self._write({
                 "type": "resource.header",
                 "schema_version": 1,
@@ -130,6 +140,8 @@ class ResourceSampler:
                 "interval_ms": self.interval * 1000,
                 "root_pids": self.roots,
                 "scope": "declared_roots_and_observed_descendants",
+                "lifecycle": "kqueue.EVFILT_PROC" if self._queue else "polling",
+                "lifecycle_error": self._lifecycle_error,
                 "error": self._failure,
             })
             if self._counter:
@@ -137,24 +149,83 @@ class ResourceSampler:
                 self._thread = threading.Thread(target=self._run, name="resource-sampler", daemon=True)
                 self._thread.start()
         except Exception:
+            self._close_lifecycle()
             self._output.close()
             raise
 
     def _write(self, entry):
         self._output.write(json.dumps(entry, separators=(",", ":")) + "\n")
 
+    def _open_lifecycle(self):
+        try:
+            self._queue = select.kqueue()
+            self._wake = os.pipe()
+            wake_event = select.kevent(
+                self._wake[0], filter=select.KQ_FILTER_READ,
+                flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+            )
+            self._queue.control([wake_event], 0, 0)
+        except OSError as error:
+            self._lifecycle_error = str(error)
+            self._close_lifecycle()
+
+    def _close_lifecycle(self):
+        if self._queue:
+            self._queue.close()
+            self._queue = None
+        if self._wake:
+            for descriptor in self._wake:
+                os.close(descriptor)
+            self._wake = None
+
+    def _watch(self, identity):
+        pid, started = identity
+        self._queue.control([select.kevent(
+            pid, filter=select.KQ_FILTER_PROC, flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+            fflags=select.KQ_NOTE_FORK | select.KQ_NOTE_EXIT, udata=started,
+        )], 0, 0)
+
+    def _events(self, timeout):
+        return [
+            event for event in self._queue.control(None, 256, timeout)
+            if event.filter == select.KQ_FILTER_PROC
+        ]
+
     def _run(self):
         deadline = time.monotonic() + self.interval
         try:
-            while not self._halt.wait(max(0, deadline - time.monotonic())):
-                self._sample()
-                deadline = max(deadline + self.interval, time.monotonic())
+            while not self._halt.is_set():
+                timeout = max(0, deadline - time.monotonic())
+                if self._queue:
+                    events = self._events(timeout)
+                    if self._halt.is_set():
+                        self._pending_events = events
+                        return
+                else:
+                    if self._halt.wait(timeout):
+                        return
+                    events = []
+                self._sample(events=events)
+                now = time.monotonic()
+                if now >= deadline:
+                    deadline = max(deadline + self.interval, now + self.interval / 2)
         except OSError as error:
             self._failure = str(error)
 
-    def _sample(self, initial=False):
+    def _sample(self, initial=False, events=()):
         started = time.monotonic_ns()
-        queue = deque(sorted(self._tracked))
+        notifications = []
+        exits = set()
+        for event in events:
+            identity = event.ident, event.udata
+            fork = bool(event.fflags & select.KQ_NOTE_FORK)
+            exited = bool(event.fflags & select.KQ_NOTE_EXIT)
+            self._fork_notifications += int(fork)
+            notifications.append({"identity": identity, "fork": fork, "exit": exited})
+            if exited:
+                exits.add(identity)
+        self._exit_observed.update(exits)
+        queue = deque(sorted(self._tracked | exits))
         if initial:
             queue.extend((pid, None) for pid in self.roots)
         seen = set()
@@ -183,7 +254,15 @@ class ResourceSampler:
             if row["exit_abstime"] is not None:
                 self._final.add(identity)
                 continue
+            if identity in self._exit_observed:
+                continue
             live.add(identity)
+            if self._queue and identity not in self._first:
+                try:
+                    self._watch(identity)
+                except OSError as error:
+                    errors.append({"pid": pid, "start_abstime": identity[1], "errno": error.errno,
+                                   "operation": "lifecycle_watch"})
             children, error = self._counter.children(pid)
             if error is not None:
                 errors.append({"pid": pid, "start_abstime": identity[1], "errno": error, "operation": "children"})
@@ -200,9 +279,9 @@ class ResourceSampler:
                 field for field, prior, value in zip(self._counter_fields, previous, counters) if value < prior
             )
             self._last[identity] = counters
-        departed = self._tracked - live
+        departed = (self._tracked - live) | exits
         missing_final = departed - self._final
-        self._lost += len(missing_final)
+        self._lost.update(missing_final)
         self._read_failures += len(errors)
         self._tracked = live
 
@@ -234,6 +313,7 @@ class ResourceSampler:
             "joined": sorted(joined),
             "departed": sorted(departed),
             "departed_without_final_counters": sorted(missing_final),
+            "lifecycle_notifications": notifications,
             "aggregate_physical_footprint_bytes": total,
             "errors": errors,
         })
@@ -242,11 +322,16 @@ class ResourceSampler:
         if self._output is None or self._output.closed:
             raise RuntimeError("ResourceSampler has no open window")
         self._halt.set()
+        if self._wake and self._thread.is_alive():
+            os.write(self._wake[1], b" ")
         if self._thread:
             self._thread.join()
             if not self._failure:
                 try:
-                    self._sample()
+                    events = self._pending_events
+                    if self._queue:
+                        events = events + self._events(0)
+                    self._sample(events=events)
                 except OSError as error:
                     self._failure = str(error)
         counters = {}
@@ -280,12 +365,14 @@ class ResourceSampler:
             "max_sample_gap_ms": self._max_gap_ns / 1e6 if self._sample_count > 1 else None,
             "max_acquisition_ms": self._max_acquisition_ns / 1e6 if self._sample_count else None,
             "observed_process_instances": len(self._last),
-            "departed_without_final_counters": self._lost,
+            "departed_without_final_counters": len(self._lost - self._final),
+            "fork_notifications": self._fork_notifications,
+            "observed_exit_notifications": len(self._exit_observed),
             "read_or_discovery_errors": self._read_failures,
             "counter_anomalies": sorted(self._counter_anomalies),
             "error": self._failure,
             "limitations": [
-                "Sampled process counters can miss helpers that start and exit between samples.",
+                "Coalesced fork notifications may miss helpers that exit before discovery.",
                 "CPU and disk I/O are observed deltas. Departed processes may lack final counters.",
                 "Memory is the sampled sum of kernel footprints without shared-page de-duplication.",
                 "Independent helpers require explicit roots. Guest, GPU, and shared system accounting is separate.",
@@ -294,5 +381,6 @@ class ResourceSampler:
         try:
             self._write(summary)
         finally:
+            self._close_lifecycle()
             self._output.close()
         return summary
