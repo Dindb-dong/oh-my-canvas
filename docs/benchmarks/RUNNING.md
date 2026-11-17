@@ -61,8 +61,10 @@ processes can be followed. Include independently started helpers explicitly,
 and record what can be attributed to the Docker VM, guest stack, compositor,
 and browser. macOS physical footprint reports the OS-charged bytes of sampled
 processes. The sampler cannot observe every process that starts and exits
-between samples. Shared and guest measurements should be recorded with their
-own boundaries.
+between samples. Optional `resource_tail_seconds` extends the observation
+window beyond command exit when declared roots remain alive. It does not
+change completion time. Shared and guest measurements retain their own
+boundaries.
 
 ## LD02 engine diagnostics
 
@@ -97,6 +99,14 @@ readback. The Figma plan contains the inspection, page creation, page seeding,
 edit, and readback calls. Bind those payloads to the approved file and
 session at dispatch. Code that starts from this fixture still needs a
 complete acceptance adapter for a scored attempt.
+
+For a model-assisted OMC diagnostic, use `omc-ld02.mjs --agent` as the
+attempt command and set `usage_path` to `"agent.jsonl"`. The adapter scopes
+the child model client to the task-owned MCP listener and records its turn
+events. The client is subject to its MCP approval policy. Record blocked
+tool calls and any spent usage. The agent diagnostic verifies the edited
+snapshot and service rebind when edits succeed. Agent-session history needs
+separate Undo/Redo evidence.
 
 The approval and storage rules for profile isolation still apply to local test
 runs. Reuse installed tools and existing container images.
