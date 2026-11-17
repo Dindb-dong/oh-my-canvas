@@ -104,8 +104,8 @@ function isolatedOptions(servers, allowedTools) {
 }
 
 // The existing OAuth credential remains in Codex; there is no model turn in this app-server.
-export async function withFigmaMCP(run, { binary = 'codex', timeoutMs = 18_000, createSession = false } = {}) {
-  const allowedTools = createSession ? ['create_session', 'use_figma'] : ['use_figma'];
+export async function withFigmaMCP(run, { binary = 'codex', timeoutMs = 18_000, createSession = false, uploadAssets = false } = {}) {
+  const allowedTools = [...(createSession ? ['create_session'] : []), ...(uploadAssets ? ['upload_assets'] : []), 'use_figma'];
   const listed = JSON.parse(execFileSync(binary, ['mcp', 'list', '--json'], { encoding: 'utf8', timeout: timeoutMs }));
   const options = isolatedOptions(listed, allowedTools);
   const dir = await mkdtemp(join(tmpdir(), 'omc-figma-ld03-'));
