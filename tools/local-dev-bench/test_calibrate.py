@@ -1,10 +1,20 @@
 import json
+import math
 import unittest
 
-from calibrate import calibrate, example, mixture, proportion, truths
+from calibrate import calibrate, covers_truth, example, mixture, proportion, truths
 
 
 class CalibrationTest(unittest.TestCase):
+    def test_coverage_keeps_numeric_equality_without_hiding_material_misses(self):
+        bound = 240 / 670
+        self.assertTrue(covers_truth(bound, math.nextafter(bound, 1), "upper"))
+        self.assertTrue(covers_truth(bound, math.nextafter(bound, 0), "lower"))
+        self.assertFalse(covers_truth(bound, bound + 1e-12, "upper"))
+        self.assertFalse(covers_truth(bound, bound - 1e-12, "lower"))
+        self.assertFalse(covers_truth(None, bound, "upper"))
+        self.assertFalse(covers_truth(bound, "Infinity", "upper"))
+
     def config(self):
         value = example()
         value["workloads"] = {"LD02": {"weight": 1, "budget_ms": 1000}}

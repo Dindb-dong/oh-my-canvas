@@ -203,6 +203,16 @@ def proportion(count, total):
     )}
 
 
+def covers_truth(bound, truth, side):
+    if bound is None or truth is None or truth == "Infinity":
+        return False
+    # The simulated truth and bootstrap bound sum terms in different orders.
+    # A few ULPs represent the same boundary, especially for degenerate draws.
+    if abs(bound - truth) <= 4 * max(math.ulp(bound), math.ulp(truth)):
+        return True
+    return truth >= bound if side == "lower" else truth <= bound
+
+
 def observe(config, workloads, states, products, allocation, truth, rng, precision, repeats, expanded):
     ref = config["reference_product"]
     totals = Counter()
@@ -223,12 +233,7 @@ def observe(config, workloads, states, products, allocation, truth, rng, precisi
                 bound, point, target = result["bound"], result["point"], truth[baseline][endpoint]
                 finite = bound is not None
                 cell["usable"] += finite
-                # An undefined truth has no coverage interpretation.
-                covers = finite and target is not None and (
-                    target >= bound if result["bound_side"] == "lower" else (
-                        target != "Infinity" and target <= bound
-                    )
-                )
+                covers = covers_truth(bound, target, result["bound_side"])
                 cell["covered"] += covers
                 covered &= covers
                 gated &= hurdle(endpoint, bound)
