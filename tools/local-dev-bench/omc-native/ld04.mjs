@@ -54,8 +54,21 @@ export function planResponsive(fixture) {
       adapted.height=height;
       if(row.key==='footer') adapted.style['margin-top']=y-collection.bounds[1]-collection.bounds[3];
     }
+    // Native geometry accepts finite numbers only; CSS owns intrinsic dimensions.
+    // Remove the baseline overrides before applying these styles (see adaptationCommands).
+    for(const dimension of ['width','height']) if(adapted[dimension]==='auto') {
+      adapted.style[dimension]='auto';
+      delete adapted[dimension];
+    }
     return {key:row.key,parent:row.parent,kind:row.kind,id:nativeId(index+1),properties,adapted};
   });
+}
+
+export function adaptationCommands(plan) {
+  return plan.flatMap(row=>[
+    {type:'node.unset',nodeId:row.id,properties:['x','y','width','height']},
+    {type:'node.set',nodeId:row.id,properties:row.adapted},
+  ]);
 }
 
 export function normalizeResponsive(raw,scene) {
@@ -87,7 +100,7 @@ export function normalizeResponsive(raw,scene) {
     }
     if(node.kind==='text') Object.assign(row,{text:p.text,font_family:p.fontFamily,font_size:p.fontSize,fully_visible:inside});
     if(node.kind==='frame') {
-      row.height_rule=p.height==='auto'?'content':'fixed';
+      row.height_rule=p.height===undefined&&s.height==='auto'?'content':'fixed';
       if(s['min-width']!==undefined) row.min_width=Number(s['min-width']);
       if(s['max-width']!==undefined) row.max_width=Number(s['max-width']);
       if(s['flex-basis']!==undefined) row.basis_width=Number(s['flex-basis']);
@@ -141,9 +154,7 @@ async function execute(fixture,registrationPath,save,report,profile,signal) {
     });
     await command(initial,{type:'node.createMany',nodes});
     report.before=await capture('before',original);
-    report.adaptReceipt=await command(await snapshot(original),{type:'batch',commands:plan.flatMap(row=>[
-      {type:'node.unset',nodeId:row.id,properties:['x','y']},
-      {type:'node.set',nodeId:row.id,properties:row.adapted}])});
+    report.adaptReceipt=await command(await snapshot(original),{type:'batch',commands:adaptationCommands(plan)});
     await rpc('document.save',{documentId:original});
     report.candidate=await capture('candidate',original);
     report.candidateFrozenSha256=sha(JSON.stringify(report.candidate));
