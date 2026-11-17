@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {withLD02Broker} from '../ld02-model.mjs';
 import {runLD03Agent} from '../ld03-model.mjs';
 import {publishCandidate} from '../publish-candidate.mjs';
-import {atlasPlan, captureAtlas, checkProtectedAtlas, paperAtlasModelHandlers} from './ld02-atlas.mjs';
+import {atlasPlan, captureAtlas, checkProtectedAtlas, paperAtlasModelHandlers, seedAtlasPage} from './ld02-atlas.mjs';
 import {withPaper} from './ld03.mjs';
 
 const fileName = 'OMC Benchmark • Synthetic CAP Probe • 2026-11-17';
@@ -42,29 +42,15 @@ async function prepare(read, fixture, plan) {
   }
   assert.ok(approved, 'Missing approved Paper test canvas marker');
   const ownedPages = new Set();
-  const working = new Set();
-  try {
-    for (const page of plan.pages) {
-      await read(page.create);
-      const current = await call('get_basic_info');
-      const pages = current.pages.filter(row => row.name === page.name);
-      assert.equal(pages.length, 1);
-      const [created] = pages;
-      assert.ok(!original.pages.some(row => row.id === created.id) && !ownedPages.has(created.id));
-      ownedPages.add(created.id);
-      const info = await call('get_basic_info', {pageId: created.id});
-      assert.equal(info.fileName, fileName);
-      const targetNodeId = info.rootNodeId;
-      assert.ok(targetNodeId);
-      assert.deepEqual((await call('get_children', {nodeId: targetNodeId})).children, []);
-      for (const html of page.zoneFragments) {
-        const result = await call('write_html', {targetNodeId, mode: 'insert-children', html});
-        assert.ok(!result.error && !result.errors?.length && result.createdNodes?.length);
-        for (const node of result.createdNodes) working.add(node.id);
-      }
-    }
-  } finally {
-    if (working.size) await call('finish_working_on_nodes', {nodeIds: [...working]});
+  for (const page of plan.pages) {
+    await read(page.create);
+    const current = await call('get_basic_info');
+    const pages = current.pages.filter(row => row.name === page.name);
+    assert.equal(pages.length, 1);
+    const [created] = pages;
+    assert.ok(!original.pages.some(row => row.id === created.id) && !ownedPages.has(created.id));
+    ownedPages.add(created.id);
+    await seedAtlasPage(read, plan, page, created.id);
   }
   const home = await call('get_basic_info');
   assert.deepEqual(home.pages.filter(page => !ownedPages.has(page.id)), original.pages);

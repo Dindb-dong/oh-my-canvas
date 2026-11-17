@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import test from 'node:test';
-import {atlasPlan, captureAtlas, checkProtectedAtlas, discoverAtlasEdit, paperAtlasModelHandlers} from './ld02-atlas.mjs';
+import {atlasPlan, captureAtlas, checkProtectedAtlas, discoverAtlasEdit, paperAtlasModelHandlers, seedAtlasPage} from './ld02-atlas.mjs';
 
 const fixture = JSON.parse(execFileSync('python3', [
   'tools/local-dev-bench/workloads/synthetic.py', 'fixture', 'LD02', '--variant', 'conservation-atlas',
@@ -76,6 +76,49 @@ test('plans 10 isolated pages and 1,000 editable fixture elements', () => {
     }
   }
   assert.throws(() => atlasPlan(fixture, {...file,name:'Unapproved'}, 'test-atlas-01'));
+});
+
+test('native artboard seeding preserves registered zone origins without an HTML root wrapper', async () => {
+  for (const page of plan.pages) {
+    const boards = [];
+    const inserts = [];
+    let released;
+    await seedAtlasPage(async ({name, arguments: args}) => {
+      assert.equal(args.fileId, file.fileId);
+      if (name === 'get_basic_info') {
+        assert.equal(args.pageId, ids(page.key));
+        return {fileName: file.name, rootNodeId: ids(page.key), artboards: boards};
+      }
+      if (name === 'get_children') return {children: []};
+      if (name === 'create_artboard') {
+        const spec = fixture.start.nodes.find(row => row.page === page.key && row.name === args.name && row.parent === null);
+        assert.ok(spec);
+        const [left, top, width, height] = spec.bounds;
+        assert.deepEqual(args.styles, {left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`,
+          display: 'flex', flexDirection: 'column', backgroundColor: spec.fill});
+        boards.push({id: ids(spec.key), name: args.name, width, height});
+        return {};
+      }
+      if (name === 'write_html') {
+        assert.ok(boards.some(board => board.id === args.targetNodeId));
+        assert.equal(args.mode, 'insert-children');
+        assert.equal([...args.html.matchAll(/layer-name=/g)].length, 24);
+        assert.equal([...args.html.matchAll(/gap:8px/g)].length, 4);
+        assert.equal([...args.html.matchAll(/border-radius:4px/g)].length, 4);
+        inserts.push(args.targetNodeId);
+        return {createdNodes: [{id: args.targetNodeId + '/child'}]};
+      }
+      if (name === 'finish_working_on_nodes') {
+        released = args.nodeIds;
+        return 'OK';
+      }
+      throw new Error(name);
+    }, plan, page, ids(page.key));
+    assert.equal(boards.length, 4);
+    assert.deepEqual(inserts, boards.map(board => board.id));
+    assert.deepEqual(released, inserts);
+    assert.equal(boards.length + inserts.length * 24, 100);
+  }
 });
 
 test('discovery joins exact title and receipt on a shared native parent', async () => {

@@ -62,10 +62,48 @@ export function atlasPlan(fixture, source, runId) {
     assert.equal(sourceZones.length, 4);
     assert.equal(fixture.start.nodes.filter(row => row.page === page.key).length, 100);
     const name = prefix + page.name;
-    return {key: page.key, name, neutral_name: page.name, zoneFragments: sourceZones.map(markup),
+    const zoneArtboards = sourceZones.map(zone => {
+      const [left, top, width, height] = zone.bounds;
+      return {key: zone.key, name: zone.name, styles: {
+        width: `${width}px`, height: `${height}px`, left: `${left}px`, top: `${top}px`,
+        display: 'flex', flexDirection: 'column', backgroundColor: zone.fill,
+      }, html: (branches.get(zone.key) ?? []).map(markup).join('')};
+    });
+    return {key: page.key, name, neutral_name: page.name, zoneFragments: sourceZones.map(markup), zoneArtboards,
       create: {name: 'create_page', arguments: {fileId: source.fileId, name}}};
   });
   return {fileId: source.fileId, fileName: source.name, prefix, logicalObjects: nodes.size, pages};
+}
+
+export async function seedAtlasPage(read, plan, page, pageId) {
+  const call = callWith(read, plan.fileId);
+  const before = await call('get_basic_info', {pageId});
+  assert.equal(before.fileName, plan.fileName);
+  assert.ok(before.rootNodeId);
+  assert.deepEqual((await call('get_children', {nodeId: before.rootNodeId})).children, []);
+  const working = new Set();
+  try {
+    for (const zone of page.zoneArtboards) {
+      const response = await call('create_artboard', {pageId, name: zone.name, styles: zone.styles});
+      assert.ok(!response.error && !response.errors?.length);
+      const current = await call('get_basic_info', {pageId});
+      assert.equal(current.fileName, plan.fileName);
+      const matches = current.artboards.filter(row => row.name === zone.name);
+      assert.equal(matches.length, 1);
+      const [board] = matches;
+      assert.ok(board.id && !working.has(board.id));
+      assert.equal(board.width, Number.parseFloat(zone.styles.width));
+      assert.equal(board.height, Number.parseFloat(zone.styles.height));
+      working.add(board.id);
+      const written = await call('write_html', {targetNodeId: board.id, mode: 'insert-children', html: zone.html});
+      assert.ok(!written.error && !written.errors?.length && written.createdNodes?.length);
+    }
+    const complete = await call('get_basic_info', {pageId});
+    assert.equal(complete.artboards.length, 4);
+    assert.deepEqual(new Set(complete.artboards.map(row => row.id)), working);
+  } finally {
+    if (working.size) await call('finish_working_on_nodes', {nodeIds: [...working]});
+  }
 }
 
 async function pageInventory(call, plan) {
