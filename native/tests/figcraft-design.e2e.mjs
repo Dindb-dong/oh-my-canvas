@@ -421,8 +421,11 @@ test('FigCraft design commands change native layout, appearance and rendered out
       assert.ok(placed.ids.length >= 4);
       const svg = (await run('file.exportSvg', { ids: placed.ids })).content;
       assert.match(svg, /<svg/);
-      if (template.id === 'flowChart') assert.match(svg.normalize('NFKC'), /Do the first step/);
-      if (template.id === 'kanban') assert.match(svg, /Write the brief/);
+      const templateText = [...svg.matchAll(/<text\b[^>]*>([\s\S]*?)<\/text>/g)]
+        .map(([, text]) => text.replace(/<[^>]*>/g, ' ')).join(' ')
+        .normalize('NFKC').replace(/\s+/g, ' ');
+      if (template.id === 'flowChart') assert.match(templateText, /Do the first step/);
+      if (template.id === 'kanban') assert.match(templateText, /Write the brief/);
       await run('edit.undo');
       await assert.rejects(get(placed.ids[0]), /layer not found/i);
     }
@@ -467,6 +470,6 @@ test('FigCraft design commands change native layout, appearance and rendered out
     await client.close().catch(() => {});
     if (service.exitCode === null) service.kill();
     await exited;
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

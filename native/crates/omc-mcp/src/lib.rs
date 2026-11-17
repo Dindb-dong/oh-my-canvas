@@ -1,6 +1,6 @@
 //! Compatibility adapters: every semantic write crosses the document authority.
-pub mod desktop_commands;
 mod clipboard_legacy;
+pub mod desktop_commands;
 
 mod extensions;
 pub use extensions::capabilities as native_capabilities;
@@ -16,9 +16,9 @@ pub use figcraft::plugins::directory::compare_directory_versions;
 pub use figcraft::preview::preserves_preview as figcraft_preserves_preview;
 pub use figcraft::publish_server::normalize_figcraft_endpoint;
 pub use figcraft_protocol::{figcraft_tools, validate_figcraft_tool};
-mod libraries;
 mod legacy_read;
 mod legacy_view;
+mod libraries;
 mod mutations;
 mod paths;
 mod resources;
@@ -98,7 +98,10 @@ impl ToolRouter {
         self.extensions.release_session(session);
         self.legacy_clipboards.lock().unwrap().remove(session);
         self.fig_file_access.lock().unwrap().remove(session);
-        self.fig_team_publish_links.lock().unwrap().retain(|(owner, _), _| owner != session);
+        self.fig_team_publish_links
+            .lock()
+            .unwrap()
+            .retain(|(owner, _), _| owner != session);
         self.fig_design_clipboard
             .lock()
             .unwrap()
@@ -516,10 +519,20 @@ impl ToolRouter {
                 let style = styles
                     .get(&raw)
                     .ok_or_else(|| EngineError::invalid("layer not found"))?;
-                let (compatibility, native) = legacy_read::filtered_styles(style, projection.snapshot.nodes.get(&raw), args["keys"].as_array().map(Vec::as_slice));
-                let provenance = style.provenance.iter().filter(|(key, _)| native.contains_key(*key)).collect::<BTreeMap<_,_>>();
-                output.push(json!({"id":self.alias(session,id,&raw),"rawId":raw,"style":compatibility,
-                    "styles":native,"provenance":provenance,"diagnostics":style.diagnostics}));
+                let (compatibility, native) = legacy_read::filtered_styles(
+                    style,
+                    projection.snapshot.nodes.get(&raw),
+                    args["keys"].as_array().map(Vec::as_slice),
+                );
+                let provenance = style
+                    .provenance
+                    .iter()
+                    .filter(|(key, _)| native.contains_key(*key))
+                    .collect::<BTreeMap<_, _>>();
+                output.push(
+                    json!({"id":self.alias(session,id,&raw),"rawId":raw,"style":compatibility,
+                    "styles":native,"provenance":provenance,"diagnostics":style.diagnostics}),
+                );
             }
             return Ok(json!({"ok":true,"revision":snapshot.sequence,"styles":output}));
         }

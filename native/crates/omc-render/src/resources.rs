@@ -80,7 +80,8 @@ pub(super) fn load_image(
         // An untagged working surface treats source samples as already in its profile.
         // Normalize embedded raster assets before compositing into it.
         let image = if image.color_space().is_none() {
-            image.reinterpret_color_space(ColorSpace::new_srgb())
+            image
+                .reinterpret_color_space(ColorSpace::new_srgb())
                 .ok_or_else(|| RenderError::Backend("Image source profile tagging failed".into()))?
         } else {
             image

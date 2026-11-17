@@ -1149,7 +1149,13 @@ pub fn decode_wire_document(
     native_ids: &mut BTreeMap<u64, String>,
     page_ids: &mut BTreeMap<u64, String>,
 ) -> Result<(DocumentContent, usize)> {
-    decode_wire_document_with_comments(file, native_ids, page_ids, &mut WireComments::default(), None)
+    decode_wire_document_with_comments(
+        file,
+        native_ids,
+        page_ids,
+        &mut WireComments::default(),
+        None,
+    )
 }
 
 pub fn decode_wire_document_with_comments(
@@ -1366,7 +1372,14 @@ pub fn decode_wire_document_with_comments(
         }
     }
     content.validate().map_err(invalid)?;
-    comments::decode(file, &mut content, &node_ids, page_ids, comments, current_snapshot)?;
+    comments::decode(
+        file,
+        &mut content,
+        &node_ids,
+        page_ids,
+        comments,
+        current_snapshot,
+    )?;
     let marked = content
         .nodes
         .values()
@@ -1676,11 +1689,10 @@ pub fn encode_wire_document_with_comments(
     client: u32,
     comments: &mut WireComments,
 ) -> Result<Value> {
-    if snapshot
-        .metadata
-        .keys()
-        .any(|key| !matches!(key.as_str(), "annotationCategories" | "colorProfile") && !key.starts_with("comments/"))
-    {
+    if snapshot.metadata.keys().any(|key| {
+        !matches!(key.as_str(), "annotationCategories" | "colorProfile")
+            && !key.starts_with("comments/")
+    }) {
         return Err(unsupported("document-level styles or metadata"));
     }
     if snapshot.nodes.len() > MAX_NODES {

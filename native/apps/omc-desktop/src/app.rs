@@ -26,7 +26,7 @@ use omc_model::{DocumentSnapshot, Node, NodeKind};
 use omc_scene::{Scene, SceneOptions, build_scene};
 use serde_json::{Value, json};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     rc::Rc,
@@ -471,6 +471,7 @@ pub struct App {
     pub scene: Option<Arc<Scene>>,
     pub proof_scene: Option<Scene>,
     pub scene_generation: u64,
+    pub frame_preview: Cell<bool>,
     pub scene_cache: RefCell<SceneCache>,
     pub pan_cache: RefCell<PanCache>,
     pub move_cache: RefCell<crate::move_cache::MoveCache>,
@@ -549,7 +550,7 @@ pub struct App {
     background: bool,
     pub smoke_failed: bool,
     pub presented: bool,
-    trace_frames: bool,
+    pub(crate) trace_frames: bool,
     input_frame: Option<(&'static str, Instant)>,
     screenshot: Option<PathBuf>,
     pub clipboard: Option<arboard::Clipboard>,
@@ -721,6 +722,7 @@ impl App {
             scene: None,
             proof_scene: None,
             scene_generation: 0,
+            frame_preview: Cell::new(false),
             scene_cache: RefCell::default(),
             pan_cache: RefCell::new(pan_cache),
             move_cache: RefCell::default(),
@@ -1113,6 +1115,7 @@ impl App {
 
     fn draw_frame(&mut self, window: &Window) {
         self.queue_home_preview();
+        self.frame_preview.set(false);
         let trace = self.input_frame.take();
         let draw_start = Instant::now();
         match crate::paint::draw(self) {
@@ -1120,6 +1123,9 @@ impl App {
                 self.presented = true;
                 self.automation.last_frame = Some(draw_start.elapsed().as_secs_f64() * 1000.);
                 self.automation.frames_drawn = self.automation.frames_drawn.saturating_add(1);
+                if self.trace_frames {
+                    self.automation.last_frame_receipt = self.frame_receipt("submission");
+                }
                 if let Some((kind, start)) = trace {
                     eprintln!(
                         "Native frame {kind} input_to_submit_ms={:.3} draw_ms={:.3} camera={:.2},{:.2},{:.3}",
@@ -4200,6 +4206,11 @@ impl ApplicationHandler<Event> for App {
                             }
                             self.pan_view = false;
                             self.scene_generation = self.scene_generation.wrapping_add(1);
+                            self.automation.accepted_scene = json!({
+                                "documentId": reply.id, "epoch": reply.epoch,
+                                "sequence": reply.sequence.to_string(), "pageId": reply.page,
+                                "generation": self.scene_generation,
+                            });
                             self.scene = Some(Arc::new(scene));
                             self.proof_scene = reply.proof_scene;
                             let focus_lost = self.dev_focus_active()

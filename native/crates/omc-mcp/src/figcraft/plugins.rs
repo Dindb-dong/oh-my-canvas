@@ -6,14 +6,34 @@ use omc_plugin::{
 };
 use serde_json::Map;
 use std::{io::Read, path::PathBuf};
-pub(super) mod widgets;
 pub(crate) mod directory;
+pub(super) mod widgets;
 
 pub(super) const COMMANDS: &[(&str, &str, bool, &str)] = &[
-    ("plugin.directory.list", "Browse plugin directory", false, "server?, query?"),
-    ("plugin.directory.install", "Install plugin from directory", false, "id, version?, confirm, server?, sha256?"),
-    ("plugin.directory.publish", "Publish plugin to directory", false, "path | plugin, server"),
-    ("plugin.directory.unpublish", "Unpublish plugin from directory", false, "id, version?, server"),
+    (
+        "plugin.directory.list",
+        "Browse plugin directory",
+        false,
+        "server?, query?",
+    ),
+    (
+        "plugin.directory.install",
+        "Install plugin from directory",
+        false,
+        "id, version?, confirm, server?, sha256?",
+    ),
+    (
+        "plugin.directory.publish",
+        "Publish plugin to directory",
+        false,
+        "path | plugin, server",
+    ),
+    (
+        "plugin.directory.unpublish",
+        "Unpublish plugin from directory",
+        false,
+        "id, version?, server",
+    ),
     ("plugin.list", "List plugins", false, ""),
     ("plugins.manage", "Manage plugins", false, ""),
     (

@@ -441,7 +441,8 @@ fn shape_path(shape: &str, w: f64, h: f64) -> Result<String> {
 
 fn stamp(context: &Context) -> Result<Value> {
     // Stamp palette and mark geometry from FigCraft v0.17.0, MIT. See THIRD_PARTY_NOTICES.md.
-    let kind = omc_style::board_stamp_name(&context.params["stamp"]).map_err(EngineError::invalid)?;
+    let kind =
+        omc_style::board_stamp_name(&context.params["stamp"]).map_err(EngineError::invalid)?;
     let (name, color, marks): (&str, &str, &[(&str, bool)]) = match kind {
         "thumbsUp" => (
             "Thumbs up",

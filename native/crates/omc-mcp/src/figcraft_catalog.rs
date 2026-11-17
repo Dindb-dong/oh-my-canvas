@@ -1536,7 +1536,10 @@ impl ToolRouter {
     }
 }
 
-pub(super) fn node_page<'a>(snapshot: &'a DocumentSnapshot, id: &str) -> Option<&'a omc_model::Page> {
+pub(super) fn node_page<'a>(
+    snapshot: &'a DocumentSnapshot,
+    id: &str,
+) -> Option<&'a omc_model::Page> {
     let mut node = snapshot.nodes.get(id)?;
     while let Some(parent) = &node.parent_id {
         node = snapshot.nodes.get(parent)?;
@@ -2296,7 +2299,10 @@ fn comment_message(entry: &Value, people: &BTreeSet<&str>) -> Value {
     for reaction in &mut reactions {
         if let Some(users) = reaction["users"].as_array_mut() {
             for user in users {
-                if let Some(name) = user.as_str().and_then(|id| entry["reactionNames"][id].as_str()) {
+                if let Some(name) = user
+                    .as_str()
+                    .and_then(|id| entry["reactionNames"][id].as_str())
+                {
                     *user = json!(name);
                 }
             }
@@ -2361,7 +2367,14 @@ impl ToolRouter {
                 .get(author_id)
                 .or_else(|| entry["readBy"].get(who))
                 .and_then(Value::as_bool)
-                .map_or_else(|| entry["wireReadByAll"].as_bool().map_or(!authored(entry), |all| !all), |read| !read)
+                .map_or_else(
+                    || {
+                        entry["wireReadByAll"]
+                            .as_bool()
+                            .map_or(!authored(entry), |all| !all)
+                    },
+                    |read| !read,
+                )
         };
         let resolve_page = |default: &str| -> Result<&omc_model::Page> {
             let root = params
@@ -2609,12 +2622,11 @@ impl ToolRouter {
                         .ok()
                 })
                 .ok_or_else(|| EngineError::invalid("Invalid comment id or link"))?;
-            let mut found = entries
-                .iter()
-                .filter(|(raw, comment)| {
-                    let wire = comment["wireCommentId"].as_u64();
-                    comment["threadId"].is_null() && (wire == Some(id) || comment_alias(raw, wire) == id)
-                });
+            let mut found = entries.iter().filter(|(raw, comment)| {
+                let wire = comment["wireCommentId"].as_u64();
+                comment["threadId"].is_null()
+                    && (wire == Some(id) || comment_alias(raw, wire) == id)
+            });
             let (_, comment) = found
                 .next()
                 .ok_or_else(|| EngineError::invalid("Comment thread not found"))?;
@@ -2655,9 +2667,16 @@ impl ToolRouter {
                     ));
                 }
                 readers.insert(author_id.into(), json!(read));
-                let mut names = entry["readerNames"].as_object().cloned().unwrap_or_default();
+                let mut names = entry["readerNames"]
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
                 names.insert(author_id.into(), json!(who));
-                commands.push(catalog("comments", raw, json!({"readBy":readers,"readerNames":names}))?);
+                commands.push(catalog(
+                    "comments",
+                    raw,
+                    json!({"readBy":readers,"readerNames":names}),
+                )?);
             }
             let changed = commands.len();
             self.catalog_commit(session, snapshot, commands)?;
@@ -2813,15 +2832,24 @@ impl ToolRouter {
                         if !users.is_empty() {
                             reactions.push(json!({"emoji":emoji,"users":users}));
                         }
-                        let mut names = message["reactionNames"].as_object().cloned().unwrap_or_default();
+                        let mut names = message["reactionNames"]
+                            .as_object()
+                            .cloned()
+                            .unwrap_or_default();
                         if on {
                             names.insert(author.clone(), json!(who));
-                        } else if !reactions.iter().any(|reaction| reaction["users"].as_array()
-                            .is_some_and(|users| users.iter().any(|user| user == &author)))
-                        {
+                        } else if !reactions.iter().any(|reaction| {
+                            reaction["users"]
+                                .as_array()
+                                .is_some_and(|users| users.iter().any(|user| user == &author))
+                        }) {
                             names.remove(&author);
                         }
-                        commands.push(catalog("comments", id, json!({"reactions":reactions,"reactionNames":names}))?);
+                        commands.push(catalog(
+                            "comments",
+                            id,
+                            json!({"reactions":reactions,"reactionNames":names}),
+                        )?);
                     }
                     result = json!({"on":on});
                 }

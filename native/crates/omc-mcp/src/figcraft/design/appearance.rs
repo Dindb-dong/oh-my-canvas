@@ -410,7 +410,12 @@ fn default_color(kind: NodeKind, domain: &str) -> &'static str {
     }
 }
 
-pub(in crate::figcraft) fn paint_stack(properties: &Properties, kind: NodeKind, key: &str, single: &str) -> Vec<Value> {
+pub(in crate::figcraft) fn paint_stack(
+    properties: &Properties,
+    kind: NodeKind,
+    key: &str,
+    single: &str,
+) -> Vec<Value> {
     if let Some(list) = properties.get(key).and_then(Value::as_array) {
         return list.clone();
     }

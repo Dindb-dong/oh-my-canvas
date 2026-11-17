@@ -49,7 +49,15 @@ impl DockGroup {
         match self {
             Self::Move => &[Tool::Select, Tool::Scale, Tool::Pan],
             Self::Frame => &[Tool::Frame, Tool::Section, Tool::Slice],
-            Self::Vector => &[Tool::Pen, Tool::Pencil, Tool::ShapeBuilder, Tool::Marker, Tool::Highlighter, Tool::Eraser, Tool::Connector],
+            Self::Vector => &[
+                Tool::Pen,
+                Tool::Pencil,
+                Tool::ShapeBuilder,
+                Tool::Marker,
+                Tool::Highlighter,
+                Tool::Eraser,
+                Tool::Connector,
+            ],
             Self::Shape => &[
                 Tool::Rect,
                 Tool::Line,
@@ -349,40 +357,68 @@ fn tool_glyph(g: &Glyph<'_>, tool: Tool) {
         }
         Tool::Ellipse => g.circle(8., 8., 5.5),
         Tool::Pen => {
-            g.path(&[(8.,2.),(13.,8.),(11.,13.),(5.,13.),(3.,8.)],true);
-            g.line(8.,2.,8.,8.);
-            g.circle(8.,8.5,1.);
+            g.path(
+                &[(8., 2.), (13., 8.), (11., 13.), (5., 13.), (3., 8.)],
+                true,
+            );
+            g.line(8., 2., 8., 8.);
+            g.circle(8., 8.5, 1.);
         }
         Tool::Pencil => {
-            g.path(&[(3.,13.),(4.,9.),(11.,2.),(14.,5.),(7.,12.)],true);
-            g.line(9.5,3.5,12.5,6.5);
+            g.path(
+                &[(3., 13.), (4., 9.), (11., 2.), (14., 5.), (7., 12.)],
+                true,
+            );
+            g.line(9.5, 3.5, 12.5, 6.5);
         }
         Tool::Marker | Tool::Highlighter => {
-            g.path(&[(3.,13.),(4.,9.),(11.,2.),(14.,5.),(7.,12.)],true);
-            if tool == Tool::Highlighter { g.line(2.,14.,10.,14.); }
-            else { g.line(4.,9.,7.,12.); }
+            g.path(
+                &[(3., 13.), (4., 9.), (11., 2.), (14., 5.), (7., 12.)],
+                true,
+            );
+            if tool == Tool::Highlighter {
+                g.line(2., 14., 10., 14.);
+            } else {
+                g.line(4., 9., 7., 12.);
+            }
         }
         Tool::Eraser => {
-            g.path(&[(2.,10.),(8.,3.),(14.,8.),(9.,13.),(5.,13.)],true);
-            g.line(5.,7.,10.,12.);
-            g.line(9.,13.,14.,13.);
+            g.path(
+                &[(2., 10.), (8., 3.), (14., 8.), (9., 13.), (5., 13.)],
+                true,
+            );
+            g.line(5., 7., 10., 12.);
+            g.line(9., 13., 14., 13.);
         }
         Tool::Connector => {
-            g.path(&[(3.,12.),(3.,6.),(12.,6.),(12.,3.)],false);
-            g.path(&[(9.,5.),(12.,2.),(15.,5.)],false);
+            g.path(&[(3., 12.), (3., 6.), (12., 6.), (12., 3.)], false);
+            g.path(&[(9., 5.), (12., 2.), (15., 5.)], false);
         }
         Tool::Sticky => {
-            g.path(&[(2.,2.),(14.,2.),(14.,10.),(10.,14.),(2.,14.)],true);
-            g.path(&[(10.,14.),(10.,10.),(14.,10.)],false);
+            g.path(
+                &[(2., 2.), (14., 2.), (14., 10.), (10., 14.), (2., 14.)],
+                true,
+            );
+            g.path(&[(10., 14.), (10., 10.), (14., 10.)], false);
         }
         Tool::Stamp => {
-            g.path(&[(6.,8.),(5.,5.),(6.,2.),(10.,2.),(11.,5.),(10.,8.)],true);
-            g.rect(2.,8.,14.,13.,1.);
-            g.line(3.,15.,13.,15.);
+            g.path(
+                &[
+                    (6., 8.),
+                    (5., 5.),
+                    (6., 2.),
+                    (10., 2.),
+                    (11., 5.),
+                    (10., 8.),
+                ],
+                true,
+            );
+            g.rect(2., 8., 14., 13., 1.);
+            g.line(3., 15., 13., 15.);
         }
         Tool::ShapeBuilder => {
-            g.circle(6.,6.,3.5);
-            g.circle(10.,10.,3.5);
+            g.circle(6., 6., 3.5);
+            g.circle(10., 10., 3.5);
         }
         Tool::Line => g.line(3., 13., 13., 3.),
         Tool::Arrow => {
@@ -406,12 +442,18 @@ fn tool_glyph(g: &Glyph<'_>, tool: Tool) {
             true,
         ),
         Tool::Eyedropper => {
-            g.path(&[(3., 13.), (4., 10.), (10., 4.), (12., 6.), (6., 12.)], true);
+            g.path(
+                &[(3., 13.), (4., 10.), (10., 4.), (12., 6.), (6., 12.)],
+                true,
+            );
             g.line(9., 3., 13., 7.);
             g.line(11., 3., 13., 5.);
         }
         Tool::TextOnPath => {
-            g.path(&[(2., 12.), (5., 10.), (8., 9.5), (11., 10.5), (14., 12.5)], false);
+            g.path(
+                &[(2., 12.), (5., 10.), (8., 9.5), (11., 10.5), (14., 12.5)],
+                false,
+            );
             g.line(5., 3., 10., 3.);
             g.line(7.5, 3., 7.5, 7.5);
         }
@@ -739,7 +781,7 @@ mod tests {
         let menu = dock_flyout(dock, tool, viewport, group.tools().len());
         assert_eq!(menu.width, 220.);
         assert_eq!(menu.y + menu.height, dock.y - 8.);
-        assert_eq!(dock_flyout_rows(menu, group).count(), 2);
+        assert_eq!(dock_flyout_rows(menu, group).count(), 3);
     }
 
     #[test]

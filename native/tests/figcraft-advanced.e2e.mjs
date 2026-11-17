@@ -560,14 +560,6 @@ test('FigCraft handoff, component, comment and board commands change the native 
     await fig.close();
     service.kill();
     await exited;
-    for (let i = 0; i < 20; i++) {
-      try {
-        await rm(profile, { recursive: true, force: true });
-        break;
-      } catch (error) {
-        if (!['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(error.code) || i === 19) throw error;
-        await delay(50);
-      }
-    }
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

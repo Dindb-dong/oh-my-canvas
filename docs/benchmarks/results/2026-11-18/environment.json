@@ -1,0 +1,82 @@
+{
+  "initial_environment_snapshot": {
+    "schema_version": "omc-local-dev/environment/1",
+    "observed_at": "2026-11-17T09:41:32.952694+00:00",
+    "collector_revision": "9be5e60926416d65ff623645ac110ea36b406e69",
+    "collector_worktree_changed": true,
+    "host": {
+      "os": "Darwin",
+      "architecture": "arm64",
+      "kernel": "27.2.0",
+      "logical_cpus": 14,
+      "ram_bytes": 51539607552,
+      "os_version": "27.2.1",
+      "os_build": "26B131",
+      "machine_model": "Mac16,7",
+      "power_source": "Now drawing from 'Battery Power'"
+    },
+    "apps": {
+      "omc": {
+        "bundle_id": "studio.ohmycanvas.desktop",
+        "version": "0.1.0",
+        "build": "1",
+        "executable": "omc-desktop",
+        "executable_sha256": "d56f1240270b2cf5bf82aaf0f22755853c44499236a294282733f5c1c6d76af7"
+      },
+      "figma": {
+        "bundle_id": "com.figma.Desktop",
+        "version": "126.11.9",
+        "build": "126.11.9",
+        "executable": "Figma",
+        "executable_sha256": "fd53a6fab3ea31a97f3210ecbbbad2ff30709192b33b0195ba184370c469896d"
+      },
+      "paper": {
+        "bundle_id": "com.todesktop.2601167vjw8xe",
+        "version": "0.5.18",
+        "build": "261031pthw9s82w",
+        "executable": "Paper",
+        "executable_sha256": "7eb532a34a084aab0b9aab90c6bacb2015c0a6040986f0b05b0f5f045630fa4e"
+      },
+      "browser": {
+        "bundle_id": "com.google.Chrome",
+        "version": "157.0.8103.79",
+        "build": "8103.79",
+        "executable": "Google Chrome",
+        "executable_sha256": "23010a3aeff294b54c6e8dc9a88e61388ec4655e2c10216c8a4ae2c050bfcb1b"
+      }
+    },
+    "binary_sha256": {
+      "omc-service": "a6ec827d1abb15ba8f17a86788e8793435b2fc53f14a0845d41a730827d1aa2a"
+    },
+    "schema_sha256": {
+      "paper": "4d3de2ee58c7849dcd9d7b2504c504cbc78b46a627e3bd1ef07b9360781d7d33"
+    }
+  },
+  "ld03_prepared_omc_runtime": {
+    "llama_version": "version: 0.7.0 (build 11669, commit 620d2225c)\nbuilt with AppleClang 21.0.0.21000334 for Darwin arm64",
+    "argv": [
+      "/opt/homebrew/bin/llama-server",
+      "-m",
+      "sha256-5ee4f07cdb9beadbbb293e85803c569b01bd37ed059d2715faa7bb405f31caa6",
+      "--alias",
+      "qwen2.5:3b-instruct",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "<ephemeral-loopback-port>",
+      "--parallel",
+      "2",
+      "--jinja",
+      "--no-context-shift",
+      "--no-warmup",
+      "--ctx-size",
+      "65536",
+      "--slot-prompt-similarity",
+      "0.95",
+      "--no-cache-idle-slots"
+    ],
+    "model_bytes": 1929903008,
+    "speed_profile": "shared-60s-v1"
+  },
+  "scope": "Initial environment snapshot predates later collector/native desktop builds. Per-attempt registration pins take precedence. User work continued on this host. CPU/RAM caps were disabled."
+}

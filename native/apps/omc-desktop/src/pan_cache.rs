@@ -111,6 +111,10 @@ impl View {
         self.key == cached.key && self.distance(cached) <= cached.margin - guard
     }
 
+    fn covers_viewport_pixels(self, cached: Self) -> bool {
+        self.key == cached.key && self.distance(cached) <= cached.margin
+    }
+
     fn blit_origin(self, cached: Self) -> Option<(f32, f32)> {
         if self.key != cached.key {
             return None;
@@ -225,6 +229,19 @@ impl PanCache {
         self.epoch = self.epoch.wrapping_add(1);
         self.cached = None;
         self.failed = None;
+    }
+
+    pub fn covers_viewport(
+        &self,
+        generation: u64,
+        viewport: Rect,
+        scale: f64,
+        camera: Camera,
+        background: Color,
+    ) -> bool {
+        View::new(generation, viewport, scale, camera, background)
+            .zip(self.cached.as_ref())
+            .is_some_and(|(view, (cached, _))| view.covers_viewport_pixels(*cached))
     }
 
     /// Destination is already clipped to the workspace. Prewarming submits work without blitting.
@@ -378,6 +395,9 @@ mod tests {
             |x, y| View::new(1, viewport, 1., Camera { x, y, ..CAMERA }, Color::WHITE).unwrap();
         let initial = view(0., 0.);
         assert_eq!(initial.margin, 100);
+        assert!(view(100., 0.).covers_viewport_pixels(initial));
+        assert!(!view(101., 0.).covers_viewport_pixels(initial));
+        assert!(view(101., 0.).blit_origin(initial).is_some());
         for (x, y) in [(50., 0.), (0., -50.)] {
             assert!(view(x, y).cached_render_covers(initial));
         }

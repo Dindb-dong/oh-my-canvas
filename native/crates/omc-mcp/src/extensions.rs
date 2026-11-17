@@ -176,20 +176,33 @@ impl ToolRouter {
                             job.check_cancelled()?;
                             job.progress(json!({"phase":kind}));
                             let result = if kind == "import" {
-                                let bytes = if let Some(path) = job_args["filePath"].as_str() {
-                                    resources::read_explicit(path, 64 * 1024 * 1024)?
+                                let format = string(&job_args, "format")?;
+                                let (snapshot, diagnostics) = if format.eq_ignore_ascii_case("fig")
+                                    && job_args["filePath"].as_str().is_some()
+                                {
+                                    router.import_fig_file_job(
+                                        &captured,
+                                        string(&job_args, "filePath")?,
+                                        job_args["title"].as_str(),
+                                        true,
+                                        &job,
+                                    )?
                                 } else {
-                                    string(&job_args, "payload")?.as_bytes().to_vec()
+                                    let bytes = if let Some(path) = job_args["filePath"].as_str() {
+                                        resources::read_explicit(path, 64 * 1024 * 1024)?
+                                    } else {
+                                        string(&job_args, "payload")?.as_bytes().to_vec()
+                                    };
+                                    job.check_cancelled()?;
+                                    router.import_bytes_job(
+                                        &captured,
+                                        format,
+                                        &bytes,
+                                        job_args["title"].as_str(),
+                                        true,
+                                        Some(&job),
+                                    )?
                                 };
-                                job.check_cancelled()?;
-                                let (snapshot, diagnostics) = router.import_bytes_job(
-                                    &captured,
-                                    string(&job_args, "format")?,
-                                    &bytes,
-                                    job_args["title"].as_str(),
-                                    true,
-                                    Some(&job),
-                                )?;
                                 job.mark_committed();
                                 let mut value = router.context_from(&captured, &snapshot)?;
                                 value["diagnostics"] = diagnostics;

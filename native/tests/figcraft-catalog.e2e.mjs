@@ -376,6 +376,6 @@ test('FigCraft catalog commands render changes and persist components, styles, v
     await omc.close();
     service.kill();
     await exited;
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

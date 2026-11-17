@@ -8,8 +8,8 @@ mod css;
 mod drawing_defaults;
 pub use drawing_defaults::{copy_appearance_keys, drawing_defaults, is_appearance_key};
 mod length;
-mod references;
 pub mod prototype;
+mod references;
 mod selectors;
 pub use references::{ReferenceContext, catalog_entities};
 

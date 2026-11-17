@@ -13,11 +13,14 @@ pub type Properties = BTreeMap<String, Value>;
 pub const LOCAL_INVITATION_PREFIX: &str = "omc-native://join/";
 
 pub fn local_invitation_payload(link: &str) -> Option<&str> {
-    link.strip_prefix(LOCAL_INVITATION_PREFIX).filter(|payload| {
-        !payload.is_empty()
-            && payload.len() <= 12_000
-            && payload.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    })
+    link.strip_prefix(LOCAL_INVITATION_PREFIX)
+        .filter(|payload| {
+            !payload.is_empty()
+                && payload.len() <= 12_000
+                && payload
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        })
 }
 
 pub fn new_id(prefix: &str) -> String {

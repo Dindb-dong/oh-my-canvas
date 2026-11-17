@@ -404,6 +404,6 @@ ${designCopy.slice(8).replace(/=+$/,'')}(/figma)-->"></span>`,x:240,y:300});
     await client.close();
     service.kill();
     await exited;
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

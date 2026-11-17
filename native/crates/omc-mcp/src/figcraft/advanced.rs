@@ -425,23 +425,37 @@ pub(super) const COMMANDS: &[(&str, &str, bool, &str)] = &[
 impl ToolRouter {
     pub fn native_board_tool(&self, session: &str, args: &Value) -> Result<Value> {
         let command = string(args, "command")?;
-        if !matches!(command, "board.sticky" | "board.shape" | "board.stamp" | "board.connector") {
+        if !matches!(
+            command,
+            "board.sticky" | "board.shape" | "board.stamp" | "board.connector"
+        ) {
             return Err(EngineError::invalid("Unknown board creation tool"));
         }
-        let document = self.workspace.target(session, Some(string(args, "documentId")?))?;
+        let document = self
+            .workspace
+            .target(session, Some(string(args, "documentId")?))?;
         let snapshot = self.workspace.snapshot(&document)?;
-        let sequence = string(args, "sequence")?.parse::<u64>()
+        let sequence = string(args, "sequence")?
+            .parse::<u64>()
             .map_err(|_| EngineError::invalid("sequence must be a native revision number"))?;
         if string(args, "epoch")? != snapshot.epoch || sequence != snapshot.sequence {
-            return Err(EngineError::new("stale_revision", "The canvas changed during the gesture"));
+            return Err(EngineError::new(
+                "stale_revision",
+                "The canvas changed during the gesture",
+            ));
         }
-        let page = snapshot.pages.iter().find(|page| page.id == args["page"])
+        let page = snapshot
+            .pages
+            .iter()
+            .find(|page| page.id == args["page"])
             .ok_or_else(|| EngineError::invalid("The board page is unavailable"))?;
         self.context_from(session, &snapshot)?;
         let mut state = self.state(session, &document)?;
         state.page_id = page.id.clone();
         state.root = page.root_node_id.clone();
-        let mut params = args["params"].as_object().cloned()
+        let mut params = args["params"]
+            .as_object()
+            .cloned()
             .ok_or_else(|| EngineError::invalid("Expected board tool parameters"))?;
         params.remove("edit");
         if command == "board.connector" {
@@ -454,10 +468,18 @@ impl ToolRouter {
                 }
             }
         }
-        let result = self.fig_advanced_command(session, &snapshot, &state, &[], command, &Value::Object(params))?;
+        let result = self.fig_advanced_command(
+            session,
+            &snapshot,
+            &state,
+            &[],
+            command,
+            &Value::Object(params),
+        )?;
         let current = self.workspace.snapshot(&document)?;
         let selected = self.fig_layer(session, &current, &result["id"])?;
-        let edit_label = result.get("text")
+        let edit_label = result
+            .get("text")
             .map(|id| self.fig_layer(session, &current, id))
             .transpose()?;
         Ok(json!({"nativeSelection":[selected],"editLabel":edit_label}))

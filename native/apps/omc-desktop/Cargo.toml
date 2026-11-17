@@ -32,10 +32,11 @@ tempfile.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 skia-safe = { workspace = true, features = ["metal"] }
 objc2 = "=0.6.5"
+block2 = "=0.6.2"
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["NSApplication", "NSResponder", "NSView", "NSWindow", "objc2-quartz-core"] }
 objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["CFCGTypes"] }
-objc2-metal = { version = "=0.3.2", default-features = false, features = ["MTLCommandBuffer", "MTLCommandQueue", "MTLDevice"] }
-objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["CALayer", "CAMetalLayer", "CATransaction", "objc2-core-foundation", "objc2-metal"] }
+objc2-metal = { version = "=0.3.2", default-features = false, features = ["MTLCommandBuffer", "MTLCommandQueue", "MTLDevice", "block2", "objc2-core-foundation"] }
+objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["CABase", "CALayer", "CAMetalLayer", "CATransaction", "objc2-core-foundation", "objc2-metal"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 skia-safe = { workspace = true, features = ["vulkan"] }

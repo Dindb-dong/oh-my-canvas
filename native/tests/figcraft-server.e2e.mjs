@@ -55,12 +55,12 @@ async function withClient(work, existingProfile) {
       return output;
     };
     const run = (command, params = {}) => call('run_command', { command, params });
-    await work((server) => run('collab.serverInfo', { server }), run, call, profile);
+    await work((server) => run('collab.serverInfo', { server }), run, call, profile, { endpoint, token });
   } finally {
     await client.close().catch(() => {});
     if (service.exitCode === null) service.kill();
     await exited;
-    if (!existingProfile) await rm(profile, { recursive: true, force: true });
+    if (!existingProfile) await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 
@@ -217,7 +217,7 @@ test('Authenticated SDK publishes, browses, installs, runs, updates and removes 
       }
     });
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -268,7 +268,7 @@ test('The credential-free online server preference persists and supplies a direc
   } finally {
     for (const client of fixture.clients) client.terminate();
     await new Promise((resolve, reject) => fixture.close(error => error ? reject(error) : resolve()));
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -296,7 +296,7 @@ test('plugins.manage opens the native hidden editor and its controls run and rem
   const executable = process.platform === 'win32' ? 'omc-desktop.exe' : 'omc-desktop';
   const desktopBinary = process.env.OMC_DESKTOP_BINARY
     ?? fileURLToPath(new URL('../target/debug/' + executable, import.meta.url));
-  await withClient(async (_info, run, call, profile) => {
+  await withClient(async (_info, run, call, profile, { endpoint, token }) => {
     const pluginId = nativePlugin.manifest.id;
     const document = await run('file.new', { name: 'Background plugin manager fixture' });
     await run('plugin.import', nativePlugin);
@@ -307,6 +307,7 @@ test('plugins.manage opens the native hidden editor and its controls run and rem
     const guard = process.env.OMC_TEST_DESKTOP_FOCUS_GUARD;
     const watcher = guard ? spawn('python3', [guard, String(desktop.pid)], { stdio: 'inherit' }) : null;
     const watched = watcher ? once(watcher, 'exit') : null;
+    const workspace = new Client({ name: 'hidden-workspace-test', version: '1.0.0' });
     const until = async (predicate, message) => {
       for (let attempt = 0; attempt < 80 && desktop.exitCode === null; attempt++) {
         const ui = await call('inspect_ui');
@@ -317,7 +318,15 @@ test('plugins.manage opens the native hidden editor and its controls run and rem
       assert.fail(message);
     };
     try {
-      await until(ui => ui.attached && ui.documentId === document.id, 'background desktop did not attach');
+      await until(ui => ui.attached, 'background desktop did not attach');
+      await workspace.connect(new StreamableHTTPClientTransport(new URL('/mcp', endpoint), {
+        requestInit: { headers: { Authorization: `Bearer ${token}` } },
+      }));
+      const opened = await workspace.callTool({
+        name: 'workspace', arguments: { action: 'focus', documentId: document.id },
+      });
+      assert.equal(Boolean(opened.isError), false);
+      await until(ui => ui.documentId === document.id, 'background desktop did not open the fixture');
       const before = await call('screenshot', { window: true });
       assert.deepEqual(await run('plugins.manage'), await run('plugin.list'));
       let ui = await until(state => state.pluginManager?.plugins.length === 1, 'native manager did not render');
@@ -354,6 +363,7 @@ test('plugins.manage opens the native hidden editor and its controls run and rem
       await call('key', { key: 'Escape' });
       await until(state => state.pluginManager === null, 'native manager did not close');
     } finally {
+      await workspace.close().catch(() => {});
       if (desktop.exitCode === null) desktop.kill();
       await exited;
       if (watched) {
@@ -491,7 +501,7 @@ test('Authenticated SDK edits an online file in both directions and revokes real
         await owner('collab.manageFile', { file, action: 'remove' });
       }, profile).catch(() => {});
     }
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -566,7 +576,7 @@ for (const method of ['hosted', 'keyed']) {
           await owner('collab.manageFile', { file, action: 'remove' });
         }, profile).catch(() => {});
       }
-      await rm(profile, { recursive: true, force: true });
+      await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 }
@@ -660,7 +670,7 @@ test('Online recovery opens a divergent local archive beside the server document
       }
     });
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

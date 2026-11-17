@@ -10,7 +10,12 @@ mod guides;
 mod layout;
 
 pub(super) const COMMANDS: &[(&str, &str, bool, &str)] = &[
-    ("file.colorProfile", "Color profile", true, "profile?, convert?"),
+    (
+        "file.colorProfile",
+        "Color profile",
+        true,
+        "profile?, convert?",
+    ),
     (
         "fill.pattern",
         "Pattern fill",

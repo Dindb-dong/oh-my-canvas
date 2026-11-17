@@ -45,6 +45,16 @@ impl ToolRouter {
             },
         )
         .map_err(|e| EngineError::invalid(e.to_string()))?;
+        self.publish_imported(session, imported, title, job)
+    }
+
+    fn publish_imported(
+        &self,
+        session: &str,
+        imported: omc_import::ImportResult,
+        title: Option<&str>,
+        job: Option<&omc_workspace::jobs::JobContext>,
+    ) -> Result<(DocumentSnapshot, Value)> {
         let store = self.resources()?.0;
         for asset in imported.resources {
             let saved = store.ingest(&asset.bytes, &asset.media_type)?;
@@ -70,13 +80,90 @@ impl ToolRouter {
         }
         Ok((snapshot, json!(imported.diagnostics)))
     }
+    /// Seekable FIG jobs retain the canvas and one referenced asset, never the whole ZIP.
+    /// The reservation is the existing per-job limit; larger decoded graphs still fail closed.
+    pub(crate) fn import_fig_file_job(
+        &self,
+        session: &str,
+        path: &str,
+        title: Option<&str>,
+        strict: bool,
+        job: &omc_workspace::jobs::JobContext,
+    ) -> Result<(DocumentSnapshot, Value)> {
+        if !Path::new(path).is_absolute() {
+            return Err(EngineError::invalid(
+                "an explicit absolute filePath is required",
+            ));
+        }
+        let file = std::fs::File::open(path).map_err(resources::io_error)?;
+        let metadata = file.metadata().map_err(resources::io_error)?;
+        if !metadata.is_file() || metadata.len() > 256 * 1024 * 1024 {
+            return Err(EngineError::new(
+                "resource_limit",
+                "input must be a bounded regular file",
+            ));
+        }
+        let store = self.resources()?.0;
+        let failure = std::cell::RefCell::new(None);
+        let mut check = || {
+            job.check_cancelled().map_err(|error| {
+                *failure.borrow_mut() = Some(error);
+                omc_import::ImportError::Invalid("job cancelled before commit".into())
+            })
+        };
+        let mut sink = |bytes: &[u8], media: &str, hash: &str| {
+            let saved = store.ingest(bytes, media).map_err(|error| {
+                *failure.borrow_mut() = Some(error);
+                omc_import::ImportError::Invalid("asset staging failed".into())
+            })?;
+            if saved.hash != hash {
+                *failure.borrow_mut() = Some(EngineError::new(
+                    "corrupt_state",
+                    "import resource identity mismatch",
+                ));
+                return Err(omc_import::ImportError::Invalid(
+                    "import resource identity mismatch".into(),
+                ));
+            }
+            Ok(())
+        };
+        let imported = omc_import::import_fig_reader(
+            file,
+            &ImportOptions {
+                strict,
+                max_input_bytes: 256 * 1024 * 1024,
+                ..Default::default()
+            },
+            128 * 1024 * 1024,
+            &mut sink,
+            &mut check,
+        );
+        let imported = imported.map_err(|error| {
+            failure.into_inner().unwrap_or_else(|| match error {
+                omc_import::ImportError::ResourceLimit(message) => {
+                    EngineError::new("resource_limit", message)
+                }
+                other => EngineError::invalid(other.to_string()),
+            })
+        })?;
+        job.check_cancelled()?;
+        self.publish_imported(session, imported, title, Some(job))
+    }
+
     pub(crate) fn import_document(self: &Arc<Self>, session: &str, args: Value) -> Result<Value> {
         if let Some(path) = args["filePath"].as_str() {
             let size = std::fs::metadata(path).map_err(resources::io_error)?.len();
             if size > 4 * 1024 * 1024 {
-                let reserve = usize::try_from(size)
-                    .unwrap_or(usize::MAX)
-                    .saturating_mul(2);
+                let fig = args["format"]
+                    .as_str()
+                    .is_some_and(|format| format.eq_ignore_ascii_case("fig"));
+                let reserve = if fig {
+                    128 * 1024 * 1024
+                } else {
+                    usize::try_from(size)
+                        .unwrap_or(usize::MAX)
+                        .saturating_mul(2)
+                };
                 let router = Arc::clone(self);
                 let session = session.to_owned();
                 let owner = session.clone();
@@ -88,6 +175,18 @@ impl ToolRouter {
                     move |job| {
                         job.check_cancelled()?;
                         job.progress(json!({"phase":"reading"}));
+                        if fig {
+                            let (snapshot, diagnostics) = router.import_fig_file_job(
+                                &session,
+                                string(&args, "filePath")?,
+                                args["title"].as_str(),
+                                args["strict"].as_bool().unwrap_or(true),
+                                &job,
+                            )?;
+                            let mut result = router.context_from(&session, &snapshot)?;
+                            result["diagnostics"] = diagnostics;
+                            return Ok(result);
+                        }
                         let bytes =
                             resources::read_explicit(string(&args, "filePath")?, 64 * 1024 * 1024)?;
                         job.check_cancelled()?;

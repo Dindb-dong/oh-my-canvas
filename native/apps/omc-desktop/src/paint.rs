@@ -2813,6 +2813,14 @@ fn render_to_canvas(
                     true,
                 )
             {
+                app.frame_preview
+                    .set(!app.pan_cache.borrow().covers_viewport(
+                        app.scene_generation,
+                        viewport,
+                        scale,
+                        app.camera,
+                        crate::theme::color(WORKSPACE),
+                    ));
                 Some(Ok(()))
             } else {
                 let mut cache = app.scene_cache.borrow_mut();
@@ -2821,6 +2829,7 @@ fn render_to_canvas(
                         if panning
                             && cache.pan_preview(canvas, key, crate::theme::color(WORKSPACE)) =>
                     {
+                        app.frame_preview.set(true);
                         Some(Ok(()))
                     }
                     Some(key) => {
@@ -4136,7 +4145,12 @@ pub fn draw(app: &mut App) -> Result<bool, String> {
         let result = check_surface_size(size.width, size.height).and_then(|_| {
             presenter.present(&window, size, window.scale_factor(), |canvas| {
                 app.controls = controls(app);
-                render_to_canvas(app, canvas, scale, true)
+                render_to_canvas(app, canvas, scale, true)?;
+                Ok(if app.trace_frames {
+                    app.frame_receipt("painted")
+                } else {
+                    serde_json::Value::Null
+                })
             })
         });
         app.gpu_presenter = Some(presenter);
@@ -4278,7 +4292,7 @@ mod tests {
             let tools: Vec<_> = figcraft_chrome::dock_groups(dock)
                 .map(|(_, r, _)| r)
                 .collect();
-            assert_eq!(tools.len(), 4);
+            assert_eq!(tools.len(), 5);
             let mut end = dock.x;
             for rect in tools
                 .into_iter()

@@ -42,7 +42,11 @@ impl DesktopAutomation {
 
     pub fn detach(&self, session: &str) {
         let mut state = self.state.lock().unwrap();
-        if state.plugin_manager.as_ref().is_some_and(|(_, manager)| manager == session) {
+        if state
+            .plugin_manager
+            .as_ref()
+            .is_some_and(|(_, manager)| manager == session)
+        {
             state.plugin_manager = None;
         }
         if state
@@ -68,17 +72,26 @@ impl DesktopAutomation {
 
     pub fn plugin_manager_session(&self, desktop: &str, lease: Option<&str>) -> Result<String> {
         let state = self.state.lock().unwrap();
-        if !state.owner.as_ref().is_some_and(|(owner, at)| {
-            owner == desktop && at.elapsed() < OWNER_TIMEOUT
-        }) {
-            return Err(EngineError::new("authentication_failed", "Desktop broker session required"));
+        if !state
+            .owner
+            .as_ref()
+            .is_some_and(|(owner, at)| owner == desktop && at.elapsed() < OWNER_TIMEOUT)
+        {
+            return Err(EngineError::new(
+                "authentication_failed",
+                "Desktop broker session required",
+            ));
         }
         match lease {
             None => Ok(desktop.into()),
-            Some(lease) => state.plugin_manager.as_ref()
+            Some(lease) => state
+                .plugin_manager
+                .as_ref()
                 .filter(|(active, _)| active == lease)
                 .map(|(_, session)| session.clone())
-                .ok_or_else(|| EngineError::new("authentication_failed", "Plugin manager is no longer open")),
+                .ok_or_else(|| {
+                    EngineError::new("authentication_failed", "Plugin manager is no longer open")
+                }),
         }
     }
 
