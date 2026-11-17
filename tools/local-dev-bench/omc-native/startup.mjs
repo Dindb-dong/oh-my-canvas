@@ -30,10 +30,18 @@ export function verifyCatalog(rows, titles, thumbnails) {
   assert.deepEqual(rows.map(row => row.title).sort(), [...titles].sort());
   assert.equal(new Set(rows.map(row => row.id)).size, titles.length, 'Saved document identities must be distinct');
   const pngs = rows.filter(row => typeof row.thumbnail === 'string');
-  assert.equal(pngs.length, thumbnails ? Math.min(titles.length, 15) : 0);
+  assert.equal(pngs.length, thumbnails ? Math.min(titles.length, 15) : 0,
+    'Catalog did not include the expected designated thumbnails');
   assert.ok(pngs.every(row => Buffer.from(row.thumbnail, 'base64').subarray(0, PNG.length).equals(PNG)),
     'Expected a native PNG thumbnail');
   return {count: rows.length, thumbnails: pngs.length};
+}
+
+export function authoredDocument(doc) {
+  const {document} = makeFixture({experiment: 'N-A', nodeCount: doc.nodes, depth: 1, cssRules: 0});
+  document.title = doc.title;
+  document.nodes[document.pages[0].rootNodeId].properties.figThumbnail = true;
+  return document;
 }
 
 async function stop(child) {
@@ -103,8 +111,7 @@ async function run(fixture, binary, report, signal) {
   }
 
   async function seed(doc) {
-    const {document} = makeFixture({experiment: 'N-A', nodeCount: doc.nodes, depth: 1, cssRules: 0});
-    document.title = doc.title;
+    const document = authoredDocument(doc);
     const path = join(profile, 'source.json');
     await writeFile(path, JSON.stringify(document), {mode: 0o600});
     const call = async (name, args) => {

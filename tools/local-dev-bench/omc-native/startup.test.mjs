@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {plan, verifyCatalog} from './startup.mjs';
+import {authoredDocument, plan, verifyCatalog} from './startup.mjs';
 
 test('N-F varies saved count, document size, and target size independently', () => {
   for (const count of [0, 15, 100]) {
@@ -11,6 +11,9 @@ test('N-F varies saved count, document size, and target size independently', () 
     assert.equal(fixture.target.nodes, 100);
   }
   assert.throws(() => plan(16, 100, 100));
+  const doc = authoredDocument(plan(0, 100, 100).target);
+  assert.equal(Object.values(doc.nodes).filter(node => node.properties.figThumbnail === true).length, 1);
+  assert.equal(doc.nodes[doc.pages[0].rootNodeId].properties.figThumbnail, true);
 });
 
 test('N-F preserves real library identity and its supported thumbnail cap', () => {
