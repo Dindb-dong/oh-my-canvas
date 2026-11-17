@@ -83,6 +83,8 @@ export function validateEvidence(plan, evidence) {
     'asset_font_ready', 'first_accepted_edit', 'warm_reopen_requested', 'warm_reopen_content',
     'warm_reopen_verified',
   ]);
+  assert.equal(evidence.events.find(event => event.name === 'first_window').status, 'unobservable');
+  assert.equal(typeof evidence.saveResponseObserved, 'boolean');
   let previous = 0;
   for (const event of evidence.events) {
     if (event.status === 'observed') {
@@ -270,6 +272,7 @@ async function createDriver(plan, storageState, endpoint) {
 async function main(args) {
   const [action, input, count] = args;
   if (action === 'plan' && input && count !== undefined && args.length === 3) {
+    assert.match(count, /^(0|15|100)$/);
     console.log(JSON.stringify(makeCase(input, Number(count)), null, 2));
     return;
   }
