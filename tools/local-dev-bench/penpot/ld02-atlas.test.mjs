@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
 import {
-  atlasDifferences,atlasInventory,atlasTarget,readAtlasPage,readAtlasPages,runAtlasModel,seedAtlasPage,validateFixture,
+  atlasDifferences,atlasInventory,atlasTarget,readAtlasPage,readAtlasPages,reopenAtlas,runAtlasModel,seedAtlasPage,validateFixture,
 } from './ld02-atlas.mjs';
 
 const generator = 'tools/local-dev-bench/workloads/synthetic.py';
@@ -15,6 +15,17 @@ const id = '00000000-0000-4000-8000-000000000001';
 const copyId = '00000000-0000-4000-8000-000000000002';
 const Async = (async () => {}).constructor;
 const evalScript = (code,penpot) => new Async('penpot',code)(penpot);
+
+test('normal reopen closes the old workspace and awaits document readiness before attach',async()=>{
+  const calls=[];
+  const fresh={goto:async(url,options)=>calls.push(['navigate',url,options])};
+  const original={close:async()=>calls.push(['closed'])};
+  const context={newPage:async()=>{calls.push(['created']);return fresh;}};
+  const url=new URL('http://localhost:19001/?screen=workspace');
+  const result=await reopenAtlas(original,context,url,async page=>{assert.equal(page,fresh);calls.push(['attached']);});
+  assert.equal(result,fresh);
+  assert.deepEqual(calls,[['created'],['closed'],['navigate',url.href,{waitUntil:'domcontentloaded'}],['attached']]);
+});
 
 function synthetic(fileId) {
   let serial = 0;

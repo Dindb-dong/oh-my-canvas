@@ -292,13 +292,15 @@ async function waitValues(execute, fixture, id, expectedSide) {
   }
 }
 
-async function reopen(page, context, url) {
+export async function reopenAtlas(page, context, url, attach = connectEditor) {
   const next = await context.newPage();
   await page.close();
-  await next.goto(url.href);
-  await connectEditor(next);
+  await next.goto(url.href,{waitUntil:'domcontentloaded'});
+  await attach(next);
   return next;
 }
+
+const reopen = reopenAtlas;
 
 function waitSave(page, origin) {
   return page.waitForResponse(response => response.ok() && new URL(response.url()).origin === origin &&
@@ -331,6 +333,9 @@ async function replay(origin, fixture, modelCommand, prepare, prepared) {
   let phase = 'synthetic account setup';
   const modelTools = [];
   let edit = [];
+  const startedAt = performance.now();
+  const timeline = [];
+  const mark = name => timeline.push({phase:name,elapsedMs:performance.now()-startedAt});
   try {
     browser = await chromium.launch({channel:'chrome',headless:true});
     const enrolled = prepared && JSON.parse(await readFile(prepared,'utf8'));
@@ -346,7 +351,7 @@ async function replay(origin, fixture, modelCommand, prepare, prepared) {
     await client.connect(new StreamableHTTPClientTransport(endpoint));
     let editor = enrolled ? await context.newPage() : await newFile(dashboard,context,origin);
     const workspace = enrolled ? preparedWorkspace(enrolled.workspace,origin) : new URL(editor.url());
-    if (enrolled) await editor.goto(workspace.href);
+    if (enrolled) await editor.goto(workspace.href,{waitUntil:'domcontentloaded'});
     await editor.getByRole('toolbar',{name:'Drawing tools'}).waitFor();
     assert.equal(workspace.origin,origin);
     const id = workspace.searchParams.get('file-id');
@@ -366,6 +371,7 @@ async function replay(origin, fixture, modelCommand, prepare, prepared) {
     await readAfterAttach(() => execute(`${guard(id)} return penpot.currentFile.id;`));
 
     phase = 'seed ten native Atlas pages';
+    mark(phase);
     const setupStarted = performance.now();
     let initialSaveObserved, before, copy;
     if (enrolled) {
@@ -406,6 +412,7 @@ async function replay(origin, fixture, modelCommand, prepare, prepared) {
     const setupMs = performance.now()-setupStarted;
 
     phase = 'three semantic edits on original';
+    mark(phase);
     const started = performance.now();
     let saved;
     if (modelCommand) {
@@ -420,14 +427,19 @@ async function replay(origin, fixture, modelCommand, prepare, prepared) {
       await waitValues(execute,fixture,id,'to');
     }
     const editMs = performance.now()-started;
+    mark('model or deterministic edit returned');
     const candidate = await capture(execute,fixture,id);
+    mark('candidate capture complete');
     const saveObserved = await saved;
     if (saveObserved instanceof Error) throw saveObserved;
     phase = 'normal original reopen';
+    mark(phase);
     editor = await reopen(editor,context,workspace);
     const reopened = await capture(execute,fixture,id);
+    mark('original reopen capture complete');
     const reopenMs = performance.now()-started;
     phase = 'independently verify Undo and Redo on native copy';
+    mark(phase);
     editor = await reopen(editor,context,copy.url);
     const copyBefore = await verifyStart(execute,fixture,copy.id,'copy-before');
     if (enrolled) assert.equal(identityHash(copyBefore),enrolled.copyIdentitySha256);
@@ -443,6 +455,7 @@ async function replay(origin, fixture, modelCommand, prepare, prepared) {
     await waitValues(execute,fixture,copy.id,'to');
     const copyRedo = await capture(execute,fixture,copy.id);
     phase = 'read the protected original';
+    mark(phase);
     editor = await reopen(editor,context,workspace);
     const afterProbeOriginal = await capture(execute,fixture,id);
     const evidence = {
@@ -451,6 +464,7 @@ async function replay(origin, fixture, modelCommand, prepare, prepared) {
       ...(modelCommand ? {modelTools} : {}),
     };
     await publishCandidate(process.env.OMC_BENCH_CANDIDATE,evidence);
+    mark('candidate published');
     console.log(JSON.stringify({workload:'LD02',sourceFamily:fixture.source_family_id,setupMs,editMs,reopenMs,
       initialSaveObserved,saveObserved,
       scope:modelCommand ? 'model-assisted canonical native Atlas edit' : 'native product-only canonical Atlas gate'}));
@@ -461,6 +475,9 @@ async function replay(origin, fixture, modelCommand, prepare, prepared) {
   } finally {
     await Promise.allSettled([client.close(),browser?.close()]);
     const output = process.env.OMC_BENCH_OUTPUT_DIR;
+    mark('cleanup complete');
+    if (output) await writeFile(join(output,'ld02-phase-timings.json'),
+      JSON.stringify({lastPhase:phase,timeline})+'\n',{flag:'wx',mode:0o600});
     if (modelCommand && output) await writeFile(join(output,'ld02-model-actions.json'),
       JSON.stringify({edit,modelTools}) + '\n',{flag:'wx',mode:0o600});
   }
