@@ -70,7 +70,7 @@ function storedId(id) {
   return 'doc_' + id.replaceAll('-', '');
 }
 
-async function startService(binary, profile, signal) {
+export async function startService(binary, profile, signal) {
   const {Client, StreamableHTTPClientTransport} = await import('../replays/mcp.mjs');
   const child = spawn(binary, ['--profile', profile, '--port', '0'], {stdio: ['ignore', 2, 2]});
   let client;
@@ -120,11 +120,12 @@ async function startService(binary, profile, signal) {
       assert.ok(!response.isError, `${args.command ?? name}: ${JSON.stringify(content)}`);
       return content;
     }
-    async function rpc(method, id) {
+    async function rpc(method, target = {}) {
       const response = await fetch(new URL('/rpc', url), {
         method: 'POST',
         headers: {...headers, 'Content-Type': 'application/json', 'X-OMC-Session': transport.sessionId},
-        body: JSON.stringify({id: randomUUID(), method, params: {documentId: storedId(id)}}),
+        body: JSON.stringify({id: randomUUID(), method,
+          params: typeof target === 'string' ? {documentId: storedId(target)} : target}),
         signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
       });
       const body = await response.json();
