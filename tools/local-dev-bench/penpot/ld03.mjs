@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import {randomBytes} from 'node:crypto';
-import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {createHash, randomBytes} from 'node:crypto';
+import {lstat, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -14,14 +14,14 @@ import {runLD03Agent, withLD03Broker} from '../ld03-model.mjs';
 import {publishCandidate} from '../publish-candidate.mjs';
 
 const marker = 'LD03 ';
-const fileName = 'OMC Benchmark LD03 / field-relay';
 const tokenSet = 'LD03 shared values';
 const idPattern = /^[a-f0-9-]{36}$/i;
 const card = /^target\/(\d+)\/(\d+)$/;
 
 export function planFieldRelay(fixture) {
   assert.equal(fixture.workload, 'LD03');
-  assert.equal(fixture.source_family_id, 'field-relay');
+  const edition = fixture.source_family_id === 'edition-grid';
+  assert.ok(edition || fixture.source_family_id === 'field-relay', 'Unknown LD03 fixture family');
   assert.equal(fixture.start.nodes.length, fixture.logical_objects);
   assert.equal(fixture.target_references, 40);
   assert.equal(fixture.local_overrides, 4);
@@ -33,10 +33,18 @@ export function planFieldRelay(fixture) {
     const match = card.exec(node.key);
     let box;
     if (node.key === 'board') box = [0, 0, 1440, 960];
-    else if (match) box = [10, 46 + Number(match[2]) * 98, 204, 90];
-    else if (/^target\/\d+$/.test(node.key)) box = [20 + Number(node.key.at(-1)) * 232, 76, 224, 844];
-    else if (node.key === 'keep') box = [1180, 76, 240, 844];
+    // Edition grid gives each department wrapper two separate ten-card columns.
+    else if (node.key === 'board/editorial') box = [20, 76, 552, 844];
+    else if (node.key === 'board/distribution') box = [596, 76, 552, 844];
+    else if (match) {
+      const row = Number(match[2]);
+      box = edition ? [10, 44 + row * 78, 240, 74] : [10, 46 + row * 98, 204, 90];
+    } else if (/^target\/\d+$/.test(node.key)) {
+      const group = Number(node.key.at(-1));
+      box = edition ? [8 + (group % 2) * 268, 8, 260, 828] : [20 + group * 232, 76, 224, 844];
+    } else if (node.key === 'keep') box = [1180, 76, 240, 844];
     else if (/^keep\/\d+$/.test(node.key)) box = [10, 46 + Number(node.key.at(-1)) * 98, 216, 90];
+    if (node.kind !== 'text') assert.ok(box, `No geometry for LD03 object ${node.key}`);
     return {...node, box};
   });
 }
@@ -332,7 +340,65 @@ export async function duplicateFromDashboard(page, context, origin, name) {
   return {opened, url, id:url.searchParams.get('file-id')};
 }
 
-async function replay(origin, fixture, modelCommand) {
+export function preparedIdentityHash(state) {
+  const pairs = rows => rows.map(({key,native_id})=>[key,native_id]).sort(([a],[b])=>a.localeCompare(b));
+  return createHash('sha256').update(JSON.stringify([state.document_id,pairs(state.nodes),pairs(state.styles)])).digest('hex');
+}
+
+export function validatePreparedDescriptor(fixture,origin,prepared) {
+  assert.equal(prepared.schema,'omc-penpot-ld03-prepared/1');
+  assert.equal(prepared.fixtureSha256,fixture.fixture_sha256,'Prepared fixture differs');
+  assert.equal(prepared.fileName,`OMC Benchmark LD03 / ${fixture.source_family_id}`);
+  const workspace = new URL(prepared.workspace);
+  assert.equal(workspace.origin,origin);
+  assert.ok(!workspace.username && !workspace.password);
+  assert.equal(workspace.searchParams.get('screen'),'workspace');
+  for (const key of ['file-id','page-id']) assert.match(workspace.searchParams.get(key),idPattern);
+  assert.match(prepared.baselineIdentitySha256,/^[a-f0-9]{64}$/);
+  assert.match(prepared.saveFence.pageId,idPattern);
+  assert.equal(workspace.searchParams.get('page-id'),prepared.saveFence.pageId);
+  assert.match(prepared.saveFence.marker,/^[a-f0-9]{32}$/);
+  assert.ok(Array.isArray(prepared.storageState.cookies) && Array.isArray(prepared.storageState.origins));
+  assert.ok(prepared.storageState.origins.every(row=>row.origin === origin),'Unexpected prepared storage origin');
+  return workspace;
+}
+
+export function requirePreparedBaseline(fixture,prepared,state) {
+  assert.equal(state.document_id,new URL(prepared.workspace).searchParams.get('file-id'));
+  assert.deepEqual(stateDifferences(fixture.start,state),[],'Prepared native baseline differs');
+  assert.equal(preparedIdentityHash(state),prepared.baselineIdentitySha256,'Prepared native identities changed');
+}
+
+export async function loadPreparedDescriptor(path,fixture,origin) {
+  const info = await lstat(path);
+  assert.ok(info.isFile() && (info.mode & 0o077) === 0,'Prepared credentials must be a private regular file');
+  const enrolled = JSON.parse(await readFile(path,'utf8'));
+  return {enrolled,workspace:validatePreparedDescriptor(fixture,origin,enrolled)};
+}
+
+export function preparationSaveFence(fileId,marker) {
+  assert.match(marker,/^[a-f0-9]{32}$/);
+  return `${guard(fileId)}
+    const page = penpot.currentPage;
+    const saved = new Promise((resolve,reject)=>{
+      const listener = penpot.on("contentsave",()=>{clearTimeout(timer);penpot.off(listener);resolve(true);});
+      const timer = setTimeout(()=>{penpot.off(listener);reject(new Error("LD03 preparation contentsave deadline"));},20000);
+    });
+    page.setPluginData("ld03-save-fence",${JSON.stringify(marker)});
+    await saved;
+    return {pageId:page.id,marker:page.getPluginData("ld03-save-fence"),contentsave:true};`;
+}
+
+export function readPreparationFence(fileId,pageId) {
+  assert.match(pageId,idPattern);
+  return `${guard(fileId)}
+    const page = penpot.currentFile.pages.find(page=>page.id === ${JSON.stringify(pageId)});
+    if (!page) throw new Error("Missing LD03 prepared page");
+    return page.getPluginData("ld03-save-fence");`;
+}
+
+async function replay(origin, fixture, modelCommand, {prepare,prepared} = {}) {
+  const fileName = `OMC Benchmark LD03 / ${fixture.source_family_id}`;
   const {benchRequire, Client, StreamableHTTPClientTransport} = await import('../replays/mcp.mjs');
   const {chromium} = benchRequire('playwright');
   const client = new Client({name:'omc-ld03-replay', version:'1'});
@@ -345,23 +411,33 @@ async function replay(origin, fixture, modelCommand) {
   try {
     await waitForBackend(origin);
     browser = await chromium.launch({channel:'chrome', headless:true});
-    const context = await browser.newContext({locale:'en-US', viewport:{width:1440,height:960}});
+    let enrolled, preparedWorkspace;
+    if (prepared) {
+      const loaded = await loadPreparedDescriptor(prepared,fixture,origin);
+      enrolled = loaded.enrolled; preparedWorkspace = loaded.workspace;
+    }
+    const context = await browser.newContext({locale:'en-US', viewport:{width:1440,height:960},
+      ...(enrolled ? {storageState:enrolled.storageState} : {})});
     context.setDefaultTimeout(15000);
     const dashboard = await context.newPage();
-    await createAccount(dashboard, origin, email, password);
+    if (enrolled) await dashboard.goto(origin);
+    else await createAccount(dashboard, origin, email, password);
     endpoint = await getMcpEndpoint(dashboard, origin);
     await client.connect(new StreamableHTTPClientTransport(endpoint));
-    let editor = await newFile(dashboard, context, origin);
+    let editor = enrolled ? await context.newPage() : await newFile(dashboard, context, origin);
+    if (enrolled) await editor.goto(preparedWorkspace.href,{waitUntil:'domcontentloaded'});
     await editor.getByRole('toolbar', {name:'Drawing tools'}).waitFor();
-    const workspace = new URL(editor.url());
+    const workspace = preparedWorkspace ?? new URL(editor.url());
     assert.equal(workspace.origin, origin);
     const id = workspace.searchParams.get('file-id');
     assert.match(id, idPattern);
-    await editor.locator('header [class*="file-name-label"]').dblclick();
-    const title = editor.locator('header input[class*="file-name-input"]');
-    await title.fill(fileName);
-    await title.press('Enter');
-    await editor.getByText(fileName, {exact:true}).waitFor();
+    if (!enrolled) {
+      await editor.locator('header [class*="file-name-label"]').dblclick();
+      const title = editor.locator('header input[class*="file-name-input"]');
+      await title.fill(fileName);
+      await title.press('Enter');
+      await editor.getByText(fileName, {exact:true}).waitFor();
+    }
     if (editor !== dashboard) await dashboard.close();
 
     await connectEditor(editor);
@@ -369,11 +445,39 @@ async function replay(origin, fixture, modelCommand) {
       name:'execute_code', arguments:{code},
     }, undefined, {timeout:20000}));
     await readAfterAttach(() => execute(`${guard(id)} return penpot.currentFile.id;`));
-    phase = 'seed native field-relay tokens and shapes';
+    phase = enrolled ? 'verify frozen prepared native baseline' : `seed native ${fixture.source_family_id} tokens and shapes`;
     const setup = performance.now();
-    assert.deepEqual(await execute(seedFieldRelay(fixture, id)), {nodes:fixture.logical_objects, styles:4});
-    const before = await takeState(execute, id, fixture.start);
+    if (!enrolled) assert.deepEqual(await execute(seedFieldRelay(fixture, id)), {nodes:fixture.logical_objects, styles:4});
+    let before = await takeState(execute, id, fixture.start);
     await requireState(fixture.start, before, 'baseline');
+    if (enrolled) {
+      requirePreparedBaseline(fixture,enrolled,before);
+      assert.equal(await readAfterAttach(()=>execute(readPreparationFence(id,enrolled.saveFence.pageId))),enrolled.saveFence.marker,
+        'Prepared save fence differs');
+    }
+    if (prepare) {
+      phase = 'persist prepared baseline with an actual content save fence';
+      const marker = randomBytes(16).toString('hex');
+      const response = editor.waitForResponse(reply=>reply.ok() && new URL(reply.url()).origin === origin &&
+        reply.url().includes('/update-file') && reply.request().method() === 'POST' && reply.request().postData()?.includes(marker),
+      {timeout:22000}).then(()=>true,error=>error);
+      const fence = await execute(preparationSaveFence(id,marker));
+      const receipt = await response; if (receipt instanceof Error) throw receipt;
+      assert.equal(fence.contentsave,true); assert.equal(fence.marker,marker);
+      phase = 'independent normal reopen of frozen prepared baseline';
+      editor = await reopenPage(editor,context,workspace);
+      assert.equal(await readAfterAttach(()=>execute(readPreparationFence(id,fence.pageId))),marker);
+      const reopened = await takeState(execute,id,fixture.start);
+      await requireState(fixture.start,reopened,'prepared-reopened-baseline');
+      assert.equal(preparedIdentityHash(reopened),preparedIdentityHash(before),'Prepared baseline identities changed on reopen');
+      before = reopened;
+      const descriptor = {schema:'omc-penpot-ld03-prepared/1',fixtureSha256:fixture.fixture_sha256,
+        workspace:workspace.href,fileName,baselineIdentitySha256:preparedIdentityHash(before),
+        saveFence:{pageId:fence.pageId,marker},storageState:await context.storageState()};
+      validatePreparedDescriptor(fixture,origin,descriptor);
+      await writeFile(prepare,JSON.stringify(descriptor)+'\n',{flag:'wx',mode:0o600});
+      return;
+    }
     const setupMs = performance.now() - setup;
     phase = 'apply two original token updates';
     const started = performance.now();
@@ -438,7 +542,7 @@ async function replay(origin, fixture, modelCommand) {
       ...(modelCommand ? {candidateActions,modelTools} : {})};
     await publishCandidate(process.env.OMC_BENCH_CANDIDATE, evidence);
     console.log(JSON.stringify({workload:'LD03', sourceFamily:fixture.source_family_id,
-      setupMs, editedMs, reopenedMs, saveResponseObserved:saveResult,
+      setupMs, editedMs, reopenedMs, saveResponseObserved:saveResult, preparedStart:Boolean(enrolled),
       scope:modelCommand ? 'model-assisted native shared-value edit' : 'native deterministic shared-value edit'}));
   } catch (error) {
     const secrets = [email,password,endpoint?.searchParams.get('userToken')].filter(Boolean);
@@ -451,10 +555,13 @@ async function replay(origin, fixture, modelCommand) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const {positionals,values} = parseArgs({allowPositionals:true,options:{'model-command':{type:'string'}}});
-  assert.equal(positionals.length,2,'Use ld03.mjs LOOPBACK_ORIGIN CANONICAL_FIELD_RELAY_JSON [--model-command EXECUTABLE]');
-  assert.ok(process.env.OMC_BENCH_CANDIDATE, 'Set OMC_BENCH_CANDIDATE for the neutral grader');
+  const {positionals,values} = parseArgs({allowPositionals:true,options:{
+    'model-command':{type:'string'},prepare:{type:'string'},prepared:{type:'string'},
+  }});
+  assert.equal(positionals.length,2,'Use ld03.mjs LOOPBACK_ORIGIN CANONICAL_LD03_JSON [--prepare OUT | --prepared INPUT] [--model-command EXECUTABLE]');
+  assert.ok(!values.prepare || (!values.prepared && !values['model-command']),'Preparation cannot edit or use another prepared baseline');
+  assert.ok(values.prepare || process.env.OMC_BENCH_CANDIDATE, 'Set OMC_BENCH_CANDIDATE for the neutral grader');
   const fixture = JSON.parse(await readFile(positionals[1], 'utf8'));
   planFieldRelay(fixture);
-  await replay(loopbackOrigin(positionals[0]),fixture,values['model-command']);
+  await replay(loopbackOrigin(positionals[0]),fixture,values['model-command'],values);
 }
