@@ -11,25 +11,28 @@ import {parseArgs} from 'node:util';
 
 import {makeFixture, targetNodeName} from './fixture.mjs';
 import {historySchedule, measureHistory} from './history.mjs';
+import {collectDesktopTrace, measureRendering} from './rendering.mjs';
 
 const {values} = parseArgs({options: {
   experiment: {type: 'string'},
   nodes: {type: 'string'},
   depth: {type: 'string', default: '1'},
-  desktop: {type: 'string', default: 'headless'},
+  desktop: {type: 'string'},
   samples: {type: 'string', default: '5'},
   'css-rules': {type: 'string', default: '0'},
   'history-edits': {type: 'string'},
   'history-shape': {type: 'string'},
   'fixture-only': {type: 'boolean', default: false},
 }});
-const {experiment, desktop} = values;
+const {experiment} = values;
 const isHistory = experiment === 'N-C';
-const nodeCount = Number(values.nodes ?? (isHistory ? 17 : NaN));
+const isRendering = experiment === 'N-D';
+const desktop = values.desktop ?? (isRendering ? 'attached' : 'headless');
+const nodeCount = Number(values.nodes ?? (isHistory ? 17 : isRendering ? 1000 : NaN));
 const depth = Number(values.depth);
 const sampleCount = Number(values.samples);
 const cssRules = Number(values['css-rules']);
-assert.ok(['N-A', 'N-B', 'N-C'].includes(experiment), '--experiment must be N-A, N-B or N-C');
+assert.ok(['N-A', 'N-B', 'N-C', 'N-D'].includes(experiment), '--experiment must be N-A, N-B, N-C or N-D');
 assert.ok(isHistory ? nodeCount === 17 : [1000, 10000, 100000].includes(nodeCount) || (experiment === 'N-B' && nodeCount === 100),
   '--nodes must be 1000, 10000, 100000, 100 for the N-B baseline, or 17 for N-C');
 assert.ok([1, 32].includes(depth), '--depth must be 1 or 32');
@@ -40,13 +43,14 @@ assert.ok(experiment === 'N-B' || !cssRules, '--css-rules is specific to N-B');
 assert.ok(isHistory || (values['history-edits'] === undefined && values['history-shape'] === undefined),
   '--history-edits and --history-shape are specific to N-C');
 assert.ok(!isHistory || (depth === 1 && desktop === 'headless'), 'N-C uses a fixed headless fixture at depth 1');
+assert.ok(!isRendering || desktop === 'attached', 'N-D requires the isolated background desktop');
 const historyEdits = Number(values['history-edits'] ?? 0);
 const historyPlacement = values['history-shape'] ?? 'concentrated';
 assert.ok(Number.isInteger(historyEdits) && historyEdits >= 0 && historyEdits <= 100_000 && historyEdits % 2 === 0,
   '--history-edits must be an even number from 0 through 100000');
 assert.ok(['concentrated', 'distributed'].includes(historyPlacement), '--history-shape must be concentrated or distributed');
 
-let {document, summary} = makeFixture({experiment, nodeCount, depth, cssRules});
+let {document, summary} = makeFixture({experiment: isRendering ? 'N-A' : experiment, nodeCount, depth, cssRules});
 let input = JSON.stringify(document);
 const expectedCss = document.metadata.css;
 const authoredShapes = isHistory
@@ -87,6 +91,18 @@ if (isHistory) {
   report.unavailable.historyReplayCpu = 'No isolated operation-replay CPU counter exposed by the installed path.';
   report.unavailable.tombstoneRetention = 'This diagnostic ages scalar coordinates only.';
 }
+if (isRendering) {
+  report.rendering = {
+    condition: 'isolated background desktop',
+    input: 'FigCraft MCP viewport automation',
+    frameTraceEnabled: true,
+    metalPhaseSamples: null,
+  };
+  report.unavailable.cacheOutcomes = 'The installed desktop automation does not expose cache hits or misses.';
+  report.unavailable.inputToSubmit = 'These automation commands do not trigger OS input trace markers.';
+  report.unavailable.frameSubmitMs = 'No submission is linked to an individual automation command.';
+  report.unavailable.gpuCompletion = 'Metal phase traces record CPU-side calls only.';
+}
 
 async function hashFile(path) {
   const hash = createHash('sha256');
@@ -126,6 +142,7 @@ async function run() {
   let service;
   let window;
   let client;
+  let renderingClient;
   let endpoint;
   let auth;
   try {
@@ -183,8 +200,8 @@ async function run() {
       };
     }
 
-    async function call(name, args, timeout = 120_000) {
-      const response = await client.callTool({name, arguments: args}, undefined, {signal, timeout});
+    async function call(name, args, timeout = 120_000, caller = client) {
+      const response = await caller.callTool({name, arguments: args}, undefined, {signal, timeout});
       assert.ok(!response.isError, `${name} returned an MCP error`);
       return response.structuredContent ?? JSON.parse(response.content[0].text);
     }
@@ -216,9 +233,15 @@ async function run() {
     const documentId = imported.documentId.startsWith('doc_')
       ? imported.documentId : `doc_${imported.documentId.replaceAll('-', '')}`;
 
+    const external = documentId.slice(4).replace(/^(........)(....)(....)(....)(............)$/, '$1-$2-$3-$4-$5');
+    let trace;
     if (desktop === 'attached') {
       const windowStarted = performance.now();
-      window = spawn(desktopBinary, ['--profile', profile, '--automation-background'], {stdio: ['ignore', 2, 2]});
+      window = spawn(desktopBinary, ['--profile', profile, '--automation-background'], {
+        stdio: ['ignore', 2, isRendering ? 'pipe' : 2],
+        env: isRendering ? {...process.env, OMC_NATIVE_FRAME_TRACE: '1'} : process.env,
+      });
+      if (isRendering) trace = collectDesktopTrace(window.stderr);
       await once(window, 'spawn');
       let attached = false;
       while (performance.now() - windowStarted < 30_000) {
@@ -232,7 +255,6 @@ async function run() {
       assert.ok(attached, 'Isolated background desktop did not attach');
       report.stages.desktopAttachMs = performance.now() - windowStarted;
       const focusStarted = performance.now();
-      const external = documentId.slice(4).replace(/^(........)(....)(....)(....)(............)$/, '$1-$2-$3-$4-$5');
       const opened = await call('workspace', {action: 'focus', documentId: external});
       assert.equal(opened.window?.documentId, documentId);
       assert.equal(opened.window.windows[0].focused, false);
@@ -249,6 +271,20 @@ async function run() {
         rpc, restart, signal, profile, documentId, sessionId, initial, authoredShapes, report,
         placement: historyPlacement, edits: historyEdits, samples: sampleCount,
       });
+      return;
+    }
+    if (isRendering) {
+      renderingClient = new Client({name: 'omc-native-rendering-probe', version: '1'});
+      await renderingClient.connect(new StreamableHTTPClientTransport(new URL('/mcp/figcraft', endpoint), {
+        requestInit: {headers: auth},
+      }), {signal, timeout: 10_000});
+      await measureRendering({
+        call: (name, args) => call(name, args, 15_000, renderingClient),
+        documentId: external, report, sampleCount, signal, trace,
+      });
+      const {result: final} = await rpc('document.snapshot', {documentId}, sessionId);
+      assert.deepEqual(final, initial, 'Viewport automation leaves the canonical document unchanged');
+      report.rendering.canonicalDocumentUnchanged = true;
       return;
     }
     // Native JSON import remaps IDs. Resolve the sole named target from the imported state.
@@ -310,7 +346,7 @@ async function run() {
     }
   } finally {
     try {
-      await Promise.all([stop(window), client?.close()]);
+      await Promise.all([stop(window), client?.close(), renderingClient?.close()]);
     } finally {
       await stop(service, isHistory ? 'SIGINT' : 'SIGTERM');
       await rm(profile, {recursive: true, force: true, maxRetries: 10});

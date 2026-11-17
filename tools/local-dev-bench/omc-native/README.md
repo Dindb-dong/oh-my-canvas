@@ -25,3 +25,14 @@ node tools/local-dev-bench/omc-native/native-probe.mjs --experiment N-C --histor
 N-C uses one headless 1,440 × 900 frame with 16 named rectangles under fresh isolated profiles. The default control performs zero prior edits. Opt in to an even prior-edit count up to 100,000. Concentrated aging applies every two-edit pair to the first rectangle. Distributed aging rotates whole pairs across the sixteen rectangles. Each pair moves one rectangle one unit on the x axis and restores its authored coordinate. Every prior edit gets an acknowledged durable response that advances the same epoch by exactly one sequence. Full page, metadata, and node state must equal the imported control before and after reopening.
 
 Each condition gracefully shuts down and restarts its own service with the retained profile. The service descriptor, open/snapshot RPC, native bounded-query RPC, timed scalar edits and restorations have separate records. The query reads the complete small fixture, including all prior targets. Each measured scalar edit is restored before the next sample. Storage snapshots report logical SQLite/WAL file sizes at the recorded boundaries. The OS file cache is uncontrolled. The probe leaves tombstone retention and attributed replay CPU unmeasured.
+
+## Background viewport rendering
+
+```sh
+node --test tools/local-dev-bench/omc-native/rendering.test.mjs
+node tools/local-dev-bench/omc-native/native-probe.mjs --experiment N-D --samples 2
+```
+
+N-D defaults to the 1,000-node fixture in an isolated unfocused desktop. It uses the FigCraft MCP viewport automation and verifies each pan and zoom step, the return to the original camera, and the unchanged document snapshot. It records client round trips and desktop draw counters. The trace is enabled for this diagnostic. If emitted during the command window, the Metal CPU phases cover drawable acquisition, surface wrap, canvas paint, flush/submit and present command submission. These phase records have no per-command identifiers. An empty trace or unchanged draw count leaves actual submit/presentation latency unobserved.
+
+Three separate timed PNG captures observe the offscreen window raster path at repeated static and zoomed camera states, including PNG encoding and MCP transport. This path bypasses retained gesture caches. The run leaves cache outcomes, visible/physical frame presentation, GPU completion, native OS gesture timing, drag, mixed-content/remote-edit pressure and scale variants unmeasured.
