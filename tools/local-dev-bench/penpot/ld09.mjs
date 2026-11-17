@@ -184,7 +184,7 @@ async function createDriver(plan, storageState, endpoint) {
     }
     await page.goto(plan.workspaceUrl, {waitUntil:'commit'});
     assert.equal(new URL(page.url()).origin, plan.origin);
-    await page.getByText(marker, {exact:true}).waitFor({state:'visible'});
+    await page.getByTestId('layer-row').getByText(marker, {exact:true}).waitFor({state:'visible'});
   };
   const connectEditor = async () => {
     await page.getByRole('button', {name:'MCP', exact:true}).click();
