@@ -55,9 +55,22 @@ class ResourceWindowTest(unittest.TestCase):
         self.assertEqual(phases["replay"]["observed"]["physical_footprint_peak_bytes"], 100)
         self.assertEqual(phases["tail"]["observed"]["physical_footprint_peak_bytes"], 300)
         self.assertEqual(phases["tail"]["observed"]["disk_read_bytes"], 4)
+        self.assertIsNone(phases["tail"]["observed"]["package_idle_wakeups"])
+        self.assertEqual(phases["tail"]["measurement_completeness"]["wakeups"], "NOT_OBSERVABLE")
         self.assertEqual(result["observed_physical_footprint_peak_bytes"], 800)
         self.assertIsNone(result["physical_footprint_peak_bytes"])
         self.assertEqual(result["measurement_completeness"]["physical_footprint"], "INCOMPLETE")
+
+    def test_phase_wakeups_use_counter_differences_without_filling_legacy_values(self):
+        left, right = line(21, 22, 200), line(25, 26, 200)
+        left["processes"][0]["package_idle_wakeups"] = 30
+        right["processes"][0]["package_idle_wakeups"] = 37
+        with tempfile.TemporaryDirectory() as directory:
+            result = fixture(Path(directory) / "samples", [left, right])
+        tail = result["phases"]["tail"]
+        self.assertEqual(tail["observed"]["package_idle_wakeups"], 7)
+        self.assertIsNone(tail["observed"]["interrupt_wakeups"])
+        self.assertEqual(tail["measurement_completeness"]["wakeups"], "INCOMPLETE")
 
     def test_failed_attestation_and_changed_pid_identity_invalidate_phases(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -18,7 +18,9 @@ from resources import ResourceSampler
 
 
 PHASES = ("baseline", "replay", "tail")
-FIELDS = ("cpu_user_ns", "cpu_system_ns", "disk_read_bytes", "disk_write_bytes")
+IO_FIELDS = ("disk_read_bytes", "disk_write_bytes")
+WAKEUP_FIELDS = ("package_idle_wakeups", "interrupt_wakeups")
+FIELDS = ("cpu_user_ns", "cpu_system_ns") + IO_FIELDS + WAKEUP_FIELDS
 
 
 def duration(args, name, default):
@@ -61,13 +63,14 @@ class Observation:
             identity = process["pid"], process["start_abstime"]
             if process["exit_abstime"] is None and identity not in departed:
                 live_ids.add(identity)
-            values = tuple(process[field] for field in FIELDS)
+            values = tuple(process.get(field) for field in FIELDS)
             counter = self.counters.get(identity)
             if counter is None:
                 self.counters[identity] = (values, values, 1, set())
             else:
                 first, last, reads, resets = counter
-                resets.update(index for index, (old, new) in enumerate(zip(last, values)) if new < old)
+                resets.update(index for index, (old, new) in enumerate(zip(last, values))
+                              if old is None or new is None or new < old)
                 self.counters[identity] = (first, values, reads + 1, resets)
         roots_present = len(root_ids) == expected_roots and root_ids <= live_ids
         if not roots_present:
@@ -110,10 +113,13 @@ class Observation:
         metrics = {key: status for key in whole_metrics}
         if status == "COMPLETE":
             metrics = dict(whole_metrics)
-            # Phase-local CPU/I/O observations omit work between edges and first-seen process counters.
+            # Phase-local counter deltas omit work between edges and first-seen process counters.
             metrics["cpu"] = "INCOMPLETE" if observed["cpu_seconds"] is not None else "NOT_OBSERVABLE"
             metrics["disk_io"] = (
-                "INCOMPLETE" if any(observed[key] is not None for key in FIELDS[2:]) else "NOT_OBSERVABLE"
+                "INCOMPLETE" if any(observed[key] is not None for key in IO_FIELDS) else "NOT_OBSERVABLE"
+            )
+            metrics["wakeups"] = (
+                "INCOMPLETE" if any(observed[key] is not None for key in WAKEUP_FIELDS) else "NOT_OBSERVABLE"
             )
         return {
             "status": status,

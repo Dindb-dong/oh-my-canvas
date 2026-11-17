@@ -62,6 +62,8 @@ class DarwinProcessCounters:
             "cpu_system_ns": info.system * self.numer // self.denom,
             "disk_read_bytes": info.disk_read,
             "disk_write_bytes": info.disk_write,
+            "package_idle_wakeups": info.package_wakeups,
+            "interrupt_wakeups": info.interrupt_wakeups,
         }, None
 
     def children(self, pid):
@@ -79,7 +81,10 @@ class DarwinProcessCounters:
 class ResourceSampler:
     """Write JSONL and return observed estimates at the end of a measurement window."""
 
-    _counter_fields = ("cpu_user_ns", "cpu_system_ns", "disk_read_bytes", "disk_write_bytes")
+    _counter_fields = (
+        "cpu_user_ns", "cpu_system_ns", "disk_read_bytes", "disk_write_bytes",
+        "package_idle_wakeups", "interrupt_wakeups",
+    )
 
     def __init__(self, path, root_pids, interval=0.05):
         self.path = Path(path)
@@ -348,6 +353,7 @@ class ResourceSampler:
                 "physical_footprint": completeness,
                 "cpu": completeness,
                 "disk_io": completeness,
+                "wakeups": completeness,
             },
             "physical_footprint_peak_bytes": self._peak,
             "physical_footprint_mean_bytes": (
@@ -361,6 +367,8 @@ class ResourceSampler:
             "cpu_seconds": cpu_s,
             "disk_read_bytes": counters.get("disk_read_bytes"),
             "disk_write_bytes": counters.get("disk_write_bytes"),
+            "package_idle_wakeups": counters.get("package_idle_wakeups"),
+            "interrupt_wakeups": counters.get("interrupt_wakeups"),
             "sample_count": self._sample_count,
             "max_sample_gap_ms": self._max_gap_ns / 1e6 if self._sample_count > 1 else None,
             "max_acquisition_ms": self._max_acquisition_ns / 1e6 if self._sample_count else None,
