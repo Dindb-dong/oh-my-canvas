@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createReadStream} from 'node:fs';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {extname, join} from 'node:path';
@@ -29,6 +29,12 @@ test('LD05 source fixtures retain behavior through scheduled patches at all widt
     ));
     const initial = run('prepare');
     assert.equal(initial.fixture_sha256, contract.fixture_sha256);
+    const component = contract.cycles[0].source_state.component;
+    const app = await readFile(join(root, 'app.mjs'), 'utf8');
+    const card = await readFile(join(root, 'card.mjs'), 'utf8');
+    assert.ok(app.startsWith(`import {${component} as createCard} from './card.mjs';`));
+    assert.ok(card.includes(`export {createCard as ${component}};`));
+    for (const name of ['app.mjs', 'card.mjs']) execFileSync(process.execPath, ['--check', join(root, name)]);
     const serve = createServer((request, response) => {
       const path = request.url === '/' ? 'index.html' : request.url.slice(1);
       if (!Object.hasOwn(initial.files, path)) {
@@ -55,6 +61,10 @@ test('LD05 source fixtures retain behavior through scheduled patches at all widt
             await page.route('**/*', route => route.request().url().startsWith(origin + '/')
               ? route.continue() : route.abort());
             await page.goto(origin);
+            assert.equal(await page.evaluate(async name => {
+              const module = await import('./card.mjs');
+              return typeof module[name] === 'function' && module[name] === module.createCard;
+            }, component), true);
             const state = cycle.source_state;
             const toggle = page.getByRole('button', {name: state.check_control_name});
             assert.equal(await page.locator('#state').innerText(), state.keyboard_before);

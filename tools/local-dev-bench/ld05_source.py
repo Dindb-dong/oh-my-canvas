@@ -179,8 +179,8 @@ def prepare(output, family):
     files = {
         "index.html": html(family, brief),
         "theme.css": STYLES,
-        "app.mjs": MAIN,
-        "card.mjs": CARD,
+        "app.mjs": MAIN.replace("import {createCard}", f"import {{{brief['component']} as createCard}}", 1),
+        "card.mjs": CARD + f"\nexport {{createCard as {brief['component']}}};\n",
         "data.mjs": "".join(f"export const {name} = {json.dumps(value, ensure_ascii=False)};\n"
                             for name, value in data.items()),
     }

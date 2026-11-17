@@ -107,12 +107,13 @@ test('common LD05 projections retain only actual observations and leave unsuppor
   assert.equal(form.field_name, 'Measured field');
   assert.equal(form.submitted_value, 'Observed input');
   assert.equal(form.valid_result, 'Measured saved');
-  const boundary = {registered_component: 'RegisteredCard', module_sha256: 'a'.repeat(64),
-    initial_module_sha256: 'a'.repeat(64), app_source: "import {createCard} from './card.mjs';",
-    module_source: 'export function createCard({title}) {}'};
+  const boundary = {module_sha256: 'a'.repeat(64),
+    initial_module_sha256: 'a'.repeat(64), app_source: "import {RegisteredCard as createCard} from './card.mjs';",
+    module_source: 'export function createCard({title}) {}\nexport {createCard as RegisteredCard};'};
   assert.equal(normalizePaperSource(browser, wanted, boundary).component, 'RegisteredCard');
   assert.throws(() => normalizePaperSource(browser, wanted, {...boundary, module_sha256: 'b'.repeat(64)}));
   assert.throws(() => normalizePaperSource(browser, wanted, {...boundary, app_source: 'import fake from "./other.mjs"'}));
+  assert.throws(() => normalizePaperSource(browser, wanted, {...boundary, module_source: 'export function createCard() {}'}));
   const snapshot = {listId: 'list', controls: [{name: 'Source control', text: 'Actual control'},
     {name: 'Source status', text: 'Actual status'}], cards: [{id: 'card', headingId: 'heading',
       heading: 'Actual card', originalAssetSha256: 'hash'}],
