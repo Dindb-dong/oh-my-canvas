@@ -43,17 +43,35 @@ before traversing the board and reading the four scoped tokens.
    Retain raw captures, tool responses and save/reopen evidence separately.
    Run the neutral `synthetic.py grade LD03` command on the assembled JSON.
 
-A fresh read of Paper Desktop 0.5.18 on the approved CAP canvas
-returned no color or spacing tokens. It corroborated the response
-envelopes, layer types, JSX code and computed styles used by the
-capture route. Actual token records, token ID fields and preservation
-of CSS references in JSX require a seeded production-tool probe.
-The normalizer requires a stable native token ID in the token read,
-a real reference in the raw JSX styles, and concrete effective values
-from `get_computed_styles`. A plan or matching colors alone cannot
-complete acceptance. Reconnects and token values cannot demonstrate
-a normal document reopen. The adapter reports missing evidence and
-retains the raw capture on normalization failure.
+Paper Desktop 0.5.18 returned token records containing `name`, `type`,
+and `value`. Paper identifies each token by its exact full CSS variable
+name. The same name appears in the mutation selector and native
+references. The grading identity uses the document ID and this key.
+Opaque token IDs are unavailable in this route.
+
+Paper's JSX and computed styles both retained the `var(...)`
+references. The observer needs independent effective values to
+qualify these references. The field-relay seeder has a 1× JPEG route.
+It checks card fill colors from solid interior RGB medians and
+calibrates second-line text position against both local gap overrides.
+The raster tolerances are 5 levels per RGB channel and 1 px for gap.
+This route requires `ffmpeg` and `ffprobe`, and is specific to the
+fixed field-relay geometry. Preserve the exact raw capture and the
+corresponding screenshot from the same stable board state.
+
+```sh
+node tools/local-dev-bench/paper/ld03.mjs screenshot \
+  "$FIXTURE" "$SCOPE" "$BOARD_JPEG" > "$SCREENSHOT_METADATA"
+python3 tools/local-dev-bench/paper/ld03-raster.py \
+  "$FIXTURE" "$SCOPE" "$CAPTURE" "$BOARD_JPEG" > "$RASTER"
+node tools/local-dev-bench/paper/ld03.mjs normalize \
+  "$FIXTURE" "$SCOPE" "$CAPTURE" "$RASTER" > "$SNAPSHOT"
+```
+
+`capture` retains the raw observation on normalization failure.
+When it reports missing rendered values, use that raw observation
+as `$CAPTURE` in the raster workflow to produce `$SNAPSHOT`. A
+reconnect still needs separate evidence of normal document reopen.
 
 LD01 still needs a qualified asset readback. The observed Paper
 `get_fill_image` tool returns resized or re-encoded JPEG and source URL
@@ -90,6 +108,5 @@ private evidence directory. A partial run retains its new page and
 IDs for inspection. To retry after a partial run, choose a fresh run ID.
 
 The seeding mocks exercise the generated inline fragments, structural
-readback, native ID drift checks and scoped token setup. A live run
-must still establish the returned token identity and actual persistent
-CSS-reference behavior before the neutral oracle can pass.
+readback, native ID drift checks and scoped token setup. Run the screenshot and raster qualification against each phase whose
+computed styles contain token references.

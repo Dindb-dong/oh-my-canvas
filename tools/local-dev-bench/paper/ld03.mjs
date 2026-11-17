@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync, writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 
 const properties = {fill: 'backgroundColor', gap: 'gap'};
@@ -69,8 +70,16 @@ function number(value) {
   return typeof value === 'string' && /^-?\d+(?:\.\d+)?px$/.test(value) ? Number(value.slice(0, -2)) : undefined;
 }
 
-export function normalize(fixture, scope, observation) {
+export function normalize(fixture, scope, observation, raster = undefined) {
   validate(fixture, scope);
+  if (raster) {
+    assert.equal(raster.schema, 'paper-ld03-field-relay-raster/1');
+    assert.equal(fixture.source_family_id, 'field-relay');
+    assert.equal(raster.fixture_sha256, fixture.fixture_sha256);
+    assert.equal(raster.fileId, scope.fileId);
+    assert.equal(raster.boardId, scope.boardId);
+    assert.match(raster.screenshot_sha256, /^[a-f0-9]{64}$/);
+  }
   const {home, page, tokens, details, computed, sourceStyles} = observation;
   assert.equal(home.fileName, scope.fileName, 'Different Paper file');
   assert.ok(home.pages.some(row => row.id === scope.pageId), 'Page is outside approved file');
@@ -85,14 +94,14 @@ export function normalize(fixture, scope, observation) {
   const styles = fixture.start.styles.map(row => {
     const name = tokenName(scope.prefix, row);
     const native = tokenByName.get(name);
-    assert.ok(typeof native?.id === 'string' && native.id, `Missing stable native token ID for ${name}`);
+    assert.ok(native, `Missing native token binding key for ${name}`);
     assert.equal(native.type, row.kind === 'color' ? 'color' : 'spacing', `Unexpected token type for ${name}`);
     return {
-      key: row.key, native_id: native.id, kind: row.kind,
+      key: row.key, native_id: JSON.stringify([scope.fileId, native.name]), kind: row.kind,
       value: row.kind === 'color' ? normalizeColor(native.value) : number(native.value),
     };
   });
-  const idsByName = new Map(fixture.start.styles.map((row, index) => [tokenName(scope.prefix, row), styles[index].native_id]));
+  const stylesByName = new Map(fixture.start.styles.map((row, index) => [tokenName(scope.prefix, row), styles[index]]));
   const fixtureRows = new Map(fixture.start.nodes.map(row => [row.key, row]));
   const logicalByNative = new Map(Object.entries(scope.nodes ?? {}).map(([key, id]) => [id, key]));
   assert.equal(logicalByNative.get(scope.boardId), 'board');
@@ -117,21 +126,38 @@ export function normalize(fixture, scope, observation) {
       const rendered = computed.styles[id];
       const raw = sourceStyles[id];
       assert.ok(rendered && raw, `Missing CSS evidence for ${key}`);
-      value.fill = normalizeColor(rendered.backgroundColor);
-      value.gap = number(rendered.gap);
       value.layout = rendered.display === 'flex' && rendered.flexDirection === 'column' ? 'vertical' : undefined;
       value.bindings = {};
       for (const [property, css] of Object.entries(properties)) {
         const declared = raw[css];
         assert.ok(typeof declared === 'string' || typeof declared === 'number', `Missing raw ${css} for ${key}`);
         const reference = typeof declared === 'string' && declared.match(/^var\(\s*(--[\w-]+)\s*\)$/);
+        const parse = property === 'fill' ? normalizeColor : number;
+        const nativeStyle = reference ? stylesByName.get(reference[1]) : undefined;
         if (reference) {
-          assert.ok(idsByName.has(reference[1]), `Reference outside the scoped tokens on ${key}`);
-          value.bindings[property] = idsByName.get(reference[1]);
-        } else {
-          assert.ok(property === 'fill' ? normalizeColor(declared) : number(declared) !== undefined,
-            `Unverifiable literal override on ${key}.${property}`);
+          assert.ok(nativeStyle, `Reference outside the scoped tokens on ${key}`);
+          value.bindings[property] = nativeStyle.native_id;
         }
+        const nominal = nativeStyle ? nativeStyle.value : parse(declared);
+        assert.notEqual(nominal, undefined, `Unverifiable ${key}.${property} value`);
+        const fromComputed = parse(rendered[css]);
+        const computedIsReference = nativeStyle && rendered[css] === declared;
+        if (fromComputed !== undefined) assert.equal(fromComputed, nominal, `Effective CSS differs on ${key}.${property}`);
+        else assert.ok(computedIsReference && raster, `Missing independent rendered ${property} for ${key}`);
+        if (raster) {
+          const card = raster.cards[id];
+          assert.ok(card, `Missing raster card evidence for ${key}`);
+          if (property === 'fill') {
+            const rgb = nominal.slice(1).match(/../g).map(channel => parseInt(channel, 16));
+            assert.ok(Array.isArray(card.fill_rgb) && card.fill_rgb.length === 3 &&
+              card.fill_rgb.every((actual, index) => Number.isInteger(actual) &&
+                Math.abs(actual - rgb[index]) <= 5), `Raster fill differs on ${key}`);
+          } else {
+            assert.ok(Number.isInteger(card.gap) && Math.abs(card.gap - nominal) <= 1,
+              `Raster gap differs on ${key}`);
+          }
+        }
+        value[property] = nominal;
       }
     }
     nodes.push(value);
@@ -140,7 +166,13 @@ export function normalize(fixture, scope, observation) {
   }
   walk(scope.boardId, page.rootNodeId);
   assert.equal(visited.size, fixtureRows.size, 'Incomplete Paper layer tree');
-  return {document_id: scope.fileId, nodes, styles};
+  if (raster) assert.equal(Object.keys(raster.cards).length,
+    fixture.start.nodes.filter(row => Object.hasOwn(row, 'bindings')).length, 'Extra or missing raster cards');
+  return {
+    document_id: scope.fileId, nodes, styles,
+    style_identity: 'paper-file-scoped-custom-property-name',
+    ...(raster && {raster_sha256: raster.screenshot_sha256}),
+  };
 }
 
 export function sourceStylesFromJsx(ts, code) {
@@ -213,6 +245,16 @@ export async function capture(read, ts, fixture, scope) {
   }
 }
 
+async function screenshot(read, fixture, scope) {
+  validate(fixture, scope);
+  const home = await read(tool('get_basic_info', scope.fileId, {}));
+  assert.equal(home.fileName, scope.fileName);
+  assert.ok(home.pages.some(row => row.id === scope.pageId));
+  const page = await read(tool('get_basic_info', scope.fileId, {pageId: scope.pageId}));
+  assert.ok(page.artboards.some(row => row.id === scope.boardId));
+  return await read(tool('get_screenshot', scope.fileId, {nodeId: scope.boardId, scale: 1}));
+}
+
 export async function withPaper(scope, action) {
   const endpoint = new URL(process.env.PAPER_BENCH_URL ?? 'http://127.0.0.1:29979/mcp');
   assert.ok(endpoint.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname));
@@ -226,6 +268,11 @@ export async function withPaper(scope, action) {
     const read = async selector => {
       const answer = await client.callTool(selector, undefined, {timeout: 30_000});
       const text = answer.content.filter(block => block.type === 'text').map(block => block.text);
+      if (selector.name === 'get_screenshot') {
+        const image = answer.content.find(block => block.type === 'image');
+        assert.ok(!answer.isError && image?.mimeType === 'image/jpeg' && image.data, 'Paper board JPEG unavailable');
+        return Buffer.from(image.data, 'base64');
+      }
       assert.ok(!answer.isError && text.length > 1 && text.slice(0, -1).some(header =>
         header.includes(scope.fileId)), `Paper response error or wrong file for ${selector.name}`);
       const body = text.at(-1);
@@ -247,13 +294,30 @@ export async function withPaper(scope, action) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [mode, fixturePath, scopePath] = process.argv.slice(2);
-  assert.ok(['plan', 'capture'].includes(mode) && fixturePath && scopePath,
-    'Usage: ld03.mjs plan|capture FIXTURE.json SCOPE.json');
+  const [mode, fixturePath, scopePath, capturePath, rasterPath] = process.argv.slice(2);
+  assert.ok(['plan', 'capture', 'normalize', 'screenshot'].includes(mode) && fixturePath && scopePath,
+    'Usage: ld03.mjs plan|capture FIXTURE.json SCOPE.json or normalize FIXTURE.json SCOPE.json CAPTURE.json RASTER.json or screenshot FIXTURE.json SCOPE.json BOARD.jpg');
   const fixture = JSON.parse(readFileSync(fixturePath, 'utf8'));
   const scope = JSON.parse(readFileSync(scopePath, 'utf8'));
-  const output = mode === 'plan' ? plan(fixture, scope) :
-    await withPaper(scope, (read, ts) => capture(read, ts, fixture, scope));
+  let output;
+  if (mode === 'screenshot') {
+    assert.ok(capturePath && !rasterPath, 'Provide a new JPEG file path');
+    const jpeg = await withPaper(scope, read => screenshot(read, fixture, scope));
+    writeFileSync(capturePath, jpeg, {flag: 'wx', mode: 0o600});
+    output = {mime: 'image/jpeg', bytes: jpeg.length, sha256: createHash('sha256').update(jpeg).digest('hex')};
+  } else if (mode === 'normalize') {
+    assert.ok(capturePath && rasterPath, 'A captured readback and matching raster record are required');
+    const rawCapture = readFileSync(capturePath);
+    const {raw} = JSON.parse(rawCapture);
+    const raster = JSON.parse(readFileSync(rasterPath, 'utf8'));
+    assert.equal(raster.capture_sha256, createHash('sha256').update(rawCapture).digest('hex'));
+    const {benchRequire} = await import('../replays/mcp.mjs');
+    const sourceStyles = sourceStylesFromJsx(benchRequire('typescript'), raw.jsx);
+    output = normalize(fixture, scope, {...raw, sourceStyles}, raster);
+  } else {
+    output = mode === 'plan' ? plan(fixture, scope) :
+      await withPaper(scope, (read, ts) => capture(read, ts, fixture, scope));
+  }
   console.log(JSON.stringify(output));
   if (output.blocker) process.exitCode = 1;
 }

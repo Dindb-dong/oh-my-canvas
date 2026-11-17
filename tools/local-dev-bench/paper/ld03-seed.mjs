@@ -60,11 +60,21 @@ export function boardPlan(fixture, file, runId) {
   };
 }
 
-function guardToolResponse(name, answer) {
-  const entries = Array.isArray(answer) ? answer : [...(answer?.results ?? []), answer];
-  assert.ok(entries.every(entry => !entry?.error && entry?.result !== 'error' &&
-    (!entry?.ignoredStyles || Object.keys(entry.ignoredStyles).length === 0)),
-  `Paper reported an in-band failure in ${name}`);
+function guardToolResponse(name, fields, answer) {
+  const label = `Paper reported an in-band failure in ${name}`;
+  const clean = row => !row?.error && row?.result !== 'error' &&
+    (!row?.ignoredStyles || Object.keys(row.ignoredStyles).length === 0);
+  assert.ok(clean(answer), label);
+  if (name === 'create_tokens') {
+    assert.ok(Array.isArray(answer?.tokens) && answer.count === fields.tokens.length, label);
+    assert.ok(answer.tokens.every(row => clean(row) && row.result === 'created'), label);
+    assert.deepEqual(answer.tokens.map(row => row.name).sort(), fields.tokens.map(row => row.name).sort(), label);
+  }
+  if (name === 'update_styles') {
+    assert.ok(Array.isArray(answer?.updates) && answer.updates.every(clean), label);
+    assert.deepEqual(answer.updates.map(row => row.nodeId).sort(),
+      fields.updates.flatMap(row => row.nodeIds).sort(), label);
+  }
 }
 
 export async function seed(read, ts, fixture, file, runId) {
@@ -75,7 +85,7 @@ export async function seed(read, ts, fixture, file, runId) {
     const args = {...fields, fileId: file.fileId};
     const result = await read({name, arguments: args});
     trace.push({name, arguments: args, result});
-    guardToolResponse(name, result);
+    guardToolResponse(name, fields, result);
     return result;
   };
 

@@ -11,7 +11,7 @@ const fixture = JSON.parse(execFileSync('python3', [
 const file = {fileId: 'approved-mock', name: 'OMC Benchmark • Synthetic CAP Probe • 2026-11-17'};
 const runId = 'smoke-test-01';
 
-function mock({wrongName, missingControl, duplicatePage, duplicateToken, ignoredCss} = {}) {
+function mock({wrongName, missingControl, duplicatePage, duplicateToken, ignoredCss, tokenFailure} = {}) {
   const name = wrongName || file.name;
   const run = boardPlan(fixture, file, runId);
   const original = {id: 'existing-page', name: 'Control page'};
@@ -91,14 +91,16 @@ function mock({wrongName, missingControl, duplicatePage, duplicateToken, ignored
       return {tokens: tokens.filter(token => args.types.includes(token.type))};
     case 'create_tokens':
       args.tokens.forEach((token, index) => tokens.push({...token, id: `T-${index}`}));
-      return {results: tokens.map(row => ({name: row.name, result: 'created'}))};
+      return {count: tokens.length, tokens: tokens.map((row, index) => ({
+        name: row.name, result: tokenFailure && index === 0 ? 'error' : 'created',
+      }))};
     case 'update_styles':
       assert.equal(args.updates.length, 44);
-      if (ignoredCss) return {ignoredStyles: {gap: 'unsupported'}};
       args.updates.forEach(row => {
         row.nodeIds.forEach(id => Object.assign(nodes.get(id).css, row.styles));
       });
-      return {ignoredStyles: {}};
+      return {updates: args.updates.flatMap(row => row.nodeIds).map((nodeId, index) =>
+        ignoredCss && index === 0 ? {nodeId, ignoredStyles: {gap: 'unsupported'}} : {nodeId})};
     case 'get_computed_styles': {
       const effective = Object.fromEntries(args.nodeIds.map(id => [id, Object.fromEntries(
         Object.entries(nodes.get(id).css).map(([prop, value]) =>
@@ -162,4 +164,12 @@ test('offline plan validates fixture, pre-approved canvas name and run naming', 
   assert.equal(plan.prefix, 'omc-ld03-smoke-test-01');
   assert.equal(plan.artboardStyles.width, '1440px');
   assert.ok(plan.fragments.some(html => html.includes('Archive · reference only')));
+});
+
+
+test('rejects a per-token error in the observed Paper create response envelope', async () => {
+  const {read, calls} = mock({tokenFailure: true});
+  const result = await seed(read, ts, fixture, file, runId);
+  assert.match(result.blocker, /in-band failure in create_tokens/);
+  assert.equal(calls.some(call => call.action === 'update_styles'), false);
 });

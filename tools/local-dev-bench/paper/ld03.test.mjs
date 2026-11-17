@@ -115,15 +115,15 @@ test('reads both variants into phases accepted by the shared oracle', async () =
   }
 });
 
-test('rejects missing native token identity, missing raw CSS, and unapproved scope', () => {
+test('rejects missing native token key, missing raw CSS, and unapproved scope', () => {
   const fixture = contract('field-relay');
   const scope = scopeOf(fixture);
   const {state} = nativeMock(fixture, scope, 'start');
   assert.throws(() => normalize(fixture, {...scope, pageId: 'unapproved'}, state), /outside approved file/);
   const missingStyleEvidence = {...state, sourceStyles: {}};
   assert.throws(() => normalize(fixture, scope, missingStyleEvidence), /Missing CSS evidence/);
-  delete state.tokens.tokens[0].id;
-  assert.throws(() => normalize(fixture, scope, state), /Missing stable native token ID/);
+  state.tokens.tokens.pop();
+  assert.throws(() => normalize(fixture, scope, state), /Missing or extra run-scoped tokens/);
 });
 
 test('reads variable declarations for each JSX element without running the source', () => {
@@ -133,4 +133,29 @@ test('reads variable declarations for each JSX element without running the sourc
   const raw = sourceStylesFromJsx(ts, jsx);
   assert.equal(raw['1-0'].backgroundColor, 'var(--color-scope-accent)');
   assert.equal(raw['2-0'].gap, 4);
+});
+
+
+test('corroborates raw variables with independently measured raster values', () => {
+  const fixture = contract('field-relay');
+  const scope = scopeOf(fixture);
+  const {state} = nativeMock(fixture, scope, 'start');
+  const cards = {};
+  for (const row of fixture.start.nodes.filter(node => Object.hasOwn(node, 'bindings'))) {
+    const id = scope.nodes[row.key];
+    Object.assign(state.computed.styles[id], state.sourceStyles[id]);
+    cards[id] = {
+      fill_rgb: row.fill.slice(1).match(/../g).map(value => parseInt(value, 16)),
+      gap: row.gap,
+    };
+  }
+  for (const token of state.tokens.tokens) delete token.id;
+  const raster = {schema: 'paper-ld03-field-relay-raster/1', fileId: scope.fileId, boardId: scope.boardId,
+    fixture_sha256: fixture.fixture_sha256, screenshot_sha256: 'a'.repeat(64), cards};
+  assert.throws(() => normalize(fixture, scope, state), /Missing independent rendered fill/);
+  const result = normalize(fixture, scope, state, raster);
+  assert.equal(result.style_identity, 'paper-file-scoped-custom-property-name');
+  assert.equal(result.styles[0].native_id, JSON.stringify([scope.fileId, state.tokens.tokens[0].name]));
+  cards[Object.keys(cards)[0]].gap += 2;
+  assert.throws(() => normalize(fixture, scope, state, raster), /Raster gap differs/);
 });
