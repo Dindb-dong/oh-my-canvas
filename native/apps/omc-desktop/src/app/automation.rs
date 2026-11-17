@@ -34,6 +34,8 @@ pub(super) struct State {
     queued: Option<(Job, Reply)>,
     pub(super) last_frame: Option<f64>,
     pub(super) frames_drawn: u64,
+    pub(super) accepted_scene: Value,
+    pub(super) last_frame_receipt: Value,
     pub(super) view: commands::EditorView,
     pub(super) default_shape: Option<omc_model::Properties>,
     pub(super) default_text: Option<omc_model::Properties>,
@@ -541,6 +543,17 @@ impl App {
         });
         result["frameMs"] = json!(self.automation.last_frame);
         result["framesDrawn"] = json!(self.automation.frames_drawn);
+        result["lastFrame"] = self.automation.last_frame_receipt.clone();
+        result["camera"] = json!({"x":self.camera.x,"y":self.camera.y,"zoom":self.camera.zoom});
+        #[cfg(target_os = "macos")]
+        {
+            result["hostTimeSeconds"] = json!(objc2_quartz_core::CACurrentMediaTime());
+            if let Some(presenter) = &self.gpu_presenter {
+                result["presentationEvents"] = json!(presenter.presentation_events());
+                result["presentationEventsDropped"] =
+                    json!(presenter.presentation_events_dropped());
+            }
+        }
         result["window"] = json!(self.proxy.id);
         result["focus"] = self.automation_focus_state();
         result["uiScale"] = self.automation_ui_scale_state();
@@ -611,6 +624,37 @@ impl App {
             })).collect::<Vec<_>>()
         }]);
         result
+    }
+
+    pub(crate) fn frame_receipt(&self, boundary: &str) -> Value {
+        let scene = &self.automation.accepted_scene;
+        let current = self.document().map(|document| {
+            json!({
+                "documentId": document.id, "epoch": document.epoch,
+                "sequence": document.sequence.to_string(), "pageId": self.page,
+            })
+        });
+        let exact = current
+            .as_ref()
+            .is_some_and(|current| scene_matches(scene, current))
+            && self.scene.is_some()
+            && !self.scene_pending
+            && !self.pending
+            && !self.frame_preview.get()
+            && self.pending_move.is_none()
+            && self.automation.text_preview.is_none();
+        let viewport = self.canvas_rect();
+        json!({
+            "frame": self.automation.frames_drawn + u64::from(boundary == "painted"),
+            "boundary": boundary, "scene": scene, "current": current,
+            "exactCurrentRevision": exact, "preview": self.frame_preview.get(),
+            "scenePending": self.scene_pending, "editPending": self.pending,
+            "camera": {"x": self.camera.x, "y": self.camera.y, "zoom": self.camera.zoom},
+            "viewport": [viewport.x, viewport.y, viewport.width, viewport.height],
+            "selection": self.selected, "background": self.background,
+            "window": self.proxy.id, "occluded": self.occluded,
+            "visible": self.window.as_ref().is_some_and(|window| window.is_visible() == Some(true)),
+        })
     }
 
     fn automation_screenshot(&self, args: &Value) -> Result<Value, String> {
@@ -1072,9 +1116,35 @@ fn coordinate_pair(x: &Value, y: &Value) -> Result<(f64, f64), String> {
         .ok_or_else(|| "Canvas coordinates must be finite numbers within ±10,000,000.".into())
 }
 
+fn scene_matches(scene: &Value, current: &Value) -> bool {
+    scene["documentId"].is_string()
+        && scene["epoch"].is_string()
+        && scene["sequence"].is_string()
+        && ["documentId", "epoch", "sequence", "pageId"]
+            .iter()
+            .all(|key| scene[*key] == current[*key])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_identity_rejects_stale_revision_epoch_page_and_document() {
+        let scene = json!({"documentId":"a", "epoch":"e", "sequence":"4", "pageId":"p"});
+        assert!(scene_matches(&scene, &scene));
+        for (key, value) in [
+            ("documentId", "b"),
+            ("epoch", "f"),
+            ("sequence", "5"),
+            ("pageId", "q"),
+        ] {
+            let mut current = scene.clone();
+            current[key] = json!(value);
+            assert!(!scene_matches(&scene, &current));
+        }
+        assert!(!scene_matches(&Value::Null, &Value::Null));
+    }
 
     #[test]
     fn canvas_coordinates_reject_malformed_and_excessive_input() {

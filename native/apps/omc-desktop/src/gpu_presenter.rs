@@ -10,9 +10,14 @@ use objc2_metal::{
     MTLPixelFormat,
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer, CATransaction};
+use serde_json::{Value, json};
 use skia_safe::{Canvas, ColorType, gpu};
 use std::{
-    sync::mpsc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -106,6 +111,9 @@ pub struct MetalPresenter {
     trace_phases: bool,
     request_drawable: mpsc::SyncSender<()>,
     drawable: DrawableRequest<ReadyDrawable>,
+    presented_sender: mpsc::SyncSender<Value>,
+    presented_receiver: mpsc::Receiver<Value>,
+    presented_dropped: Arc<AtomicU64>,
 }
 
 fn new_context(
@@ -172,6 +180,7 @@ impl MetalPresenter {
             })
             .map_err(|error| format!("Could not start the Metal drawable worker: {error}"))?;
         root.addSublayer(&layer);
+        let (presented_sender, presented_receiver) = mpsc::sync_channel(256);
         Ok(Self {
             context,
             queue,
@@ -180,6 +189,9 @@ impl MetalPresenter {
             trace_phases,
             request_drawable,
             drawable: DrawableRequest::Idle,
+            presented_sender,
+            presented_receiver,
+            presented_dropped: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -195,12 +207,20 @@ impl MetalPresenter {
         self.drawable.discard();
     }
 
+    pub fn presentation_events(&self) -> Vec<Value> {
+        self.presented_receiver.try_iter().collect()
+    }
+
+    pub fn presentation_events_dropped(&self) -> u64 {
+        self.presented_dropped.load(Ordering::Relaxed)
+    }
+
     pub fn present(
         &mut self,
         window: &Window,
         size: PhysicalSize<u32>,
         scale: f64,
-        draw: impl FnOnce(&Canvas) -> Result<(), String>,
+        draw: impl FnOnce(&Canvas) -> Result<Value, String>,
     ) -> Result<bool, String> {
         if self.drawable.deferred(Instant::now()) {
             return Ok(false);
@@ -247,7 +267,7 @@ impl MetalPresenter {
             )
             .ok_or("Could not bind the Metal drawable to Skia.")?;
             let t2 = stamp();
-            draw(surface.canvas())?;
+            let receipt = draw(surface.canvas())?;
             let t3 = stamp();
             self.context.flush_and_submit_surface(&mut surface, None);
             let t4 = stamp();
@@ -257,6 +277,24 @@ impl MetalPresenter {
                 .commandBuffer()
                 .ok_or("Could not allocate a Metal presentation command buffer.")?;
             let drawable: &ProtocolObject<dyn MTLDrawable> = ProtocolObject::from_ref(&*drawable);
+            if self.trace_phases {
+                let sender = self.presented_sender.clone();
+                let dropped = Arc::clone(&self.presented_dropped);
+                let submitted = objc2_quartz_core::CACurrentMediaTime();
+                let callback = block2::RcBlock::new(
+                    move |drawable: std::ptr::NonNull<ProtocolObject<dyn MTLDrawable>>| {
+                        // Metal supplies the live drawable and retains the registered block.
+                        let presented = unsafe { drawable.as_ref() }.presentedTime();
+                        let event = presentation_receipt(&receipt, submitted, presented);
+                        eprintln!("Native presentation {}", event);
+                        retain_presentation(&sender, &dropped, event);
+                    },
+                );
+                // The heap block is valid here; addPresentedHandler copies it for presentation.
+                unsafe {
+                    drawable.addPresentedHandler(block2::RcBlock::as_ptr(&callback));
+                }
+            }
             window.pre_present_notify();
             command.presentDrawable(drawable);
             command.commit();
@@ -279,6 +317,22 @@ impl MetalPresenter {
     }
 }
 
+fn presentation_receipt(receipt: &Value, submitted: f64, presented: f64) -> Value {
+    let mut event = receipt.clone();
+    event["boundary"] = json!("metal-drawable-presented");
+    event["submittedHostTimeSeconds"] = json!(submitted);
+    event["presentedHostTimeSeconds"] = json!(presented);
+    event["presentationObserved"] =
+        json!(presented.is_finite() && presented > 0. && presented >= submitted);
+    event
+}
+
+fn retain_presentation(sender: &mpsc::SyncSender<Value>, dropped: &AtomicU64, event: Value) {
+    if sender.try_send(event).is_err() {
+        dropped.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 impl Drop for MetalPresenter {
     fn drop(&mut self) {
         self.layer.removeFromSuperlayer();
@@ -294,6 +348,32 @@ mod tests {
     };
     use skia_safe::{Color, ImageInfo};
     use std::cell::Cell;
+
+    #[test]
+    fn presentation_receipts_require_actual_host_time_and_preserve_frame_identity() {
+        let frame = json!({"frame":7, "scene":{"epoch":"e", "sequence":"9"}});
+        for (time, observed) in [(0., false), (9., false), (10.02, true)] {
+            let event = presentation_receipt(&frame, 10., time);
+            assert_eq!(event["presentationObserved"], observed);
+            assert_eq!(event["frame"], 7);
+            assert_eq!(event["scene"], frame["scene"]);
+        }
+    }
+
+    #[test]
+    fn presentation_queue_is_bounded_and_reports_missing_callbacks() {
+        let (sender, receiver) = mpsc::sync_channel(2);
+        let dropped = AtomicU64::new(0);
+        for frame in [3, 2, 4] {
+            retain_presentation(&sender, &dropped, json!({"frame":frame}));
+        }
+        let frames: Vec<_> = receiver
+            .try_iter()
+            .map(|value| value["frame"].clone())
+            .collect();
+        assert_eq!(frames, vec![json!(3), json!(2)]);
+        assert_eq!(dropped.load(Ordering::Relaxed), 1);
+    }
 
     #[test]
     fn drawable_timeout_retries_a_deferred_frame_and_discards_hidden_work() {
