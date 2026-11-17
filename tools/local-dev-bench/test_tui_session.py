@@ -1,4 +1,7 @@
 import os
+import io
+import json
+from unittest.mock import patch
 from pathlib import Path
 import subprocess
 import sys
@@ -39,6 +42,30 @@ else:
             self.assertEqual(result['native_exit'], 0)
             self.assertIsNotNone(result['main_completed_at_ns'])
             self.assertIn(b'Session outcome', (root / 'terminal.log').read_bytes())
+
+    def test_guarded_edit_boundary_does_not_invent_main_completion(self):
+        code = """
+from pathlib import Path
+import sys
+assert input('Type start: ') == 'start'
+Path(sys.argv[1], 'edit-ready').write_text('native receipt and settled provider usage')
+try:
+    input()
+except EOFError:
+    assert input('Session outcome: ') == 'candidate'
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def status(*args, **kwargs):
+                completed = "guarded_edit_metered" if (root / "edit-ready").exists() else None
+                return io.BytesIO(json.dumps({"completion": completed}).encode())
+            with patch("tui_session.urlopen", side_effect=status):
+                result = drive([sys.executable, "-c", code, directory], os.environ, root,
+                               deadline_ns(2), completion_url="http://127.0.0.1:1/benchmark/completion")
+            self.assertEqual(result["native_exit"], 0)
+            self.assertIsNone(result["main_completed_at_ns"])
+            self.assertIsNotNone(result["guarded_edit_metered_at_ns"])
+            self.assertEqual(result["completion_reason"], "guarded_edit_metered")
 
     def test_main_terminal_marker_retains_transport_error(self):
         with tempfile.TemporaryDirectory() as directory:

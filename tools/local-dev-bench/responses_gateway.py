@@ -75,6 +75,27 @@ class ResponsesHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_GET(self):
+        if self.path != "/benchmark/completion" or self.server.completion is None:
+            return self.reply_error(404, "unsupported_route")
+        if CREDENTIAL_HEADERS.intersection(name.lower() for name in self.headers) or "Origin" in self.headers:
+            return self.reply_error(400, "credentials_are_not_accepted")
+        completed = self.server.edit_completed()
+        locked = self.server.admissions.acquire(blocking=False)
+        try:
+            snapshot = self.server.gate.snapshot()
+            ready = completed and locked and snapshot["usage_complete"] and bool(snapshot["requests"])
+            body = json_bytes({"completion": "guarded_edit_metered" if ready else None,
+                               "dispatch_closed": completed, "usage_complete": snapshot["usage_complete"]})
+        finally:
+            if locked:
+                self.server.admissions.release()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
         try:
             self.handle_response_request()
@@ -114,6 +135,8 @@ class ResponsesHandler(BaseHTTPRequestHandler):
 
         # Title calls, follow-ups, and retries share the same count/generate/drain critical section.
         with self.server.admissions:
+            if self.server.edit_completed():
+                return self.reply_error(409, "guarded_edit_completed")
             if self.server.stopping.is_set() or self.client_disconnected():
                 return self.reply_error(503, "gateway_stopping")
             snapshot = gate.snapshot()
@@ -127,6 +150,8 @@ class ResponsesHandler(BaseHTTPRequestHandler):
                 return self.reply_error(502, "input_meter_unavailable")
             if self.server.stopping.is_set() or self.client_disconnected():
                 return self.reply_error(503, "gateway_stopping")
+            if self.server.edit_completed():
+                return self.reply_error(409, "guarded_edit_completed")
             request_id = uuid4().hex
             try:
                 admission = gate.admit(request_id, "responses", body, minimum_input_tokens=minimum_input)
@@ -195,11 +220,21 @@ class ResponsesHandler(BaseHTTPRequestHandler):
 class ResponsesGateway(ThreadingHTTPServer):
     def __init__(self, upstream_port, token_cap, *, port=0, minimum_output_tokens=1,
                  upstream_timeout=TIMEOUT_SECONDS, llama_synthetic_canary=False,
-                 llama_ld03=False, llama_ld02_atlas=False, max_request_output_tokens=None):
+                 llama_ld03=False, llama_ld02_atlas=False, max_request_output_tokens=None,
+                 completion_config=None):
         if type(upstream_port) is not int or not 0 < upstream_port < 65536:
             raise ValueError("invalid loopback upstream port")
         if type(upstream_timeout) is not int or upstream_timeout <= 0:
             raise ValueError("invalid loopback upstream socket timeout")
+        self.completion = None
+        self.dispatch_closed = Event()
+        if completion_config is not None:
+            if not llama_ld02_atlas:
+                raise ValueError("completion receipt requires the LD02 Atlas bridge")
+            from ld02_completion import EditCompletion
+            self.completion = EditCompletion(completion_config)
+            if self.completion.path.exists():
+                raise ValueError("completion receipt must start absent")
         self.upstream_port = upstream_port
         self.upstream_timeout = upstream_timeout
         bridges = [bridge for enabled, bridge in (
@@ -217,6 +252,11 @@ class ResponsesGateway(ThreadingHTTPServer):
         if self.server_port == self.upstream_port:
             self.server_close()
             raise ValueError("upstream and gateway ports must differ")
+
+    def edit_completed(self):
+        if self.completion is not None and self.completion.completed():
+            self.dispatch_closed.set()
+        return self.dispatch_closed.is_set()
 
     def connection(self):
         return HTTPConnection(LOOPBACK, self.upstream_port, timeout=self.upstream_timeout)
@@ -268,6 +308,8 @@ def main():
     bridges.add_argument("--llama-ld02-atlas", action="store_true",
                          help="Expose only the registered LD02 Atlas lookup and edit tools to a local llama-server")
     parser.add_argument("--ledger", type=Path, required=True, help="New private JSON evidence file")
+    parser.add_argument("--completion-config", type=Path,
+                        help="Private expected-edit registration for the opt-in LD02 completion boundary")
     parser.add_argument("--drain-in-flight", action="store_true",
                         help="At shutdown, await an admitted request's terminal usage up to the outer deadline")
     args = parser.parse_args()
@@ -281,7 +323,8 @@ def main():
                          upstream_timeout=args.upstream_timeout,
                          llama_synthetic_canary=args.llama_synthetic_canary, llama_ld03=args.llama_ld03,
                          llama_ld02_atlas=args.llama_ld02_atlas,
-                         max_request_output_tokens=args.max_request_output_tokens) as gateway,
+                         max_request_output_tokens=args.max_request_output_tokens,
+                         completion_config=args.completion_config) as gateway,
         open(args.ledger, "x", encoding="utf-8", opener=private_open) as ledger,
     ):
         print(json.dumps({"base_url": f"http://{LOOPBACK}:{gateway.server_port}/v1"}), flush=True)

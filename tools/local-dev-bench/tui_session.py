@@ -11,6 +11,8 @@ import select
 import signal
 import struct
 from subprocess import TimeoutExpired
+from urllib.error import URLError
+from urllib.request import urlopen
 import termios
 import time
 
@@ -74,7 +76,7 @@ def completed_main_messages(root, cache=None):
 
 
 @unwind_on_term()
-def drive(argv, env, root, deadline, *, canary=None):
+def drive(argv, env, root, deadline, *, canary=None, completion_url=None):
     pid, fd = pty.fork()
     if not pid:
         try:
@@ -86,6 +88,7 @@ def drive(argv, env, root, deadline, *, canary=None):
     trace_cache = {}
     started = sent_exit = entered_outcome = saw_canary = False
     completed_at = native_exit = None
+    guarded_edit_at = None
     eof = False
     try:
         fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 132, 0, 0))
@@ -106,13 +109,21 @@ def drive(argv, env, root, deadline, *, canary=None):
                 if canary and canary.encode() in cleaned:
                     saw_canary = True
                 if b"Session outcome" in cleaned and not entered_outcome:
-                    candidate = saw_canary if canary is not None else completed_at is not None
+                    candidate = saw_canary if canary is not None else completed_at is not None or guarded_edit_at is not None
                     os.write(fd, b"candidate\n" if candidate else b"blocked\n")
                     entered_outcome = True
             if completed_at is None and completed_main_messages(root, trace_cache) and remaining(deadline):
                 completed_at = time.monotonic_ns()
+            if completion_url is not None and guarded_edit_at is None and remaining(deadline):
+                try:
+                    with urlopen(completion_url, timeout=min(0.05, remaining(deadline))) as response:
+                        status = json.load(response)
+                    if status.get("completion") == "guarded_edit_metered":
+                        guarded_edit_at = time.monotonic_ns()
+                except (OSError, URLError, ValueError):
+                    pass
             # The gateway meters the terminal response before forwarding it to Codex.
-            if completed_at is not None and not (sent_exit or eof) and remaining(deadline):
+            if (guarded_edit_at is not None if completion_url else completed_at is not None) and not (sent_exit or eof) and remaining(deadline):
                 os.write(fd, b"\x04")
                 sent_exit = True
             child, status = os.waitpid(pid, os.WNOHANG)
@@ -146,5 +157,7 @@ def drive(argv, env, root, deadline, *, canary=None):
         "started": started,
         "saw_canary": saw_canary,
         "main_completed_at_ns": completed_at,
+        "guarded_edit_metered_at_ns": guarded_edit_at,
+        "completion_reason": "guarded_edit_metered" if guarded_edit_at is not None else "main_task_complete" if completed_at is not None else None,
         "timed_out": timed_out,
     }
