@@ -98,6 +98,8 @@ export function normalizePaperSource(browser, wanted, componentBoundary) {
   if (componentBoundary) {
     assert.match(componentBoundary.module_sha256, /^[a-f0-9]{64}$/);
     assert.equal(componentBoundary.module_sha256, componentBoundary.initial_module_sha256);
+    assert.equal(createHash('sha256').update(componentBoundary.module_source).digest('hex'), componentBoundary.module_sha256);
+    assert.equal(createHash('sha256').update(componentBoundary.app_source).digest('hex'), componentBoundary.app_sha256);
     const imported = /import\s*\{\s*([A-Za-z_$][\w$]*)\s+as\s+createCard\s*\}\s*from\s*['"]\.\/card\.mjs['"]/.exec(componentBoundary.app_source);
     assert.ok(imported, 'Source must import the actual named component as createCard');
     const exported = [...componentBoundary.module_source.matchAll(/export\s*\{\s*createCard\s+as\s+([A-Za-z_$][\w$]*)\s*\}/g)];
@@ -390,7 +392,7 @@ export async function runPaperLD05(read, scope, fixture, output, runId, {nativeR
       {mode: 0o600, flag: 'wx'});
     const patched = sourceCommand('patch', fixture, sourceDir, cycle);
     const before = await sourceProbe(sourceDir, fixture, patched, cycle, rules.source_state);
-    const refreshBoundary = {module_sha256: patched.files['card.mjs'], initial_module_sha256: initial.files['card.mjs'],
+    const refreshBoundary = {app_sha256: patched.files['app.mjs'], module_sha256: patched.files['card.mjs'], initial_module_sha256: initial.files['card.mjs'],
       app_source: await readFile(join(sourceDir, 'app.mjs'), 'utf8'),
       module_source: await readFile(join(sourceDir, 'card.mjs'), 'utf8')};
     const observedSource = normalizePaperSource(before, rules.source_state, refreshBoundary);
@@ -429,7 +431,7 @@ export async function runPaperLD05(read, scope, fixture, output, runId, {nativeR
     assert.equal(merged.files['app.mjs'], patched.files['app.mjs']);
     const after = await sourceProbe(clean, fixture, merged, cycle, rules.result);
     await save('source-after.json', after.states);
-    const componentBoundary = {module_sha256: merged.files['card.mjs'], initial_module_sha256: initial.files['card.mjs'],
+    const componentBoundary = {app_sha256: merged.files['app.mjs'], module_sha256: merged.files['card.mjs'], initial_module_sha256: initial.files['card.mjs'],
       app_source: await readFile(join(clean, 'app.mjs'), 'utf8'),
       module_source: await readFile(join(clean, 'card.mjs'), 'utf8')};
     await save('source-component-boundary.json', componentBoundary);

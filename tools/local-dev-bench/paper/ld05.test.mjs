@@ -110,6 +110,9 @@ test('common LD05 projections retain only actual observations and leave unsuppor
   const boundary = {module_sha256: 'a'.repeat(64),
     initial_module_sha256: 'a'.repeat(64), app_source: "import {RegisteredCard as createCard} from './card.mjs';",
     module_source: 'export function createCard({title}) {}\nexport {createCard as RegisteredCard};'};
+  boundary.module_sha256 = createHash('sha256').update(boundary.module_source).digest('hex');
+  boundary.initial_module_sha256 = boundary.module_sha256;
+  boundary.app_sha256 = createHash('sha256').update(boundary.app_source).digest('hex');
   assert.equal(normalizePaperSource(browser, wanted, boundary).component, 'RegisteredCard');
   assert.throws(() => normalizePaperSource(browser, wanted, {...boundary, module_sha256: 'b'.repeat(64)}));
   assert.throws(() => normalizePaperSource(browser, wanted, {...boundary, app_source: 'import fake from "./other.mjs"'}));

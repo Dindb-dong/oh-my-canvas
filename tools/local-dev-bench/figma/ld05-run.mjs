@@ -70,7 +70,20 @@ const px = value => {
   return Number(value.slice(0,-2));
 };
 
-export function projectSource(fixture,wanted,browser,assets) {
+export function sourceComponentIdentity(boundary) {
+  assert.ok(boundary, 'Missing observed source component boundary');
+  assert.equal(sha(boundary.module_source),boundary.module_sha256,'Source component bytes differ from manifest');
+  assert.equal(boundary.module_sha256,boundary.initial_module_sha256,'Source component implementation changed');
+  assert.equal(sha(boundary.app_source),boundary.app_sha256,'Source app bytes differ from manifest');
+  const imported=/import\s*\{\s*([A-Za-z_$][\w$]*)\s+as\s+createCard\s*\}\s*from\s*['"]\.\/card\.mjs['"]/.exec(boundary.app_source);
+  assert.ok(imported,'Source must import its actual named component as createCard');
+  const exported=[...boundary.module_source.matchAll(/export\s*\{\s*createCard\s+as\s+([A-Za-z_$][\w$]*)\s*\}/g)];
+  assert.ok(exported.some(match=>match[1]===imported[1]),'Named source component export differs from app import');
+  assert.match(boundary.module_source,/export function createCard\(/);
+  return imported[1];
+}
+
+export function projectSource(fixture,wanted,browser,assets,componentBoundary) {
   assert.deepEqual(browser.states.map(row=>row.width),fixture.widths);
   const [{cards,controlName,beforePress,statusVisible,afterPress,form,conditional,styles}] = browser.states;
   assert.deepEqual(cards.map(card=>card.label),wanted.cards);
@@ -82,7 +95,7 @@ export function projectSource(fixture,wanted,browser,assets) {
     'Source control observations differ across widths');
   assert.ok(browser.evaluatedHtml.includes('<h1>'+fixture.title+'</h1>'));
   const labels = {title:fixture.title, check_control_name:controlName,
-    keyboard_before:beforePress, keyboard_after:afterPress, component:wanted.component};
+    keyboard_before:beforePress, keyboard_after:afterPress, component:sourceComponentIdentity(componentBoundary)};
   if (form) {
     assert.equal(form.saved,wanted.valid_result+': '+form.retainedValue);
     assert.equal(form.fieldName,wanted.field_name);
@@ -163,8 +176,8 @@ export function normalizeNativeCycle(expected,observed,assets) {
     wrap:observed.direction==='HORIZONTAL'&&observed.wrap==='WRAP'});
 }
 
-export function normalizeSourceCycle(fixture,expected,browser,assets) {
-  const source=projectSource(fixture,expected,browser,assets);
+export function normalizeSourceCycle(fixture,expected,browser,assets,componentBoundary) {
+  const source=projectSource(fixture,expected,browser,assets,componentBoundary);
   return cycleSemantics(expected,{...source,cards:source.cards.map(card=>({...card,radius:source.radius,
     headingSize:source.headingSize,accent:source.accent,border:source.variantBorder}))});
 }
@@ -201,6 +214,11 @@ export async function runFigmaLD05(family,atlasScope,output,candidate,{nativeReo
   const sourceCommand=(name,...args)=>readJSON('ld05_source.py',name,family,sourceDir,...args);
   const fixture=readJSON('ld05_contract.py',family);
   const initial=sourceCommand('prepare');
+  const componentBoundary=async manifest=>({
+    app_source:await readFile(join(sourceDir,'app.mjs'),'utf8'),
+    module_source:await readFile(join(sourceDir,'card.mjs'),'utf8'),
+    app_sha256:manifest.files['app.mjs'],module_sha256:manifest.files['card.mjs'],
+    initial_module_sha256:initial.files['card.mjs']});
   const git=(...args)=>execFileSync('git',['-C',sourceDir,'-c','user.name=LD05 Benchmark','-c','user.email=ld05@example.invalid',
     '-c','core.hooksPath=/dev/null','-c','commit.gpgsign=false',...args],{env,encoding:'utf8'}).trim();
   const commit=(message,files)=>{git('add','--',...files);git('commit','--quiet','-m',message);return git('rev-parse','HEAD');};
@@ -227,7 +245,9 @@ export async function runFigmaLD05(family,atlasScope,output,candidate,{nativeReo
         const sourceCommit=commit('Apply registered source patch '+cycle,['app.mjs','index.html']);
         const observedSource=await sourceProbe(sourceDir,fixture,patched,cycle,rules.source_state);
         await save(prefix+'browser-source.json',observedSource.states);
-        const source=projectSource(fixture,rules.source_state,observedSource,assets);
+        const sourceBoundary=await componentBoundary(patched);
+        await save(prefix+'source-component.json',sourceBoundary);
+        const source=projectSource(fixture,rules.source_state,observedSource,assets,sourceBoundary);
         const call=async (invoke,stage,request)=>{
           const response=await invoke(request);
           await save(prefix+stage+'.json',response);
@@ -266,7 +286,11 @@ export async function runFigmaLD05(family,atlasScope,output,candidate,{nativeReo
         }
         const reproduced=await sourceProbe(clean,fixture,manifest,cycle,rules.result);
         await save(prefix+'browser-clean.json',reproduced.states);
-        const sourceState=normalizeSourceCycle(fixture,rules.result,reproduced,assets);
+        const cleanBoundary={...await componentBoundary(manifest),
+          app_source:await readFile(join(clean,'app.mjs'),'utf8'),
+          module_source:await readFile(join(clean,'card.mjs'),'utf8')};
+        await save(prefix+'clean-component.json',cleanBoundary);
+        const sourceState=normalizeSourceCycle(fixture,rules.result,reproduced,assets,cleanBoundary);
         const result={source_parent_sha256:previous.source_sha256,source_patch_sha256:patched.source_sha256,
           result_checkout_sha256:manifest.source_sha256,source_patch_commit:sourceCommit,result_commit:resultCommit,
           refreshed_canvas:refreshedState,persisted_canvas:persistedState,source_result:sourceState,

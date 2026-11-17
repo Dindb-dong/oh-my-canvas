@@ -79,8 +79,13 @@ test('browser-observed refresh and independent native readback preserve real sou
     controlName:'Toggle',beforePress:'Idle',statusVisible:true,afterPress:'Done',styles:{gap:'12px',radius:'6px',heading:'20px',wrap:'nowrap',accent:'rgb(37, 51, 87)',
       variantBorder:'rgba(0, 0, 0, 0)'}};
   const assets={'first.png':Buffer.from(rawPng)};
+  const hash=value=>createHash('sha256').update(value).digest('hex');
+  const app_source="import {Card as createCard} from './card.mjs';";
+  const module_source='export function createCard() {}\nexport {createCard as Card};';
+  const boundary={app_source,module_source,app_sha256:hash(app_source),module_sha256:hash(module_source),
+    initial_module_sha256:hash(module_source)};
   const source=projectSource(fixture,wanted,{evaluatedHtml:'<h1>Source board</h1>',states:
-    fixture.widths.map(width=>({...state,width}))},assets);
+    fixture.widths.map(width=>({...state,width}))},assets,boundary);
   const scope={fileKey:'synthetic',page:'1:1',root:'1:2',list:'1:3',cards:[
     {frame:'1:4',heading:'1:5',detail:'1:6',asset:'1:7'},
     {frame:'1:8',heading:'1:9',detail:'1:10',asset:'1:11'},

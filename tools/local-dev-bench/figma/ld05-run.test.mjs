@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import test from 'node:test';
-import {awaitNativeReopen,normalizeNativeCycle,normalizeSourceCycle} from './ld05-run.mjs';
+import {awaitNativeReopen,normalizeNativeCycle,normalizeSourceCycle,sourceComponentIdentity} from './ld05-run.mjs';
 import {publishCandidate} from '../publish-candidate.mjs';
 
 // These temp-directory receipts model the root observer and never enter live evidence.
@@ -69,6 +70,16 @@ test('an absent UI receipt expires within the existing deadline and preserves th
 });
 
 test('cycle results are assembled from actual canvas and source observations and reject missing proof',()=>{
+  const hash=value=>createHash('sha256').update(value).digest('hex');
+  const app_source="import {Card as createCard} from './card.mjs';";
+  const module_source='export function createCard() {}\nexport {createCard as Card};';
+  const boundary={app_source,module_source,app_sha256:hash(app_source),module_sha256:hash(module_source),
+    initial_module_sha256:hash(module_source)};
+  assert.equal(sourceComponentIdentity(boundary),'Card');
+  assert.throws(()=>sourceComponentIdentity(),/Missing observed/);
+  const wrongApp=app_source.replace('Card as','WrongCard as');
+  assert.throws(()=>sourceComponentIdentity({...boundary,app_source:wrongApp,app_sha256:hash(wrongApp)}),/export differs/);
+  assert.throws(()=>sourceComponentIdentity({...boundary,module_source:module_source+'\n// changed'}),/bytes differ/);
   const expected={check_control_name:'Toggle',keyboard_before:'Off',keyboard_after:'On',component:'Card',
     status_visible:true,cards:['One','Two'],asset:'one.png',gap:20,radius:14,heading_size:24};
   const assets={'one.png':Buffer.from([137,80,78,71,1,2,3,4,5]),'two.png':Buffer.from([137,80,78,71,5,4,3,2,1])};
@@ -85,11 +96,11 @@ test('cycle results are assembled from actual canvas and source observations and
     cards:observed.cards.map(card=>({label:card.title,detail:card.detail,variant:card.variant,
       src:'./assets/one.png',loaded:true})),styles:{gap:'20px',radius:'14px',heading:'24px',wrap:'nowrap',
       accent:'rgb(37, 51, 87)',variantBorder:'rgba(0, 0, 0, 0)'}}))};
-  assert.deepEqual(normalizeSourceCycle(fixture,expected,browser,assets),expected);
+  assert.deepEqual(normalizeSourceCycle(fixture,expected,browser,assets,boundary),expected);
   const changed=structuredClone(browser);
   changed.states[0].styles.gap='8px';
-  assert.throws(()=>normalizeSourceCycle(fixture,expected,changed,assets),/semantics differ/);
+  assert.throws(()=>normalizeSourceCycle(fixture,expected,changed,assets,boundary),/semantics differ/);
   const missing=structuredClone(browser);
   delete missing.states[0].beforePress;
-  assert.throws(()=>normalizeSourceCycle(fixture,expected,missing,assets),/actual initial source status/);
+  assert.throws(()=>normalizeSourceCycle(fixture,expected,missing,assets,boundary),/actual initial source status/);
 });
