@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { withLD02Broker } from '../ld02-model.mjs';
+import { withFigmaMCP } from './ld03-model.mjs';
 
 const readSkill = 'resource:figma-use';
 const writeSkills = readSkill + ',resource:figma-generate-design';
@@ -139,7 +141,7 @@ async function inspect(figma, { fileKey, pageName, start, limit }) {
     selected_native_ids: page.selection.map(node => node.id), nodes };
 }
 
-async function edit(figma, { fileKey, query, changes }) {
+async function edit(figma, { fileKey, query, changes, native }) {
   if (figma.fileKey !== fileKey) throw new Error('Unexpected test file');
   const matches = [];
   for (const page of figma.root.children) {
@@ -150,6 +152,7 @@ async function edit(figma, { fileKey, query, changes }) {
       }
     }
   }
+  if (!changes && !matches.length) return null;
   if (matches.length !== 1) throw new Error('Semantic target did not match precisely one station');
   const [{ page, frame }] = matches;
   await figma.setCurrentPageAsync(page);
@@ -158,14 +161,23 @@ async function edit(figma, { fileKey, query, changes }) {
     gap: [null, 'FRAME', 'itemSpacing'],
     radius: ['marker', 'RECTANGLE', 'cornerRadius'],
   };
-  const operations = [];
-  for (const change of changes) {
-    const [name, type, prop] = fields[change.field];
+  const nodes = {};
+  for (const [field, [name, type, prop]] of Object.entries(fields)) {
     const targets = name == null ? [frame] : frame.children.filter(node => node.type === type && node.name === name);
     const [node] = targets;
-    if (targets.length !== 1 || !node.visible || node.locked || node.type !== type || node[prop] !== change.from) {
-      throw new Error('Starting edit state differs for ' + change.field);
+    if (targets.length !== 1 || !node.visible || node.locked || node.type !== type ||
+        (native && (page.id !== native.page || node.id !== native[field]))) {
+      throw new Error('Station identity differs for ' + field);
     }
+    nodes[field] = { node, type, prop };
+  }
+  const read = () => ({ found: true, name: query.name, receipt: query.receipt,
+    text: nodes.text.node.characters, gap_px: frame.itemSpacing, radius_px: nodes.radius.node.cornerRadius });
+  if (!changes) return read();
+  const operations = [];
+  for (const change of changes) {
+    const { node, type, prop } = nodes[change.field];
+    if (node[prop] !== change.from) throw new Error('Starting edit state differs for ' + change.field);
     if (type === 'TEXT') {
       for (const { fontName } of node.getStyledTextSegments(['fontName'])) await figma.loadFontAsync(fontName);
     }
@@ -175,7 +187,7 @@ async function edit(figma, { fileKey, query, changes }) {
     node[prop] = value;
     return { native_id: node.id, field, from, to: node[prop] };
   });
-  return { document_id: figma.fileKey, page_id: page.id, writes };
+  return { document_id: figma.fileKey, page_id: page.id, writes, ...(native ? { state: read() } : {}) };
 }
 
 function fixtureIndex(fixture) {
@@ -241,12 +253,15 @@ function snapshot(raw, fixturePages) {
   const pages = [];
   const nodes = [];
   const selection = [];
+  let consumed = 0;
   for (const page of inventory.pages) {
     const spec = fixturePages.get(page.name);
     assert.ok(spec, 'Unexpected native page name');
     pages.push({ key: spec.key, name: page.name, native_id: page.id });
     const parts = batches.filter(item => item.page_id === page.id).sort((a, b) => a.start - b.start);
-    assert.equal(parts.length, 2, 'Missing page capture batches');
+    assert.ok(parts.length === 2 || parts.length === 1 && parts[0].nodes.length === spec.nodes.length,
+      'Missing page capture batches');
+    consumed += parts.length;
     assert.ok(Array.isArray(parts[0].selected_native_ids), 'Missing native selection observation');
     let start = 0;
     for (const part of parts) {
@@ -267,7 +282,7 @@ function snapshot(raw, fixturePages) {
     assert.equal(start, spec.nodes.length, 'Incomplete native layer capture');
     selection.push(...parts[0].selected_native_ids);
   }
-  assert.equal(batches.length, 2 * pages.length, 'Additional unexpected capture batches');
+  assert.equal(batches.length, consumed, 'Additional unexpected capture batches');
   assert.ok(Array.isArray(inventory.styles), 'Missing native style inventory');
   return { document_id: inventory.document_id, pages, nodes, styles: inventory.styles, selected_native_ids: selection };
 }
@@ -285,6 +300,79 @@ function mutations(raw, captured) {
       return { ...change, key: node.key };
     });
   });
+}
+
+export function atlasSnapshot(fixture, capture) {
+  return snapshot(capture, fixtureIndex(fixture).pages);
+}
+
+export function atlasFullPageReads(plan) {
+  assert.equal(plan.pages.length, 20);
+  const pages = plan.pages.filter((_, index) => index % 2 === 0).map(row => {
+    const code = row.code.replace(/,"start":0,"limit":50\}\);$/, ',"start":0,"limit":100});');
+    assert.notEqual(code, row.code);
+    return {...row, code};
+  });
+  return {inventory:plan.inventory, pages};
+}
+
+export function planAtlasReset(fixture, after) {
+  const {byKey} = fixtureIndex(fixture);
+  const target = byKey.get(fixture.edit.find(change => change.field === 'gap').key);
+  const query = {name:target.name, receipt:byKey.get(target.key + '/receipt').text};
+  const native = {page:after.pages.find(page => page.key === target.page)?.native_id};
+  for (const {field, key, to} of fixture.edit) {
+    const row = after.nodes.find(node => node.key === key);
+    assert.ok(row && row.editable && row[field] === to, 'Reset requires the prior recorded edited values');
+    native[field] = row.native_id;
+  }
+  assert.ok(Object.values(native).every(id => typeof id === 'string' && id.length));
+  const changes = fixture.edit.map(({field, to, from}) => ({field, from:to, to:from}));
+  return payload('Restore only the guarded Atlas fields in the approved synthetic Draft', edit,
+    {fileKey:after.document_id, query, native, changes}, true);
+}
+
+// The trusted runner supplies an independently graded starting capture and the approved Draft.
+export function figmaAtlasModelDriver(fixture, { fileKey, sessionId, before }, invoke, edits = []) {
+  assert.match(fileKey ?? '', /^[A-Za-z0-9_-]{1,128}$/);
+  assert.match(sessionId ?? '', /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i);
+  const {byKey} = fixtureIndex(fixture);
+  assert.equal(before.document_id, fileKey);
+  const target = byKey.get(fixture.edit.find(change => change.field === 'gap').key);
+  const query = {name: target.name, receipt: byKey.get(target.key + '/receipt').text};
+  const native = {page: before.pages.find(page => page.key === target.page)?.native_id};
+  for (const {field, key, from} of fixture.edit) {
+    const row = before.nodes.find(node => node.key === key);
+    assert.ok(row && row.editable && row[field] === from, `Wrong prepared edit value for ${field}`);
+    native[field] = row.native_id;
+  }
+  assert.ok(Object.values(native).every(id => typeof id === 'string' && id.length));
+  assert.equal(new Set(Object.values(native)).size, 4);
+  let written = false;
+  async function call(selector, values) {
+    const changes = values ? fixture.edit.map(({field, from}) => ({field, from, to: values[field]})) : null;
+    const pinned = selector.name === query.name && selector.receipt === query.receipt ? native : undefined;
+    if (changes) {
+      assert.ok(pinned && !written, 'Only one registered Figma Atlas edit is allowed');
+      written = true;
+    }
+    const request = payload(changes ? 'Apply the scoped Atlas edit' : 'Find the station by name and receipt',
+      edit, {fileKey, query: selector, changes, native: pinned}, Boolean(changes));
+    const result = await invoke({...request, fileKey, sessionId});
+    const observed = decode(result);
+    if (!changes) return observed;
+    assert.equal(observed.document_id, fileKey);
+    assert.equal(observed.page_id, native.page);
+    assert.deepEqual(observed.writes, changes.map(change => ({...change, native_id: native[change.field]})));
+    edits.push(result);
+    return observed.state;
+  }
+  return {query, find: selector => call(selector), edit: (selector, values) => call(selector, values)};
+}
+
+export function withOfficialFigmaAtlasModel(fixture, scope, socketPath, events, edits, run, options) {
+  return withFigmaMCP((invoke) => withLD02Broker(socketPath,
+    figmaAtlasModelDriver(fixture, scope, invoke, edits), events, run), options);
 }
 
 export function normalizeAtlas(fixture, raw) {

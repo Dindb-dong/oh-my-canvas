@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {randomBytes} from 'node:crypto';
+import {createHash, randomBytes} from 'node:crypto';
 import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {withLD02Broker} from '../ld02-model.mjs';
 import {runLD03Agent} from '../ld03-model.mjs';
+import {publishCandidate} from '../publish-candidate.mjs';
 import {
   connectEditor, createAccount, getMcpEndpoint, loopbackOrigin, newFile, waitForBackend,
 } from '../penpot-ld02.mjs';
@@ -101,13 +102,15 @@ export function atlasInventory(fixture, fileId) {
 }
 
 export function readAtlasPage(page, fileId) {
+  return readAtlasPages([page],fileId);
+}
+
+export function readAtlasPages(pages, fileId) {
   return `${guard(fileId)}
-    const page = penpot.currentFile.pages.find(candidate => candidate.id === ${JSON.stringify(page.native_id)});
-    if (!page || page.name !== ${JSON.stringify(page.name)}) throw new Error("Missing native Atlas page");
     const keyLiteral = ${JSON.stringify(nativeKey)};
-    const walk = (shape, parent, order) => {
+    const walk = (shape, pageKey, parent, order) => {
       const key = shape.getPluginData(keyLiteral);
-      const row = {native_id:shape.id,key,page:${JSON.stringify(page.key)},parent,name:shape.name,
+      const row = {native_id:shape.id,key,page:pageKey,parent,name:shape.name,
         kind:shape.type === "board" ? "frame" : shape.type, editable:!shape.blocked && !shape.hidden,
         bounds:[shape.x,shape.y,shape.width,shape.height]};
       if (order !== undefined) row.order = order;
@@ -122,9 +125,13 @@ export function readAtlasPage(page, fileId) {
         row.padding = padding.every(value => value === padding[0]) ? padding[0] : padding;
         children = [...children].sort((a,b) => a.y - b.y);
       }
-      return [row,...children.flatMap((child,index) => walk(child,key,shape.flex ? index : undefined))];
+      return [row,...children.flatMap((child,index) => walk(child,pageKey,key,shape.flex ? index : undefined))];
     };
-    return page.root.children.flatMap(shape => walk(shape,null));
+    return ${JSON.stringify(pages)}.flatMap(spec => {
+      const page = penpot.currentFile.pages.find(candidate => candidate.id === spec.native_id);
+      if (!page || page.name !== spec.name) throw new Error("Missing native Atlas page");
+      return page.root.children.flatMap(shape => walk(shape,spec.key,null));
+    });
   `;
 }
 
@@ -250,7 +257,10 @@ export function atlasDifferences(spec, state, tolerance) {
 async function capture(execute, fixture, fileId) {
   const state = await readAfterAttach(() => execute(atlasInventory(fixture,fileId)));
   const nodes = [];
-  for (const page of state.pages) nodes.push(...await execute(readAtlasPage(page,fileId)));
+  for (let i = 0; i < state.pages.length; i += 2) {
+    // Keep a bounded tool reply while eliminating half the round trips.
+    nodes.push(...await execute(readAtlasPages(state.pages.slice(i,i+2),fileId)));
+  }
   return {...state,nodes,styles:[]};
 }
 
@@ -296,7 +306,21 @@ function waitSave(page, origin) {
     .then(() => true,error => error.name === 'TimeoutError' ? false : error);
 }
 
-async function replay(origin, fixture, modelCommand) {
+function identityHash(state) {
+  const pairs = rows => rows.map(({key,native_id}) => [key,native_id]).sort(([a],[b]) => a.localeCompare(b));
+  return createHash('sha256').update(JSON.stringify([state.document_id,pairs(state.pages),pairs(state.nodes)])).digest('hex');
+}
+
+function preparedWorkspace(raw, origin) {
+  const url = new URL(raw);
+  assert.equal(url.origin,origin);
+  assert.ok(!url.username && !url.password);
+  assert.equal(url.searchParams.get('screen'),'workspace');
+  for (const key of ['file-id','page-id']) assert.match(url.searchParams.get(key),nativeId);
+  return url;
+}
+
+async function replay(origin, fixture, modelCommand, prepare, prepared) {
   await waitForBackend(origin);
   const {benchRequire, Client, StreamableHTTPClientTransport} = await import('../replays/mcp.mjs');
   const {chromium} = benchRequire('playwright');
@@ -309,24 +333,30 @@ async function replay(origin, fixture, modelCommand) {
   let edit = [];
   try {
     browser = await chromium.launch({channel:'chrome',headless:true});
+    const enrolled = prepared && JSON.parse(await readFile(prepared,'utf8'));
+    if (enrolled) assert.equal(enrolled.fixtureSha256,fixture.fixture_sha256);
     const context = await browser.newContext({locale:'en-US',viewport:{
       width:fixture.viewport.width,height:fixture.viewport.height,
-    }});
+    },...(enrolled ? {storageState:enrolled.storageState} : {})});
     context.setDefaultTimeout(15000);
     const dashboard = await context.newPage();
-    await createAccount(dashboard,origin,email,password);
+    if (enrolled) await dashboard.goto(origin);
+    else await createAccount(dashboard,origin,email,password);
     endpoint = await getMcpEndpoint(dashboard,origin);
     await client.connect(new StreamableHTTPClientTransport(endpoint));
-    let editor = await newFile(dashboard,context,origin);
+    let editor = enrolled ? await context.newPage() : await newFile(dashboard,context,origin);
+    const workspace = enrolled ? preparedWorkspace(enrolled.workspace,origin) : new URL(editor.url());
+    if (enrolled) await editor.goto(workspace.href);
     await editor.getByRole('toolbar',{name:'Drawing tools'}).waitFor();
-    const workspace = new URL(editor.url());
     assert.equal(workspace.origin,origin);
     const id = workspace.searchParams.get('file-id');
     assert.match(id,nativeId);
-    await editor.locator('header [class*="file-name-label"]').dblclick();
-    const title = editor.locator('header input[class*="file-name-input"]');
-    await title.fill(scope);
-    await title.press('Enter');
+    if (!enrolled) {
+      await editor.locator('header [class*="file-name-label"]').dblclick();
+      const title = editor.locator('header input[class*="file-name-input"]');
+      await title.fill(scope);
+      await title.press('Enter');
+    }
     await editor.getByText(scope,{exact:true}).waitFor();
     if (editor !== dashboard) await dashboard.close();
     await connectEditor(editor);
@@ -337,27 +367,42 @@ async function replay(origin, fixture, modelCommand) {
 
     phase = 'seed ten native Atlas pages';
     const setupStarted = performance.now();
-    const nativePages = new Map();
-    let setupSave;
-    for (const [index,page] of fixture.start.pages.entries()) {
-      if (index === fixture.start.pages.length - 1) setupSave = waitSave(editor,origin);
-      const result = await execute(seedAtlasPage(fixture,page,index,id));
-      assert.equal(result.logicalObjects,100);
-      nativePages.set(page.key,result.nativeId);
+    let initialSaveObserved, before, copy;
+    if (enrolled) {
+      const url = preparedWorkspace(enrolled.copy,origin);
+      copy = {id:url.searchParams.get('file-id'),url};
+      before = await verifyStart(execute,fixture,id,'before');
+      assert.equal(identityHash(before),enrolled.originalIdentitySha256);
+    } else {
+      const nativePages = new Map();
+      let setupSave;
+      for (const [index,page] of fixture.start.pages.entries()) {
+        if (index === fixture.start.pages.length - 1) setupSave = waitSave(editor,origin);
+        const result = await execute(seedAtlasPage(fixture,page,index,id));
+        assert.equal(result.logicalObjects,100);
+        nativePages.set(page.key,result.nativeId);
+      }
+      workspace.searchParams.set('page-id',nativePages.get(fixture.working_page));
+      initialSaveObserved = await setupSave;
+      if (initialSaveObserved instanceof Error) throw initialSaveObserved;
+      editor = await reopen(editor,context,workspace);
+      before = await verifyStart(execute,fixture,id,'before');
+      phase = 'duplicate the prepared original';
+      copy = await duplicateFromDashboard(editor,context,origin,scope);
+      const copyInventory = await readAfterAttach(() => execute(atlasInventory(fixture,copy.id)));
+      const copyPage = copyInventory.pages.find(page => page.key === fixture.working_page);
+      assert.ok(copyPage);
+      copy.url.searchParams.set('page-id',copyPage.native_id);
+      editor = await reopen(copy.opened,context,prepare ? copy.url : workspace);
+      if (prepare) {
+        const copyBefore = await verifyStart(execute,fixture,copy.id,'prepared-copy');
+        await writeFile(prepare, JSON.stringify({fixtureSha256:fixture.fixture_sha256,workspace:workspace.href,
+          copy:copy.url.href, originalIdentitySha256:identityHash(before), copyIdentitySha256:identityHash(copyBefore),
+          storageState:await context.storageState()})+'\n',{flag:'wx',mode:0o600});
+        return;
+      }
     }
-    workspace.searchParams.set('page-id',nativePages.get(fixture.working_page));
-    const initialSaveObserved = await setupSave;
-    if (initialSaveObserved instanceof Error) throw initialSaveObserved;
-    editor = await reopen(editor,context,workspace);
-    const before = await verifyStart(execute,fixture,id,'before');
-    phase = 'duplicate the prepared original';
-    const copy = await duplicateFromDashboard(editor,context,origin,scope);
     assert.notEqual(copy.id,id,'Expected distinct native verification copy');
-    const copyInventory = await readAfterAttach(() => execute(atlasInventory(fixture,copy.id)));
-    const copyPage = copyInventory.pages.find(page => page.key === fixture.working_page);
-    assert.ok(copyPage);
-    copy.url.searchParams.set('page-id',copyPage.native_id);
-    editor = await reopen(copy.opened,context,workspace);
     const setupMs = performance.now()-setupStarted;
 
     phase = 'three semantic edits on original';
@@ -385,6 +430,7 @@ async function replay(origin, fixture, modelCommand) {
     phase = 'independently verify Undo and Redo on native copy';
     editor = await reopen(editor,context,copy.url);
     const copyBefore = await verifyStart(execute,fixture,copy.id,'copy-before');
+    if (enrolled) assert.equal(identityHash(copyBefore),enrolled.copyIdentitySha256);
     await editor.keyboard.press('Escape');
     await execute(atlasTarget(copy.id,true,fixture));
     await waitValues(execute,fixture,copy.id,'to');
@@ -404,7 +450,7 @@ async function replay(origin, fixture, modelCommand) {
       copy_history:{undo_count:1,redo_count:1},after_probe_original:afterProbeOriginal,
       ...(modelCommand ? {modelTools} : {}),
     };
-    await writeFile(process.env.OMC_BENCH_CANDIDATE,JSON.stringify(evidence)+'\n',{flag:'wx',mode:0o600});
+    await publishCandidate(process.env.OMC_BENCH_CANDIDATE,evidence);
     console.log(JSON.stringify({workload:'LD02',sourceFamily:fixture.source_family_id,setupMs,editMs,reopenMs,
       initialSaveObserved,saveObserved,
       scope:modelCommand ? 'model-assisted canonical native Atlas edit' : 'native product-only canonical Atlas gate'}));
@@ -421,10 +467,13 @@ async function replay(origin, fixture, modelCommand) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const {positionals,values} = parseArgs({allowPositionals:true,options:{'model-command':{type:'string'}}});
+  const {positionals,values} = parseArgs({allowPositionals:true,options:{
+    'model-command':{type:'string'},prepare:{type:'string'},prepared:{type:'string'},
+  }});
   assert.equal(positionals.length,2,
-    'Use ld02-atlas.mjs LOOPBACK_ORIGIN CANONICAL_ATLAS.json [--model-command EXECUTABLE]');
-  assert.ok(process.env.OMC_BENCH_CANDIDATE,'Set OMC_BENCH_CANDIDATE for the independent neutral grader');
+    'Use ld02-atlas.mjs LOOPBACK_ORIGIN CANONICAL_ATLAS.json [--prepare OUT | --prepared INPUT] [--model-command EXECUTABLE]');
+  assert.ok(!values.prepare || (!values.prepared && !values['model-command']));
+  assert.ok(values.prepare || process.env.OMC_BENCH_CANDIDATE,'Set OMC_BENCH_CANDIDATE for the independent neutral grader');
   const fixture = validateFixture(JSON.parse(await readFile(positionals[1],'utf8')));
-  await replay(loopbackOrigin(positionals[0]),fixture,values['model-command']);
+  await replay(loopbackOrigin(positionals[0]),fixture,values['model-command'],values.prepare,values.prepared);
 }

@@ -7,6 +7,18 @@ const escapes = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#
 const escape = value => value.replace(/[&<>"']/g, symbol => escapes[symbol]);
 const callWith = (read, fileId) => (name, args = {}) => read({name, arguments: {...args, fileId}});
 const kind = {Frame: 'frame', Text: 'text', Rectangle: 'rectangle'};
+const readConcurrency = 16;
+
+async function readBatches(items, read) {
+  const results = [];
+  for (let start = 0; start < items.length; start += readConcurrency) {
+    const batch = await Promise.allSettled(items.slice(start, start + readConcurrency).map(read));
+    const failed = batch.find(row => row.status === 'rejected');
+    if (failed) throw failed.reason;
+    results.push(...batch.map(row => row.value));
+  }
+  return results;
+}
 function atlasKind(row) {
   if (row.name === 'marker' && row.component === 'Frame' && row.childCount === 0) return 'rectangle';
   return kind[row.component];
@@ -69,49 +81,119 @@ async function pageInventory(call, plan) {
   });
 }
 
-export async function discoverAtlasEdit(read, plan, brief) {
-  assert.ok(brief.title && brief.receipt && brief.status && Number.isInteger(brief.gap) && Number.isInteger(brief.radius));
+async function discoverAtlasStation(read, plan, {title, receipt}) {
   const call = callWith(read, plan.fileId);
   const pages = await pageInventory(call, plan);
+  const hits = await readBatches(pages.flatMap(page => [title, receipt].map(textValue => ({page, textValue}))),
+    ({page, textValue}) => call('find_nodes', {pageId: page.native_id, textValue}));
   const candidates = [];
-  for (const page of pages) {
-    const [titles, receipts] = await Promise.all([brief.title, brief.receipt].map(textValue =>
-      call('find_nodes', {pageId: page.native_id, textValue})));
+  for (const [index, page] of pages.entries()) {
+    const [titles, receipts] = hits.slice(index * 2, index * 2 + 2);
     if (!titles.nodes.length || !receipts.nodes.length) continue;
-    const details = async rows => await Promise.all(rows.map(({id}) => call('get_node_info', {nodeId: id})));
-    const named = (await details(titles.nodes)).filter(row => row.component === 'Text' && row.textContent === brief.title);
-    const coded = (await details(receipts.nodes)).filter(row => row.component === 'Text' && row.textContent === brief.receipt);
+    const details = rows => readBatches(rows, ({id}) => call('get_node_info', {nodeId: id}));
+    const named = (await details(titles.nodes)).filter(row => row.component === 'Text' && row.textContent === title);
+    const coded = (await details(receipts.nodes)).filter(row => row.component === 'Text' && row.textContent === receipt);
     for (const text of named) {
-      if (coded.some(row => row.parentId === text.parentId)) candidates.push({id: text.parentId, pageId: page.native_id});
+      const code = coded.filter(row => row.parentId === text.parentId);
+      if (code.length === 1) candidates.push({section: {id: text.parentId, pageId: page.native_id},
+        titleId: text.id, receiptId: code[0].id});
     }
   }
+  if (!candidates.length) return null;
   assert.equal(candidates.length, 1, 'A unique title and receipt match is required');
-  const [section] = candidates;
+  const [{section, titleId, receiptId}] = candidates;
   const station = await call('get_node_info', {nodeId: section.id});
   assert.equal(station.component, 'Frame');
-  assert.equal(station.name, brief.title);
+  assert.equal(station.name, title);
   assert.equal(station.childCount, 5);
   const {children} = await call('get_children', {nodeId: section.id});
   const status = children.filter(row => row.name === 'status' && row.component === 'Text');
   const marker = children.filter(row => row.name === 'marker' && atlasKind(row) === 'rectangle');
   assert.equal(status.length, 1);
   assert.equal(marker.length, 1);
-  return {
-    section, status: status[0].id, marker: marker[0].id,
-    requests: [
-      {name: 'set_text_content', arguments: {fileId: plan.fileId, updates: [{nodeId: status[0].id, html: escape(brief.status)}]}},
+  return {section, titleId, receiptId, status: status[0].id, marker: marker[0].id};
+}
+
+function atlasEditRequests(plan, {section, status, marker}, values) {
+  return [
+      {name: 'set_text_content', arguments: {fileId: plan.fileId, updates: [{nodeId: status, html: escape(values.text)}]}},
       {name: 'update_styles', arguments: {fileId: plan.fileId, updates: [
-        {nodeIds: [section.id], styles: {gap: `${brief.gap}px`}},
-        {nodeIds: [marker[0].id], styles: {borderRadius: `${brief.radius}px`}},
+        {nodeIds: [section.id], styles: {gap: `${values.gap}px`}},
+        {nodeIds: [marker], styles: {borderRadius: `${values.radius}px`}},
       ]}},
-    ],
-  };
+  ];
+}
+
+export async function discoverAtlasEdit(read, plan, brief) {
+  assert.ok(brief.title && brief.receipt && brief.status && Number.isInteger(brief.gap) && Number.isInteger(brief.radius));
+  const station = await discoverAtlasStation(read, plan, brief);
+  assert.ok(station, 'A unique title and receipt match is required');
+  const {section, status, marker} = station;
+  return {section, status, marker, requests: atlasEditRequests(plan, station, {...brief, text: brief.status})};
 }
 
 function px(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && /^-?\d+(\.\d+)?px$/.test(value)) return Number.parseFloat(value);
   return null;
+}
+
+export function paperAtlasModelHandlers(read, plan, fixture) {
+  const {nodes, branches} = prepared(fixture);
+  const expected = fixture.edit.find(row => row.field === 'gap');
+  const parts = branches.get(expected.key);
+  const query = {name: nodes.get(expected.key).name, receipt: parts.find(row => row.name === 'receipt').text};
+  const starting = Object.fromEntries(fixture.edit.map(({field, from}) => [field, from]));
+  const call = callWith(read, plan.fileId);
+  let target;
+
+  async function observe(station) {
+    const {section, status, marker, titleId, receiptId} = station;
+    const [frame, title, receipt, text, image, styles] = await Promise.all([
+      ...[section.id, titleId, receiptId, status, marker].map(nodeId => call('get_node_info', {nodeId})),
+      call('get_computed_styles', {nodeIds: [section.id, marker]}),
+    ]);
+    assert.equal(frame.id, section.id);
+    assert.deepEqual([title.id, receipt.id, text.id, image.id], [titleId, receiptId, status, marker]);
+    assert.ok([title, receipt, text, image].every(node => node.parentId === section.id && frame.childIds.includes(node.id)));
+    assert.ok([frame, text, image].every(node => node.isLocked === false && node.isVisible === true));
+    assert.ok(title.component === 'Text' && receipt.component === 'Text' && text.component === 'Text' && atlasKind(image) === 'rectangle');
+    return {name: title.textContent, receipt: receipt.textContent, text: text.textContent,
+      gap_px: px(styles.styles[section.id]?.gap), radius_px: px(styles.styles[marker]?.borderRadius)};
+  }
+
+  return {
+    query,
+    async find(selector) {
+      const station = await discoverAtlasStation(read, plan, {title: selector.name, receipt: selector.receipt});
+      if (!station) return null;
+      const state = await observe(station);
+      assert.equal(state.name, selector.name);
+      assert.equal(state.receipt, selector.receipt);
+      if (selector.name === query.name && selector.receipt === query.receipt) target = station;
+      return state;
+    },
+    async edit(selector, values) {
+      assert.deepEqual(selector, query);
+      assert.ok(target, 'No live Paper target');
+      const pages = await pageInventory(call, plan);
+      assert.equal(pages.find(page => page.key === fixture.working_page)?.native_id, target.section.pageId);
+      assert.deepEqual(await observe(target), {...query, text: starting.text,
+        gap_px: starting.gap, radius_px: starting.radius}, 'Paper target changed before write');
+      try {
+        for (const request of atlasEditRequests(plan, target, values)) {
+          const response = await read(request);
+          const rows = response?.updates ?? response?.results ?? [];
+          assert.ok(response && !response.error && !response.errors?.length && rows.every(row =>
+            !row.error && row.result !== 'error' && !Object.keys(row.ignoredStyles ?? {}).length),
+          `Paper ${request.name} recorded an in-band error`);
+        }
+        return await observe(target);
+      } finally {
+        await call('finish_working_on_nodes', {nodeIds: [target.section.id, target.status, target.marker]});
+      }
+    },
+  };
 }
 
 export async function captureAtlas(read, fixture, plan) {
@@ -121,38 +203,61 @@ export async function captureAtlas(read, fixture, plan) {
   const selection = await call('get_selection');
   assert.equal(selection.count, selection.selectedNodes.length);
   const nodes = [];
-  const raw = [];
   const missingBounds = [];
-  for (const page of pages) {
+  const raw = await readBatches(pages, async page => {
     const info = await call('get_basic_info', {pageId: page.native_id});
     assert.equal(info.fileName, plan.fileName);
     assert.ok(typeof info.rootNodeId === 'string' && info.rootNodeId);
-    const observed = new Map();
-    async function descend(parentId, logicalParent, siblingSpecs) {
-      if (!siblingSpecs.length) return;
-      const {children} = await call('get_children', {nodeId: parentId});
-      assert.equal(children.length, siblingSpecs.length, 'Incomplete or extra children in Paper page');
-      const matches = await Promise.all(siblingSpecs.map(async spec => {
-        const matching = children.filter(row => row.name === spec.name && atlasKind(row) === spec.kind);
-        assert.equal(matching.length, 1, `Unidentified or replaced layer ${spec.key}`);
-        const layer = await call('get_node_info', {nodeId: matching[0].id});
-        assert.equal(layer.id, matching[0].id);
-        assert.equal(layer.parentId, parentId);
-        assert.equal(layer.childCount, (branches.get(spec.key) ?? []).length);
-        assert.ok(!observed.has(layer.id));
-        observed.set(layer.id, {layer, spec, logicalParent, order: children.indexOf(matching[0])});
-        return {layer, spec};
-      }));
-      for (const {layer, spec} of matches) await descend(layer.id, spec.key, branches.get(spec.key) ?? []);
-    }
-    await descend(info.rootNodeId, null, branches.get(page.key));
-    assert.equal(observed.size, 100);
-    const computed = {};
-    const ids = [...observed.keys()];
-    for (let offset = 0; offset < ids.length; offset += 25) {
-      Object.assign(computed, (await call('get_computed_styles', {nodeIds: ids.slice(offset, offset + 25)})).styles);
-    }
-    for (const [id,{layer,spec,logicalParent,order}] of observed) {
+    const {children} = await call('get_children', {nodeId: info.rootNodeId});
+    return {page, info, rootIds: children.map(({id}) => id), entries: [], computed: {}};
+  });
+
+  const observedIds = new Set();
+  let frontier = raw.map(state => ({state, parentId: state.info.rootNodeId,
+    logicalParent: null, specs: branches.get(state.page.key), ids: state.rootIds}));
+  while (frontier.length) {
+    const requests = frontier.flatMap(group => {
+      assert.equal(group.ids.length, group.specs.length, 'Incomplete or extra children in Paper page');
+      return group.ids.map(id => ({group, id}));
+    });
+    const details = new Map(await readBatches(requests, async ({group, id}) => {
+      assert.ok(!observedIds.has(id), 'Duplicate Paper layer ID');
+      observedIds.add(id);
+      const layer = await call('get_node_info', {nodeId: id});
+      assert.equal(layer.id, id);
+      assert.equal(layer.parentId, group.parentId);
+      assert.ok(Array.isArray(layer.childIds));
+      assert.equal(layer.childCount, layer.childIds.length);
+      return [id, layer];
+    }));
+    frontier = frontier.flatMap(({state, logicalParent, specs, ids}) => {
+      const siblings = ids.map(id => details.get(id));
+      return specs.flatMap(spec => {
+        const matches = siblings.filter(layer => layer.name === spec.name && atlasKind(layer) === spec.kind);
+        assert.equal(matches.length, 1, `Unidentified or replaced layer ${spec.key}`);
+        const [layer] = matches;
+        const children = branches.get(spec.key) ?? [];
+        assert.equal(layer.childIds.length, children.length);
+        state.entries.push({layer, spec, logicalParent, order: siblings.indexOf(layer)});
+        return children.length ? [{state, parentId: layer.id, logicalParent: spec.key,
+          specs: children, ids: layer.childIds}] : [];
+      });
+    });
+  }
+
+  const styleBatches = raw.flatMap(state => {
+    assert.equal(state.entries.length, 100);
+    const nodeIds = state.entries.map(({layer}) => layer.id);
+    return Array.from({length: Math.ceil(nodeIds.length / 25)}, (_, batch) =>
+      ({state, ids: nodeIds.slice(batch * 25, (batch + 1) * 25)}));
+  });
+  await readBatches(styleBatches, async ({state, ids}) => {
+    const {styles} = await call('get_computed_styles', {nodeIds: ids});
+    Object.assign(state.computed, styles);
+  });
+  for (const {page, entries, computed} of raw) {
+    for (const {layer,spec,logicalParent,order} of entries) {
+      const {id} = layer;
       const css = computed[id];
       assert.ok(css, `Missing native computed style for ${spec.key}`);
       if (spec.kind === 'rectangle') {
@@ -175,9 +280,9 @@ export async function captureAtlas(read, fixture, plan) {
         ...(spec.radius === undefined ? {} : {radius: px(css.borderRadius)}),
       });
     }
-    raw.push({page, info, nodes: [...observed.values()].map(item => item.layer), computed});
   }
-  return {raw, missingBounds, snapshot: {
+  return {raw: raw.map(({page, info, entries, computed}) => ({page, info, computed,
+    nodes: entries.map(({layer}) => layer)})), missingBounds, snapshot: {
     document_id: plan.fileId, pages, nodes: nodes.sort((a,b) => a.key.localeCompare(b.key)), styles: [],
     selected_native_ids: selection.selectedNodes.map(row => row.id),
   }};
@@ -198,10 +303,13 @@ export function checkProtectedAtlas(fixture, before, after) {
   assert.equal(before.nodes.length, 1000);
   assert.equal(after.nodes.length, 1000);
   assert.deepEqual(before.nodes.map(strip), after.nodes.map(strip), 'Protected native content or identity changed');
-  for (const edit of fixture.edit) {
-    assert.equal(before.nodes.find(row => row.key === edit.key)?.[edit.field], edit.from);
-    assert.equal(after.nodes.find(row => row.key === edit.key)?.[edit.field], edit.to);
-  }
+  return fixture.edit.map(({key, field, from: expectedBefore, to: expectedAfter}) => {
+    const from = before.nodes.find(row => row.key === key)?.[field];
+    const to = after.nodes.find(row => row.key === key)?.[field];
+    assert.equal(from, expectedBefore);
+    assert.equal(to, expectedAfter);
+    return {key, field, from, to};
+  });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

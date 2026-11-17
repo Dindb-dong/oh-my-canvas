@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
 import {
-  atlasDifferences,atlasInventory,atlasTarget,readAtlasPage,runAtlasModel,seedAtlasPage,validateFixture,
+  atlasDifferences,atlasInventory,atlasTarget,readAtlasPage,readAtlasPages,runAtlasModel,seedAtlasPage,validateFixture,
 } from './ld02-atlas.mjs';
 
 const generator = 'tools/local-dev-bench/workloads/synthetic.py';
@@ -94,6 +94,18 @@ async function seed(app) {
     assert.equal(result.logicalObjects,100);
   }
 }
+
+test('batched Atlas capture preserves native page bindings and row order', async () => {
+  const app = synthetic(id);
+  await seed(app);
+  const {pages} = await evalScript(atlasInventory(fixture,id),app);
+  const pair = pages.slice(0,2);
+  const single = await Promise.all(pair.map(page => evalScript(readAtlasPage(page,id),app)));
+  const batched = await evalScript(readAtlasPages(pair,id),app);
+  assert.equal(batched.length,200);
+  assert.deepEqual(batched,single.flat());
+  await assert.rejects(evalScript(readAtlasPages(pair,copyId),app), /Wrong isolated Atlas document/);
+});
 
 async function snapshot(app) {
   const state=await evalScript(atlasInventory(fixture,app.currentFile.id),app);

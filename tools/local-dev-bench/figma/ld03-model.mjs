@@ -92,7 +92,7 @@ export function figmaLD03Driver({ fixture, fileKey, sessionId, nativeIds, before
   };
 }
 
-function isolatedOptions(servers) {
+function isolatedOptions(servers, allowedTools) {
   assert.ok(servers.some(server => server.name === 'figma' && server.enabled && server.auth_status === 'o_auth' &&
     server.transport.url === 'https://mcp.figma.com/mcp'), 'Official Figma MCP OAuth is unavailable');
   const opts = servers.filter(server => server.name !== 'figma').flatMap(server => {
@@ -100,13 +100,14 @@ function isolatedOptions(servers) {
     const dummy = server.transport.type === 'stdio' ? 'command="/usr/bin/false"' : 'url="http://127.0.0.1:9/mcp"';
     return ['-c', `mcp_servers.${server.name}={enabled=false,${dummy}}`];
   });
-  return [...opts, '-c', 'mcp_servers.figma={enabled=true,url="https://mcp.figma.com/mcp",enabled_tools=["use_figma"]}'];
+  return [...opts, '-c', `mcp_servers.figma={enabled=true,url="https://mcp.figma.com/mcp",enabled_tools=${JSON.stringify(allowedTools)}}`];
 }
 
 // The existing OAuth credential remains in Codex; there is no model turn in this app-server.
-async function withFigmaMCP(run, { binary = 'codex', timeoutMs = 18_000 } = {}) {
+export async function withFigmaMCP(run, { binary = 'codex', timeoutMs = 18_000, createSession = false } = {}) {
+  const allowedTools = createSession ? ['create_session', 'use_figma'] : ['use_figma'];
   const listed = JSON.parse(execFileSync(binary, ['mcp', 'list', '--json'], { encoding: 'utf8', timeout: timeoutMs }));
-  const options = isolatedOptions(listed);
+  const options = isolatedOptions(listed, allowedTools);
   const dir = await mkdtemp(join(tmpdir(), 'omc-figma-ld03-'));
   const start = performance.now();
   const child = spawn(binary, ['app-server', '--disable', 'apps', '--disable', 'plugins', ...options, '--stdio'],
@@ -168,12 +169,13 @@ async function withFigmaMCP(run, { binary = 'codex', timeoutMs = 18_000 } = {}) 
     const active = availability.data.filter(server => Object.keys(server.tools).length > 0);
     assert.deepEqual(active.map(server => server.name), ['figma']);
     assert.equal(active[0].authStatus, 'oAuth');
-    assert.deepEqual(Object.keys(active[0].tools), ['use_figma']);
+    assert.deepEqual(Object.keys(active[0].tools).sort(), allowedTools);
     const readiness = { initialization_ms: initialized - start, ephemeral_thread_ms: threaded - initialized,
       connector_discovery_ms: performance.now() - threaded };
-    return await run(args => rpc('mcpServer/tool/call', {
-      threadId, server: 'figma', tool: 'use_figma', arguments: args,
-    }), readiness);
+    return await run((args, tool = 'use_figma') => {
+      assert.ok(allowedTools.includes(tool), 'Tool is outside the isolated Figma adapter');
+      return rpc('mcpServer/tool/call', {threadId, server: 'figma', tool, arguments: args});
+    }, readiness);
   } finally {
     reader.close();
     if (child.exitCode === null && child.signalCode === null) {

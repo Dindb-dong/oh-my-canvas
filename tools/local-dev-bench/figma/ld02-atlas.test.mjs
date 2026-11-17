@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { normalizeAtlas, planAtlas } from './ld02-atlas.mjs';
+import { atlasFullPageReads, atlasSnapshot, figmaAtlasModelDriver, normalizeAtlas, planAtlas,
+  planAtlasReset } from './ld02-atlas.mjs';
 
 const synth = fileURLToPath(new URL('../workloads/synthetic.py', import.meta.url));
 const python = (...args) => spawnSync('python3', [synth, ...args], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
@@ -141,4 +142,40 @@ test('Atlas generated requests and independent snapshots pass the shared oracle'
   } finally {
     rmSync(temp, { recursive: true });
   }
+});
+
+test('Atlas broker binds model-selected changes to its observed synthetic baseline once', async () => {
+  const fixture = JSON.parse(python('fixture', 'LD02', '--variant', 'conservation-atlas').stdout);
+  const fileKey = 'approved-original';
+  const plan = planAtlas(fixture, fileKey);
+  const figma = figmaMock(fileKey);
+  await seed(figma, plan);
+  const before = atlasSnapshot(fixture, await capture(figma, plan.original.read));
+  assert.deepEqual(atlasSnapshot(fixture, await capture(figma, atlasFullPageReads(plan.original.read))), before);
+  assert.throws(() => planAtlasReset(fixture, before), /prior recorded edited values/);
+  await execute(figma, plan.original.edit);
+  const previouslyEdited = atlasSnapshot(fixture, await capture(figma, plan.original.read));
+  await execute(figma, planAtlasReset(fixture, previouslyEdited));
+  assert.deepEqual(atlasSnapshot(fixture, await capture(figma, plan.original.read)), before);
+  const sessionId = '5bd636ba-7048-4fad-a896-46207a0bac92';
+  const invocations = [];
+  const edits = [];
+  const driver = figmaAtlasModelDriver(fixture, {fileKey, sessionId, before}, async request => {
+    invocations.push(request);
+    assert.equal(request.sessionId, sessionId);
+    assert.equal(request.fileKey, fileKey);
+    return wrap(await execute(figma, request));
+  }, edits);
+  const changes = {text: 'Model selected', gap: 24, radius: 12};
+  assert.equal(await driver.find({name: driver.query.name, receipt: 'AA-999'}), null);
+  const found = await driver.find(driver.query);
+  assert.equal(found.found, true);
+  assert.deepEqual(Object.keys(found).sort(), ['found', 'gap_px', 'name', 'radius_px', 'receipt', 'text']);
+  await assert.rejects(driver.edit({...driver.query, receipt:'AA-999'}, changes), /Only one registered/);
+  assert.equal(invocations.length, 2);
+  const after = await driver.edit(driver.query, changes);
+  assert.deepEqual(after, {...found, text: changes.text, gap_px: changes.gap, radius_px: changes.radius});
+  assert.equal(edits.length, 1);
+  await assert.rejects(driver.edit(driver.query, changes), /Only one registered/);
+  assert.throws(() => figmaAtlasModelDriver(fixture, {fileKey:'wrong-draft', sessionId, before}, () => {}));
 });
