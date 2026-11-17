@@ -150,3 +150,25 @@ edit, and reopen separately. First visible OS window and asset/font rendering
 are unobservable for this headless solid-shape fixture. Keep the archive,
 manifest and both run records. Remove the short-lived storage state and MCP
 endpoint files from the source and destination once the run finishes.
+
+## LD02 conservation-atlas
+
+Use the canonical ten-page LD02 fixture and neutral independent scorer:
+
+```sh
+python3 tools/local-dev-bench/workloads/synthetic.py fixture LD02 --variant conservation-atlas > "$FIXTURE"
+OMC_BENCH_CANDIDATE="$EVIDENCE" node tools/local-dev-bench/penpot/ld02-atlas.mjs http://localhost:19001 "$FIXTURE"
+python3 tools/local-dev-bench/workloads/synthetic.py grade LD02 "$EVIDENCE" --variant conservation-atlas
+node --test tools/local-dev-bench/penpot/ld02-atlas.test.mjs
+```
+
+The adapter prepares a fresh synthetic account and a native editable document,
+with 1,000 objects across 10 pages. Target lookup uses the exact observed
+station name and receipt. The three setters run in a native history block.
+A dashboard duplicate made from the prepared state provides a distinct
+native document for the verification edits and actual Undo and Redo
+shortcuts. Original and copy snapshots traverse every page using observed
+shape identities, hierarchy and geometry. The original is read after normal
+reopen and again after the copy edits. The independent scorer remains the
+acceptance gate. The product-only scope excludes model and presentation
+measurements.

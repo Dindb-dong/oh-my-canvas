@@ -238,11 +238,11 @@ async function reopenPage(page, context, workspace) {
   return next;
 }
 
-async function duplicateFromDashboard(page, context, origin) {
+export async function duplicateFromDashboard(page, context, origin, name) {
   const dashboard = await context.newPage();
   await page.close();
   await dashboard.goto(origin);
-  const source = dashboard.getByRole('button', {name:fileName, exact:true});
+  const source = dashboard.getByRole('button', {name:name, exact:true});
   await source.hover();
   await source.locator('[id$="-action-menu"]').click();
   await dashboard.getByText('Duplicate', {exact:true}).click();
@@ -251,9 +251,9 @@ async function duplicateFromDashboard(page, context, origin) {
   await cards.nth(1).waitFor({state:'visible'});
   const titles = await cards.evaluateAll(items => items.map(item => item.getAttribute('title')));
   assert.equal(titles.length, 2, 'Expected one original and one native duplicate on the disposable account');
-  assert.ok(titles.includes(fileName), 'Original benchmark card missing');
-  const copy = titles.find(title => title !== fileName);
-  assert.ok(copy.startsWith(fileName), 'Unexpected duplicate file');
+  assert.ok(titles.includes(name), 'Original benchmark card missing');
+  const copy = titles.find(title => title !== name);
+  assert.ok(copy.startsWith(name), 'Unexpected duplicate file');
   const duplicate = dashboard.getByRole('button', {name:copy, exact:true});
   const editor = Promise.any([
     context.waitForEvent('page', {timeout:10000}),
@@ -334,7 +334,7 @@ async function replay(origin, fixture) {
     }
 
     phase = 'native verification duplicate';
-    const {opened, id:copyId, url:copyUrl} = await duplicateFromDashboard(editor, context, origin);
+    const {opened, id:copyId, url:copyUrl} = await duplicateFromDashboard(editor, context, origin, fileName);
     assert.notEqual(copyId, id, 'Propagation probe must edit a distinct native copy');
     let copy = opened;
     const copyImmediate = await readAfterAttach(() => execute(readFieldRelay(copyId)));
