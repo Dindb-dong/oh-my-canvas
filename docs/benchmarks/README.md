@@ -1,8 +1,11 @@
 # Local Development Benchmark Protocol
 
-**Protocol:** `omc-local-dev/1`  
-**Design date:** 2026-11-17  
-**Status:** proposed measurement protocol; comparative results **NOT_RUN**  
+**Protocol:** `omc-local-dev/1`
+
+**Design date:** 2026-11-17
+
+**Status:** proposed measurement protocol; comparative results **NOT_RUN**
+
 **Inspected OMC source:** [`ad7a58d147d1987589e147fb92b51155118b90a5`](https://github.com/Dindb-dong/oh-my-canvas/commit/ad7a58d147d1987589e147fb92b51155118b90a5)
 
 ## 1. Decision this benchmark supports
@@ -21,7 +24,15 @@ Do not replace this statement with an unqualified claim that OMC is always faste
 
 This directory specifies a study and the collector work needed to run it. It does **not** contain a completed cross-product runner or measured comparative results.
 
-The protocol consists of this overview and five companion specifications: `WORKLOADS.md`, `MEASUREMENT.md`, `ANALYSIS_PLAN.md`, `COMPETITOR_BASELINES.md`, and `IMPLEMENTATION_MAP.md`. The final navigation index is added when those specifications are integrated. A study must implement and freeze the complete set; the overview alone is not an executable experiment.
+| Document | Read it to answer |
+| --- | --- |
+| [Workloads and acceptance](WORKLOADS.md) | Which exact tasks, fixtures, budgets and quality checks represent local development? |
+| [Measurement and collector contract](MEASUREMENT.md) | What counts as a token, visible edit, complete process boundary, resource peak or accepted completion? |
+| [Statistical analysis and claim policy](ANALYSIS_PLAN.md) | How are failures, uncertainty, sample size and two-competitor claims handled? |
+| [Competitor baselines](COMPETITOR_BASELINES.md) | Which current Paper/Figma workflows must be allowed, and how is capability/access established? |
+| [Native implementation map](IMPLEMENTATION_MAP.md) | Which source paths support each hypothesis, and which bottlenecks and existing-harness gaps should be measured? |
+
+A study must implement and freeze the complete set; the overview alone is not an executable experiment. The source map and competitor review are completed documentation. Fixture generation, cross-product adapters, new collectors, acceptance automation, pilot and confirmation are future implementation/execution work. No comparative measurements accompany this protocol.
 
 The existing [native qualification guide](../native-engine/QUALIFICATION.md) remains authoritative for native release qualification W1-W7 and correctness obligations. This protocol adds **cross-product local-development comparisons**. It neither marks the older qualification complete nor weakens its gates. Its own result set starts at NOT_RUN. Existing benchmark scripts are diagnostic starting points, not comparative evidence.
 
@@ -31,7 +42,7 @@ The existing [native qualification guide](../native-engine/QUALIFICATION.md) rem
 | --- | --- | --- |
 | OMC-native | Release-built native desktop, native service, workers, declared MCP dialect and transport | Primary candidate |
 | Paper-desktop | Current stable Paper desktop and its supported MCP integration | Primary comparator |
-| Figma-desktop | Current stable Figma desktop with the supported official remote MCP write workflow | Primary comparator |
+| Figma-desktop | Current stable Figma desktop with the supported official remote MCP write workflow (`figma-remote` integration profile) | Primary comparator |
 | OMC-Electron | The existing Electron application from a pinned commit | Internal regression/control arm; never silently substituted for native |
 | Figma-browser | Dedicated browser profile with the same design and official MCP workflow | Optional separately reported deployment arm |
 | Penpot | Pinned hosted/self-hosted version and renderer mode | Optional open-source reference; not required for the Paper/Figma claim |
@@ -53,14 +64,16 @@ The following effect sizes are **proposed practical targets**, not observations 
 | Claim | Primary quantity | Proposed material improvement | Mandatory accompanying gate |
 | --- | --- | --- | --- |
 | Lower model usage | All-attempt provider-accounted token spend per accepted completion, with input/output components also reported | At least 25% lower against each claimed comparator | Equal acceptance contract; success non-inferiority; no missing token accounting |
-| Faster agent-assisted completion | All-attempt elapsed effort per accepted completion, plus censored time-to-acceptance and solve curves | At least 20% lower | Failure/time-limit attempts remain counted; final result passes acceptance |
-| Lower local RAM demand | Simultaneous aggregate physical footprint peak for the declared product process set | At least 25% lower | Same workload, cache state, visible quality and residency; valid OS accounting |
+| Faster agent-assisted completion | Workload-weighted capped verified completion time: accepted elapsed time on success, registered deadline otherwise | At least 20% lower | Actual elapsed time reported separately; failure cannot look like a fast completion |
+| Lower local RAM demand | Fixed-weight mean of per-replay peaks of simultaneous aggregate physical footprint for the declared product process set | At least 25% lower | Equivalent complete replay, cache state, visible quality and residency; valid OS accounting |
 | Lower local CPU work | Aggregate user + system CPU-seconds over the same task/window | At least 20% lower, secondary | Compare energy and sustained activity separately; do not use CPU percentage alone |
 | Smooth interaction | Input-to-visible-change latency, missed-refresh fraction, hitch rate | Meet registered absolute interaction targets and avoid material regression | Actual presentation evidence or explicitly weaker measurement label |
 | Foreground isolation | Change in foreground latency/resources during another document's work | Meet absolute foreground gates and registered slowdown margin | Real independent documents and active agent jobs, with no omitted pending work |
 | Reliable local workflow | Accepted completion, source semantics, durable recovery, offline capability and human repair | Correctness gates pass; performance gains cannot offset data loss | Report unsupported workflows and unavailable observation separately |
 
 An aggregate marketing claim combining tokens, speed, and memory requires **all named endpoints** to pass against **both named competitors** at the registered quality and success level. A token win with a memory regression is a token win, not overall dominance. Report trade-offs as a vector; no opaque weighted product score is allowed.
+
+For the requested tokens + time + memory claim, preregister the expanded eight-statement family: success noninferiority and each of the three savings endpoints against each comparator. The specified conservative multiplicity correction uses 99.375% one-sided bounds. The observed OMC success target is at least 95%, with a paired success-difference lower bound above -5 percentage points and no severe correctness violation. The observed target alone does not prove population reliability. The analysis plan also defines a narrower four-statement token-only study; it cannot substitute for the expanded family after outcomes are known.
 
 Local footprint measures user-device demand, not total cloud compute or total energy. A remote competitor may offload substantial work. State that boundary instead of describing local memory figures as end-to-end computational efficiency.
 
@@ -102,7 +115,7 @@ Use separate pilot fixtures to expose broken tasks, collector bias, rate limits,
 
 ### Stage D — Preregister and run confirmation
 
-Commit the complete protocol, task manifests and hashes, analysis implementation, sample-size rule, thresholds, ordered product schedule, and exclusions before viewing confirmatory outcomes. A planning allocation is eight independent variants per primary family and three repetitions per product: 48 task instances, 144 attempts per product, 432 attempts for OMC/Paper/Figma. This is a starting budget, not a theorem that these sample sizes can prove non-inferiority. The analysis plan can require more independently sampled variants.
+Commit the complete protocol, task manifests and hashes, analysis implementation, sample-size rule, thresholds, ordered product schedule, and exclusions before viewing confirmatory outcomes. A feasibility/descriptive planning allocation is eight independently authored source fixtures per primary family and three repetitions per product: 48 independent fixtures, 144 attempts per product, 432 attempts for OMC/Paper/Figma. Copies, alternate colors and sizes of one source template do not become independent fixtures. This allocation becomes confirmatory only if the preregistered power/precision analysis supports it; success noninferiority can require substantially more independent fixtures.
 
 Balance product order on the same hardware and task instance. Keep app/document/OS/model cache conditions distinct. Freeze app updates for a block; if SaaS changes are observed, version the study block and rerun affected comparisons instead of mixing them silently.
 
