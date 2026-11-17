@@ -14,7 +14,7 @@ cargo build --locked -p omc-service -p omc-cli -p omc-desktop
 node tests/mcp.e2e.mjs
 ```
 
-The MCP suite starts native processes on loopback and removes its temporary profiles on exit. For desktop changes, also run `omc-desktop --profile <temporary-directory> --smoke-exit-ms 2000 --screenshot <output.png>` using the binary in `target/debug/` and inspect the image. Record the OS, commands and results in the PR. Platform packaging and workload qualification are tracked in the [native qualification guide](../docs/native-engine/QUALIFICATION.md).
+The MCP suite starts native processes on loopback and removes its temporary profiles on exit. For desktop changes, also run `omc-desktop --profile <temporary-directory> --automation-background --smoke-exit-ms 2000 --screenshot <output.png>` using the binary in `target/debug/` and inspect the image. Record the OS, commands and results in the PR. Platform packaging and workload qualification are tracked in the [native qualification guide](../docs/native-engine/QUALIFICATION.md).
 
 ## Foundation
 
