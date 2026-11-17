@@ -407,15 +407,16 @@ test('FigCraft geometry commands change the native document through MCP', async 
     await run('variable.set',{variable:accentVariable,value:'#229999'});
     assert.equal(await paintPng(first),variablePng);
 
-    const rich=(await call('create_node',{type:'text',text:'한글🙂ABC',x:330,y:100,width:120,height:50})).id;
-    await run('text.style',{id:rich,start:0,end:3,fontSize:24,
+    // Latin A guarantees tintable ink when the host lacks Hangul glyphs or uses color emoji.
+    const rich=(await call('create_node',{type:'text',text:'A한글🙂BC',x:330,y:100,width:120,height:50})).id;
+    await run('text.style',{id:rich,start:0,end:4,fontSize:24,
       textFills:[{type:'solid',color:'#a44444'}]});
     const richColors=(await run('selection.colors',{ids:[rich]})).colors;
-    const paintedRange=richColors.find(group=>group.targets[0].range?.join(',')==='0,3').targets;
+    const paintedRange=richColors.find(group=>group.targets[0].range?.join(',')==='0,4').targets;
     const richBefore=await paintPng(rich);
     await run('selection.applyColorStyle',{targets:paintedRange,style:alternate});
     assert.notEqual(await paintPng(rich),richBefore);
-    const richRun=(await get(rich)).textRuns.find(run=>run.text==='한글🙂');
+    const richRun=(await get(rich)).textRuns.find(run=>run.text==='A한글🙂');
     assert.equal(richRun.attributes.fontSize,24);
     assert.match(richRun.attributes.fill,/rgba\(34, 68, 102,/);
     await run('selection.bindColorVariable',{targets:paintedRange,variable:accentVariable});
