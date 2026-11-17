@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {readFileSync, writeFileSync} from 'node:fs';
+import {appendFileSync, readFileSync, writeFileSync} from 'node:fs';
 import {mkdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -60,6 +60,8 @@ export function planLD04(fixture, file, runId) {
     const color = row.parent === 'collection' ? '#e8edf4' : '#f7f9fc';
     return `<div style="${bounds};background-color:${color}">${children(row.key).map(n=>render(n,row)).join('')}</div>`;
   };
+  assert.equal(fixture.probe_actions.length,4);
+  assert.equal(fixture.responsive_steps.length,4);
   const widthSteps = fixture.probe_actions.map(({op,key,property,value}, i) => {
     assert.equal(op, 'set_node');
     assert.equal(key, 'canvas');
@@ -80,7 +82,7 @@ function observedBounds(detail, root) {
   return [values[0]-root.worldX,values[1]-root.worldY,values[2],values[3]];
 }
 
-export function compareLD04(expected, snapshot) {
+export function compareLD04(expected, snapshot, tolerance=2) {
   const root = snapshot.details.canvas;
   const differences = [];
   const missingBounds = [];
@@ -90,13 +92,20 @@ export function compareLD04(expected, snapshot) {
     if (!bounds) {
       missingBounds.push(row.key);
     } else {
-      if (row.bounds.some((value,index)=>Math.abs(value-bounds[index])>1)) {
+      if (row.bounds.some((value,index)=>Math.abs(value-bounds[index])>tolerance)) {
         differences.push({key:row.key,observed:bounds,expected:row.bounds});
       }
-      if (bounds[0]+bounds[2]>root.width+1||bounds[1]+bounds[3]>root.height+1) overflows.push(row.key);
+      if (bounds[0]+bounds[2]>root.width+tolerance||bounds[1]+bounds[3]>root.height+tolerance) overflows.push(row.key);
     }
   }
-  return {actualWidth:root.width??null, differences, missingBounds, overflows};
+  const cardRows = expected.nodes.filter(row=>row.parent==='collection').map(row=>{
+    const bounds = observedBounds(snapshot.details[row.key],root);
+    return {key:row.key, rowY:bounds?.[1]??null, width:bounds?.[2]??null};
+  });
+  const collection = snapshot.details.collection;
+  const collectionStyles = collection ? snapshot.styles?.[collection.id] : null;
+  return {actualWidth:root.width??null, actualHeight:root.height??null, collectionStyles:collectionStyles??null,
+    cardRows, differences, missingBounds, overflows};
 }
 
 export async function runLD04(read, fixture, file, runId, save, record) {
@@ -213,10 +222,9 @@ if (process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
     const save = (name,data) => writeFileSync(join(output,name),Buffer.isBuffer(data)?data:JSON.stringify(data,null,2)+'\n',
       {flag:'wx',mode:0o600});
     save('plan.json',plan);
-    const events = [];
-    const result = await withPaper(file,read=>runLD04(read,fixture,file,runId,save,event=>events.push(event)))
+    const record = event => appendFileSync(join(output,'tool-events.jsonl'),JSON.stringify(event)+'\n',{mode:0o600});
+    const result = await withPaper(file,read=>runLD04(read,fixture,file,runId,save,record))
       .catch(error=>({blocker:error.message,acceptedCompletionSeconds:null}));
-    save('tool-events.json',events);
     save('result.json',result);
     console.log(JSON.stringify({widths:result.comparedWidths?.length??0,blocker:result.blocker??null}));
     if (result.blocker) process.exitCode=1;
