@@ -3,7 +3,7 @@ import {spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {once} from 'node:events';
 import {constants} from 'node:fs';
-import {access, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {access, mkdir, mkdtemp, open, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -14,6 +14,10 @@ import {Client, StreamableHTTPClientTransport} from './mcp.mjs';
 const binaryDir = process.env.OMC_BENCH_BIN_DIR ?? '/Applications/Oh My Canvas.app/Contents/MacOS';
 const serviceBinary = join(binaryDir, 'omc-service');
 const desktopBinary = join(binaryDir, 'omc-desktop');
+const [mode, extra] = process.argv.slice(2);
+assert.ok(extra === undefined && [undefined, '--agent'].includes(mode), 'Usage: node omc-ld02.mjs [--agent]');
+const outputDir = process.env.OMC_BENCH_OUTPUT_DIR;
+assert.ok(mode !== '--agent' || outputDir, '--agent requires the runner output directory');
 await Promise.all([access(serviceBinary, constants.X_OK), access(desktopBinary, constants.X_OK)]);
 
 const id = (type, n) => `${type}_${BigInt(n).toString(16).padStart(32, '0')}`;
@@ -60,6 +64,39 @@ for (const event of ['SIGTERM', 'SIGINT']) {
 const {signal} = cancellation;
 let service;
 let desktop;
+
+async function runAgent(endpoint, token) {
+  const directory = join(profile, 'agent');
+  await mkdir(directory, {mode: 0o700});
+  const ledger = await open(join(outputDir, 'agent.jsonl'), 'wx', 0o600);
+  const prompt = [
+    `In the synthetic LD02 canvas, find the "${edit.card}" card on the "${edit.page}" page.`,
+    `Change "${edit.before.text}" to "${edit.after.text}", the vertical gap to ${edit.after.gap}px,`,
+    `and the swatch fill to ${edit.after.fill}. Preserve all other objects and properties.`,
+    'Use only the OMC MCP tools supplied for this task. Do not use shell commands or delegate.',
+  ].join(' ');
+  const bearerVariable = 'OMC_BENCH_MCP_BEARER';
+  try {
+    const agent = spawn('codex', [
+      'exec', '--ignore-user-config', '--ephemeral', '--skip-git-repo-check',
+      '--sandbox', 'read-only', '-m', 'gpt-6.1-sol', '--json',
+      '--disable', 'shell_tool', '--disable', 'unified_exec',
+      '--cd', directory,
+      '-c', `mcp_servers.omc.url=${JSON.stringify(new URL('/mcp', endpoint).href)}`,
+      '-c', `mcp_servers.omc.bearer_token_env_var="${bearerVariable}"`,
+      prompt,
+    ], {
+      cwd: directory,
+      env: {...process.env, [bearerVariable]: token},
+      stdio: ['ignore', ledger.fd, 'inherit'],
+      signal,
+    });
+    const [code] = await once(agent, 'exit');
+    assert.equal(code, 0, 'Codex CLI did not complete the diagnostic');
+  } finally {
+    await ledger.close();
+  }
+}
 
 try {
   const path = join(profile, 'fixture.json');
@@ -122,7 +159,8 @@ try {
     ? imported.documentId : `doc_${imported.documentId.replaceAll('-', '')}`;
   const external = documentId.slice(4).replace(/^(........)(....)(....)(....)(............)$/, '$1-$2-$3-$4-$5');
   desktop = spawn(desktopBinary, [
-    '--profile', profile, '--automation-background', '--smoke-exit-ms', '30000',
+    '--profile', profile, '--automation-background',
+    ...(mode === '--agent' ? [] : ['--smoke-exit-ms', '30000']),
   ], {stdio: 'inherit'});
   await once(desktop, 'spawn');
   for (let attempt = 0; attempt < 40; attempt++) {
@@ -153,18 +191,22 @@ try {
   assert.equal(card.properties.layout.gap, edit.before.gap);
   assert.equal(swatch.properties.fill, edit.before.fill);
 
-  const requestId = randomUUID();
   const targetEpoch = baseline.epoch;
-  const layout = {...card.properties.layout, gap: edit.after.gap};
-  await rpc('document.command', {envelope: {
-    protocol: 'omc.engine/1', requestId, documentId, targetEpoch, idempotencyKey: requestId,
-    preconditions: {revision: {epoch: targetEpoch, sequence: baseline.sequence}},
-    command: {type: 'batch', commands: [
-      {type: 'node.set', nodeId: card.id, properties: {layout}},
-      {type: 'text.replace', nodeId: label.id, text: edit.after.text},
-      {type: 'node.set', nodeId: swatch.id, properties: {fill: edit.after.fill}},
-    ]},
-  }}, sessionId);
+  if (mode === '--agent') {
+    await runAgent(descriptor.endpoint, descriptor.token);
+  } else {
+    const requestId = randomUUID();
+    const layout = {...card.properties.layout, gap: edit.after.gap};
+    await rpc('document.command', {envelope: {
+      protocol: 'omc.engine/1', requestId, documentId, targetEpoch, idempotencyKey: requestId,
+      preconditions: {revision: {epoch: targetEpoch, sequence: baseline.sequence}},
+      command: {type: 'batch', commands: [
+        {type: 'node.set', nodeId: card.id, properties: {layout}},
+        {type: 'text.replace', nodeId: label.id, text: edit.after.text},
+        {type: 'node.set', nodeId: swatch.id, properties: {fill: edit.after.fill}},
+      ]},
+    }}, sessionId);
+  }
 
   const after = await snapshot();
   const editReadbackMs = performance.now() - started;
@@ -176,11 +218,32 @@ try {
   assert.equal(after.nodes[card.id].properties.layout.gap, edit.after.gap);
   assert.equal(after.nodes[label.id].properties.text, edit.after.text);
   assert.equal(after.nodes[swatch.id].properties.fill, edit.after.fill);
+  if (mode === '--agent') {
+    assert.equal(after.title, baseline.title);
+    assert.deepEqual(after.metadata, baseline.metadata);
+    assert.deepEqual(after.nodes[card.id], {
+      ...card, properties: {...card.properties, layout: {...card.properties.layout, gap: edit.after.gap}},
+    });
+    assert.deepEqual(after.nodes[swatch.id], {
+      ...swatch, properties: {...swatch.properties, fill: edit.after.fill},
+    });
+    const [run] = label.properties.textRuns;
+    assert.equal(label.properties.textRuns.length, 1);
+    assert.deepEqual(after.nodes[label.id], {
+      ...label, properties: {
+        ...label.properties, text: edit.after.text, textRuns: [{...run, text: edit.after.text}],
+      },
+    });
+  }
 
-  await rpc('document.undo', {documentId, targetEpoch}, sessionId);
-  assert.deepEqual((await snapshot()).nodes, baseline.nodes);
-  await rpc('document.redo', {documentId, targetEpoch}, sessionId);
-  assert.deepEqual((await snapshot()).nodes, after.nodes);
+  // The independent RPC session cannot undo operations from the closed agent MCP session.
+  const undoRedoVerified = mode !== '--agent';
+  if (undoRedoVerified) {
+    await rpc('document.undo', {documentId, targetEpoch}, sessionId);
+    assert.deepEqual((await snapshot()).nodes, baseline.nodes);
+    await rpc('document.redo', {documentId, targetEpoch}, sessionId);
+    assert.deepEqual((await snapshot()).nodes, after.nodes);
+  }
   await rpc('document.save', {documentId}, sessionId);
   await rpc('workspace.close', {documentId}, sessionId);
   const reopened = await rpc('workspace.open', {documentId}, sessionId);
@@ -188,9 +251,11 @@ try {
 
   console.log(JSON.stringify({
     workload: fixture.workload,
-    measurement: 'deterministic-replay',
+    measurement: mode === '--agent' ? 'model-assisted-diagnostic' : 'deterministic-replay',
     editReadbackMs,
-    serviceSaveUndoRedoReopenMs: performance.now() - started,
+    ...(undoRedoVerified
+      ? {serviceSaveUndoRedoReopenMs: performance.now() - started}
+      : {agentSaveRebindMs: performance.now() - started, undoRedoVerified}),
     logicalObjects: fixture.logicalObjects,
     pages: fixture.pages.length,
     changed: changed.length,
