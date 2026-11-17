@@ -9,11 +9,12 @@ import ld01
 import ld03
 import ld04
 import ld06
+import ld07
 from font_asset import read_font
 
 
 SCHEMA = "omc-local-dev/workload-fixture/1"
-WORKLOADS = {"LD01": ld01, "LD03": ld03, "LD04": ld04, "LD06": ld06}
+WORKLOADS = {"LD01": ld01, "LD03": ld03, "LD04": ld04, "LD06": ld06, "LD07": ld07}
 GEOMETRY_TOLERANCE = 2
 
 
@@ -179,7 +180,7 @@ def _handoff(contract, evidence, phases, failures):
                     failures.append(f"{label}: {key}.{field} differs")
 
 
-def grade(contract, evidence):
+def grade(contract, evidence, *, symptom_screenshot=None):
     failures = []
     if not isinstance(evidence, dict):
         return ["evidence must be an object"]
@@ -203,7 +204,7 @@ def grade(contract, evidence):
                 failures.append(f"{name}: document or native identities changed")
         if phases["before"] and phases["before"][0] != candidate[0]:
             failures.append("candidate: document identity differs from the prepared starting document")
-        if contract["workload"] in {"LD03", "LD04"} and phases["before"] and phases["before"] != candidate:
+        if contract["workload"] in {"LD03", "LD04", "LD07"} and phases["before"] and phases["before"] != candidate:
             failures.append("candidate: shared references or native object identities were replaced")
         if phases.get("probe") and phases["probe"][0] == candidate[0]:
             failures.append("probe: verification edits were not performed on a distinct copy")
@@ -212,10 +213,15 @@ def grade(contract, evidence):
         _responsive(contract, evidence, phases["probe"], failures)
     elif contract["workload"] == "LD06":
         _handoff(contract, evidence, phases, failures)
+    elif contract["workload"] == "LD07":
+        ld07.acceptance(contract, evidence, symptom_screenshot, failures)
     return failures
 
 
 def public_brief(contract):
+    if contract["workload"] == "LD07":
+        keys = ("schema", "workload", "source_family_id", "fixture_sha256", "brief", "symptom_screenshot_name")
+        return {key: contract[key] for key in keys}
     private = {"probe", "probe_actions", "responsive_steps", "handoff_values"}
     return {key: value for key, value in contract.items() if key not in private}
 
@@ -230,11 +236,14 @@ def main():
     parser.add_argument("--registration", type=Path)
     parser.add_argument("--font-file", type=Path)
     parser.add_argument("--font-license")
+    parser.add_argument("--symptom-screenshot", type=Path)
     args = parser.parse_args()
     module = WORKLOADS[args.workload]
     if args.variant and args.variant not in module.VARIANTS:
         parser.error("available variants: " + ", ".join(module.VARIANTS))
     variant = args.variant or next(iter(module.VARIANTS))
+    if args.symptom_screenshot and (args.action != "grade" or args.workload != "LD07"):
+        parser.error("--symptom-screenshot is only for grading LD07")
     if args.registration and args.workload != "LD04":
         parser.error("--registration is only for LD04")
     if (args.font_file or args.font_license) and (
@@ -273,9 +282,10 @@ def main():
         parser.error("grade requires an evidence JSON path")
     try:
         evidence = json.loads(args.evidence.read_text(encoding="utf-8"))
+        screenshot = args.symptom_screenshot.read_bytes() if args.symptom_screenshot else None
     except (OSError, ValueError) as error:
         parser.error(str(error))
-    failures = grade(contract, evidence)
+    failures = grade(contract, evidence, symptom_screenshot=screenshot)
     print(json.dumps({"passed": not failures, "failures": failures}))
     return int(bool(failures))
 

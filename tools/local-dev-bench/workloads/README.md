@@ -2,7 +2,7 @@
 
 These fixtures describe useful design work in product-independent terms. Each
 variant is a separately authored source family for fixture development. The
-current set supplies two variants each for LD01, LD03, LD04, and LD06.
+current set supplies two variants each for LD01, LD03, LD04, LD06, and LD07.
 Confirmatory sample size and per-product capability require separate evidence.
 
 ```sh
@@ -17,6 +17,11 @@ python3 tools/local-dev-bench/workloads/synthetic.py fixture LD06 \
   --font-license OFL-1.1 --assets-dir /path/to/new-assets
 python3 tools/local-dev-bench/workloads/synthetic.py grade LD01 \
   /path/to/observations.json --variant harbor-ops
+python3 tools/local-dev-bench/workloads/synthetic.py brief LD07 \
+  --variant transit-departures
+python3 tools/local-dev-bench/workloads/synthetic.py grade LD07 \
+  /path/to/observations.json --variant transit-departures \
+  --symptom-screenshot /path/to/retained/symptom.png
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/local-dev-bench/workloads
 ```
 
@@ -122,3 +127,49 @@ private-local URLs that happen to work on the setup machine. Preserve source
 commit, build logs, browser readbacks, and asset resolution proof alongside
 the normalized observation. Product import, browser capture, font installation
 and code export require product adapters.
+
+## LD07 defect preparation and diagnosis
+
+`transit-departures` and `clinic-check-in` are separate diagnostic fixtures.
+Seed the private `expected` snapshot as a healthy editable document. Apply its
+two ordered `injections` through native properties and verify the resulting
+document against `start`. The injected or repaired property is identified by
+`collection`, `key` and `field`, with `from` and `to` giving the expected prior
+and resulting values. The logical key for a binding identifies the associated
+style. The helper `ld07.apply_operations(snapshot, operations)` applies the
+same mutations and resolves resulting positions and style fills for fixture
+validation. Seed native layout and style relationships in the product.
+
+Outside the timed attempt, reopen the prepared corrupt file and capture its
+visible state as `symptom.png` from that product at the registered viewport.
+Use the viewport crop without tool overlays, annotate nothing, and retain the
+original PNG and its SHA-256 alongside the independent `before` readback.
+Verify by visual inspection that the captured fault and the nearby object are
+visible. Give the measured agent the `brief` output, the captured PNG, and
+the editable document. Keep private manifests, the fixture checkout and the
+observer's results outside the workspace visible to that agent. Use a fresh
+corrupt document for each attempt. A capture generated from source geometry
+is suitable for a harness test only.
+
+The observer records `symptom_capture` with the PNG's `sha256`, pixel `width`
+and `height`, corresponding `document_id`, and `phase` equal to `before`.
+The grader verifies the retained PNG's identity and uses native readbacks
+for geometry and style acceptance. The observer validates capture content.
+`diagnoses` records each root cause reported by the agent using `collection`,
+`key`, `field`, and `from`. `repair_actions` records measured edit operations
+using the same fields plus `to`. Map native changes to their logical targets
+and retain the underlying edit trace. Two accepted operations may be
+performed in either order. Native positions and resolved fills that
+update automatically belong in the candidate snapshot. Measure the two
+repairs together with their diagnosis. Confirm both survive a normal reopen
+and compare the complete logical node and style sets and IDs to detect
+replacement or changes to unrelated content.
+
+Record UTF-8 or binary response byte counts from raw model-visible reads,
+classified by scope as scoped, whole-file, or unknown. Also record the number
+of tool screenshots requested after timing starts, false diagnoses and write
+attempts, and preserve trace references that explain those counts. The
+initial symptom image is setup evidence delivered with the prompt. Report
+accepted elapsed time and all observed agent usage with missing or
+unattributable counters marked unknown. LD07 defaults to a 900-second and
+120,000-token cap and is outside the primary six-family panel.
