@@ -65,6 +65,36 @@ pub fn layout(body: &str, size: f32, color: Color, width: f64) -> Option<Rc<Text
 
 pub fn editor_rect(app: &App) -> Option<Rect> {
     let edit = app.editing.as_ref()?;
+    if edit.target.is_home() {
+        return app
+            .controls
+            .iter()
+            .find(|control| {
+                matches!(
+                    (&edit.target, &control.action),
+                    (
+                        EditTarget::HomeSearch,
+                        crate::app::Action::Home(crate::app::HomeAction::Search)
+                    ) | (
+                        EditTarget::HomeFolder,
+                        crate::app::Action::Home(crate::app::HomeAction::NewFolder)
+                    )
+                )
+            })
+            .map(|control| {
+                let inset = if matches!(edit.target, EditTarget::HomeSearch) {
+                    32.
+                } else {
+                    9.
+                };
+                Rect::new(
+                    control.rect.x + inset,
+                    control.rect.y + 6.,
+                    control.rect.width - inset - 9.,
+                    control.rect.height - 12.,
+                )
+            });
+    }
     if matches!(edit.target, EditTarget::LibraryDescription) {
         return app
             .controls
@@ -246,7 +276,7 @@ pub fn pointer(app: &mut App, x: f64, y: f64, extend: bool) -> bool {
     if edit.buffer.composing {
         return true;
     }
-    let size = if matches!(edit.target, EditTarget::Property { .. }) {
+    let size = if edit.target.is_home() || matches!(edit.target, EditTarget::Property { .. }) {
         13.
     } else {
         18.

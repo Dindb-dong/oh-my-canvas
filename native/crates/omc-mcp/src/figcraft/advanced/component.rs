@@ -498,7 +498,7 @@ pub(super) fn describe_layer(context: &Context, raw: &str) -> Result<Value> {
 fn owning_component<'a>(snapshot: &'a DocumentSnapshot, raw: &str) -> Result<&'a Node> {
     let mut node = snapshot.nodes.get(raw);
     while let Some(current) = node {
-        if current.kind == NodeKind::Component {
+        if omc_model::electron::is_component_definition(current) {
             if current.string("libraryId").is_some() {
                 return Err(EngineError::invalid("Library components are read-only"));
             }

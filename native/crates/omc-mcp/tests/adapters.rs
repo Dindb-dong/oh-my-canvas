@@ -31,6 +31,65 @@ fn setup() -> (
 }
 
 #[test]
+fn home_thumbnails_render_canvas_content_and_prefer_a_designated_frame() {
+    let (_dir, workspace, router, session, id) = setup();
+    let native = format!("doc_{}", id.replace('-', ""));
+    let empty = workspace.snapshot(&native).unwrap();
+    assert!(router.home_thumbnail_png(&empty).unwrap().is_none());
+
+    let rectangle = |x, width, height| {
+        invoke(
+            &router,
+            &session,
+            "create_shape",
+            json!({"documentId":id,"type":"rect","x":x,"y":600,"width":width,"height":height,
+                "properties":{"fills":[{"type":"solid","color":"#2563eb"}]}}),
+        )["rawIds"][0]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let first = rectangle(800, 100, 50);
+    rectangle(1100, 100, 50);
+    let mut drawing = workspace.snapshot(&native).unwrap();
+    assert!(router.thumbnail_png(&drawing).unwrap().is_none());
+    let dimensions = |image: &[u8]| {
+        assert_eq!(&image[..8], b"\x89PNG\r\n\x1a\n");
+        (
+            u32::from_be_bytes(image[16..20].try_into().unwrap()),
+            u32::from_be_bytes(image[20..24].try_into().unwrap()),
+        )
+    };
+    let automatic = router.home_thumbnail_png(&drawing).unwrap().unwrap();
+    let (width, height) = dimensions(&automatic);
+    assert!((319..=321).contains(&width));
+    assert!(height < width / 4);
+    let raster = skia_safe::Image::from_encoded(skia_safe::Data::new_copy(&automatic))
+        .unwrap()
+        .make_raster_image(None, None)
+        .unwrap();
+    assert_eq!(
+        raster
+            .peek_pixels()
+            .unwrap()
+            .get_color((40, height as i32 / 2)),
+        skia_safe::Color::from_rgb(37, 99, 235),
+    );
+
+    drawing
+        .nodes
+        .get_mut(&first)
+        .unwrap()
+        .properties
+        .insert("figThumbnail".into(), json!(true));
+    let designated = router.home_thumbnail_png(&drawing).unwrap().unwrap();
+    let (width, height) = dimensions(&designated);
+    assert_eq!((width, height), (320, 160));
+    let legacy = router.thumbnail_png(&drawing).unwrap().unwrap();
+    assert_eq!(dimensions(&legacy), (128, 64));
+}
+
+#[test]
 fn native_html_import_creates_editable_layers_that_survive_reopen() {
     let (_dir, workspace, router, session, _) = setup();
     let html = r##"

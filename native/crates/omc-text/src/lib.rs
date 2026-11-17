@@ -20,10 +20,15 @@ use unicode_segmentation::UnicodeSegmentation;
 
 pub const INTER_REGULAR: &[u8] = include_bytes!("../fonts/Inter-Regular.ttf");
 
+thread_local! {
+    // Creating a system manager enumerates installed font families on macOS.
+    static SYSTEM_FONTS: FontMgr = FontMgr::default();
+}
+
 pub fn bundled_font_manager() -> FontMgr {
     thread_local! {
         static BUNDLED: FontMgr = {
-            let system = FontMgr::default();
+            let system = SYSTEM_FONTS.with(Clone::clone);
             let mut fonts = skia_safe::textlayout::TypefaceFontProvider::new();
             for bytes in [
                 INTER_REGULAR,
@@ -395,7 +400,7 @@ fn paragraph(
     if text.len() > 4 * 1024 * 1024 {
         return Err(TextError::ResourceLimit);
     }
-    let font_manager = FontMgr::default();
+    let font_manager = SYSTEM_FONTS.with(Clone::clone);
     let mut diagnostics = Vec::new();
     let font_size = style
         .get("font-size")

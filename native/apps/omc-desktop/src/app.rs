@@ -4,6 +4,8 @@ mod comments;
 mod dev_compare;
 mod dev_focus;
 mod eyedropper;
+mod home;
+pub use home::{HomeAction, HomeMenu, HomeView};
 mod object_snap;
 mod prototype_runtime;
 mod scale_tool;
@@ -13,7 +15,7 @@ pub(crate) mod windows;
 
 use crate::{
     Event,
-    client::{Bridge, DocumentEntry, Request, Response},
+    client::{Bridge, DocumentEntry, FolderEntry, Request, Response},
     geometry::{Camera, Rect},
     pan_cache::PanCache,
     scene_cache::SceneCache,
@@ -148,6 +150,7 @@ pub enum Action {
     Collaborate,
     Collaboration(&'static str),
     Library,
+    Home(HomeAction),
     Utility(UtilityPopup),
     EditLibraryDescription,
     PublishLibrary,
@@ -266,6 +269,8 @@ pub enum EditTarget {
         previous_selection: BTreeSet<String>,
     },
     LibraryDescription,
+    HomeSearch,
+    HomeFolder,
     CursorChat,
     CanvasComment {
         page: String,
@@ -283,6 +288,10 @@ pub enum EditTarget {
     },
 }
 impl EditTarget {
+    pub fn is_home(&self) -> bool {
+        matches!(self, Self::HomeSearch | Self::HomeFolder)
+    }
+
     pub fn is_canvas_text(&self) -> bool {
         matches!(self, Self::Text { .. } | Self::TextOnPath { .. })
     }
@@ -501,6 +510,15 @@ pub struct App {
     pub interface_language: String,
     pub board_grid: Value,
     pub library_open: bool,
+    pub library_scroll: f64,
+    pub home_view: HomeView,
+    pub home_search: String,
+    pub home_folders: Vec<FolderEntry>,
+    pub home_menu: Option<HomeMenu>,
+    pub home_menu_scroll: f64,
+    home_workspace_epoch: String,
+    home_mutating: bool,
+    home_previews: home::HomePreviewCache,
     pub modifiers: ModifiersState,
     pub space_pan: bool,
     pub pending: bool,
@@ -736,6 +754,15 @@ impl App {
             interface_language,
             board_grid: Value::Null,
             library_open,
+            library_scroll: 0.,
+            home_view: HomeView::Recents,
+            home_search: String::new(),
+            home_folders: Vec::new(),
+            home_menu: None,
+            home_menu_scroll: 0.,
+            home_workspace_epoch: String::new(),
+            home_mutating: false,
+            home_previews: Default::default(),
             modifiers: ModifiersState::empty(),
             space_pan: false,
             pending: false,
@@ -1027,14 +1054,18 @@ impl App {
             .and_then(|id| self.snapshots.get(id))
             .map(Arc::as_ref)
     }
+    pub(crate) fn shows_library(&self) -> bool {
+        self.library_open || self.active.is_none()
+    }
     pub fn node(&self) -> Option<&Node> {
         let id = self.selected.iter().next()?;
         self.document()?.nodes.get(id)
     }
     pub fn inspector_visible(&self) -> bool {
         let view = &self.automation.view;
-        !self.ui_hidden()
-            && (!view.compact || self.library_open || !self.selected.is_empty())
+        !self.shows_library()
+            && !self.ui_hidden()
+            && (!view.compact || !self.selected.is_empty())
             && (self.width >= 960. || self.inspector != Inspector::Design)
     }
     pub fn uses_pan_raster(&self) -> bool {
@@ -1076,6 +1107,7 @@ impl App {
     }
 
     fn draw_frame(&mut self, window: &Window) {
+        self.queue_home_preview();
         let trace = self.input_frame.take();
         let draw_start = Instant::now();
         match crate::paint::draw(self) {
@@ -1107,11 +1139,12 @@ impl App {
         }
         window.set_ime_allowed(self.editing.is_some());
         if let (Some(edit), Some(area)) = (&self.editing, crate::text_ui::editor_rect(self)) {
-            let size = if matches!(edit.target, EditTarget::Property { .. }) {
-                13.
-            } else {
-                18.
-            };
+            let size =
+                if edit.target.is_home() || matches!(edit.target, EditTarget::Property { .. }) {
+                    13.
+                } else {
+                    18.
+                };
             if let Some(caret) =
                 crate::text_ui::prepare(&edit.buffer, area, size).and_then(|p| p.caret())
             {
@@ -1233,6 +1266,7 @@ impl App {
         self.pending_move = None;
         self.move_cache.get_mut().clear();
         self.library_open = false;
+        self.home_menu = None;
         self.active = Some(id.clone());
         self.selected.clear();
         self.page = self
@@ -1281,6 +1315,20 @@ impl App {
         }
     }
     pub fn action_available(&self, action: &Action) -> bool {
+        if self.home_menu.is_some()
+            && !matches!(
+                action,
+                Action::ClosePopup
+                    | Action::Home(
+                        HomeAction::Move(_) | HomeAction::MoveTo(_, _) | HomeAction::Trash(_)
+                    )
+            )
+        {
+            return false;
+        }
+        if let Action::Home(home_action) = action {
+            return !self.closing && self.home_action_available(home_action);
+        }
         if self.closing
             || self.version_preview_active()
                 && !matches!(
@@ -1329,6 +1377,27 @@ impl App {
         if !self.action_available(&action) {
             return;
         }
+        if self
+            .editing
+            .as_ref()
+            .is_some_and(|edit| edit.target.is_home())
+            && !matches!(
+                action,
+                Action::Home(HomeAction::Search | HomeAction::CommitFolder)
+            )
+        {
+            if self.home_folder_draft() {
+                self.editing = None;
+            } else {
+                self.commit_edit();
+                if self.editing.is_some() {
+                    return;
+                }
+            }
+        }
+        if !matches!(action, Action::Home(_)) {
+            self.home_menu = None;
+        }
         let previous_popup = self.popup.take();
         if (self.pending || self.editing.is_some())
             && matches!(
@@ -1352,6 +1421,7 @@ impl App {
             return;
         }
         match action {
+            Action::Home(action) => self.home_action(action),
             Action::Collaborate => {
                 if previous_popup != Some(Popup::Collaboration) {
                     self.popup = Some(Popup::Collaboration);
@@ -2057,6 +2127,10 @@ impl App {
             self.error = Some("Finish the current input composition first.".into());
             return;
         }
+        if edit.target.is_home() {
+            self.finish_home_input(edit);
+            return;
+        }
         if edit.buffer.text == edit.buffer.original {
             self.discard_path_text_preview(&edit.target);
             return;
@@ -2066,6 +2140,7 @@ impl App {
             return;
         }
         let command = match &edit.target {
+            EditTarget::HomeSearch | EditTarget::HomeFolder => unreachable!(),
             EditTarget::CanvasComment {
                 page,
                 point,
@@ -2614,6 +2689,9 @@ impl App {
     }
 
     fn pointer_down(&mut self, button: MouseButton, canvas_only: bool) {
+        if self.shows_library() && !canvas_only {
+            self.controls = crate::paint::controls(self);
+        }
         let (x, y) = self.cursor;
         if self.dev_comparison.is_some() && self.dev_compare_rect().contains(x, y) {
             if button == MouseButton::Left && self.dev_compare_close_rect().contains(x, y) {
@@ -2661,6 +2739,18 @@ impl App {
                 return;
             }
             self.popup = None;
+            self.home_menu = None;
+            if self
+                .editing
+                .as_ref()
+                .is_some_and(|edit| edit.target.is_home())
+            {
+                if self.home_folder_draft() {
+                    self.editing = None;
+                } else {
+                    self.commit_edit();
+                }
+            }
             if !canvas_only && y < self.header_height() {
                 if let Some(window) = &self.window {
                     let _ = window.drag_window();
@@ -2668,7 +2758,8 @@ impl App {
                 return;
             }
         }
-        if self.prototype_frame.is_some()
+        if self.shows_library()
+            || self.prototype_frame.is_some()
             || !canvas_only
                 && crate::paint::palette_rect(self).is_some_and(|area| area.contains(x, y))
         {
@@ -3141,6 +3232,19 @@ impl App {
 
     fn wheel(&mut self, delta: MouseScrollDelta, scale: f64, phase: TouchPhase) -> bool {
         let (dx, dy) = scroll_delta(delta, scale, self.modifiers.shift_key());
+        if self.shows_library() {
+            if matches!(self.home_menu, Some(HomeMenu::Move(_))) && dy.is_finite() {
+                let max = crate::paint::library_move_scroll_max(self);
+                let previous = self.home_menu_scroll;
+                self.home_menu_scroll = (previous - dy).clamp(0., max);
+                return previous != self.home_menu_scroll;
+            }
+            let grid = crate::paint::library_grid(self);
+            if self.popup.is_some() || !grid.area.contains(self.cursor.0, self.cursor.1) {
+                return false;
+            }
+            return self.scroll_library(-dy);
+        }
         if self.scroll_dev_comparison(dy) {
             return true;
         }
@@ -3212,6 +3316,59 @@ impl App {
         }
         true
     }
+    pub(crate) fn scroll_library(&mut self, pixels: f64) -> bool {
+        if !self.shows_library()
+            || self.popup.is_some()
+            || self.home_menu.is_some()
+            || !pixels.is_finite()
+        {
+            return false;
+        }
+        let max = crate::paint::library_grid(self).max_scroll;
+        let before = self.library_scroll;
+        self.library_scroll = (before + pixels).clamp(0., max);
+        self.queue_home_preview();
+        before != self.library_scroll
+    }
+
+    fn library_key(&mut self, key: &Key) -> bool {
+        if !self.shows_library() || self.popup.is_some() || self.home_menu.is_some() {
+            return false;
+        }
+        let grid = crate::paint::library_grid(self);
+        if grid.count == 0 {
+            return false;
+        }
+        let first = crate::paint::LIBRARY_CARD_FIRST;
+        let index = self
+            .focus
+            .checked_sub(first)
+            .map(|id| id as usize)
+            .filter(|index| *index < grid.count);
+        let current = index.unwrap_or_else(|| grid.visible_range(self.library_scroll).start);
+        let next = match key {
+            Key::Named(NamedKey::ArrowLeft) => Some(current.saturating_sub(1)),
+            Key::Named(NamedKey::ArrowRight) => Some(current + 1),
+            Key::Named(NamedKey::ArrowUp) => Some(current.saturating_sub(grid.columns)),
+            Key::Named(NamedKey::ArrowDown) => Some(current + grid.columns),
+            Key::Named(NamedKey::PageUp) => {
+                Some(current.saturating_sub(grid.columns * grid.visible_rows))
+            }
+            Key::Named(NamedKey::PageDown) => Some(current + grid.columns * grid.visible_rows),
+            Key::Named(NamedKey::Home) => Some(0),
+            Key::Named(NamedKey::End) => Some(grid.count - 1),
+            _ => None,
+        };
+        let Some(next) = next else {
+            return false;
+        };
+        let next = next.min(grid.count - 1);
+        self.library_scroll = grid.reveal(next, self.library_scroll);
+        self.focus = first + next as u64;
+        self.keyboard_focus_visible = true;
+        self.queue_home_preview();
+        true
+    }
     fn keyboard(&mut self, event: &winit::event::KeyEvent) {
         self.key_input(
             &event.logical_key,
@@ -3228,6 +3385,41 @@ impl App {
             return;
         }
         let command = self.modifiers.control_key() || self.modifiers.super_key();
+        if self.shows_library() {
+            self.controls = crate::paint::controls(self);
+            if self.home_menu.is_some() && *key == Key::Named(NamedKey::Escape) {
+                self.home_menu = None;
+                return;
+            }
+            if matches!(self.home_menu, Some(HomeMenu::Move(_))) {
+                let max = crate::paint::library_move_scroll_max(self);
+                let step = (self.height * 0.5).max(48.);
+                let target = match key {
+                    Key::Named(NamedKey::PageDown) => Some(self.home_menu_scroll + step),
+                    Key::Named(NamedKey::PageUp) => Some(self.home_menu_scroll - step),
+                    Key::Named(NamedKey::Home) => Some(0.),
+                    Key::Named(NamedKey::End) => Some(max),
+                    _ => None,
+                };
+                if let Some(target) = target {
+                    self.home_menu_scroll = target.clamp(0., max);
+                    return;
+                }
+            }
+            if !command
+                && *key == Key::Named(NamedKey::Space)
+                && self.editing.is_none()
+                && let Some(control) = self.controls.iter().find(|c| c.id == self.focus).cloned()
+            {
+                self.space_pan = false;
+                self.action(control.action);
+                return;
+            }
+            if command && matches!(key, Key::Character(value) if value.eq_ignore_ascii_case("f")) {
+                self.action(Action::Home(HomeAction::Search));
+                return;
+            }
+        }
         if self.prototype_frame.is_some() {
             if self.prototype_key(key) {
                 return;
@@ -3307,6 +3499,14 @@ impl App {
                     }
                 }
             }
+            if self
+                .editing
+                .as_ref()
+                .is_some_and(|edit| matches!(edit.target, EditTarget::HomeSearch))
+            {
+                self.library_scroll = 0.;
+                self.queue_home_preview();
+            }
             self.refresh_path_text_scene();
             return;
         }
@@ -3359,6 +3559,9 @@ impl App {
                     _ => {}
                 }
             }
+            return;
+        }
+        if self.library_key(key) {
             return;
         }
         if self.tool == Tool::Pen && !self.pen_vertices.is_empty() {
@@ -3651,14 +3854,31 @@ impl App {
                     }
                 }
             }
-            Response::Documents(documents) => {
-                self.documents = documents;
+            Response::Documents(listing) => {
+                self.set_home_listing(listing);
                 if self.active.is_none()
                     && !self.library_open
-                    && let Some(doc) = self.documents.iter().find(|d| !d.archived)
+                    && let Some(doc) = self.documents.iter().find(|d| !d.archived && !d.trashed)
                 {
                     self.send(Request::Open { id: doc.id.clone() });
                 }
+                self.queue_home_preview();
+            }
+            Response::HomeOrganized(result) => {
+                self.home_mutating = false;
+                match result {
+                    Ok(listing) => self.set_home_listing(listing),
+                    Err(error) => {
+                        if error.starts_with("epoch_mismatch:") {
+                            self.send(Request::Refresh);
+                        }
+                        self.error = Some(error);
+                    }
+                }
+                self.queue_home_preview();
+            }
+            Response::HomePreview { key, image } => {
+                self.finish_home_preview(key, image);
             }
             Response::Snapshot {
                 document,
@@ -3697,12 +3917,15 @@ impl App {
                 }
                 if let Some(entry) = self.documents.iter_mut().find(|d| d.id == id) {
                     entry.title = document.title.clone();
+                    entry.epoch = document.epoch.clone();
+                    entry.sequence = document.sequence.to_string();
                 } else {
                     self.documents.push(DocumentEntry {
                         id: id.clone(),
                         title: document.title.clone(),
-                        archived: false,
-                        thumbnail: None,
+                        epoch: document.epoch.clone(),
+                        sequence: document.sequence.to_string(),
+                        ..DocumentEntry::default()
                     });
                 }
                 self.snapshots.insert(id.clone(), Arc::new(document));
@@ -3745,6 +3968,8 @@ impl App {
                     self.pan_view = false;
                     if let Some(id) = self.tabs.last().cloned() {
                         self.switch(id);
+                    } else {
+                        self.library_open = true;
                     }
                 }
                 self.finish_workspace_tab(&id, Some(false), None);
@@ -3784,7 +4009,9 @@ impl App {
         if self.closing {
             return;
         }
-        if self.editing.is_some() {
+        if self.home_folder_draft() {
+            self.editing = None;
+        } else if self.editing.is_some() {
             self.commit_edit();
         }
         if self.pending {
@@ -4106,7 +4333,8 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::PinchGesture { delta, .. } => {
                 let r = self.canvas_rect();
-                needs_redraw = delta.is_finite()
+                needs_redraw = !self.shows_library()
+                    && delta.is_finite()
                     && delta != 0.
                     && self.prototype_frame.is_none()
                     && self.drag.is_none()
@@ -4152,6 +4380,14 @@ impl ApplicationHandler<Event> for App {
                     edit.buffer.commit_ime(&text);
                 }
                 self.refresh_path_text_scene();
+                if self
+                    .editing
+                    .as_ref()
+                    .is_some_and(|edit| matches!(edit.target, EditTarget::HomeSearch))
+                {
+                    self.library_scroll = 0.;
+                    self.queue_home_preview();
+                }
                 if self.ime_selection.is_some() || self.ime_capture_pending {
                     self.ime_commit = Some(text);
                     if self.ime_selection.is_some() {

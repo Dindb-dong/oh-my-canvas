@@ -51,21 +51,41 @@ pub fn shape_path(item: &SceneItem) -> Option<Path> {
             }
         }
         _ => {
-            let radius =
-                item.style
-                    .get("border-radius")
-                    .and_then(|value| {
-                        resolve_length(
-                            value,
-                            LengthContext {
-                                percent_basis: item.width.min(item.height),
-                                ..Default::default()
-                            },
-                        )
+            let radius = item.style.get("border-radius").and_then(|value| {
+                resolve_length(
+                    value,
+                    LengthContext {
+                        percent_basis: item.width.min(item.height),
+                        ..Default::default()
+                    },
+                )
+            });
+            let limit = item.width.min(item.height).max(0.) / 2.;
+            let legacy = item.properties.get("radii");
+            let radii = [
+                ("topLeft", "radiusTopLeft"),
+                ("topRight", "radiusTopRight"),
+                ("bottomRight", "radiusBottomRight"),
+                ("bottomLeft", "radiusBottomLeft"),
+            ];
+            let corners = std::array::from_fn(|index| {
+                let (key, property) = radii[index];
+                let value = radius
+                    .or_else(|| {
+                        legacy.and_then(|value| {
+                            value
+                                .as_f64()
+                                .or_else(|| value.get(index).and_then(Value::as_f64))
+                                .or_else(|| value.get(key).and_then(Value::as_f64))
+                        })
                     })
+                    .or_else(|| item.properties.get("radius").and_then(Value::as_f64))
+                    .or_else(|| item.properties.get(property).and_then(Value::as_f64))
                     .unwrap_or(0.)
-                    .clamp(0., item.width.min(item.height).max(0.) / 2.) as f32;
-            path.add_rrect(RRect::new_rect_xy(rect, radius, radius), None);
+                    .clamp(0., limit) as f32;
+                (value, value).into()
+            });
+            path.add_rrect(RRect::new_rect_radii(rect, &corners), None);
         }
     }
     Some(path)

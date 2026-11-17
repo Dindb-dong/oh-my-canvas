@@ -223,11 +223,49 @@ impl App {
             ));
             return;
         }
+        if self.background
+            && self.shows_library()
+            && (matches!(
+                job.method.as_str(),
+                "pointer" | "key" | "type_text" | "view.pan"
+            ) || job.method == "legacy.view" && job.arguments["action"] == "pan")
+        {
+            let old_modifiers = self.modifiers;
+            self.modifiers = modifiers(&job.arguments);
+            self.error = None;
+            let result = match job.method.as_str() {
+                "pointer" => self.home_automation_pointer(&job.arguments),
+                "key" => self.automation_key(&job.arguments),
+                "type_text" => self.automation_text(&job.arguments),
+                _ => coordinate_pair(&json!(0), &job.arguments["dy"]).map(|(_, dy)| {
+                    let grid = crate::paint::library_grid(self);
+                    self.cursor = (grid.area.x + 1., grid.area.y + 1.);
+                    self.wheel(
+                        MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(0., -dy)),
+                        1.,
+                        TouchPhase::Moved,
+                    );
+                }),
+            };
+            self.modifiers = old_modifiers;
+            self.redraw();
+            let result = result.and_then(|()| {
+                self.error
+                    .clone()
+                    .map_or_else(|| Ok(self.inspect_automation()), Err)
+            });
+            let _ = reply.try_send(result);
+            return;
+        }
         if job.method == "legacy.view" {
-            if self.scene_pending && matches!(job.arguments["action"].as_str(), Some("fit" | "select")) {
+            if self.scene_pending
+                && matches!(job.arguments["action"].as_str(), Some("fit" | "select"))
+            {
                 self.automation.queued = Some((job, reply));
             } else if self.automation.gesture.is_some() {
-                let _ = reply.try_send(Err("Finish the active pointer gesture before changing the view.".into()));
+                let _ = reply.try_send(Err(
+                    "Finish the active pointer gesture before changing the view.".into(),
+                ));
             } else {
                 let _ = reply.try_send(self.legacy_view(&job.arguments));
                 self.redraw();
@@ -283,8 +321,10 @@ impl App {
             let _ = reply.try_send(result);
             return;
         }
-        if matches!(job.method.as_str(), "dev.focus" | "proto.preview" | "proto.present")
-            && let Some(document) = self.document()
+        if matches!(
+            job.method.as_str(),
+            "dev.focus" | "proto.preview" | "proto.present"
+        ) && let Some(document) = self.document()
             && job.arguments["minSequence"]
                 .as_u64()
                 .is_some_and(|sequence| sequence > document.sequence)
@@ -496,7 +536,7 @@ impl App {
         result["canvas"] = json!([canvas.x, canvas.y, canvas.width, canvas.height]);
         result["panels"] = json!({
             "left": self.left_width(), "right": self.right_width(),
-            "leftCollapsed": self.left_width() == 0., "leftTab": if self.library_open { "assets" } else { "file" },
+            "leftCollapsed": self.left_width() == 0., "leftTab": if self.shows_library() { "assets" } else { "file" },
             "rightTab":format!("{:?}",self.inspector).to_lowercase()
         });
         result["frameMs"] = json!(self.automation.last_frame);
@@ -508,7 +548,25 @@ impl App {
         result["proofSrgb"] = json!({"on":self.proof_enabled(),"ready":self.proof_scene.is_some()});
         result["language"] = json!(self.interface_language);
         result["windowMotionReduced"] = json!(self.window_animation_reduced());
-        result["home"] = self.library_open.into();
+        result["home"] = self.shows_library().into();
+        if self.background && self.shows_library() {
+            let controls = crate::paint::controls(self);
+            result["homeLibrary"] = json!({
+                "view":format!("{:?}",self.home_view),
+                "scrollY":self.library_scroll,
+                "query":self.home_query(),
+                "pending":self.home_mutating,
+                "previewCount":self.home_documents().iter().filter(|doc| self.home_thumbnail(doc).is_some()).count(),
+                "documents":self.documents.iter().map(|doc| json!({
+                    "id":doc.id,"title":doc.title,"starred":doc.starred,"trashed":doc.trashed,
+                    "folderId":doc.folder_id,"preview":self.home_thumbnail(doc).is_some()
+                })).collect::<Vec<_>>(),
+                "folders":self.home_folders.iter().map(|f| json!({"id":f.id,"title":f.title,"parentId":f.parent_id})).collect::<Vec<_>>(),
+                "controls":controls.iter().map(|c| json!({"id":c.id,"label":c.label,
+                    "rect":[c.rect.x,c.rect.y,c.rect.width,c.rect.height]})).collect::<Vec<_>>(),
+            });
+        }
+
         result["textPreview"] = json!(
             self.automation
                 .text_preview
@@ -578,6 +636,20 @@ impl App {
             "format":"png", "mimeType":"image/png", "width":width, "height":height,
             "base64":base64::engine::general_purpose::STANDARD.encode(data)
         }))
+    }
+
+    fn home_automation_pointer(&mut self, args: &Value) -> Result<(), String> {
+        let kind = args["kind"].as_str().unwrap_or("click");
+        let (x, y) = coordinate_pair(&args["x"], &args["y"])?;
+        if !matches!(kind, "click" | "double" | "move" | "hover") || args.get("tool").is_some() {
+            return Err("Home automation supports pointer clicks and movements.".into());
+        }
+        self.pointer_move(x, y);
+        if matches!(kind, "click" | "double") {
+            self.pointer_down(MouseButton::Left, false);
+            self.pointer_up();
+        }
+        Ok(())
     }
 
     fn automation_pointer(&mut self, session: &str, args: &Value) -> Result<(), String> {
@@ -701,6 +773,8 @@ impl App {
             "home" => Key::Named(NamedKey::Home),
             "end" => Key::Named(NamedKey::End),
             "tab" => Key::Named(NamedKey::Tab),
+            "pageup" if self.shows_library() => Key::Named(NamedKey::PageUp),
+            "pagedown" if self.shows_library() => Key::Named(NamedKey::PageDown),
             "f6" => Key::Named(NamedKey::F6),
             "space" | " " => Key::Named(NamedKey::Space),
             _ if self.prototype_frame.is_some() && raw.chars().count() == 1 => {
@@ -737,6 +811,10 @@ impl App {
             }
             _ => return Err("This keyboard shortcut is unavailable in the native desktop.".into()),
         };
+        if self.background && self.shows_library() {
+            self.key_input(&key, (raw.chars().count() == 1).then_some(raw), true);
+            return Ok(());
+        }
         if self.prototype_frame.is_some() {
             self.key_input(&key, None, true);
             return Ok(());
@@ -881,11 +959,13 @@ impl App {
 
     fn automation_text(&mut self, args: &Value) -> Result<(), String> {
         let text = args["text"].as_str().ok_or("Text is required.")?;
+        let home = self.background && self.shows_library();
         let edit = self
             .editing
             .as_mut()
             .filter(|edit| {
                 edit.target.is_canvas_text()
+                    || home && edit.target.is_home()
                     || matches!(edit.target, EditTarget::CanvasComment { .. })
             })
             .ok_or("Start editing a canvas text layer or comment first.")?;
@@ -893,6 +973,10 @@ impl App {
             return Err("Finish the current input composition first.".into());
         }
         edit.buffer.insert(text);
+        if matches!(edit.target, EditTarget::HomeSearch) {
+            self.library_scroll = 0.;
+            self.queue_home_preview();
+        }
         self.refresh_path_text_scene();
         Ok(())
     }

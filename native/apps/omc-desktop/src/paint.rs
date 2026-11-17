@@ -8,20 +8,21 @@ use crate::{
     geometry::Rect,
     scene_cache::SceneCacheKey,
     tab_strip,
+    theme::{selection_background, selection_ink},
 };
 use omc_render::{SelectionOutline, paint_scene_editor, paint_scene_layers, paint_scene_preview};
 use serde_json::Value;
 use skia_safe::{
-    Canvas, Color, ColorType, Font, FontMgr, FontStyle, Paint, PaintStyle, Rect as SkRect, Surface,
+    Canvas, Color, ColorType, CubicResampler, Data, Font, FontMgr, FontStyle, Image, Paint,
+    PaintStyle, Rect as SkRect, Surface,
 };
 use std::{num::NonZeroU32, path::Path};
 
 const INK: Color = Color::from_rgb(32, 32, 32);
 const MUTED: Color = Color::from_rgb(115, 115, 115);
 const LINE: Color = Color::from_rgb(226, 226, 226);
-const ACCENT: Color = Color::from_rgb(0, 214, 143);
-const SELECTED: Color = Color::from_rgb(213, 249, 238);
-const SELECTED_INK: Color = Color::from_rgb(0, 105, 72);
+const ACCENT: Color = Color::from_rgb(37, 99, 235);
+const ACCENT_HOVER: Color = Color::from_rgb(29, 78, 216);
 const COMPONENT: Color = Color::from_rgb(144, 51, 236);
 const WORKSPACE: Color = Color::from_rgb(242, 242, 242);
 
@@ -56,8 +57,10 @@ const LAYER_FIRST: u64 = 1 << 32;
 const LAYER_CONTROLS: u64 = 4;
 const MCP_BUTTON_WIDTH: f64 = 62.;
 const MCP_HEADER_SPACE: f64 = 198.;
-const COLLABORATE_BLUE: Color = Color::from_rgb(37, 99, 235);
 pub(crate) const POPUP_FIRST: u64 = 1 << 48;
+
+mod home;
+pub(crate) use home::{LIBRARY_CARD_FIRST, library_grid, library_move_scroll_max};
 
 fn sidebar_top() -> f64 {
     HEADER + 60.
@@ -199,6 +202,7 @@ fn stroke(canvas: &Canvas, r: Rect, color: Color, width: f32) {
     canvas.draw_rect(rect(r), &p);
 }
 fn text(canvas: &Canvas, body: &str, x: f64, y: f64, size: f32, color: Color, font: &Font) {
+    let color = crate::theme::color(color);
     if !body.is_ascii()
         && let Some(layout) = crate::text_ui::layout(body, size, color, 10000.)
     {
@@ -206,7 +210,7 @@ fn text(canvas: &Canvas, body: &str, x: f64, y: f64, size: f32, color: Color, fo
         return;
     }
     let mut p = Paint::default();
-    p.set_color(crate::theme::color(color));
+    p.set_color(color);
     p.set_anti_alias(true);
     let mut f = font.clone();
     f.set_size(size);
@@ -277,6 +281,7 @@ pub fn controls(app: &App) -> Vec<Control> {
         return controls;
     }
     let header = app.header_height();
+    let home = app.shows_library();
     let left = app.left_width();
     let right_width = app.right_width();
     let mut add =
@@ -284,8 +289,8 @@ pub fn controls(app: &App) -> Vec<Control> {
             let tab = (46..=50).contains(&id) || (3000..3200).contains(&id);
             let sidebar = matches!(id, 10 | 35..=37 | 40..=42)
                 || (300..500).contains(&id)
-                || (LAYER_FIRST..POPUP_FIRST).contains(&id);
-            if tab && header == 0. || sidebar && left == 0. {
+                || (LAYER_FIRST..home::FIRST).contains(&id);
+            if tab && header == 0. || sidebar && left == 0. || home && id < home::FIRST && !tab {
                 return;
             }
             controls.push(Control {
@@ -302,7 +307,7 @@ pub fn controls(app: &App) -> Vec<Control> {
         Rect::new(tab_strip::HOME_X, 0., tab_strip::HOME_WIDTH, HEADER),
         "Home".into(),
         Action::Library,
-        app.library_open || app.active.is_none(),
+        home,
         None,
     );
     add(
@@ -594,27 +599,8 @@ pub fn controls(app: &App) -> Vec<Control> {
             );
             y += 37.;
         }
-    } else {
-        for (i, doc) in app
-            .documents
-            .iter()
-            .filter(|doc| !doc.archived)
-            .take(15)
-            .enumerate()
-        {
-            let y = HEADER + 55. + i as f64 * 36.;
-            if y + 32. > app.height - FOOTER {
-                break;
-            }
-            add(
-                400 + i as u64,
-                Rect::new(RAIL_WIDTH + 10., y, left - RAIL_WIDTH - 20., 32.),
-                doc.title.clone(),
-                Action::Open(doc.id.clone()),
-                false,
-                None,
-            );
-        }
+    } else if home {
+        home::controls(app, &mut add);
     }
     for control in crate::inspector::controls(app)
         .into_iter()
@@ -1507,11 +1493,11 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
             canvas,
             r,
             if primary {
-                COLLABORATE_BLUE
+                if hovered { ACCENT_HOVER } else { ACCENT }
             } else {
                 Color::from_rgb(227, 228, 231)
             },
-            15.,
+            6.,
         );
         if !primary {
             round(
@@ -1522,12 +1508,13 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                 } else {
                     WORKSPACE
                 },
-                14.,
+                5.,
             );
         }
         let mut label_font = font.clone();
         label_font.set_size(12.);
         let width = f64::from(label_font.measure_str(&control.label, None).0);
+        let _foreground = primary.then(|| crate::theme::enter(false));
         text(
             canvas,
             &control.label,
@@ -1544,7 +1531,16 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
             font,
         );
         if app.focus == control.id && app.keyboard_focus_visible {
-            stroke(canvas, r, SELECTED_INK, 1.35);
+            stroke(
+                canvas,
+                Rect::new(r.x + 2., r.y + 2., r.width - 4., r.height - 4.),
+                if primary {
+                    Color::WHITE
+                } else {
+                    selection_ink()
+                },
+                1.35,
+            );
         }
         return;
     }
@@ -1565,7 +1561,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                         canvas,
                         Rect::new(r.x + 9., r.y, 20., r.height),
                         "M2 14l2-8 6-4 4 4-4 6zM2 14l6-6m-1-1 2 2",
-                        SELECTED_INK,
+                        selection_ink(),
                     );
                     control_text(
                         canvas,
@@ -1591,7 +1587,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
             mark(canvas, r, icon, INK);
         }
         if app.focus == control.id && app.keyboard_focus_visible {
-            stroke(canvas, r, SELECTED_INK, 1.35);
+            stroke(canvas, r, selection_ink(), 1.35);
         }
         return;
     }
@@ -1616,7 +1612,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
                 canvas,
                 icon,
                 if control.selected {
-                    SELECTED
+                    selection_background()
                 } else {
                     WORKSPACE
                 },
@@ -1627,7 +1623,11 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
             canvas,
             item,
             r,
-            if control.selected { SELECTED_INK } else { INK },
+            if control.selected {
+                selection_ink()
+            } else {
+                INK
+            },
         );
         text(
             canvas,
@@ -1639,7 +1639,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
             font,
         );
         if app.focus == control.id && app.keyboard_focus_visible {
-            stroke(canvas, icon, SELECTED_INK, 1.4);
+            stroke(canvas, icon, selection_ink(), 1.4);
         }
         return;
     }
@@ -1649,7 +1649,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         }
         figcraft_chrome::paint_dock_chevron(canvas, r, MUTED);
         if app.focus == control.id && app.keyboard_focus_visible {
-            stroke(canvas, r, SELECTED_INK, 1.35);
+            stroke(canvas, r, selection_ink(), 1.35);
         }
         return;
     }
@@ -1662,13 +1662,13 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
             (control.id - 60) as usize,
             r,
             if control.selected {
-                SELECTED_INK
+                selection_ink()
             } else {
                 MUTED
             },
         );
         if app.focus == control.id && app.keyboard_focus_visible {
-            stroke(canvas, r, SELECTED_INK, 1.35);
+            stroke(canvas, r, selection_ink(), 1.35);
         }
         return;
     }
@@ -1699,40 +1699,13 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
             _ => figcraft_chrome::paint_layer_eye(canvas, r, control.selected, color),
         }
         if focused {
-            stroke(canvas, r, SELECTED_INK, 1.35);
+            stroke(canvas, r, selection_ink(), 1.35);
         }
         return;
     }
     if matches!(control.action, Action::InspectorLayerMenu) {
         if app.focus == control.id && app.keyboard_focus_visible {
-            stroke(canvas, r, SELECTED_INK, 1.35);
-        }
-        return;
-    }
-    if (400..415).contains(&control.id)
-        && let Action::Open(id) = &control.action
-        && let Some(image) = app
-            .documents
-            .iter()
-            .find(|doc| &doc.id == id)
-            .and_then(|doc| doc.thumbnail.as_ref())
-    {
-        if hovered {
-            round(canvas, r, WORKSPACE, 4.);
-        }
-        let scale = 24. / image.width().max(image.height()) as f32;
-        let width = image.width() as f32 * scale;
-        let height = image.height() as f32 * scale;
-        let dest = SkRect::from_xywh(
-            r.x as f32 + 6. + (24. - width) / 2.,
-            r.y as f32 + (r.height as f32 - height) / 2.,
-            width,
-            height,
-        );
-        canvas.draw_image_rect(image, None, dest, &Paint::default());
-        control_text(canvas, r, &control.label, 36., r.y + 20., 12., INK, font);
-        if app.focus == control.id && app.keyboard_focus_visible {
-            stroke(canvas, r, SELECTED_INK, 1.35);
+            stroke(canvas, r, selection_ink(), 1.35);
         }
         return;
     }
@@ -1779,7 +1752,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         };
         inspector_glyph(canvas, r, name, ink);
         if app.focus == control.id && app.keyboard_focus_visible {
-            stroke(canvas, r, SELECTED_INK, 1.35);
+            stroke(canvas, r, selection_ink(), 1.35);
         }
         return;
     }
@@ -1814,10 +1787,11 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         Action::Tool(tool) => Some(tool),
         _ => None,
     };
-    let background = if control.id == 34 || control.selected && tool.is_some() {
-        Some(ACCENT)
+    let accent_filled = control.id == 34 || control.selected && tool.is_some();
+    let background = if accent_filled {
+        Some(if hovered { ACCENT_HOVER } else { ACCENT })
     } else if matches!(control.action, Action::Layer(_)) {
-        control.selected.then_some(SELECTED)
+        control.selected.then(selection_background)
     } else if control.selected || hovered || control.field_value.is_some() {
         Some(if control.id >= 660_000 && control.field_value.is_some() {
             INSPECTOR_FIELD
@@ -1830,16 +1804,48 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
     if let Some(color) = background {
         round(canvas, r, color, 6.);
     }
+    let _foreground = accent_filled.then(|| crate::theme::enter(false));
     if app.focus == control.id && app.keyboard_focus_visible {
         stroke(
             canvas,
             Rect::new(r.x + 1., r.y + 1., r.width - 2., r.height - 2.),
-            SELECTED_INK,
+            if accent_filled {
+                Color::WHITE
+            } else {
+                selection_ink()
+            },
             1.35,
         );
     }
+    if control.id == 10 {
+        thread_local! {
+            static ICON: Option<Image> = Image::from_encoded(Data::new_copy(
+                include_bytes!("../../../../public/app-icon.png"),
+            ));
+        }
+        ICON.with(|image| {
+            if let Some(image) = image {
+                let size = 26.;
+                let destination = Rect::new(
+                    r.x + (r.width - size) / 2.,
+                    r.y + (r.height - size) / 2.,
+                    size,
+                    size,
+                );
+                canvas.draw_image_rect_with_sampling_options(
+                    image,
+                    None,
+                    rect(destination),
+                    CubicResampler::mitchell(),
+                    &Paint::default(),
+                );
+            }
+        });
+        return;
+    }
     if let Some(tool) = tool {
-        figcraft_chrome::paint_tool_icon(canvas, tool, r, INK);
+        let color = if accent_filled { Color::WHITE } else { INK };
+        figcraft_chrome::paint_tool_icon(canvas, tool, r, color);
         return;
     }
     if (30..=32).contains(&control.id) {
@@ -2065,7 +2071,6 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         return;
     }
     let label = match (&control.action, control.id) {
-        (_, 10) => "OMC",
         (_, 35) => control
             .label
             .strip_prefix("Rename ")
@@ -2104,7 +2109,7 @@ fn draw_control(canvas: &Canvas, app: &App, control: &Control, font: &Font) {
         5.,
         r.y + r.height * 0.5 + 4.,
         if control.id == 35 { 15. } else { 12. },
-        INK,
+        if accent_filled { Color::WHITE } else { INK },
         &title,
     );
 }
@@ -2240,6 +2245,7 @@ fn selection_dimensions(canvas: &Canvas, app: &App, viewport: Rect, font: &Font)
         19.,
     );
     round(canvas, r, ACCENT, 4.);
+    let _foreground = crate::theme::enter(false);
     control_text(canvas, r, &label, 7., r.y + 13., 11., Color::WHITE, font);
 }
 
@@ -2284,9 +2290,15 @@ fn render_to_canvas(
     let font = UI_FONT
         .with(Clone::clone)
         .ok_or("No native UI font is available.")?;
+    let generated_controls = (!allow_pan_preview).then(|| controls(app));
+    let controls = generated_controls.as_deref().unwrap_or(&app.controls);
     let design_font = inspector_font().unwrap_or_else(|| font.clone());
     let viewport = app.canvas_rect();
-    if app
+    let home = app.shows_library();
+    let gallery = home.then(|| home::PaintLayout::new(app));
+    if let Some(layout) = &gallery {
+        home::background(canvas, app, layout, &font);
+    } else if app
         .document()
         .and_then(|document| document.metadata.get("boardDocument"))
         == Some(&serde_json::Value::Bool(true))
@@ -2308,7 +2320,7 @@ fn render_to_canvas(
         fill(canvas, Rect::new(0., 0., app.width, header), TAB_BG);
         fill(canvas, Rect::new(0., header - 1., app.width, 1.), LINE);
     }
-    if left > 0. {
+    if left > 0. && !home {
         fill(
             canvas,
             Rect::new(RAIL_WIDTH - 1., header, 1., app.height - header),
@@ -2372,7 +2384,7 @@ fn render_to_canvas(
             );
         }
     }
-    if app.inspector_visible() {
+    if app.inspector_visible() && !home {
         let panel_x = app.width - right;
         let x = panel_x + 12.;
         fill(
@@ -2964,15 +2976,11 @@ fn render_to_canvas(
                 | Drag::VectorTrace { .. } => {}
             }
         }
-    } else {
+    } else if !home {
         let middle = viewport.x + viewport.width * 0.5;
         text(
             canvas,
-            if app.active.is_some() {
-                "Preparing canvas…"
-            } else {
-                "Create a document to start designing"
-            },
+            "Preparing canvas…",
             middle - 150.,
             viewport.y + viewport.height * 0.43,
             18.,
@@ -3011,14 +3019,15 @@ fn render_to_canvas(
                 canvas,
                 Rect::new(x - 2., y - 1., 16., 16.),
                 "M2 1l11 9-5 .4-2 4z",
-                COLLABORATE_BLUE,
+                ACCENT,
                 PaintStyle::Fill,
                 1.,
             );
             let label = peer["name"].as_str().unwrap_or("Designer");
             let width = (label.chars().count() as f64 * 8. + 14.).min(150.);
             let badge = Rect::new(x + 8., y + 13., width, 19.);
-            round(canvas, badge, COLLABORATE_BLUE, 4.);
+            round(canvas, badge, ACCENT, 4.);
+            let _foreground = crate::theme::enter(false);
             control_text(
                 canvas,
                 badge,
@@ -3032,7 +3041,7 @@ fn render_to_canvas(
             if let Some(chat) = peer["chat"].as_str().filter(|chat| !chat.is_empty()) {
                 let width = (chat.chars().count() as f64 * 8. + 16.).min(260.);
                 let message = Rect::new(badge.x, badge.y + badge.height + 3., width, 22.);
-                round(canvas, message, COLLABORATE_BLUE, 5.);
+                round(canvas, message, ACCENT, 5.);
                 control_text(
                     canvas,
                     message,
@@ -3096,7 +3105,7 @@ fn render_to_canvas(
     if let Some(r) = palette_rect(app) {
         figcraft_chrome::paint_dock(canvas, r);
     }
-    if header > 0. && !app.inspector_visible() {
+    if header > 0. && !home && !app.inspector_visible() {
         round(
             canvas,
             Rect::new(app.width - RIGHT, header, RIGHT, 50.),
@@ -3104,8 +3113,12 @@ fn render_to_canvas(
             8.,
         );
     }
-    for control in &app.controls {
-        if control.id < POPUP_FIRST {
+    for control in controls {
+        if let Some(layout) = &gallery
+            && home::is_control(control.id)
+        {
+            home::draw(canvas, app, layout, control, &font);
+        } else if control.id < POPUP_FIRST {
             let font = if (600_000..600_003).contains(&control.id)
                 || (660_000..LAYER_FIRST).contains(&control.id)
             {
@@ -3116,7 +3129,7 @@ fn render_to_canvas(
             draw_control(canvas, app, control, font);
         }
     }
-    if let Some(thumb) = crate::inspector::scrollbar(app) {
+    if !home && let Some(thumb) = crate::inspector::scrollbar(app) {
         round(canvas, thumb, Color::from_rgb(198, 198, 198), 1.5);
     }
     if let Some(menu) = popup_rect(app) {
@@ -3230,11 +3243,7 @@ fn render_to_canvas(
                 &font,
             );
         }
-        for control in app
-            .controls
-            .iter()
-            .filter(|control| control.id >= POPUP_FIRST)
-        {
+        for control in controls.iter().filter(|control| control.id >= POPUP_FIRST) {
             let r = control.rect;
             let hovered = r.contains(app.cursor.0, app.cursor.1);
             if let Action::Tool(tool) = control.action {
@@ -3281,7 +3290,7 @@ fn render_to_canvas(
         && app.drag.is_none()
         && let Some(dock) = palette_rect(app)
         && let Some(control) = dock_tooltip_target(
-            &app.controls,
+            controls,
             dock,
             app.cursor,
             app.keyboard_focus_visible.then_some(app.focus),
@@ -3307,7 +3316,8 @@ fn render_to_canvas(
     }
     for pin in app.comment_pins() {
         let badge = Rect::new(pin.x - 12., pin.y - 12., 24., 24.);
-        round(canvas, badge, SELECTED_INK, 12.);
+        round(canvas, badge, ACCENT, 12.);
+        let _foreground = crate::theme::enter(false);
         text(
             canvas,
             &pin.number.to_string(),
@@ -3342,8 +3352,21 @@ fn render_to_canvas(
         }
         canvas.restore();
     }
+    if let Some(layout) = &gallery
+        && app.home_menu.is_some()
+    {
+        for control in controls.iter().filter(|c| home::is_menu_control(c.id)) {
+            home::draw(canvas, app, layout, control, &font);
+        }
+    }
     if let Some(edit) = &app.editing {
-        if matches!(edit.target, EditTarget::LibraryDescription) {
+        if matches!(edit.target, EditTarget::HomeSearch | EditTarget::HomeFolder) {
+            if let Some(area) = crate::text_ui::editor_rect(app)
+                && let Some(prepared) = crate::text_ui::prepare(&edit.buffer, area, 13.)
+            {
+                prepared.paint(canvas, area);
+            }
+        } else if matches!(edit.target, EditTarget::LibraryDescription) {
             if let Some(area) = crate::text_ui::editor_rect(app)
                 && let Some(prepared) = crate::text_ui::prepare(&edit.buffer, area, 14.)
             {
@@ -3600,7 +3623,7 @@ fn draw_document_outlines(
     let mut paint = Paint::default();
     paint
         .set_color(if matches!(layers, OutlineLayers::Masks) {
-            COLLABORATE_BLUE
+            ACCENT
         } else {
             crate::theme::color(INK)
         })

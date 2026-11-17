@@ -3,6 +3,7 @@ use omc_model::{DocumentSnapshot, Node, NodeKind};
 use serde_json::{Value, json};
 
 mod electron_canvas;
+mod electron_properties;
 
 pub fn import_json(source: &str, options: &ImportOptions) -> Result<ImportResult, ImportError> {
     validate_input(source.as_bytes(), options)?;
@@ -153,10 +154,12 @@ fn remap_value(key: &str, value: &mut Value, mapping: &BTreeMap<String, String>)
                     | "pageId"
                     | "rootNodeId"
                     | "componentId"
+                    | "variantSetId"
                     | "definitionId"
                     | "maskId"
                     | "targetId"
                     | "sourceNodeId"
+                    | "sourceChildren"
                     | "nodeIds"
                     | "operandIds"
             ) =>

@@ -1,4 +1,6 @@
 //! Authored document types. This crate has no storage, graphics or network dependencies.
+pub mod electron;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};

@@ -22,31 +22,57 @@ const MAX_IMPORT_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_PASTE_HTML_BYTES: usize = 1024 * 1024;
 const MAX_EXPORT_BYTES: usize = 64 * 1024 * 1024;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentEntry {
     pub id: String,
     pub title: String,
-    #[serde(default)]
+    pub epoch: String,
+    pub sequence: String,
     pub archived: bool,
-    #[serde(default, deserialize_with = "deserialize_thumbnail")]
-    pub thumbnail: Option<skia_safe::Image>,
+    pub starred: bool,
+    pub trashed: bool,
+    pub folder_id: Option<String>,
+    pub updated_at_ms: i64,
 }
 
-fn deserialize_thumbnail<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<skia_safe::Image>, D::Error> {
-    let value = Option::<String>::deserialize(deserializer)?;
-    Ok(value
-        .and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok())
-        .and_then(|bytes| {
-            skia_safe::images::deferred_from_encoded_data(skia_safe::Data::new_copy(&bytes), None)
-        }))
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderEntry {
+    pub id: String,
+    pub title: String,
+    pub parent_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HomeListing {
+    pub documents: Vec<DocumentEntry>,
+    pub folders: Vec<FolderEntry>,
+    pub workspace_epoch: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewKey {
+    pub document_id: String,
+    pub epoch: String,
+    pub sequence: String,
+}
+
+impl DocumentEntry {
+    pub fn preview_key(&self) -> PreviewKey {
+        PreviewKey {
+            document_id: self.id.clone(),
+            epoch: self.epoch.clone(),
+            sequence: self.sequence.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub enum Request {
     Refresh,
+    OrganizeHome(Value),
     Create {
         title: String,
     },
@@ -147,7 +173,12 @@ pub enum Response {
         operation: &'static str,
         result: Result<Value, String>,
     },
-    Documents(Vec<DocumentEntry>),
+    Documents(HomeListing),
+    HomeOrganized(Result<HomeListing, String>),
+    HomePreview {
+        key: PreviewKey,
+        image: Option<skia_safe::Image>,
+    },
     CanvasMutation {
         document: DocumentSnapshot,
         selected: Vec<String>,
@@ -279,11 +310,13 @@ mod tests {
 #[derive(Clone)]
 pub struct Bridge {
     pub sender: SyncSender<Request>,
+    previews: SyncSender<PreviewKey>,
 }
 
 impl Bridge {
     pub fn start(profile: PathBuf, proxy: WindowProxy) -> Self {
         let (sender, receiver) = mpsc::sync_channel::<Request>(32);
+        let (previews, preview_receiver) = mpsc::sync_channel::<PreviewKey>(1);
         thread::spawn(move || {
             let mut client = match Client::connect(&profile) {
                 Ok(client) => client,
@@ -295,6 +328,19 @@ impl Bridge {
                     return;
                 }
             };
+            let preview_client = client.clone();
+            let preview_proxy = proxy.clone();
+            thread::spawn(move || {
+                while let Ok(key) = preview_receiver.recv() {
+                    let image = preview_client.home_preview(&key);
+                    if preview_proxy
+                        .send_event(crate::Event::Service(Response::HomePreview { key, image }))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
             let _ = proxy.send_event(crate::Event::Service(Response::Connected));
             if proxy.id == 1 {
                 let automation = client.clone();
@@ -345,7 +391,11 @@ impl Bridge {
                 }
             }
         });
-        Self { sender }
+        Self { sender, previews }
+    }
+
+    pub fn request_preview(&self, key: PreviewKey) -> bool {
+        self.previews.try_send(key).is_ok()
     }
 
     pub fn send(&self, request: Request) -> Result<(), String> {
@@ -474,6 +524,36 @@ impl Client {
             return Err("The service did not establish an editor session.".into());
         }
         Ok(client)
+    }
+
+    fn home_listing(&self) -> Result<HomeListing, String> {
+        serde_json::from_value(self.call("workspace.home", json!({}))?)
+            .map_err(|e| format!("Invalid workspace listing: {e}"))
+    }
+
+    fn home_preview(&self, key: &PreviewKey) -> Option<skia_safe::Image> {
+        let value = self
+            .call_limit(
+                "workspace.preview",
+                json!({"documentId":key.document_id,"epoch":key.epoch,"sequence":key.sequence}),
+                2 * 1024 * 1024,
+            )
+            .ok()?;
+        if value["documentId"] != key.document_id
+            || value["epoch"] != key.epoch
+            || value["sequence"] != key.sequence
+        {
+            return None;
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(value["thumbnail"].as_str()?)
+            .ok()?;
+        let image =
+            skia_safe::images::deferred_from_encoded_data(skia_safe::Data::new_copy(&bytes), None)?;
+        if !(1..=640).contains(&image.width()) || !(1..=640).contains(&image.height()) {
+            return None;
+        }
+        image.make_raster_image(None, None)
     }
 
     fn call(&self, method: &str, params: Value) -> Result<Value, String> {
@@ -643,14 +723,11 @@ impl Client {
                 })();
                 Ok(Response::Collaboration { action, result })
             }
-            Request::Refresh => {
-                let value = self.call("workspace.list", json!({"thumbnails":true}))?;
-                let documents = serde_json::from_value(
-                    value.get("documents").cloned().unwrap_or_else(|| json!([])),
-                )
-                .map_err(|e| e.to_string())?;
-                Ok(Response::Documents(documents))
-            }
+            Request::Refresh => self.home_listing().map(Response::Documents),
+            Request::OrganizeHome(args) => Ok(Response::HomeOrganized(
+                self.call("workspace.organize", args)
+                    .and_then(|_| self.home_listing()),
+            )),
             Request::Create { title } => {
                 let value = self.call("workspace.create", json!({"title":title}))?;
                 let document: DocumentSnapshot =

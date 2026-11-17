@@ -1,4 +1,4 @@
-use super::*;
+use super::{electron_properties, *};
 use serde_json::Map;
 
 pub(super) fn import(value: &Value, options: &ImportOptions) -> Result<ImportResult, ImportError> {
@@ -89,11 +89,8 @@ pub(super) fn import(value: &Value, options: &ImportOptions) -> Result<ImportRes
             }
         }
     }
+    electron_properties::link_components(value, &mut import);
     for (field, message) in [
-        (
-            "editorComponents",
-            "Component definitions and instance connections require migration",
-        ),
         ("editorStyles", "Shared style connections require migration"),
         ("editorLibraries", "Library subscriptions require migration"),
     ] {
@@ -181,6 +178,12 @@ fn add_layer(
         "flipX",
         "flipY",
         "radii",
+        "radius",
+        "cornerRadius",
+        "radiusTopLeft",
+        "radiusTopRight",
+        "radiusBottomRight",
+        "radiusBottomLeft",
         "cornerSmoothing",
         "clipContent",
         "fontFamily",
@@ -254,13 +257,43 @@ fn add_layer(
         NodeKind::Text => migrate_text(source, &mut node, import),
         _ => {}
     }
+    electron_properties::layout(source, &mut node);
+    for kind in electron_properties::effects(source, &mut node) {
+        report(
+            import,
+            Some(&node.id),
+            "effects",
+            &format!("Unsupported Electron effect: {kind}"),
+        );
+    }
+    let component_value = |key| {
+        source.get(key).or_else(|| {
+            source
+                .get("editorComponent")
+                .and_then(|value| value.get(key))
+        })
+    };
+    for key in [
+        "isVariantSet",
+        "componentPropertyRefs",
+        "componentProperties",
+    ] {
+        if let Some(value) = component_value(key).filter(|value| !value.is_null()) {
+            node.properties.insert(key.into(), value.clone());
+        }
+    }
+    if let Some(source_id) = component_value("sourceId").and_then(Value::as_str) {
+        node.properties.insert(
+            "electronComponentRef".into(),
+            json!({
+                "sourceId":source_id,
+                "overrides":component_value("overrides"),
+                "isInstanceRoot":component_value("isInstanceRoot")
+            }),
+        );
+    }
     for (field, message) in [
-        ("editorLayout", "Electron layout rules require migration"),
         ("editorMask", "Electron masking requires migration"),
-        (
-            "editorComponent",
-            "Component metadata and connections require migration",
-        ),
         (
             "editorStyleRef",
             "Shared style references require migration",
@@ -274,21 +307,6 @@ fn add_layer(
             .is_some_and(|values| !values.is_empty())
         {
             report(import, Some(&node.id), field, message);
-        }
-    }
-    for field in ["shadows", "effects", "blur", "backgroundBlur"] {
-        if source.get(field).is_some_and(|value| match value {
-            Value::Array(values) => !values.is_empty(),
-            Value::Object(values) => !values.is_empty(),
-            Value::Number(number) => number.as_f64().is_some_and(|amount| amount > 0.),
-            _ => false,
-        }) {
-            report(
-                import,
-                Some(&node.id),
-                field,
-                "Electron effect requires migration",
-            );
         }
     }
     if matches!(kind, "boolean") || native == NodeKind::Group && !matches!(kind, "group") {
@@ -310,12 +328,49 @@ fn add_layer(
 fn migrate_text(source: &Map<String, Value>, node: &mut Node, import: &mut ImportResult) {
     let visible = source.get("text").and_then(Value::as_str).unwrap_or("");
     node.properties.insert("text".into(), json!(visible));
-    let Some(paragraphs) = source
-        .get("editorText")
-        .and_then(|value| value["content"]["children"].as_array())
-    else {
+    if let Some(height) = source.get("lineHeight").and_then(line_height) {
+        node.properties.insert("lineHeight".into(), height);
+    }
+    let content = source.get("editorText").map(|text| &text["content"]);
+    if let Some(vertical) = content
+        .and_then(|rich| rich["verticalAlign"].as_str())
+        .or_else(|| source.get("verticalAlign").and_then(Value::as_str))
+    {
+        let vertical = if vertical == "center" {
+            "middle"
+        } else {
+            vertical
+        };
+        node.properties
+            .insert("textVerticalAlign".into(), json!(vertical));
+    }
+    let Some(paragraphs) = content.and_then(|rich| rich["children"].as_array()) else {
         return;
     };
+    let fallback = source
+        .get("textAlign")
+        .and_then(Value::as_str)
+        .unwrap_or("left");
+    let align = |paragraph: &Value| match paragraph["textAlign"].as_str().unwrap_or(fallback) {
+        "start" => "left",
+        "end" => "right",
+        "center" => "center",
+        "right" => "right",
+        "justify" => "justify",
+        _ => "left",
+    };
+    if let Some(first) = paragraphs.first().map(align) {
+        if paragraphs.iter().all(|paragraph| align(paragraph) == first) {
+            node.properties.insert("textAlign".into(), json!(first));
+        } else {
+            report(
+                import,
+                Some(&node.id),
+                "textAlign",
+                "Mixed Electron paragraph alignment requires migration",
+            );
+        }
+    }
     let mut runs = Vec::new();
     let mut text = String::new();
     for (index, paragraph) in paragraphs.iter().enumerate() {
@@ -326,6 +381,10 @@ fn migrate_text(source: &Map<String, Value>, node: &mut Node, import: &mut Impor
         let Some(leaves) = paragraph["children"].as_array() else {
             continue;
         };
+        let height = paragraph
+            .get("lineHeight")
+            .or_else(|| leaves.first().and_then(|leaf| leaf.get("lineHeight")))
+            .and_then(line_height);
         for run in leaves {
             let Some(characters) = run["text"].as_str() else {
                 continue;
@@ -337,11 +396,13 @@ fn migrate_text(source: &Map<String, Value>, node: &mut Node, import: &mut Impor
                 "fontWeight",
                 "fontStyle",
                 "letterSpacing",
-                "lineHeight",
             ] {
                 if let Some(value) = run.get(key) {
                     attributes.insert(key.into(), value.clone());
                 }
+            }
+            if let Some(height) = &height {
+                attributes.insert("lineHeight".into(), height.clone());
             }
             if let Some(color) = run["fills"][0]["color"].as_str() {
                 attributes.insert("color".into(), json!(color));
@@ -362,8 +423,73 @@ fn migrate_text(source: &Map<String, Value>, node: &mut Node, import: &mut Impor
     }
 }
 
+fn line_height(value: &Value) -> Option<Value> {
+    if let Some(number) = value.as_f64() {
+        return Some(if number > 4. {
+            json!(format!("{number}px"))
+        } else {
+            value.clone()
+        });
+    }
+    let number = value["value"].as_f64()?;
+    let unit = if value["unit"] == "percent" {
+        "%"
+    } else {
+        "px"
+    };
+    Some(json!(format!("{number}{unit}")))
+}
+
 fn report(import: &mut ImportResult, node: Option<&str>, field: &str, message: &str) {
     import
         .diagnostics
         .push(Diagnostic::unsupported(node, Some(field), message));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_corner_and_paragraph_alignment_properties() {
+        let input = json!({
+            "editorPages": [{"id":"page"}],
+            "pages": [{"id":"frame","type":"frame","radiusTopLeft":24,"radiusBottomRight":8,
+                "children":[{"id":"text","type":"text","text":"Title","editorText":{"content":{
+                    "verticalAlign":"center","children":[{"textAlign":"right","lineHeight":24,"children":[{"text":"Title"}]}]
+                }}}]
+            }]
+        });
+        let result = import(&input, &ImportOptions::default()).unwrap();
+        let frame = &result.content.nodes[&result.source_map["electron:page:frame"]];
+        let text = &result.content.nodes[&result.source_map["electron:page:text"]];
+        assert_eq!(frame.properties["radiusTopLeft"], 24);
+        assert_eq!(frame.properties["radiusBottomRight"], 8);
+        assert_eq!(text.properties["textAlign"], "right");
+        assert_eq!(text.properties["textVerticalAlign"], "middle");
+        assert_eq!(
+            text.properties["textRuns"][0]["attributes"]["lineHeight"],
+            "24px"
+        );
+    }
+    #[test]
+    fn imports_exported_component_extension_and_array_overrides() {
+        let input = json!({
+            "editorPages": [{"id":"page"}],
+            "editorComponents": {"main":{"mainId":"main","name":"Main"}},
+            "pages": [
+                {"id":"main","type":"frame","width":100,"height":100},
+                {"id":"copy","type":"frame","x":150,"width":100,"height":100,
+                 "editorComponent":{"sourceId":"main","overrides":["paint"],"isInstanceRoot":true}}
+            ]
+        });
+        let imported = import(&input, &ImportOptions::default()).unwrap();
+        let copy = &imported.content.nodes[&imported.source_map["electron:page:copy"]];
+        let link = &copy.properties["electronComponentLink"];
+        assert_eq!(link["root"], true);
+        assert_eq!(link["nodeId"], imported.source_map["electron:page:main"]);
+        for key in ["x", "y", "fills", "strokes"] {
+            assert!(link["fields"].get(key).is_none());
+        }
+    }
 }

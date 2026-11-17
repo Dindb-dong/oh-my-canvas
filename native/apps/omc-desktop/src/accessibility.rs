@@ -1,8 +1,9 @@
 //! A real native accessibility tree for controls and the active text buffer.
 //! OS screen-reader journeys remain separate platform qualification gates.
 use crate::{
-    app::{Action, App, EditTarget, FOOTER, HEADER},
+    app::{Action, App, EditTarget, FOOTER, HEADER, HomeAction},
     geometry::Rect,
+    paint::library_grid,
 };
 use accesskit::{
     Action as AxAction, ActionData, Node, NodeId, Rect as AxRect, Role, TextPosition,
@@ -13,6 +14,7 @@ const ROOT: NodeId = NodeId(1);
 const EDITOR: NodeId = NodeId(1_u64 << 60);
 const TEXT_RUN: NodeId = NodeId((1_u64 << 60) + 1);
 const STATUS: NodeId = NodeId((1_u64 << 60) + 2);
+const LIBRARY: NodeId = NodeId((1_u64 << 60) + 3);
 const INSPECTOR_DETAIL_START: u64 = (1_u64 << 60) + 100;
 
 fn bounds(r: Rect, scale: f64) -> AxRect {
@@ -30,18 +32,41 @@ pub fn tree(app: &App) -> TreeUpdate {
     root.set_label("Oh My Canvas");
     root.set_bounds(AxRect::new(0., 0., app.width * scale, app.height * scale));
     let mut children = vec![];
+    let mut library_children = vec![];
     let mut nodes = vec![];
+    let gallery = app.shows_library().then(|| library_grid(app));
     for control in &app.controls {
         let id = NodeId(control.id);
-        children.push(id);
+        if gallery.as_ref().is_some_and(|grid| {
+            control.rect.x >= grid.area.x && control.rect.y + control.rect.height > grid.area.y
+        }) && matches!(
+            control.action,
+            Action::Open(_)
+                | Action::Home(
+                    HomeAction::Star(_)
+                        | HomeAction::Menu(_)
+                        | HomeAction::Restore(_)
+                        | HomeAction::View(crate::app::HomeView::Folder(_))
+                )
+        ) {
+            library_children.push(id);
+        } else {
+            children.push(id);
+        }
         let layer_toggle = matches!(
             control.action,
-            Action::LayerVisibility(_) | Action::LayerLock(_) | Action::ToggleFontDownloads
+            Action::LayerVisibility(_)
+                | Action::LayerLock(_)
+                | Action::ToggleFontDownloads
+                | Action::Home(HomeAction::Star(_))
         );
         let mut node = Node::new(
             if matches!(
                 control.action,
-                Action::Field(_) | Action::EditCatalog { .. } | Action::EditLibraryDescription
+                Action::Field(_)
+                    | Action::EditCatalog { .. }
+                    | Action::EditLibraryDescription
+                    | Action::Home(HomeAction::Search)
             ) && control.field_value.is_some()
             {
                 Role::TextInput
@@ -65,7 +90,9 @@ pub fn tree(app: &App) -> TreeUpdate {
             node.set_value(value.clone());
             if matches!(
                 control.action,
-                Action::Field(_) | Action::EditLibraryDescription
+                Action::Field(_)
+                    | Action::EditLibraryDescription
+                    | Action::Home(HomeAction::Search)
             ) && app.action_available(&control.action)
             {
                 node.add_action(AxAction::SetValue);
@@ -77,6 +104,29 @@ pub fn tree(app: &App) -> TreeUpdate {
             node.set_selected(true);
         }
         nodes.push((id, node));
+    }
+    if let Some(grid) = gallery {
+        let mut library = Node::new(Role::ScrollView);
+        library.set_label(crate::localization::label(
+            &app.interface_language,
+            "Your canvases",
+        ));
+        library.set_bounds(bounds(grid.area, scale));
+        library.set_children(library_children.clone());
+        if grid.max_scroll > 0. {
+            let y = app.library_scroll.min(grid.max_scroll);
+            library.set_scroll_y(y);
+            library.set_scroll_y_min(0.);
+            library.set_scroll_y_max(grid.max_scroll);
+            if y > 0. {
+                library.add_action(AxAction::ScrollUp);
+            }
+            if y < grid.max_scroll {
+                library.add_action(AxAction::ScrollDown);
+            }
+        }
+        children.push(LIBRARY);
+        nodes.push((LIBRARY, library));
     }
     for (index, (rect, label)) in crate::inspector::detail_text(app).into_iter().enumerate() {
         let id = NodeId(INSPECTOR_DETAIL_START + index as u64);
@@ -97,6 +147,8 @@ pub fn tree(app: &App) -> TreeUpdate {
         node.set_label(match &edit.target {
             EditTarget::Text { .. } | EditTarget::TextOnPath { .. } => "Canvas text",
             EditTarget::LibraryDescription => "Library description",
+            EditTarget::HomeSearch => "Search canvases",
+            EditTarget::HomeFolder => "Folder name",
             EditTarget::CursorChat => "Cursor chat",
             EditTarget::CanvasComment { .. } => "Canvas comment",
             EditTarget::Title => "Document name",
@@ -147,7 +199,8 @@ pub fn tree(app: &App) -> TreeUpdate {
         nodes.push((TEXT_RUN, run));
         children.push(EDITOR);
         EDITOR
-    } else if children.contains(&NodeId(app.focus)) {
+    } else if children.contains(&NodeId(app.focus)) || library_children.contains(&NodeId(app.focus))
+    {
         NodeId(app.focus)
     } else {
         ROOT
@@ -222,6 +275,13 @@ pub fn handle(app: &mut App, event: accesskit_winit::Event) {
                     }
                 }
                 app.refresh_path_text_scene();
+            } else if request.target_node == LIBRARY {
+                let step = library_grid(app).area.height * 0.8;
+                match request.action {
+                    AxAction::ScrollUp => app.scroll_library(-step),
+                    AxAction::ScrollDown => app.scroll_library(step),
+                    _ => false,
+                };
             } else if let Some(control) = app
                 .controls
                 .iter()
@@ -237,7 +297,9 @@ pub fn handle(app: &mut App, event: accesskit_winit::Event) {
                     (AxAction::SetValue, Some(ActionData::Value(value))) => {
                         if matches!(
                             control.action,
-                            Action::Field(_) | Action::EditLibraryDescription
+                            Action::Field(_)
+                                | Action::EditLibraryDescription
+                                | Action::Home(HomeAction::Search)
                         ) {
                             app.action(control.action);
                             if let Some(edit) = &mut app.editing {

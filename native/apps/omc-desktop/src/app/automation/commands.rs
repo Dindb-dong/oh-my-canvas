@@ -103,7 +103,7 @@ impl Default for EditorPreferences {
             wheel_zoom: false,
             nudge_small: 1.,
             nudge_big: 10.,
-            start_home: false,
+            start_home: true,
             reduce_motion: false,
             snap_pixel: false,
             snap_objects: false,
@@ -182,7 +182,7 @@ impl App {
 
     pub fn left_width(&self) -> f64 {
         let view = &self.automation.view;
-        if !self.library_open && (self.ui_hidden() || view.compact || view.hide_left) {
+        if self.shows_library() || self.ui_hidden() || view.compact || view.hide_left {
             0.
         } else {
             view.left
@@ -197,7 +197,7 @@ impl App {
     }
     pub fn header_height(&self) -> f64 {
         let view = &self.automation.view;
-        if !self.library_open && (self.ui_hidden() || view.compact) {
+        if !self.shows_library() && (self.ui_hidden() || view.compact) {
             0.
         } else {
             HEADER
@@ -206,7 +206,7 @@ impl App {
     pub fn ui_hidden(&self) -> bool {
         let view = &self.automation.view;
         (view.hide_ui || view.presenting && self.prototype_playback.options["hideUi"] != false)
-            && !self.library_open
+            && !self.shows_library()
     }
     pub fn show_layout_grids(&self) -> bool {
         self.automation.view.grids
@@ -1303,5 +1303,27 @@ fn move_text_line(buffer: &mut EditBuffer, up: bool, extend: bool) {
         if !extend {
             buffer.anchor = buffer.caret;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EditorPreferences;
+
+    #[test]
+    fn home_is_the_default_when_no_startup_preference_is_saved() {
+        let profile = tempfile::tempdir().unwrap();
+        assert!(EditorPreferences::read(profile.path()).start_home);
+
+        let directory = profile.path().join("native-v1");
+        std::fs::create_dir(&directory).unwrap();
+        let file = directory.join("desktop-preferences.json");
+        std::fs::write(&file, br#"{"wheelZoom":true}"#).unwrap();
+        let preferences = EditorPreferences::read(profile.path());
+        assert!(preferences.start_home);
+        assert!(preferences.wheel_zoom);
+
+        std::fs::write(&file, br#"{"startHome":false}"#).unwrap();
+        assert!(!EditorPreferences::read(profile.path()).start_home);
     }
 }

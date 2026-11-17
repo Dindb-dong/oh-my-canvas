@@ -294,11 +294,14 @@ impl Workspace {
         if !omc_model::valid_id(id, "doc") || !self.catalog.lock().unwrap().exists(id)? {
             return Err(EngineError::invalid("document not found"));
         }
-        Ok(self
-            .profile
+        Ok(self.document_database(id))
+    }
+
+    fn document_database(&self, id: &str) -> PathBuf {
+        self.profile
             .join("native-v1/documents")
             .join(id)
-            .join("document.sqlite"))
+            .join("document.sqlite")
     }
     pub fn create(
         &self,
@@ -740,6 +743,92 @@ impl Workspace {
             json!({"documents":cat.list(include_archived)?,"folders":cat.folders()?,"workspaceEpoch":cat.epoch}),
         )
     }
+    pub fn home(&self) -> Result<Value> {
+        let catalog = self.catalog.lock().unwrap();
+        Ok(json!({
+            "documents":catalog.list_for_home()?,
+            "folders":catalog.folders()?,
+            "workspaceEpoch":catalog.epoch,
+        }))
+    }
+
+    pub fn organize_home(&self, args: &Value) -> Result<Value> {
+        let document = || {
+            args["documentId"]
+                .as_str()
+                .filter(|id| omc_model::valid_id(id, "doc"))
+                .ok_or_else(|| EngineError::invalid("valid documentId required"))
+        };
+        match args["action"].as_str() {
+            Some("trash_document") => {
+                self.catalog.lock().unwrap().require_epoch(args)?;
+                let title = args["expectedTitle"]
+                    .as_str()
+                    .ok_or_else(|| EngineError::invalid("expectedTitle required"))?;
+                self.delete_document(document()?, title)
+            }
+            Some("restore_trash") => {
+                self.catalog.lock().unwrap().require_epoch(args)?;
+                self.restore_trashed_document(document()?)
+            }
+            Some("set_starred") => {
+                document()?;
+                self.catalog.lock().unwrap().organization(args)
+            }
+            Some("move_document") => {
+                document()?;
+                if !args["folderId"].is_null()
+                    && !args["folderId"]
+                        .as_str()
+                        .is_some_and(|id| omc_model::valid_id(id, "folder"))
+                {
+                    return Err(EngineError::invalid(
+                        "folderId must identify a folder or be null",
+                    ));
+                }
+                self.catalog.lock().unwrap().organization(args)
+            }
+            Some("create_folder") => {
+                if !args["parentId"].is_null()
+                    && !args["parentId"]
+                        .as_str()
+                        .is_some_and(|id| omc_model::valid_id(id, "folder"))
+                {
+                    return Err(EngineError::invalid(
+                        "parentId must identify a folder or be null",
+                    ));
+                }
+                self.catalog.lock().unwrap().organization(args)
+            }
+            _ => Err(EngineError::invalid("unknown Home organization action")),
+        }
+    }
+
+    fn restore_trashed_document(&self, id: &str) -> Result<Value> {
+        let _lifecycle = self.lifecycle.lock().unwrap();
+        if !self.catalog.lock().unwrap().is_trashed(id)? {
+            return Err(EngineError::invalid("document not found in Trash"));
+        }
+        let _permit = self.admission.acquire(
+            "document-restore",
+            id,
+            WorkClass::Durable,
+            4096,
+            Duration::from_secs(30),
+        )?;
+        let path = self.document_database(id);
+        let metadata = self.workers.call(&path, "metadata", json!({}));
+        self.workers.release(&path)?;
+        if metadata?["id"] != id {
+            return Err(EngineError::new(
+                "corrupt_state",
+                "retained document identity does not match",
+            ));
+        }
+        self.catalog.lock().unwrap().restore_trashed(id)?;
+        Ok(json!({"documentId":id,"trashed":false}))
+    }
+
     pub fn delete_document(&self, id: &str, expected_title: &str) -> Result<Value> {
         let _lifecycle = self.lifecycle.lock().unwrap();
         if self
@@ -877,6 +966,80 @@ fn read_adapter_intent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn home_organization_preserves_recoverable_canvases_across_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = Workspace::open(directory.path(), None).unwrap();
+        let opened = workspace.session_open(None).unwrap();
+        let session = opened["sessionId"].as_str().unwrap();
+        let snapshot = workspace.create(session, "Saved canvas", None).unwrap();
+        let id = &snapshot.id;
+        let mut node = Node::new(omc_model::NodeKind::Rect);
+        node.parent_id = Some(snapshot.pages[0].root_node_id.clone());
+        workspace
+            .execute(
+                session,
+                CommandEnvelope::new(
+                    id,
+                    &snapshot.epoch,
+                    Command::NodeCreate { node: node.clone() },
+                ),
+            )
+            .unwrap();
+        let epoch = workspace.home().unwrap()["workspaceEpoch"].clone();
+        let create_folder = json!({"action":"create_folder","targetEpoch":epoch,"title":"Project"});
+        let folder = workspace.organize_home(&create_folder).unwrap();
+        workspace
+            .organize_home(&json!({"action":"move_document","targetEpoch":epoch,"documentId":id,"folderId":folder["id"]}))
+            .unwrap();
+        let star =
+            json!({"action":"set_starred","targetEpoch":epoch,"documentId":id,"starred":true});
+        workspace.organize_home(&star).unwrap();
+        let mut trash = json!({"action":"trash_document","targetEpoch":epoch,"documentId":id,"expectedTitle":"Saved canvas"});
+        let other = workspace.session_open(None).unwrap();
+        let other_session = other["sessionId"].as_str().unwrap();
+        workspace.bind(other_session, id).unwrap();
+        workspace.release(session, id).unwrap();
+        assert_eq!(workspace.organize_home(&trash).unwrap_err().code, "busy");
+        workspace.release(other_session, id).unwrap();
+        trash["expectedTitle"] = "Wrong title".into();
+        assert_eq!(
+            workspace.organize_home(&trash).unwrap_err().code,
+            "conflict"
+        );
+        trash["expectedTitle"] = "Saved canvas".into();
+        workspace.organize_home(&trash).unwrap();
+        assert_eq!(workspace.home().unwrap()["documents"][0]["trashed"], true);
+        assert!(
+            workspace.list(true).unwrap()["documents"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(workspace.snapshot(id).is_err());
+        assert!(workspace.organize_home(&star).is_err());
+
+        drop(workspace);
+        let workspace = Workspace::open(directory.path(), None).unwrap();
+        let home = workspace.home().unwrap();
+        assert_eq!(home["documents"][0]["trashed"], true);
+        assert_eq!(home["documents"][0]["starred"], true);
+        assert_eq!(home["documents"][0]["folderId"], folder["id"]);
+        assert_eq!(home["folders"][0], folder);
+        let mut restore = json!({"action":"restore_trash","targetEpoch":"stale","documentId":id});
+        assert_eq!(
+            workspace.organize_home(&restore).unwrap_err().code,
+            "epoch_mismatch"
+        );
+        restore["targetEpoch"] = epoch;
+        workspace.organize_home(&restore).unwrap();
+        assert_eq!(workspace.home().unwrap()["documents"][0]["trashed"], false);
+        let restored = workspace.snapshot(id).unwrap();
+        assert_eq!(restored.nodes[&node.id].kind, node.kind);
+        assert_eq!(restored.sequence, 1);
+        assert!(workspace.organize_home(&restore).is_err());
+    }
+
     #[test]
     fn ownership_and_principal_resume_survive_restart() {
         let directory = tempfile::tempdir().unwrap();

@@ -8,6 +8,7 @@ mod invite_registration;
 mod plugin_directory;
 mod plugin_manager;
 mod team_library;
+mod workspace_preview;
 use axum::{
     Json, Router,
     body::Bytes,
@@ -273,6 +274,8 @@ fn dispatch_rpc(app: &App, session: Option<&str>, method: &str, args: Value) -> 
             app.desktop_automation.detach(session);
             result
         }
+        "workspace.home" => app.workspace.home(),
+        "workspace.organize" => app.workspace.organize_home(&args),
         "workspace.list" => {
             let mut listing = app
                 .workspace
@@ -297,6 +300,7 @@ fn dispatch_rpc(app: &App, session: Option<&str>, method: &str, args: Value) -> 
             }
             Ok(listing)
         }
+        "workspace.preview" => workspace_preview::preview(app, &args),
         "desktop.openPath" => app.router.native_open_window_file(session, string(&args, "path")?),
         "desktop.plugins" => plugin_manager::desktop_action(app, session, &args),
         "workspace.create" => Ok(json!(app.workspace.create(

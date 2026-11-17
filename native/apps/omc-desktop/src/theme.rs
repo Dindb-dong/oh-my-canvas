@@ -17,6 +17,22 @@ pub fn enter(dark: bool) -> Scope {
     Scope(DARK.replace(dark))
 }
 
+pub fn selection_background() -> Color {
+    if DARK.get() {
+        Color::from_rgb(23, 37, 84)
+    } else {
+        Color::from_rgb(239, 246, 255)
+    }
+}
+
+pub fn selection_ink() -> Color {
+    if DARK.get() {
+        Color::from_rgb(147, 197, 253)
+    } else {
+        Color::from_rgb(30, 64, 175)
+    }
+}
+
 pub fn color(color: Color) -> Color {
     let rgb = [color.r(), color.g(), color.b()];
     let (darkest, lightest) = (
