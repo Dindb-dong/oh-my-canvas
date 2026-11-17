@@ -1652,7 +1652,7 @@ impl ToolRouter {
         let document = &snapshot.id;
         let key = (session.to_owned(), document.clone());
         if command == "component.list" {
-            let items: Vec<_> = snapshot.nodes.values().filter(|node| node.kind == NodeKind::Component).map(|node| {
+            let items: Vec<_> = snapshot.nodes.values().filter(|node| omc_model::electron::is_component_definition(node)).map(|node| {
                 let title = node.string("name").unwrap_or("Component");
                 let page = node_page(snapshot, &node.id);
                 let (folder, label) = title.rsplit_once('/').unwrap_or(("", title));
@@ -1663,7 +1663,7 @@ impl ToolRouter {
                 let mut item = json!({
                     "id":self.fig_alias(session, document, &node.id), "name":title, "type":"component",
                     "page":page.filter(|_| library.is_none()).map(|page| self.fig_alias(session, document, &page.root_node_id)),
-                    "instances":snapshot.nodes.values().filter(|candidate| candidate.string("componentId") == Some(&node.id)).count(),
+                    "instances":snapshot.nodes.values().filter(|candidate| candidate.string("componentId") == Some(&node.id) || candidate.properties.get("electronComponentLink").is_some_and(|link| link["root"] == true && link["nodeId"] == node.id)).count(),
                     "folder":parts.join("/"), "label":label,
                 });
                 if let Some(library) = library { item["library"] = json!(library); }
@@ -1677,11 +1677,11 @@ impl ToolRouter {
             {
                 component = children(snapshot, &component)
                     .into_iter()
-                    .find(|node| node.kind == NodeKind::Component)
+                    .find(|node| omc_model::electron::is_component_definition(node))
                     .map(|node| node.id.clone())
                     .ok_or_else(|| EngineError::invalid("The component set has no variants"))?;
             }
-            if snapshot.nodes[&component].kind != NodeKind::Component {
+            if !omc_model::electron::is_component_definition(&snapshot.nodes[&component]) {
                 return Err(EngineError::invalid("Expected a component definition"));
             }
             let point = |key| {
@@ -1724,12 +1724,12 @@ impl ToolRouter {
             if snapshot.nodes[&source].properties.get("isVariantSet") == Some(&Value::Bool(true)) {
                 source = children(snapshot, &source)
                     .into_iter()
-                    .find(|node| node.kind == NodeKind::Component)
+                    .find(|node| omc_model::electron::is_component_definition(node))
                     .map(|node| node.id.clone())
                     .ok_or_else(|| EngineError::invalid("The component set has no variants"))?;
             }
             let component = &snapshot.nodes[&source];
-            if component.kind != NodeKind::Component {
+            if !omc_model::electron::is_component_definition(component) {
                 return Err(EngineError::invalid("component must be a component layer"));
             }
             let parent = params

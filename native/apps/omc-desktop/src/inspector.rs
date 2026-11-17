@@ -447,7 +447,7 @@ fn popup_entries(app: &App) -> Vec<(String, Action, bool)> {
             ];
             match node.kind {
                 NodeKind::Group => entries.push(("그룹 해제".into(), Action::Ungroup, false)),
-                NodeKind::Component => {
+                _ if omc_model::electron::is_component_definition(node) => {
                     entries.push(("인스턴스 추가".into(), Action::Instance, false))
                 }
                 NodeKind::Instance => entries.push(("인스턴스 분리".into(), Action::Detach, false)),

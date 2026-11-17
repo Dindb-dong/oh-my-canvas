@@ -1,4 +1,6 @@
 //! Shared native box layout. Camera changes do not modify authored dimensions.
+mod electron;
+
 use omc_model::{DocumentSnapshot, Node, NodeKind};
 use omc_style::{ComputedStyle, Diagnostic, LengthContext, compute_styles, resolve_length};
 use serde::{Deserialize, Serialize};
@@ -95,6 +97,7 @@ pub fn layout(
         &mut visiting,
         &mut diagnostics,
         viewport,
+        false,
         0,
     )?;
     let mut measure_error = None;
@@ -201,6 +204,7 @@ fn add_node(
     visiting: &mut BTreeSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
     viewport: (f64, f64),
+    ancestor_resized: bool,
     depth: usize,
 ) -> Result<NodeId, LayoutError> {
     if depth > 512 || !visiting.insert(id.into()) {
@@ -211,12 +215,20 @@ fn add_node(
         .get(id)
         .ok_or_else(|| LayoutError::UnknownRoot(id.into()))?;
     let style = styles.get(id).cloned().unwrap_or_default();
-    let parent_flow = node
+    let responsive =
+        ancestor_resized || electron::resized(node, "width") || electron::resized(node, "height");
+    let parent = node
         .parent_id
         .as_ref()
-        .and_then(|id| styles.get(id))
-        .and_then(|s| s.get("display"))
-        .is_some_and(|d| matches!(d, "flex" | "grid" | "inline-flex" | "inline-grid"));
+        .and_then(|id| snapshot.nodes.get(id));
+    let electron_parent_flow = ancestor_resized && parent.is_some_and(electron::flows);
+    let parent_flow = (electron_parent_flow && !electron::rules(node).is_object())
+        || node
+            .parent_id
+            .as_ref()
+            .and_then(|id| styles.get(id))
+            .and_then(|s| s.get("display"))
+            .is_some_and(|d| matches!(d, "flex" | "grid" | "inline-flex" | "inline-grid"));
     let legacy_paint_stroke = snapshot
         .metadata
         .get("migration")
@@ -230,6 +242,9 @@ fn add_node(
     if legacy_paint_stroke {
         // Electron saves layer positions from the frame edge, independent of the painted stroke.
         tstyle.border = Rect::ZERO.map(length);
+    }
+    if responsive {
+        electron::apply(node, parent, electron_parent_flow, &mut tstyle, viewport);
     }
     order.push(id.into());
     let mut child_ids = Vec::new();
@@ -247,6 +262,7 @@ fn add_node(
                 visiting,
                 diagnostics,
                 viewport,
+                responsive,
                 depth + 1,
             )?);
         }

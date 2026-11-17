@@ -1,6 +1,7 @@
 //! A coherent native display list and its exact shared hit-test coordinate chain.
 mod board;
 mod components;
+mod electron_components;
 pub mod measurement;
 mod placement;
 pub use placement::absolute_placement;

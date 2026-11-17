@@ -218,7 +218,7 @@ pub fn instance(document: &DocumentSnapshot, id: &str) -> Result<(Value, String)
     let definition = document
         .nodes
         .get(id)
-        .filter(|n| n.kind == NodeKind::Component)
+        .filter(|node| omc_model::electron::is_component_definition(node))
         .ok_or("Select a component definition to add an instance.")?;
     let parent = definition
         .parent_id

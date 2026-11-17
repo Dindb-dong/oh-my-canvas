@@ -1,4 +1,4 @@
-use super::*;
+use super::{electron_properties, *};
 use serde_json::Map;
 
 pub(super) fn import(value: &Value, options: &ImportOptions) -> Result<ImportResult, ImportError> {
@@ -89,11 +89,8 @@ pub(super) fn import(value: &Value, options: &ImportOptions) -> Result<ImportRes
             }
         }
     }
+    electron_properties::link_components(value, &mut import);
     for (field, message) in [
-        (
-            "editorComponents",
-            "Component definitions and instance connections require migration",
-        ),
         ("editorStyles", "Shared style connections require migration"),
         ("editorLibraries", "Library subscriptions require migration"),
     ] {
@@ -260,13 +257,43 @@ fn add_layer(
         NodeKind::Text => migrate_text(source, &mut node, import),
         _ => {}
     }
+    electron_properties::layout(source, &mut node);
+    for kind in electron_properties::effects(source, &mut node) {
+        report(
+            import,
+            Some(&node.id),
+            "effects",
+            &format!("Unsupported Electron effect: {kind}"),
+        );
+    }
+    let component_value = |key| {
+        source.get(key).or_else(|| {
+            source
+                .get("editorComponent")
+                .and_then(|value| value.get(key))
+        })
+    };
+    for key in [
+        "isVariantSet",
+        "componentPropertyRefs",
+        "componentProperties",
+    ] {
+        if let Some(value) = component_value(key).filter(|value| !value.is_null()) {
+            node.properties.insert(key.into(), value.clone());
+        }
+    }
+    if let Some(source_id) = component_value("sourceId").and_then(Value::as_str) {
+        node.properties.insert(
+            "electronComponentRef".into(),
+            json!({
+                "sourceId":source_id,
+                "overrides":source.get("overrides"),
+                "isInstanceRoot":source.get("isInstanceRoot")
+            }),
+        );
+    }
     for (field, message) in [
-        ("editorLayout", "Electron layout rules require migration"),
         ("editorMask", "Electron masking requires migration"),
-        (
-            "editorComponent",
-            "Component metadata and connections require migration",
-        ),
         (
             "editorStyleRef",
             "Shared style references require migration",
@@ -280,21 +307,6 @@ fn add_layer(
             .is_some_and(|values| !values.is_empty())
         {
             report(import, Some(&node.id), field, message);
-        }
-    }
-    for field in ["shadows", "effects", "blur", "backgroundBlur"] {
-        if source.get(field).is_some_and(|value| match value {
-            Value::Array(values) => !values.is_empty(),
-            Value::Object(values) => !values.is_empty(),
-            Value::Number(number) => number.as_f64().is_some_and(|amount| amount > 0.),
-            _ => false,
-        }) {
-            report(
-                import,
-                Some(&node.id),
-                field,
-                "Electron effect requires migration",
-            );
         }
     }
     if matches!(kind, "boolean") || native == NodeKind::Group && !matches!(kind, "group") {

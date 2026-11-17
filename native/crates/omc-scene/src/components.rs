@@ -18,6 +18,29 @@ pub fn resolve_components<'a>(
     snapshot: &'a DocumentSnapshot,
     page_or_root: Option<&str>,
 ) -> ComponentProjection<'a> {
+    if let Some(electron) = super::electron_components::project(snapshot) {
+        let (expanded, diagnostics) = {
+            let projected = resolve_native(&electron, page_or_root);
+            (
+                match projected.snapshot {
+                    Cow::Borrowed(_) => None,
+                    Cow::Owned(snapshot) => Some(snapshot),
+                },
+                projected.diagnostics,
+            )
+        };
+        return ComponentProjection {
+            snapshot: Cow::Owned(expanded.unwrap_or(electron)),
+            diagnostics,
+        };
+    }
+    resolve_native(snapshot, page_or_root)
+}
+
+fn resolve_native<'a>(
+    snapshot: &'a DocumentSnapshot,
+    page_or_root: Option<&str>,
+) -> ComponentProjection<'a> {
     let root = page_or_root
         .and_then(|id| {
             snapshot
@@ -127,7 +150,7 @@ fn expand(
     let Some(definition) = source
         .nodes
         .get(definition_id)
-        .filter(|n| n.kind == NodeKind::Component)
+        .filter(|node| omc_model::electron::is_component_definition(node))
     else {
         diagnostics.push(unresolved(
             &instance.id,
@@ -339,7 +362,7 @@ fn apply_overrides(
     }
 }
 
-fn apply_bindings(
+pub(super) fn apply_bindings(
     node: &mut Node,
     authored: &Node,
     definition: &Node,
@@ -409,7 +432,7 @@ fn apply_bindings(
     }
 }
 
-fn derived_id(instance: &str, source: &str) -> String {
+pub(super) fn derived_id(instance: &str, source: &str) -> String {
     let digest = Sha256::digest(format!("omc.component/1\0{instance}\0{source}").as_bytes());
     format!(
         "node_{}",
