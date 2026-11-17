@@ -117,12 +117,32 @@ separate Undo/Redo evidence.
 The approval and storage rules for profile isolation still apply to local test
 runs. Reuse installed tools and existing container images.
 
+## LD05 source fixture preparation
+
+`ld05_source.py prepare FAMILY NEW_DIRECTORY` creates a synthetic static
+project and emits the file hashes. The families are `route-board` and
+`supply-ledger`. Serve the project only from its registered local development
+origin. Freeze the fixture hash and starting project archive before an attempt.
+At each registered source-change boundary run
+`ld05_source.py patch FAMILY DIRECTORY --cycle N` in the existing working tree,
+then capture the changed source before the product design edit. The command
+touches only the scheduled markup and client code; it preserves the card
+module, stylesheet, and data.
+
+`ld05_contract.py FAMILY` prints the brief and normalized expected results.
+`ld05_contract.py FAMILY --grade EVIDENCE.json` grades evidence from independent
+source and product collectors. The local headless test checks the source
+fixture's interaction and asset behavior at every registered width. Scored
+attempts also need real product adapters, per-cycle source and canvas readbacks,
+and a reproducible clean checkout.
+
 ## Qualification checks
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/local-dev-bench
 node tools/local-dev-bench/figma-ld02.mjs --self-test
 node tools/local-dev-bench/penpot-ld02.mjs --self-test
+node --test tools/local-dev-bench/ld05_source.test.mjs
 ```
 
 Start with a known synthetic command, acceptance failure, timeout, missing usage,
