@@ -141,7 +141,12 @@ impl Scene {
         self.hit_test_filter(x, y, |_| true)
     }
 
-    pub fn hit_test_filter(&self, x: f64, y: f64, accepts: impl Fn(&SceneItem) -> bool) -> Option<&SceneItem> {
+    pub fn hit_test_filter(
+        &self,
+        x: f64,
+        y: f64,
+        accepts: impl Fn(&SceneItem) -> bool,
+    ) -> Option<&SceneItem> {
         if !x.is_finite() || !y.is_finite() {
             return None;
         }
@@ -495,7 +500,11 @@ pub fn build_scene_in_color_profile(
     }
     Ok(Scene {
         root: 0,
-        slices: items.iter().enumerate().filter_map(|(index, item)| item.is_slice().then_some(index)).collect(),
+        slices: items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| item.is_slice().then_some(index))
+            .collect(),
         width: options.width,
         height: options.height,
         time_ms: options.time_ms,

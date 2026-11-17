@@ -176,7 +176,10 @@ impl ToolRouter {
                     _ => "delete",
                 };
                 let root = thread.unwrap_or(&id);
-                let wire = context.metadata.get(&format!("comments/{root}/wireCommentId")).and_then(Value::as_u64);
+                let wire = context
+                    .metadata
+                    .get(&format!("comments/{root}/wireCommentId"))
+                    .and_then(Value::as_u64);
                 let mut data = json!({"command":format!("comment.{action}"),"commentId":figcraft_catalog::comment_alias(root, wire)});
                 if let Some(thread) = thread {
                     let comments = resources::catalogs(&context.metadata, "comments");

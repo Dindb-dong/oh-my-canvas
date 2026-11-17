@@ -4292,7 +4292,7 @@ mod tests {
             let tools: Vec<_> = figcraft_chrome::dock_groups(dock)
                 .map(|(_, r, _)| r)
                 .collect();
-            assert_eq!(tools.len(), 4);
+            assert_eq!(tools.len(), 5);
             let mut end = dock.x;
             for rect in tools
                 .into_iter()

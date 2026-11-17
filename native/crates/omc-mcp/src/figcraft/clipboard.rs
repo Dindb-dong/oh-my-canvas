@@ -39,7 +39,6 @@ struct ClipRoot {
     world: Affine,
 }
 
-
 impl ToolRouter {
     pub(super) fn fig_clipboard_command(
         &self,
@@ -121,7 +120,8 @@ impl ToolRouter {
                 for key in omc_style::copy_appearance_keys(node) {
                     if let Some(value) = props.get(key) {
                         set.insert(key.into(), value.clone());
-                    } else if omc_style::is_appearance_key(key) && node.properties.contains_key(key) {
+                    } else if omc_style::is_appearance_key(key) && node.properties.contains_key(key)
+                    {
                         unset.push(key.into());
                     }
                 }

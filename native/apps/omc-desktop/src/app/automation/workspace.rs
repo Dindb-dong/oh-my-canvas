@@ -77,7 +77,9 @@ impl App {
                         || args["fullscreen"] == true
                         || args["visible"] == true)
                 {
-                    return Err("Background automation cannot change window visibility or focus.".into());
+                    return Err(
+                        "Background automation cannot change window visibility or focus.".into(),
+                    );
                 }
                 let window = self.window.as_ref().ok_or("No native window.")?;
                 if let Some(hide) = args["hideOthers"].as_bool() {

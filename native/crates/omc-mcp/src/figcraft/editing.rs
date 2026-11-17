@@ -4,7 +4,12 @@ use std::collections::BTreeSet;
 
 pub(super) const COMMANDS: &[(&str, &str, bool, &str)] = &[
     ("edit.duplicate", "Duplicate", true, "ids?, dx?, dy?, map?"),
-    ("pref.renameDuplicates", "Rename duplicated layers", false, "on?"),
+    (
+        "pref.renameDuplicates",
+        "Rename duplicated layers",
+        false,
+        "on?",
+    ),
     ("select.matching", "Select matching layers", false, ""),
     ("select.sameFill", "Select same fill", false, ""),
     ("select.sameStroke", "Select same stroke", false, ""),
@@ -24,8 +29,12 @@ pub(super) const COMMANDS: &[(&str, &str, bool, &str)] = &[
 
 impl ToolRouter {
     pub(super) fn fig_rename_duplicates(&self, params: &Value) -> Result<Value> {
-        schema::check(&json!({"type":"object","additionalProperties":false,
-            "properties":{"on":{"type":"boolean"}}}), params, "params")?;
+        schema::check(
+            &json!({"type":"object","additionalProperties":false,
+            "properties":{"on":{"type":"boolean"}}}),
+            params,
+            "params",
+        )?;
         let catalog = self.workspace.catalog.lock().unwrap();
         let mut preferences = catalog.preference()?;
         let current = preferences["renameDuplicates"].as_bool().unwrap_or(false);
@@ -113,7 +122,8 @@ impl ToolRouter {
                     ));
                 }
                 let scene = paths::scene(snapshot, &state.page_id)?;
-                let rename = self.workspace.catalog.lock().unwrap().preference()?["renameDuplicates"] == true;
+                let rename = self.workspace.catalog.lock().unwrap().preference()?["renameDuplicates"]
+                    == true;
                 let previous = &state.view["figDuplicate"];
                 let repeated = params.get("dx").is_none()
                     && params.get("dy").is_none()
@@ -231,9 +241,16 @@ impl ToolRouter {
                         }
                         if rename && copy.kind != NodeKind::Instance {
                             let name = copy.string("name").unwrap_or("Layer");
-                            let updated = name.rsplit_once(' ').and_then(|(base, suffix)| {
-                                suffix.parse::<u64>().ok()?.checked_add(1).map(|number| format!("{base} {number}"))
-                            }).unwrap_or_else(|| format!("{name} 2"));
+                            let updated = name
+                                .rsplit_once(' ')
+                                .and_then(|(base, suffix)| {
+                                    suffix
+                                        .parse::<u64>()
+                                        .ok()?
+                                        .checked_add(1)
+                                        .map(|number| format!("{base} {number}"))
+                                })
+                                .unwrap_or_else(|| format!("{name} 2"));
                             copy.properties.insert("name".into(), json!(updated));
                         }
                         copies.push(json!(self.fig_alias(session, document, &copy.id)));

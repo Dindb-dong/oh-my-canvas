@@ -125,7 +125,8 @@ impl Collaboration {
     }
 
     pub async fn has_room(&self, document: &str) -> bool {
-        self.hosts.lock().await.contains_key(document) || self.guests.lock().await.contains_key(document)
+        self.hosts.lock().await.contains_key(document)
+            || self.guests.lock().await.contains_key(document)
     }
 
     pub async fn rename_local_participant(&self) {
@@ -148,7 +149,11 @@ impl Collaboration {
             return name(args);
         }
         let name = self.workspace.preferences().user_name;
-        Ok(if name.is_empty() || name == "You" {fallback.into()} else {name})
+        Ok(if name.is_empty() || name == "You" {
+            fallback.into()
+        } else {
+            name
+        })
     }
 
     pub async fn call(&self, session: &str, args: Value) -> Result<Value> {
@@ -228,7 +233,8 @@ impl Collaboration {
                         "invitation is for a different document",
                     ));
                 }
-                self.join(session, invitation, self.profile_name(&args, "")?).await?;
+                self.join(session, invitation, self.profile_name(&args, "")?)
+                    .await?;
             }
             "invite" => {
                 let hosts = self.hosts.lock().await;
@@ -1043,14 +1049,19 @@ fn checked_cursor(value: &Value) -> Result<Value> {
 }
 
 fn name(args: &Value) -> Result<String> {
-    let name = args.get("name")
+    let name = args
+        .get("name")
         .map_or(Some("Designer"), Value::as_str)
         .ok_or_else(|| EngineError::invalid("name must be text"))?
         .trim();
-    if name.is_empty() || name.chars().count() > omc_workspace::PROFILE_NAME_LIMIT || name.chars().any(char::is_control) {
-        return Err(EngineError::invalid(
-            format!("name must be between 1 and {} characters", omc_workspace::PROFILE_NAME_LIMIT),
-        ));
+    if name.is_empty()
+        || name.chars().count() > omc_workspace::PROFILE_NAME_LIMIT
+        || name.chars().any(char::is_control)
+    {
+        return Err(EngineError::invalid(format!(
+            "name must be between 1 and {} characters",
+            omc_workspace::PROFILE_NAME_LIMIT
+        )));
     }
     Ok(name.into())
 }

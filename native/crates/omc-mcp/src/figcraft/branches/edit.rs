@@ -1,7 +1,10 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(in crate::figcraft) fn commands(before: &DocumentContent, after: &DocumentContent) -> Result<Vec<Command>> {
+pub(in crate::figcraft) fn commands(
+    before: &DocumentContent,
+    after: &DocumentContent,
+) -> Result<Vec<Command>> {
     let mut changes = Vec::new();
     let old_pages: BTreeMap<_, _> = before.pages.iter().map(|page| (&page.id, page)).collect();
     let new_pages: BTreeMap<_, _> = after.pages.iter().map(|page| (&page.id, page)).collect();

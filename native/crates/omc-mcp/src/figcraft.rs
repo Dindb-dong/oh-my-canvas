@@ -14,8 +14,8 @@ mod geometry;
 mod images;
 mod inspect;
 pub(super) mod plugins;
-pub(super) mod preview;
 mod preferences;
+pub(super) mod preview;
 pub(crate) mod publish_server;
 mod selection_paint;
 mod tabs;
@@ -42,19 +42,64 @@ const COMMANDS: &[(&str, &str, bool, &str)] = &[
         "id, rows, gap?, formats?, dir?, format?, scale?",
     ),
     ("collab.host", "Start live session", false, "port?, bind?"),
-    ("collab.registerLinks", "Open native invite links in Oh My Canvas", false, "on?"),
-    ("collab.share", "Share with a join code", false, "via?, access?, bind?, port?, name?"),
+    (
+        "collab.registerLinks",
+        "Open native invite links in Oh My Canvas",
+        false,
+        "on?",
+    ),
+    (
+        "collab.share",
+        "Share with a join code",
+        false,
+        "via?, access?, bind?, port?, name?",
+    ),
     ("collab.join", "Join live session", false, "link | code"),
     ("collab.peers", "People in this file", false, ""),
-    ("collab.publish", "Publish to server", false, "server, key?, name?"),
+    (
+        "collab.publish",
+        "Publish to server",
+        false,
+        "server, key?, name?",
+    ),
     ("collab.files", "Your online files", false, "refresh?"),
-    ("collab.manageFile", "Manage published file", false, "file, server?, owner?, action, access?, label?, link?, name?"),
-    ("collab.openFile", "Open online file", false, "file, server?"),
-    ("collab.forgetFile", "Forget online file", false, "file, server?"),
-    ("collab.report", "Report file to server operator", false, "reason"),
-    ("collab.recoverFile", "Recover online file", false, "path, file, server?, session, client, seq, secret?"),
+    (
+        "collab.manageFile",
+        "Manage published file",
+        false,
+        "file, server?, owner?, action, access?, label?, link?, name?",
+    ),
+    (
+        "collab.openFile",
+        "Open online file",
+        false,
+        "file, server?",
+    ),
+    (
+        "collab.forgetFile",
+        "Forget online file",
+        false,
+        "file, server?",
+    ),
+    (
+        "collab.report",
+        "Report file to server operator",
+        false,
+        "reason",
+    ),
+    (
+        "collab.recoverFile",
+        "Recover online file",
+        false,
+        "path, file, server?, session, client, seq, secret?",
+    ),
     ("collab.serverInfo", "Server info", false, "server"),
-    ("pref.publishServer", "Server for online sharing", false, "url?"),
+    (
+        "pref.publishServer",
+        "Server for online sharing",
+        false,
+        "url?",
+    ),
     ("collab.diff", "Show sync changes", false, "against?"),
     ("collab.reconnect", "Reconnect live session", false, ""),
     (
@@ -348,32 +393,61 @@ impl ToolRouter {
         Ok(())
     }
     pub fn native_shape_builder(&self, session: &str, args: &Value) -> Result<Value> {
-        let document = self.workspace.target(session, Some(string(args, "documentId")?))?;
+        let document = self
+            .workspace
+            .target(session, Some(string(args, "documentId")?))?;
         let snapshot = self.workspace.snapshot(&document)?;
-        let sequence = string(args, "sequence")?.parse::<u64>()
+        let sequence = string(args, "sequence")?
+            .parse::<u64>()
             .map_err(|_| EngineError::invalid("sequence must be a native revision number"))?;
         if string(args, "epoch")? != snapshot.epoch || sequence != snapshot.sequence {
-            return Err(EngineError::new("stale_revision", "The selected shapes changed during the gesture"));
+            return Err(EngineError::new(
+                "stale_revision",
+                "The selected shapes changed during the gesture",
+            ));
         }
-        let page = snapshot.pages.iter().find(|page| page.id == args["page"])
+        let page = snapshot
+            .pages
+            .iter()
+            .find(|page| page.id == args["page"])
             .ok_or_else(|| EngineError::invalid("shape builder page is unavailable"))?;
         self.context_from(session, &snapshot)?;
         let mut state = self.state(session, &document)?;
         state.page_id = page.id.clone();
         state.root = page.root_node_id.clone();
-        let layers = args["layers"].as_array().filter(|items| (1..=24).contains(&items.len()))
+        let layers = args["layers"]
+            .as_array()
+            .filter(|items| (1..=24).contains(&items.len()))
             .ok_or_else(|| EngineError::invalid("select 1–24 layers"))?;
-        let aliases = layers.iter().map(|layer| {
-            let raw = layer.as_str().filter(|id| snapshot.nodes.contains_key(*id))
-                .ok_or_else(|| EngineError::invalid("selected shape no longer exists"))?;
-            Ok(json!(self.fig_alias(session, &document, raw)))
-        }).collect::<Result<Vec<_>>>()?;
-        let command = if args["remove"] == true { "shapeBuilder.remove" } else { "shapeBuilder.merge" };
-        let mut result = self.fig_geometry_command(session, &snapshot, &state, &aliases, command,
-            &json!({"points":args["points"]}))?;
+        let aliases = layers
+            .iter()
+            .map(|layer| {
+                let raw = layer
+                    .as_str()
+                    .filter(|id| snapshot.nodes.contains_key(*id))
+                    .ok_or_else(|| EngineError::invalid("selected shape no longer exists"))?;
+                Ok(json!(self.fig_alias(session, &document, raw)))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let command = if args["remove"] == true {
+            "shapeBuilder.remove"
+        } else {
+            "shapeBuilder.merge"
+        };
+        let mut result = self.fig_geometry_command(
+            session,
+            &snapshot,
+            &state,
+            &aliases,
+            command,
+            &json!({"points":args["points"]}),
+        )?;
         let current = self.workspace.snapshot(&document)?;
-        let selected = result.get("id").map(|id| vec![id.clone()])
-            .or_else(|| result["changed"].as_array().cloned()).unwrap_or_default();
+        let selected = result
+            .get("id")
+            .map(|id| vec![id.clone()])
+            .or_else(|| result["changed"].as_array().cloned())
+            .unwrap_or_default();
         result["nativeSelection"] = json!(self.fig_layers(session, &current, &selected)?);
         Ok(result)
     }
@@ -1976,7 +2050,9 @@ impl ToolRouter {
         let explicit = args["document"].as_str().map(native_id).transpose()?;
         let document = self.workspace.target(session, explicit.as_deref())?;
         self.context(session, &document)?;
-        let page = self.states.lock().unwrap()[&(session.into(), document.clone())].page_id.clone();
+        let page = self.states.lock().unwrap()[&(session.into(), document.clone())]
+            .page_id
+            .clone();
         Ok((document, page))
     }
 
@@ -1991,14 +2067,13 @@ impl ToolRouter {
         if commands.is_empty() {
             return Ok(current.revision());
         }
-        let mut envelope = CommandEnvelope::new(
-            &current.id, &current.epoch, Command::Batch { commands },
-        );
+        let mut envelope =
+            CommandEnvelope::new(&current.id, &current.epoch, Command::Batch { commands });
         envelope.preconditions = omc_protocol::Preconditions::Revision {
             revision: current.revision(),
         };
         let result = self.workspace.execute_online(session, envelope, mirror)?;
         serde_json::from_value(result["revision"].clone())
-            .map_err(|error| EngineError::new("corrupt_state",error.to_string()))
+            .map_err(|error| EngineError::new("corrupt_state", error.to_string()))
     }
 }

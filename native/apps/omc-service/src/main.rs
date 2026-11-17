@@ -3,8 +3,8 @@ mod collaboration;
 mod desktop_automation;
 mod figcraft_online;
 mod figcraft_server;
-mod legacy_https;
 mod invite_registration;
+mod legacy_https;
 mod plugin_directory;
 mod plugin_manager;
 mod team_library;
@@ -240,7 +240,8 @@ async fn rpc(State(app): State<App>, headers: HeaderMap, body: Bytes) -> Respons
     } else if method == "collaboration" {
         match session {
             Some(session) => {
-                figcraft_online::native_collaboration(&app, &session, request["params"].clone()).await
+                figcraft_online::native_collaboration(&app, &session, request["params"].clone())
+                    .await
             }
             None => Err(EngineError::new(
                 "authentication_failed",
@@ -301,7 +302,9 @@ fn dispatch_rpc(app: &App, session: Option<&str>, method: &str, args: Value) -> 
             Ok(listing)
         }
         "workspace.preview" => workspace_preview::preview(app, &args),
-        "desktop.openPath" => app.router.native_open_window_file(session, string(&args, "path")?),
+        "desktop.openPath" => app
+            .router
+            .native_open_window_file(session, string(&args, "path")?),
         "desktop.plugins" => plugin_manager::desktop_action(app, session, &args),
         "workspace.create" => Ok(json!(app.workspace.create(
             session,
@@ -635,11 +638,13 @@ async fn mcp_request(app: App, headers: HeaderMap, body: Bytes, figcraft: bool) 
             } else if figcraft
                 && tool_name == "run_command"
                 && let Some(command) = params["arguments"]["command"].as_str()
-                && (matches!(command, "library.check" | "library.publishToServer" | "library.usage")
-                    || command == "library.add"
-                        && params["arguments"]["params"]["path"]
-                            .as_str()
-                            .is_some_and(team_library::is_link))
+                && (matches!(
+                    command,
+                    "library.check" | "library.publishToServer" | "library.usage"
+                ) || command == "library.add"
+                    && params["arguments"]["params"]["path"]
+                        .as_str()
+                        .is_some_and(team_library::is_link))
             {
                 team_library::command(&app, &session, command, &params["arguments"]).await
             } else if figcraft
@@ -657,11 +662,12 @@ async fn mcp_request(app: App, headers: HeaderMap, body: Bytes, figcraft: bool) 
                 && params["arguments"]["command"] == "plugins.manage"
             {
                 plugin_manager::open(&app, &session, &params["arguments"]).await
-            } else if figcraft && tool_name == "run_command"
+            } else if figcraft
+                && tool_name == "run_command"
                 && let Some(command) = params["arguments"]["command"].as_str()
-                && figcraft_online::routes(&app,&session,command,&params["arguments"])
+                && figcraft_online::routes(&app, &session, command, &params["arguments"])
             {
-                figcraft_online::command(&app,&session,command,&params["arguments"]).await
+                figcraft_online::command(&app, &session, command, &params["arguments"]).await
             } else if figcraft
                 && tool_name == "run_command"
                 && let Some(
@@ -734,7 +740,10 @@ async fn mcp_request(app: App, headers: HeaderMap, body: Bytes, figcraft: bool) 
             {
                 legacy_workspace_command(&app, &session, params["arguments"].clone()).await
             } else if !figcraft
-                && matches!(tool_name, "open_document" | "create_document" | "duplicate_document" | "import_document")
+                && matches!(
+                    tool_name,
+                    "open_document" | "create_document" | "duplicate_document" | "import_document"
+                )
                 && params["arguments"]["focus"] == true
                 && app.desktop_automation.attached()
             {
@@ -744,7 +753,7 @@ async fn mcp_request(app: App, headers: HeaderMap, body: Bytes, figcraft: bool) 
             } else if !figcraft && params["name"] == "collaboration" {
                 let args = params["arguments"].clone();
                 match omc_mcp::schema::validate("collaboration", &args) {
-                    Ok(()) => figcraft_online::native_collaboration(&app,&session,args).await,
+                    Ok(()) => figcraft_online::native_collaboration(&app, &session, args).await,
                     Err(error) => Err(error),
                 }
             } else {
@@ -936,9 +945,15 @@ async fn legacy_focused_document(
 
 async fn focus_legacy_tab(app: &App, session: &str, document: &str) -> Result<()> {
     for attempt in 0..=10 {
-        match app.desktop_automation.call(
-            session, "workspace", json!({"action":"focus","documentId":document}),
-        ).await {
+        match app
+            .desktop_automation
+            .call(
+                session,
+                "workspace",
+                json!({"action":"focus","documentId":document}),
+            )
+            .await
+        {
             Ok(_) => return Ok(()),
             Err(error) if error.code == "busy" && attempt < 10 => {
                 tokio::time::sleep(std::time::Duration::from_millis(75)).await;
@@ -953,10 +968,14 @@ async fn legacy_view_command(app: &App, session: &str, args: Value) -> Result<Va
     let router = app.router.clone();
     let caller = session.to_owned();
     let original = args.clone();
-    let prepared = tokio::task::spawn_blocking(move || router.legacy_view_arguments(&caller, &original))
-        .await
-        .map_err(|_| EngineError::new("internal_error", "view command worker stopped"))??;
-    let response = app.desktop_automation.call(session, "legacy.view", prepared.clone()).await;
+    let prepared =
+        tokio::task::spawn_blocking(move || router.legacy_view_arguments(&caller, &original))
+            .await
+            .map_err(|_| EngineError::new("internal_error", "view command worker stopped"))??;
+    let response = app
+        .desktop_automation
+        .call(session, "legacy.view", prepared.clone())
+        .await;
     let router = app.router.clone();
     let caller = session.to_owned();
     tokio::task::spawn_blocking(move || match response {

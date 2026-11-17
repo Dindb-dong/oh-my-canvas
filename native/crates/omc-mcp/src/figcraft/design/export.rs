@@ -435,7 +435,12 @@ pub(crate) fn apply_export_options(
             return Err(unavailable("custom SVG layer IDs"));
         }
     }
-    let slice = ids.iter().any(|id| snapshot.nodes.get(id).is_some_and(|node| node.string("primitive") == Some("slice")));
+    let slice = ids.iter().any(|id| {
+        snapshot
+            .nodes
+            .get(id)
+            .is_some_and(|node| node.string("primitive") == Some("slice"))
+    });
     let surrounding = setting["contentsOnly"] == false || slice;
     if setting["includeBoundingBox"] == true || surrounding {
         let scene = paths::scene(snapshot, page)?;

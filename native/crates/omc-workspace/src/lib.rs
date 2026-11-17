@@ -42,7 +42,7 @@ pub struct Workspace {
     sessions: Mutex<HashMap<String, Session>>,
     preferences: Mutex<ProfilePreferences>,
     pending_checkpoints: Mutex<BTreeSet<String>>,
-    room_access: std::sync::RwLock<BTreeMap<String,RoomAccess>>,
+    room_access: std::sync::RwLock<BTreeMap<String, RoomAccess>>,
     lifecycle: Mutex<()>,
     _lock: Arc<File>,
 }
@@ -55,9 +55,9 @@ pub enum RoomAccess {
 
 fn comment_command(command: &Command) -> bool {
     match command {
-        Command::CatalogSet {namespace,..} => namespace=="comments",
-        Command::Batch {commands} => !commands.is_empty() && commands.iter().all(comment_command),
-        Command::HistoryUndo {channel} | Command::HistoryRedo {channel} => {
+        Command::CatalogSet { namespace, .. } => namespace == "comments",
+        Command::Batch { commands } => !commands.is_empty() && commands.iter().all(comment_command),
+        Command::HistoryUndo { channel } | Command::HistoryRedo { channel } => {
             *channel == omc_protocol::HistoryChannel::Comments
         }
         _ => false,
@@ -106,7 +106,11 @@ impl Workspace {
                 let path = entry.path().join("document.sqlite");
                 let updated = Catalog::document_stamp(&path);
                 let metadata = workspace.workers.call(&path, "metadata", json!({}))?;
-                workspace.catalog.lock().unwrap().record_discovered(&id, &metadata, updated)?;
+                workspace
+                    .catalog
+                    .lock()
+                    .unwrap()
+                    .record_discovered(&id, &metadata, updated)?;
                 workspace.workers.release(&path)?;
             }
         }
@@ -328,8 +332,13 @@ impl Workspace {
         id: &str,
         revision: &Revision,
     ) -> Result<Option<DocumentSnapshot>> {
-        serde_json::from_value(self.read_call(id, "snapshot", json!({"ifRevision":revision}), 4096)?)
-            .map_err(json_error)
+        serde_json::from_value(self.read_call(
+            id,
+            "snapshot",
+            json!({"ifRevision":revision}),
+            4096,
+        )?)
+        .map_err(json_error)
     }
     pub fn metadata(&self, id: &str) -> Result<Value> {
         self.read_call(id, "metadata", json!({}), 4096)
@@ -403,14 +412,21 @@ impl Workspace {
         self.execute_with_worker_action(session_id, envelope, "execute", None)
     }
     pub fn set_room_read_only(&self, document: &str, read_only: bool) {
-        self.set_room_access(document,if read_only {RoomAccess::View} else {RoomAccess::Edit});
+        self.set_room_access(
+            document,
+            if read_only {
+                RoomAccess::View
+            } else {
+                RoomAccess::Edit
+            },
+        );
     }
     pub fn set_room_access(&self, document: &str, access: RoomAccess) {
         let mut rooms = self.room_access.write().unwrap();
         if access == RoomAccess::Edit {
             rooms.remove(document);
         } else {
-            rooms.insert(document.to_owned(),access);
+            rooms.insert(document.to_owned(), access);
         }
     }
     pub fn execute_branch_rebase(
@@ -436,7 +452,12 @@ impl Workspace {
         };
         self.execute_with_worker_action(session, envelope, "execute_branch_rebase", None)
     }
-    pub fn execute_online(&self, session_id: &str, envelope: CommandEnvelope, source: &str) -> Result<Value> {
+    pub fn execute_online(
+        &self,
+        session_id: &str,
+        envelope: CommandEnvelope,
+        source: &str,
+    ) -> Result<Value> {
         self.execute_with_worker_action(session_id, envelope, "execute", Some(source))
     }
     fn execute_with_worker_action(
@@ -458,12 +479,16 @@ impl Workspace {
             Duration::from_millis(envelope.deadline_ms.unwrap_or(30_000)),
         )?;
         let room_access = self.room_access.read().unwrap();
-        if online_author.is_none() && let Some(access) = room_access.get(&envelope.document_id)
-            && !(*access==RoomAccess::Comment && comment_command(&envelope.command)) {
-            let reason = if *access==RoomAccess::View {
+        if online_author.is_none()
+            && let Some(access) = room_access.get(&envelope.document_id)
+            && !(*access == RoomAccess::Comment && comment_command(&envelope.command))
+        {
+            let reason = if *access == RoomAccess::View {
                 "the collaboration invitation is view-only"
-            } else {"the collaboration invitation allows comments only"};
-            return Err(EngineError::new("permission_denied",reason));
+            } else {
+                "the collaboration invitation allows comments only"
+            };
+            return Err(EngineError::new("permission_denied", reason));
         }
         self.document_path(&envelope.document_id)?;
         let context = RequestContext {
@@ -481,9 +506,17 @@ impl Workspace {
             if changes_document_title(&envelope.command)
                 && let Ok(meta) = self.workers.call(&path, "metadata", json!({}))
             {
-                let _ = self.catalog.lock().unwrap().record(&envelope.document_id, &meta);
+                let _ = self
+                    .catalog
+                    .lock()
+                    .unwrap()
+                    .record(&envelope.document_id, &meta);
             } else {
-                let _ = self.catalog.lock().unwrap().touch(&envelope.document_id, &result["revision"]);
+                let _ = self
+                    .catalog
+                    .lock()
+                    .unwrap()
+                    .touch(&envelope.document_id, &result["revision"]);
             }
         }
         Ok(result)
@@ -598,7 +631,12 @@ impl Workspace {
             drop(lifecycle);
             return self.fork_replica(session, package);
         }
-        if self.sessions.lock().unwrap().values().any(|owner| owner.owners.contains(&id))
+        if self
+            .sessions
+            .lock()
+            .unwrap()
+            .values()
+            .any(|owner| owner.owners.contains(&id))
             || self.jobs.has_document(&id)
             || self.room_access.read().unwrap().contains_key(&id)
         {
@@ -654,7 +692,10 @@ impl Workspace {
             "receive_fragment",
             json!({"header":header,"index":index,"bytes":bytes}),
         )?;
-        if result["appliedTransactions"].as_array().is_some_and(|transactions| !transactions.is_empty()) {
+        if result["appliedTransactions"]
+            .as_array()
+            .is_some_and(|transactions| !transactions.is_empty())
+        {
             let _ = self.catalog.lock().unwrap().touch(id, &result["revision"]);
         }
         Ok(result)

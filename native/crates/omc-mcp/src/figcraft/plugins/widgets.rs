@@ -267,9 +267,10 @@ impl ToolRouter {
                     continue;
                 }
                 let end = node.string("text").unwrap_or("").encode_utf16().count();
-                let selection = self
-                    .workspace
-                    .text_selection(&document, json!({"nodeId":node.id,"start":0,"end":end,"revision":snapshot.revision()}))?;
+                let selection = self.workspace.text_selection(
+                    &document,
+                    json!({"nodeId":node.id,"start":0,"end":end,"revision":snapshot.revision()}),
+                )?;
                 field_edits.push(Command::TextSplice {
                     selection: serde_json::from_value(selection).map_err(plugin_error)?,
                     text: value.to_owned(),
