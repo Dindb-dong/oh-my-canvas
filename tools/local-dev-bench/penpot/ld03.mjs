@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
 import {readFile, writeFile} from 'node:fs/promises';
-import {resolve} from 'node:path';
+import {join, resolve} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {isDeepStrictEqual} from 'node:util';
 import {fileURLToPath} from 'node:url';
@@ -156,19 +156,41 @@ export function changeFieldRelay(fileId, changes) {
   `;
 }
 
-function matches(spec, state) {
-  if (state.nodes.length !== spec.nodes.length || state.styles.length !== spec.styles.length) return false;
+export function stateDifferences(spec, state) {
+  const differences = [];
   const styles = new Map(state.styles.map(style => [style.key,style]));
   const shapes = new Map(state.nodes.map(node => [node.key,node]));
-  return spec.styles.every(style => styles.get(style.key)?.value === style.value) &&
-    spec.nodes.every(node => {
-      const row = shapes.get(node.key);
-      if (!row) return false;
-      const {bindings, ...properties} = node;
-      return Object.entries(properties).every(([key, value]) => row[key] === value) &&
-        isDeepStrictEqual(row.bindings, Object.fromEntries(Object.entries(bindings ?? {}).map(([prop, key]) =>
-          [prop, styles.get(key)?.native_id])));
-    });
+  if (state.nodes.length !== spec.nodes.length) differences.push('nodes.count');
+  if (state.styles.length !== spec.styles.length) differences.push('styles.count');
+  for (const style of spec.styles) {
+    if (styles.get(style.key)?.value !== style.value) differences.push(style.key + '.value');
+  }
+  for (const node of spec.nodes) {
+    const row = shapes.get(node.key);
+    if (!row) {
+      differences.push(node.key + '.missing');
+      continue;
+    }
+    const {bindings, ...properties} = node;
+    for (const [key, value] of Object.entries(properties)) {
+      if (row[key] !== value) differences.push(node.key + '.' + key);
+    }
+    const expected = Object.fromEntries(Object.entries(bindings ?? {}).map(([prop, key]) =>
+      [prop, styles.get(key)?.native_id]));
+    if (!isDeepStrictEqual(row.bindings, expected)) differences.push(node.key + '.bindings');
+  }
+  return differences;
+}
+
+async function requireState(spec, state, phase) {
+  const differences = stateDifferences(spec, state);
+  if (!differences.length) return;
+  const output = process.env.OMC_BENCH_OUTPUT_DIR;
+  if (output) {
+    await writeFile(join(output, `ld03-${phase}-failure.json`),
+      JSON.stringify({phase, differences, state}) + '\n', {flag:'wx', mode:0o600});
+  }
+  throw new Error(`${phase}: ${differences.length} differences (${differences.slice(0,8).join(', ')})`);
 }
 
 async function takeState(execute, fileId, spec) {
@@ -176,7 +198,7 @@ async function takeState(execute, fileId, spec) {
   let state;
   do {
     state = await readAfterAttach(() => execute(readFieldRelay(fileId)));
-    if (matches(spec, state)) return state;
+    if (!stateDifferences(spec, state).length) return state;
     await delay(150);
   } while (performance.now() < deadline);
   return state;
@@ -265,7 +287,7 @@ async function replay(origin, fixture) {
     const setup = performance.now();
     assert.deepEqual(await execute(seedFieldRelay(fixture, id)), {nodes:fixture.logical_objects, styles:4});
     const before = await takeState(execute, id, fixture.start);
-    assert.ok(matches(fixture.start, before), 'Native field-relay starting bindings did not settle');
+    await requireState(fixture.start, before, 'baseline');
     const setupMs = performance.now() - setup;
     const changes = fixture.expected.styles
       .filter(style => style.key.startsWith('target.'))
@@ -287,7 +309,7 @@ async function replay(origin, fixture) {
     const {opened:copy, id:copyId} = await duplicateFromDashboard(editor, context, origin);
     assert.notEqual(copyId, id, 'Propagation probe must edit a distinct native copy');
     const copyBefore = await takeState(execute, copyId, fixture.expected);
-    assert.ok(matches(fixture.expected, copyBefore), 'Verification copy lost native token bindings');
+    await requireState(fixture.expected, copyBefore, 'copy-baseline');
     phase = 'repeat shared token edits on the copy';
     const probeActions = await execute(changeFieldRelay(copyId, fixture.probe_actions));
     const probe = await takeState(execute, copyId, fixture.probe);

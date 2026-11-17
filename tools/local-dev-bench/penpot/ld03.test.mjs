@@ -4,7 +4,7 @@ import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
-import {changeFieldRelay, planFieldRelay, readFieldRelay, seedFieldRelay} from './ld03.mjs';
+import {changeFieldRelay, planFieldRelay, readFieldRelay, seedFieldRelay, stateDifferences} from './ld03.mjs';
 
 const generator = 'tools/local-dev-bench/workloads/synthetic.py';
 const fixture = JSON.parse(execFileSync('python3', [generator,'fixture','LD03','--variant','field-relay'], {encoding:'utf8'}));
@@ -81,6 +81,12 @@ test('field-relay uses native editable objects, four real override omissions and
   await assert.rejects(run(seedFieldRelay(fixture,copyId), original), /Wrong isolated/);
   assert.deepEqual(await run(seedFieldRelay(fixture,fileId), original), {nodes:fixture.logical_objects, styles:4});
   const before = await run(readFieldRelay(fileId), original);
+  assert.deepEqual(stateDifferences(fixture.start, before), []);
+  const bad = structuredClone(before);
+  const card = bad.nodes.find(node => node.key === 'target/0/0');
+  delete card.bindings.gap;
+  card.gap = 99;
+  assert.deepEqual(stateDifferences(fixture.start, bad), ['target/0/0.gap','target/0/0.bindings']);
   const after = fixture.expected.styles.filter(style => style.key.startsWith('target.'));
   assert.throws(() => changeFieldRelay(fileId, [...after, {key:'keep.accent'}]));
   await run(changeFieldRelay(fileId,after), original);
