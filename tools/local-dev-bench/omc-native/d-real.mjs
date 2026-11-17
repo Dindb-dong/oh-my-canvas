@@ -15,6 +15,13 @@ const fixtureHash = 'c7c4fdbe469ae451c9a3d3d384a2102fa08dfaa220a1277e2df17fc2146
 const expected = {pages: 46, objects: 39_363, bitmapHashes: 160};
 const terminal = new Set(['completed', 'failed', 'interrupted', 'cancelled']);
 
+export class ToolError extends Error {
+  constructor(name, value) {
+    super(`${name}: ${JSON.stringify(value)}`);
+    this.value = value;
+  }
+}
+
 async function sha256(path) {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) hash.update(chunk);
@@ -112,6 +119,47 @@ async function stop(child) {
   }
 }
 
+export async function submitImport(call, filePath, imports, route, signal) {
+  const now = performance.now();
+  const entry = {route, polls: []};
+  imports.push(entry);
+  const args = {format: 'fig', filePath};
+  let ticket;
+  try {
+    ticket = route === 'import_document' ? await call(route, args) : await call(route, {
+      version: '1', action: 'submit', kind: 'import', arguments: args,
+    });
+  } catch (error) {
+    if (!(error instanceof ToolError)) throw error;
+    entry.state = 'rejected_before_ticket';
+    entry.error = error.value;
+    entry.elapsedMs = performance.now() - now;
+    return null;
+  }
+  entry.submissionMs = performance.now() - now;
+  if (!ticket.jobId) {
+    entry.state = 'completed_synchronously';
+    return ticket;
+  }
+  entry.jobId = ticket.jobId;
+  while (performance.now() - now < 300_000) {
+    const status = await call('native_job', {version: '1', action: 'status', jobId: ticket.jobId});
+    entry.polls.push({state: status.state, progress: status.progress, observedMs: performance.now() - now});
+    if (terminal.has(status.state)) {
+      entry.state = status.state;
+      entry.error = status.error;
+      entry.elapsedMs = performance.now() - now;
+      entry.jobClockMs = status.finishedAtMs - status.createdAtMs;
+      return status.result;
+    }
+    await delay(125, undefined, {signal});
+  }
+  entry.state = 'timeout';
+  const cancellation = await call('native_job', {version: '1', action: 'cancel', jobId: ticket.jobId});
+  entry.cancellation = {state: cancellation.state, cancellationBoundary: cancellation.cancellationBoundary};
+  return null;
+}
+
 async function live(filePath, binary, report, signal) {
   const {Client, StreamableHTTPClientTransport} = await import('../replays/mcp.mjs');
   const storage = await statfs(tmpdir());
@@ -152,40 +200,8 @@ async function live(filePath, binary, report, signal) {
   async function call(name, args) {
     const response = await client.callTool({name, arguments: args}, undefined, {timeout: 30_000, signal});
     const value = response.structuredContent ?? JSON.parse(response.content[0].text);
-    if (response.isError) throw new Error(`${name}: ${JSON.stringify(value)}`);
+    if (response.isError) throw new ToolError(name, value);
     return value;
-  }
-
-  async function submit(route) {
-    const now = performance.now();
-    const entry = {route, polls: []};
-    report.imports.push(entry);
-    const args = {format: 'fig', filePath};
-    const ticket = route === 'import_document' ? await call(route, args) : await call(route, {
-      version: '1', action: 'submit', kind: 'import', arguments: args,
-    });
-    entry.submissionMs = performance.now() - now;
-    if (!ticket.jobId) {
-      entry.state = 'completed_synchronously';
-      return ticket;
-    }
-    entry.jobId = ticket.jobId;
-    while (performance.now() - now < 300_000) {
-      const status = await call('native_job', {version: '1', action: 'status', jobId: ticket.jobId});
-      entry.polls.push({state: status.state, progress: status.progress, observedMs: performance.now() - now});
-      if (terminal.has(status.state)) {
-        entry.state = status.state;
-        entry.error = status.error;
-        entry.elapsedMs = performance.now() - now;
-        entry.jobClockMs = status.finishedAtMs - status.createdAtMs;
-        return status.result;
-      }
-      await delay(125, undefined, {signal});
-    }
-    entry.state = 'timeout';
-    const cancellation = await call('native_job', {version: '1', action: 'cancel', jobId: ticket.jobId});
-    entry.cancellation = {state: cancellation.state, cancellationBoundary: cancellation.cancellationBoundary};
-    return null;
   }
 
   try {
@@ -194,11 +210,12 @@ async function live(filePath, binary, report, signal) {
     const schemas = await client.listTools({}, {timeout: 10_000, signal});
     report.schemas = schemas.tools.filter(tool =>
       ['import_document', 'native_job', 'native_query', 'open_document', 'list_documents'].includes(tool.name));
-    let imported = await submit('import_document');
+    let imported = await submitImport(call, filePath, report.imports, 'import_document', signal);
     if (!imported) {
       report.catalogAfterFirstAttempt = await call('list_documents', {limit: 10});
-      if (report.imports[0].state === 'failed' && report.catalogAfterFirstAttempt.documents.length === 0) {
-        imported = await submit('native_job');
+      if (['failed', 'rejected_before_ticket'].includes(report.imports[0].state) &&
+          report.catalogAfterFirstAttempt.documents.length === 0) {
+        imported = await submitImport(call, filePath, report.imports, 'native_job', signal);
         report.catalogAfterSecondAttempt = await call('list_documents', {limit: 10});
       }
     }
