@@ -17,7 +17,7 @@ Use Python 3 and supply one JSON manifest for each attempt:
   "product": "omc-native",
   "workload": "LD02",
   "argv": ["node", "tools/local-dev-bench/replays/omc-ld02.mjs"],
-  "timeout_seconds": 600,
+  "timeout_seconds": 60,
   "sample_resources": true
 }
 ```
@@ -38,8 +38,24 @@ and shared host load. Isolated resource measurements require actively checking
 that other products and unrelated work are absent or recording the interference.
 Predeclare the order and cache state before scored trials.
 
+The attempt deadline defaults to 60 seconds. `OMC_BENCH_DEADLINE_NS` carries
+the absolute monotonic deadline to adapters and the interactive driver. The
+runner cancels the owned process group when the deadline expires and reports
+cleanup separately. The interactive driver also closes its owned PTY session.
+The same bound applies to setup and live checks performed inside the attempt.
+Prepare shared immutable inputs once and declare warm versus cold service state
+before running. A warm service still needs independent per-attempt fixtures and
+identities. Use a separate resource-only run for the long idle and retention
+windows. Keep offline checks off the host's measured window, or run them on a
+separate host against copies of the retained artifacts.
+
 For an accepted attempt, the task writes the immutable artifact or its evidence
 to the path in `OMC_BENCH_CANDIDATE` and completes active checks before exit.
+For adapters that publish the complete candidate atomically after all required
+live checks, set `candidate_ready_on_publish` to `true`. The runner observes and
+hashes the published file, still requires successful command exit within the
+deadline, and excludes post-publication cleanup from accepted readiness. It
+rejects an artifact that changes before or during grading.
 Register an independent `acceptance_argv` to grade that artifact. The runner
 checks that the artifact is preserved during grading. Time spent in independent
 grading is outside candidate readiness. A successful replay without a grader

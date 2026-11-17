@@ -4,10 +4,13 @@ from hashlib import sha256
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 from threading import Event, Thread
+import time
 import unittest
 
 from llama_canary import (
@@ -92,6 +95,35 @@ class GatewayTest(unittest.TestCase):
             conn.request("POST", path, body, {"Content-Type": "application/json", **(headers or {})})
             response = conn.getresponse()
             return response.status, response.read()
+
+    def test_deadline_shutdown_keeps_partial_ledger_without_waiting_for_upstream(self):
+        self.setup_gateway(40, {"slow": 20}, {"slow": b""}, pause=True)
+        self.addCleanup(self.mock.continue_generation.set)
+        with tempfile.TemporaryDirectory() as output:
+            ledger = Path(output) / "ledger.json"
+            driver = Path(__file__).with_name("responses_gateway.py")
+            deadline = time.monotonic_ns() + 500_000_000
+            env = {**os.environ, "OMC_BENCH_DEADLINE_NS": str(deadline)}
+            with subprocess.Popen([sys.executable, str(driver), "--upstream-port", str(self.mock.server_port),
+                                   "--token-cap", "40", "--ledger", str(ledger)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env) as proc:
+                try:
+                    port = int(json.loads(proc.stdout.readline())["base_url"].split(":")[-1].split("/")[0])
+                    with closing(HTTPConnection(LOOPBACK, port, timeout=2)) as conn:
+                        conn.request("POST", CREATE_PATH, json_bytes({"model": "mock-model", "stream": True,
+                                                                      "input": "slow"}),
+                                     {"Content-Type": "application/json"})
+                        self.assertEqual(conn.getresponse().status, 200)
+                        self.assertTrue(self.mock.generating.wait(1))
+                        time.sleep(max(0, (deadline - time.monotonic_ns()) / 1e9))
+                        proc.terminate()
+                        self.assertEqual(proc.wait(timeout=1), 0)
+                finally:
+                    if proc.poll() is None:
+                        proc.kill()
+            partial = json.loads(ledger.read_text())
+            self.assertFalse(partial["usage_complete"])
+            self.assertIsNotNone(partial["in_flight_request_id"])
 
     def test_upstream_socket_timeout_is_scoped_and_positive(self):
         with ResponsesGateway(12345, 40) as default, ResponsesGateway(12345, 40, upstream_timeout=60) as opted_in:

@@ -11,6 +11,7 @@ from select import select
 import signal
 from socket import MSG_PEEK
 from threading import Event, Lock
+import time
 from uuid import uuid4
 
 from budget_gate import BudgetGate, _object
@@ -241,6 +242,7 @@ class ResponsesGateway(ThreadingHTTPServer):
 
 
 def interrupted(*_):
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
     raise KeyboardInterrupt
 
 
@@ -280,9 +282,19 @@ def main():
             pass
         finally:
             gateway.stopping.set()
-            with gateway.admissions:
+            deadline = os.environ.get("OMC_BENCH_DEADLINE_NS")
+            if deadline is None:
+                locked = gateway.admissions.acquire()
+            else:
+                remaining = max(0, (int(deadline) - time.monotonic_ns()) / 1e9)
+                locked = gateway.admissions.acquire(timeout=min(0.25, remaining))
+            try:
+                # A deadline can interrupt an upstream stream before its usage arrives.
                 json.dump(gateway.gate.snapshot(), ledger, indent=2)
                 ledger.write("\n")
+            finally:
+                if locked:
+                    gateway.admissions.release()
 
 
 if __name__ == "__main__":

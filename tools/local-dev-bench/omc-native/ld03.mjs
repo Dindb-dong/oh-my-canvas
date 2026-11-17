@@ -9,6 +9,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {pathToFileURL} from 'node:url';
 import {parseArgs} from 'node:util';
 import {runLD03Agent, withLD03Broker} from '../ld03-model.mjs';
+import {publishCandidate} from '../publish-candidate.mjs';
 
 const marker = 'LD03 ';
 const styleProperties = {accent: 'fill', spacing: 'gap'};
@@ -160,8 +161,7 @@ export async function captureLD03(api, documentId, fixture) {
     };
   });
   const styleIds = new Set(styles.map(style => style.native_id));
-  const nodes = [];
-  for (const node of rawNodes) {
+  async function captureNode(node) {
     const key = keys.get(node.id);
     const alias = aliases.get(key);
     assert.equal(alias.type.toLowerCase(), node.kind, `Native and FigCraft layer types disagree for ${key}`);
@@ -201,7 +201,16 @@ export async function captureLD03(api, documentId, fixture) {
         }
       }
     }
-    nodes.push(row);
+    return row;
+  }
+  // Keep a single document bound and drain every outstanding read before changing scope.
+  const nodes = [];
+  for (let start = 0; start < rawNodes.length; start += 4) {
+    const rows = await Promise.allSettled(rawNodes.slice(start, start + 4).map(captureNode));
+    for (const row of rows) {
+      if (row.status === 'rejected') throw row.reason;
+      nodes.push(row.value);
+    }
   }
   return {document_id: documentId, nodes, styles};
 }
@@ -372,6 +381,7 @@ async function runLD03(fixture, plan, report, modelCommand) {
     report.probe = await phase('verificationCopyReadback', () => captureLD03(api, copy.id, fixture));
     report.after_probe_original = await phase('protectedOriginalReadback', () => captureLD03(api, original.id, fixture));
     report.currentPhase = 'complete';
+    if (process.env.OMC_BENCH_CANDIDATE) await publishCandidate(process.env.OMC_BENCH_CANDIDATE, report);
   } finally {
     try {
       await stop();

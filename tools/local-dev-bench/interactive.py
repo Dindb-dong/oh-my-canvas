@@ -13,6 +13,7 @@ import termios
 import time
 
 from usage import COUNTERS, summarize_usage
+from tui_session import deadline_ns, remaining
 
 
 def write_json(path, data):
@@ -26,7 +27,7 @@ def foreground_terminal():
     )
 
 
-def reduce_trace(codex, output):
+def reduce_trace(codex, output, deadline=None):
     bundles = sorted(path.parent for path in (output / "trace").glob("*/manifest.json"))
     if not bundles:
         return {"bundles": [], "usage": summarize_usage(None)}
@@ -34,15 +35,20 @@ def reduce_trace(codex, output):
     with (output / "reduce.log").open("w", encoding="utf-8") as log:
         for index, trace in enumerate(bundles, 1):
             state = output / ("state.json" if len(bundles) == 1 else f"state-{index}.json")
-            result = subprocess.run(
-                [codex, "debug", "trace-reduce", str(trace), "--output", str(state)],
-                stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-            )
+            timeout = remaining(deadline) if deadline is not None else None
+            try:
+                result = subprocess.run(
+                    [codex, "debug", "trace-reduce", str(trace), "--output", str(state)],
+                    stdin=subprocess.DEVNULL, stdout=log, stderr=log, timeout=timeout,
+                ) if timeout != 0 else None
+            except subprocess.TimeoutExpired:
+                result = None
+            reduced = result is not None and result.returncode == 0
             records.append({
                 "bundle": str(trace.relative_to(output)),
-                "reducer_exit_code": result.returncode,
-                "state": state.name if result.returncode == 0 else None,
-                "usage": summarize_usage(state if result.returncode == 0 else None),
+                "reducer_exit_code": result.returncode if result is not None else 124,
+                "state": state.name if reduced else None,
+                "usage": summarize_usage(state if reduced else None),
             })
     metering = [record["usage"] for record in records if record["usage"]["record_count"]]
     issues = [
@@ -107,11 +113,14 @@ def capture(codex, args):
     metadata = output / "interactive.json"
     write_json(metadata, session)
     started = time.monotonic()
+    outer_deadline = os.environ.get("OMC_BENCH_DEADLINE_NS")
+    deadline = deadline_ns(args.wall_seconds) if outer_deadline else None
     terminal = termios.tcgetattr(sys.stdin.fileno())
     wall_timed_out = False
     try:
         # Codex owns all TUI I/O, including its actual approval prompts.
-        result = subprocess.run(argv, cwd=root, env=env, timeout=args.wall_seconds)
+        timeout = remaining(deadline) if deadline is not None else args.wall_seconds
+        result = subprocess.run(argv, cwd=root, env=env, timeout=timeout)
         session["codex_exit_code"] = result.returncode
     except subprocess.TimeoutExpired:
         session["codex_exit_code"] = 124
@@ -131,7 +140,7 @@ def capture(codex, args):
     if outcome in {"candidate", "stopped", "blocked"}:
         session["operator_outcome"] = outcome
         session["operator_outcome_at"] = datetime.now(timezone.utc).isoformat()
-    evidence = reduce_trace(codex, output)
+    evidence = reduce_trace(codex, output, int(outer_deadline) if outer_deadline else None)
     tokens = evidence["usage"]["total_tokens"]
     if wall_timed_out or (tokens is not None and tokens > args.token_cap):
         session["budget_status"] = "TIMEOUT_BUDGET"

@@ -11,6 +11,7 @@ import {
 } from '../penpot-ld02.mjs';
 import {decodeNativeResult, readAfterAttach} from './ld09.mjs';
 import {runLD03Agent, withLD03Broker} from '../ld03-model.mjs';
+import {publishCandidate} from '../publish-candidate.mjs';
 
 const marker = 'LD03 ';
 const fileName = 'OMC Benchmark LD03 / field-relay';
@@ -435,7 +436,7 @@ async function replay(origin, fixture, modelCommand) {
     const evidence = {before, candidate, reopened, probe, after_probe_original:afterProbeOriginal,
       probe_actions:probeActions, copy_before:copyBefore,
       ...(modelCommand ? {candidateActions,modelTools} : {})};
-    await writeFile(process.env.OMC_BENCH_CANDIDATE, JSON.stringify(evidence) + '\n', {flag:'wx', mode:0o600});
+    await publishCandidate(process.env.OMC_BENCH_CANDIDATE, evidence);
     console.log(JSON.stringify({workload:'LD03', sourceFamily:fixture.source_family_id,
       setupMs, editedMs, reopenedMs, saveResponseObserved:saveResult,
       scope:modelCommand ? 'model-assisted native shared-value edit' : 'native deterministic shared-value edit'}));

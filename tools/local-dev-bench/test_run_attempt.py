@@ -69,6 +69,25 @@ class AttemptTests(unittest.TestCase):
         self.assertEqual(ready["sha256"], accepted["sha256"])
         self.assertLess(ready["monotonic_ns"], accepted["monotonic_ns"])
 
+    def test_atomic_publication_excludes_producer_cleanup(self):
+        self.manifest.update(
+            argv=python(WRITE + "\nimport time; time.sleep(0.25)"), acceptance_argv=python(GRADE),
+            candidate_ready_on_publish=True,
+        )
+        result = run(self.manifest, self.output)
+        self.assertEqual(result["execution_status"], "PASS")
+        self.assertEqual(result["accepted_ready_ms"], result["published_ready_ms"])
+        self.assertGreater(result["observed_wall_ms"] - result["accepted_ready_ms"], 175)
+
+    def test_candidate_rewrite_after_publication_is_rejected(self):
+        self.manifest.update(
+            argv=python(WRITE + "\nimport time; time.sleep(0.2); candidate.write_text('changed')"),
+            acceptance_argv=python(GRADE), candidate_ready_on_publish=True,
+        )
+        result = run(self.manifest, self.output)
+        self.assertEqual(result["reason"], "candidate_changed_before_grading")
+        self.assertIsNone(result["accepted_ready_ms"])
+
     def test_rejected_candidate_is_capped(self):
         self.manifest.update(argv=python(WRITE), acceptance_argv=python("raise SystemExit(5)"))
         result = run(self.manifest, self.output)

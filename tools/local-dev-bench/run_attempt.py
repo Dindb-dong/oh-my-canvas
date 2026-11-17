@@ -30,13 +30,16 @@ def validate_manifest(manifest):
                 or not all(isinstance(arg, str) and "\0" not in arg for arg in value)):
             raise ValueError(f"{key} must be an argv array with a nonempty executable")
     for key in ("timeout_seconds", "acceptance_timeout_seconds"):
-        if key != "timeout_seconds" and key not in manifest:
+        if key not in manifest:
             continue
         value = manifest.get(key)
         if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"{key} must be a finite positive number")
     if "sample_resources" in manifest and type(manifest["sample_resources"]) is not bool:
         raise ValueError("sample_resources must be a boolean")
+    publish = manifest.get("candidate_ready_on_publish", False)
+    if type(publish) is not bool or (publish and "acceptance_argv" not in manifest):
+        raise ValueError("candidate_ready_on_publish requires an independent oracle")
     roots = manifest.get("resource_root_pids", [])
     if not isinstance(roots, list) or any(type(pid) is not int or pid <= 0 for pid in roots):
         raise ValueError("resource_root_pids must list positive process IDs")
@@ -114,6 +117,8 @@ def run(manifest, output):
         "execution_status": None,
         "reason": None,
         "observed_wall_ms": None,
+        "published_ready_ms": None,
+        "cleanup_ms": None,
         "accepted_ready_ms": None,
         "analysis_capped_time_ms": None,
         "candidate_sha256": None,
@@ -136,7 +141,8 @@ def run(manifest, output):
     }
     proc = grader = sampler = None
     ready_ns = None
-    cap_ms = manifest["timeout_seconds"] * 1000
+    cap_ms = manifest.get("timeout_seconds", 60) * 1000
+    publish = manifest.get("candidate_ready_on_publish", False)
 
     with (output / "events.jsonl").open("x", encoding="utf-8", buffering=1) as events:
         def event(name, stamp=None, **fields):
@@ -151,7 +157,22 @@ def run(manifest, output):
             }) + "\n")
 
         start_ns = time.monotonic_ns()
+        deadline = start_ns + int(cap_ms * 1e6)
+        env["OMC_BENCH_DEADLINE_NS"] = str(deadline)
         event("attempt.start", start_ns)
+
+        def observe_candidate():
+            nonlocal ready_ns
+            seen_ns = time.monotonic_ns()
+            if seen_ns >= deadline or ready_ns is not None:
+                return
+            digest = candidate_hash(candidate)
+            if digest is not None:
+                ready_ns = seen_ns
+                result["candidate_sha256"] = digest
+                result["published_ready_ms"] = (ready_ns - start_ns) / 1e6
+                event("candidate.ready", ready_ns, sha256=digest)
+
         try:
             with (output / "stdout.log").open("xb") as stdout, (output / "stderr.log").open("xb") as stderr:
                 proc = subprocess.Popen(
@@ -171,23 +192,33 @@ def run(manifest, output):
                         event("resources.error", reason=str(error))
                         result["resources"] = {"reason": "sampler_start_failed"}
                 try:
-                    elapsed = (time.monotonic_ns() - start_ns) / 1e9
-                    proc.wait(timeout=max(0, manifest["timeout_seconds"] - elapsed))
+                    if publish:
+                        while proc.poll() is None and time.monotonic_ns() < deadline:
+                            observe_candidate()
+                            try:
+                                proc.wait(timeout=min(0.02, max(0, (deadline - time.monotonic_ns()) / 1e9)))
+                            except subprocess.TimeoutExpired:
+                                continue
+                        observe_candidate()
+                    else:
+                        proc.wait(timeout=max(0, (deadline - time.monotonic_ns()) / 1e9))
                     finished_ns = time.monotonic_ns()
                     result["observed_wall_ms"] = (finished_ns - start_ns) / 1e6
-                    if result["observed_wall_ms"] > cap_ms:
+                    if finished_ns >= deadline:
                         result.update(execution_status="TIMEOUT_BUDGET", reason="wall_time_limit")
                     elif proc.returncode:
                         result.update(execution_status="EXECUTION_FAIL", reason="attempt_command_failed")
                     elif "acceptance_argv" not in manifest:
                         result.update(execution_status="DIAGNOSTIC", reason="no_registered_oracle")
-                    else:
+                    elif not publish:
                         result["candidate_sha256"] = candidate_hash(candidate)
                         if result["candidate_sha256"] is None:
                             result.update(execution_status="QUALITY_FAIL", reason="missing_candidate")
                         else:
                             ready_ns = finished_ns
                             event("candidate.ready", ready_ns, sha256=result["candidate_sha256"])
+                    elif ready_ns is None:
+                        result.update(execution_status="QUALITY_FAIL", reason="missing_candidate")
                 except subprocess.TimeoutExpired:
                     result.update(execution_status="TIMEOUT_BUDGET", reason="wall_time_limit")
         except OSError as error:
@@ -200,9 +231,13 @@ def run(manifest, output):
                 result["observed_wall_ms"] = (time.monotonic_ns() - start_ns) / 1e6
             event("attempt.stop", execution_status=result["execution_status"],
                   awaiting_independent_acceptance=ready_ns is not None)
+            cleanup_start_ns = time.monotonic_ns()
+            stopped_at_deadline = proc is not None and proc.returncode is None
+            if stopped_at_deadline:
+                stop_group(proc)
             if sampler is not None:
                 tail_seconds = manifest.get("resource_tail_seconds", 0)
-                if tail_seconds and proc.returncode == 0:
+                if tail_seconds and not stopped_at_deadline and proc.returncode == 0:
                     tail_start_ns = time.monotonic_ns()
                     event("tail.start", tail_start_ns)
                     try:
@@ -219,8 +254,10 @@ def run(manifest, output):
                     event("resources.error", reason=str(error))
                     result["resources"] = {"reason": "sampler_stop_failed"}
             if proc is not None:
-                stop_group(proc)
+                if not stopped_at_deadline:
+                    stop_group(proc)
                 result["returncode"] = proc.returncode
+            result["cleanup_ms"] = (time.monotonic_ns() - cleanup_start_ns) / 1e6
 
         if "usage_path" in manifest:
             leaf = manifest["usage_path"]
@@ -243,8 +280,10 @@ def run(manifest, output):
                 if result["execution_status"] != "TIMEOUT_BUDGET":
                     result.update(execution_status="TIMEOUT_BUDGET", reason="token_budget_exceeded")
 
-        if ready_ns is not None and result["execution_status"] != "TIMEOUT_BUDGET":
+        if ready_ns is not None and result["execution_status"] is None:
             try:
+                if candidate_hash(candidate) != result["candidate_sha256"]:
+                    raise ValueError("published candidate changed before grading")
                 with (output / "acceptance.stdout.log").open("xb") as stdout, (
                     output / "acceptance.stderr.log"
                 ).open("xb") as stderr:
@@ -253,7 +292,7 @@ def run(manifest, output):
                         stdin=subprocess.DEVNULL, start_new_session=True,
                     )
                     result["acceptance_returncode"] = grader.wait(
-                        timeout=manifest.get("acceptance_timeout_seconds", manifest["timeout_seconds"])
+                        timeout=manifest.get("acceptance_timeout_seconds", cap_ms / 1000)
                     )
                 if candidate_hash(candidate) != result["candidate_sha256"]:
                     result.update(execution_status="INVALID_RUN", reason="candidate_changed_during_grading")
@@ -265,6 +304,9 @@ def run(manifest, output):
                     event("candidate.accepted", sha256=result["candidate_sha256"])
                 else:
                     result.update(execution_status="QUALITY_FAIL", reason="oracle_rejected_candidate")
+            except ValueError as error:
+                event("acceptance.error", reason=str(error))
+                result.update(execution_status="INVALID_RUN", reason="candidate_changed_before_grading")
             except (OSError, subprocess.TimeoutExpired, KeyboardInterrupt) as error:
                 event("acceptance.error", reason=str(error))
                 result.update(execution_status="INVALID_RUN", reason="independent_oracle_unavailable")

@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
+import {setTimeout as delay} from 'node:timers/promises';
 
-import {observedGap, planLD03, seedLD03, sharedLD03Values} from './ld03.mjs';
+import {captureLD03, observedGap, planLD03, seedLD03, sharedLD03Values} from './ld03.mjs';
 
 const generator = fileURLToPath(new URL('../workloads/synthetic.py', import.meta.url));
 const fixture = variant => JSON.parse(execFileSync('python3', [generator, 'fixture', 'LD03', '--variant', variant], {
@@ -80,4 +81,44 @@ test('shared values map the exact native target and keep identities to the broke
   });
   rows[0].id = 'unexpected-document';
   assert.throws(() => sharedLD03Values(rows, ids));
+});
+
+test('same-document readbacks overlap with bounded concurrency and keep source order', async () => {
+  const doc = '01234567-89ab-cdef-0123-456789abcdef';
+  const cards = Array.from({length: 5}, (_, index) => ({
+    id: `card-${index}`, kind: 'frame', parentId: 'root',
+    properties: {name: `LD03 card-${index}`, fill: '#112233', layout: {type: 'flex', direction: 'column', gap: 14}},
+  }));
+  const children = cards.flatMap(card => ['label', 'state'].map(text => ({
+    id: `${card.id}/${text}`, kind: 'text', parentId: card.id, properties: {name: `LD03 ${card.id}/${text}`, text},
+  })));
+  const board = {id: 'board', kind: 'frame', parentId: 'root', properties: {name: 'LD03 board'}};
+  for (const card of cards) card.parentId = board.id;
+  const raws = [...cards, ...children, board];
+  const aliases = cards.map(card => ({id: card.id, type: 'FRAME', name: card.properties.name,
+    children: children.filter(child => child.parentId === card.id).map(child => ({
+      id: child.id, type: 'TEXT', name: child.properties.name, characters: child.properties.text,
+    })),
+  }));
+  let active = 0;
+  let peak = 0;
+  const api = {
+    bind: id => assert.equal(id, doc),
+    snapshot: id => ({id: 'doc_' + id.replaceAll('-', ''), pages: [{rootNodeId: 'root'}], nodes: raws}),
+    call: tool => tool === 'inspect_document' ? {id: doc, layers: [{id: board.id}]} :
+      {id: board.id, name: board.properties.name, type: 'FRAME', children: aliases},
+    async run(command) {
+      if (command === 'variable.list') return {collections: [{id: 'collection'}], variables: []};
+      peak = Math.max(peak, ++active);
+      await delay(5);
+      active -= 1;
+      return command === 'inspect.properties' ? {sections: [{title: 'Fills', rows: [{color: '#112233'}]}]} :
+        {lines: [{x0: 0, x1: 0, y0: 0, y1: 14, dashed: false}]};
+    },
+  };
+  const result = await captureLD03(api, doc, {logical_objects: raws.length, start: {styles: []}});
+  assert.equal(peak, 4);
+  assert.equal(active, 0);
+  assert.deepEqual(result.nodes.map(node => node.native_id), raws.map(node => node.id));
+  assert.ok(result.nodes.filter(node => node.layout === 'vertical').every(node => node.gap === 14));
 });
