@@ -213,7 +213,7 @@ export async function capture(read, ts, fixture, scope) {
   }
 }
 
-async function liveCapture(fixture, scope) {
+export async function withPaper(scope, action) {
   const endpoint = new URL(process.env.PAPER_BENCH_URL ?? 'http://127.0.0.1:29979/mcp');
   assert.ok(endpoint.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname));
   assert.ok(!endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash);
@@ -228,12 +228,19 @@ async function liveCapture(fixture, scope) {
       const text = answer.content.filter(block => block.type === 'text').map(block => block.text);
       assert.ok(!answer.isError && text.length > 1 && text.slice(0, -1).some(header =>
         header.includes(scope.fileId)), `Paper response error or wrong file for ${selector.name}`);
-      if (selector.name === 'get_jsx') return text.at(-1);
-      const data = JSON.parse(text.at(-1));
-      assert.ok(!data.error, `Paper returned error for ${selector.name}`);
+      const body = text.at(-1);
+      let data;
+      try {
+        data = JSON.parse(body);
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        assert.ok(!/^(error|failed)\b/i.test(body), `Paper returned error for ${selector.name}`);
+        return body;
+      }
+      assert.ok(!data?.error, `Paper returned error for ${selector.name}`);
       return data;
     };
-    return await capture(read, benchRequire('typescript'), fixture, scope);
+    return await action(read, benchRequire('typescript'));
   } finally {
     await client.close();
   }
@@ -245,7 +252,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     'Usage: ld03.mjs plan|capture FIXTURE.json SCOPE.json');
   const fixture = JSON.parse(readFileSync(fixturePath, 'utf8'));
   const scope = JSON.parse(readFileSync(scopePath, 'utf8'));
-  const output = mode === 'plan' ? plan(fixture, scope) : await liveCapture(fixture, scope);
+  const output = mode === 'plan' ? plan(fixture, scope) :
+    await withPaper(scope, (read, ts) => capture(read, ts, fixture, scope));
   console.log(JSON.stringify(output));
   if (output.blocker) process.exitCode = 1;
 }

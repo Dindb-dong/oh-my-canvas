@@ -61,3 +61,35 @@ metadata. Recovering exact PNG bytes or the registered decoded
 RGBA pixels requires a separate demonstrated read path. The font-family
 lookup establishes availability, while actual glyph and clipping proof
 requires rendering evidence.
+
+## Seed a field-relay preflight
+
+Generate the neutral `field-relay` fixture before setup. Use the approved
+CAP file record as `$APPROVED_FILE`, containing its `fileId` and `name`.
+Choose a new lowercase run ID of 8–32 characters. The dry run emits the
+planned page, token prefix and native HTML fragments without connecting.
+
+```sh
+node tools/local-dev-bench/paper/ld03-seed.mjs plan \
+  "$FIXTURE" "$APPROVED_FILE" "$RUN_ID" > "$SEED_PLAN"
+node tools/local-dev-bench/paper/ld03-seed.mjs seed \
+  "$FIXTURE" "$APPROVED_FILE" "$RUN_ID" > "$SEED_RESULT"
+```
+
+The seeder confirms the approved file name and control board before
+writing, checks that the run page name and token prefixes are unused,
+and creates a new page with one artboard. It inserts the title and
+each section separately, reads the resulting Paper IDs and text, then
+creates four file-level tokens under the run prefix and binds their
+own card layers. Preflight work belongs outside the timed edit.
+`$SEED_RESULT` contains `scope`, `setupTrace`, `before` and, on
+incomplete setup, `blocker`. Extract the `scope` object for future
+`ld03.mjs plan` and `capture` commands. Reuse that scope for the
+post-edit capture. Keep the setup trace and both capture outputs in the
+private evidence directory. A partial run retains its new page and
+IDs for inspection. To retry after a partial run, choose a fresh run ID.
+
+The seeding mocks exercise the generated inline fragments, structural
+readback, native ID drift checks and scoped token setup. A live run
+must still establish the returned token identity and actual persistent
+CSS-reference behavior before the neutral oracle can pass.
