@@ -4,7 +4,7 @@ import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
-import {changeFieldRelay, planFieldRelay, readFieldRelay, refreshFieldRelay, seedFieldRelay, stateDifferences} from './ld03.mjs';
+import {changeFieldRelay, planFieldRelay, readFieldRelay, refreshFieldRelay, runFieldRelayModel, seedFieldRelay, stateDifferences} from './ld03.mjs';
 
 const generator = 'tools/local-dev-bench/workloads/synthetic.py';
 const fixture = JSON.parse(execFileSync('python3', [generator,'fixture','LD03','--variant','field-relay'], {encoding:'utf8'}));
@@ -129,5 +129,55 @@ test('field-relay uses native editable objects, four real override omissions and
     assert.deepEqual(originalOnly, {scope:'original-edit-and-reopen', passed:true, failures:[]});
   } finally {
     await rm(tmp,{recursive:true,force:true});
+  }
+});
+
+test('model socket sees only live shared values, and its actions control candidate without an expected-value fallback', async () => {
+  const penpot = fakePenpot(fileId);
+  const execute = code => run(code,penpot);
+  await execute(seedFieldRelay(fixture,fileId));
+  const before = await execute(readFieldRelay(fileId));
+  const changes = [{key:'target.accent',value:'#449933'},{key:'target.spacing',value:23}];
+  const ids = Object.fromEntries(before.styles.map(style => [style.key,style.native_id]));
+  const replaced = {...ids,'target.spacing':'replacement'};
+  await assert.rejects(execute(changeFieldRelay(fileId,changes,replaced)),/Wrong native token/);
+  assert.deepEqual(stateDifferences(fixture.start,await execute(readFieldRelay(fileId))),[]);
+
+  const temp = await mkdtemp(join(tmpdir(),'omc-penpot-actor-'));
+  try {
+    const actor = join(temp,'actor.mjs');
+    await writeFile(actor,`#!/usr/bin/env node
+import assert from 'node:assert/strict';
+import {createConnection} from 'node:net';
+function request(name,args) {
+  return new Promise((resolve,reject) => {
+    const socket = createConnection(process.argv[2], () => socket.write(JSON.stringify({name,arguments:args})+'\\n'));
+    let body = '';
+    socket.setEncoding('utf8').on('data', chunk => body += chunk);
+    socket.on('error',reject).on('end', () => resolve(JSON.parse(body)));
+  });
+}
+const initial = await request('inspect_shared_values',{});
+assert.deepEqual(initial,{result:{target:{accent:'#2864dc',spacing_px:12},archive:{accent:'#2864dc',spacing_px:12}}});
+const unscoped = await request('set_shared_values',{accent:'#449933',spacing_px:23,archive:'#ffffff'});
+assert.match(unscoped.error,/Expected a six-digit accent/);
+const changed = await request('set_shared_values',{accent:'#449933',spacing_px:23});
+assert.deepEqual(changed,{result:{target:{accent:'#449933',spacing_px:23},archive:initial.result.archive}});
+`,{mode:0o700});
+    const modelTools = [];
+    const candidateActions = [];
+    let writes = 0;
+    await runFieldRelayModel({execute,fileId,before,modelCommand:actor,modelTools,candidateActions,beforeWrite:() => writes++});
+    assert.equal(writes,1);
+    assert.deepEqual(modelTools.map(event => event.status),['ok','rejected','ok']);
+    assert.deepEqual(candidateActions.map(action => [action.key,action.nativeId,action.value]),[
+      ['target.accent',ids['target.accent'],'#449933'],['target.spacing',ids['target.spacing'],23],
+    ]);
+    const candidate = await execute(readFieldRelay(fileId));
+    assert.ok(stateDifferences(fixture.expected,candidate).length > 0);
+    assert.deepEqual(candidate.styles.filter(style => style.key.startsWith('keep.')),
+      before.styles.filter(style => style.key.startsWith('keep.')));
+  } finally {
+    await rm(temp,{recursive:true,force:true});
   }
 });

@@ -118,6 +118,16 @@ The general LD03 scorer still gates the full trial. If a duplicate shows
 unsettled native properties, the producer preserves immediate, settled,
 and available reopened snapshots before any probe edit.
 
+For a model-assisted attempt, add `--model-command /absolute/path/to/agent`
+after the fixture argument. The executable receives the private LD03 broker
+socket path. Its tools expose only the live synthetic target and archive
+token values and accept only target accent and spacing updates.
+The candidate starts from the same native fixture and receives the model's
+actual requested updates. The separate copy probe remains scripted for
+independent acceptance. Model broker calls and completed candidate actions
+are recorded in `ld03-model-actions.json` in the private attempt output.
+Capture provider usage separately with a registered usage ledger.
+
 ## LD09 native archive import
 
 Use a separate LD09 manifest for Penpot's dashboard .penpot archive

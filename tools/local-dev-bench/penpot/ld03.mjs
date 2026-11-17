@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
-import {readFile, writeFile} from 'node:fs/promises';
+import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
-import {isDeepStrictEqual} from 'node:util';
+import {isDeepStrictEqual, parseArgs} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {
   connectEditor, createAccount, getMcpEndpoint, loopbackOrigin, newFile, waitForBackend,
 } from '../penpot-ld02.mjs';
 import {decodeNativeResult, readAfterAttach} from './ld09.mjs';
+import {runLD03Agent, withLD03Broker} from '../ld03-model.mjs';
 
 const marker = 'LD03 ';
 const fileName = 'OMC Benchmark LD03 / field-relay';
@@ -140,20 +142,25 @@ export function readFieldRelay(fileId) {
   `;
 }
 
-export function changeFieldRelay(fileId, changes) {
+export function changeFieldRelay(fileId, changes, nativeIds) {
   assert.equal(changes.length, 2);
   assert.deepEqual(changes.map(change => change.key).sort(), ['target.accent','target.spacing']);
   return `${guard(fileId)}
     const set = penpot.library.local.tokens.sets.find(candidate => candidate.name === ${JSON.stringify(tokenSet)});
     if (!set?.active) throw new Error("Missing active benchmark tokens");
-    const actions = [];
-    for (const change of ${JSON.stringify(changes)}) {
+    const ids = ${JSON.stringify(nativeIds ?? null)};
+    const changes = ${JSON.stringify(changes)};
+    const tokens = changes.map(change => {
       const token = set.tokens.find(candidate => candidate.name === change.key);
-      if (!token || token.type !== (change.key.endsWith(".spacing") ? "spacing" : "color")) throw new Error("Wrong native token");
+      if (!token || token.type !== (change.key.endsWith(".spacing") ? "spacing" : "color") ||
+          (ids && token.id !== ids[change.key])) throw new Error("Wrong native token");
+      return token;
+    });
+    return changes.map((change,index) => {
+      const token = tokens[index];
       token.value = String(change.value);
-      actions.push({op:"set_style", key:token.name, value:change.value});
-    }
-    return actions;
+      return {op:"set_style", key:token.name, value:change.value};
+    });
   `;
 }
 
@@ -166,6 +173,62 @@ export function refreshFieldRelay(fileId) {
     set.active = true;
     return set.active;
   `;
+}
+
+function compactFieldRelay(fileId, nativeIds) {
+  return `${guard(fileId)}
+    const set = penpot.library.local.tokens.sets.find(candidate => candidate.name === ${JSON.stringify(tokenSet)});
+    if (!set?.active) throw new Error("Missing active benchmark tokens");
+    const tokens = new Map(set.tokens.map(token => [token.name,token]));
+    const expected = ${JSON.stringify(nativeIds)};
+    if (tokens.size !== Object.keys(expected).length) throw new Error("Unexpected native token set");
+    for (const [key,id] of Object.entries(expected)) {
+      const token = tokens.get(key);
+      if (!token || token.id !== id || token.type !== (key.endsWith(".spacing") ? "spacing" : "color")) {
+        throw new Error("Benchmark token identity changed");
+      }
+    }
+    const values = family => ({accent:tokens.get(family + ".accent").value.toLowerCase(),
+      spacing_px:Number(tokens.get(family + ".spacing").value)});
+    return {target:values("target"),archive:values("keep")};
+  `;
+}
+
+export async function runFieldRelayModel({execute,fileId,before,modelCommand,modelTools,candidateActions,beforeWrite}) {
+  assert.equal(before.document_id, fileId);
+  const ids = Object.fromEntries(before.styles.map(style => [style.key,style.native_id]));
+  assert.deepEqual(Object.keys(ids).sort(), ['keep.accent','keep.spacing','target.accent','target.spacing']);
+  assert.ok(Object.values(ids).every(value => typeof value === 'string' && value));
+  assert.equal(new Set(Object.values(ids)).size,4);
+  const inspect = () => readAfterAttach(() => execute(compactFieldRelay(fileId,ids)));
+  const privateDir = await mkdtemp(join(tmpdir(),'omc-penpot-ld03-'));
+  const socketPath = join(privateDir,'agent.sock');
+  const cancel = new AbortController();
+  const interrupt = () => cancel.abort();
+  for (const signal of ['SIGINT','SIGTERM']) process.once(signal,interrupt);
+  try {
+    await withLD03Broker(socketPath, {
+      inspect,
+      apply:async ({accent,spacing_px}) => {
+        const previous = await inspect();
+        const changes = [{key:'target.accent',value:accent},{key:'target.spacing',value:spacing_px}];
+        beforeWrite?.();
+        await execute(changeFieldRelay(fileId, changes, ids));
+        assert.equal(await execute(refreshFieldRelay(fileId)),true);
+        const current = await inspect();
+        assert.deepEqual(current.target,{accent,spacing_px},'The native token definitions did not persist the model request');
+        assert.deepEqual(current.archive,previous.archive,'A protected native archive token changed');
+        for (const change of changes) {
+          candidateActions.push({op:'set_style',key:change.key,nativeId:ids[change.key],value:change.value});
+        }
+        return current;
+      },
+    },modelTools,() => runLD03Agent(modelCommand,socketPath,cancel.signal));
+    assert.ok(candidateActions.length,'The model did not complete a native target token write');
+  } finally {
+    for (const signal of ['SIGINT','SIGTERM']) process.off(signal,interrupt);
+    await rm(privateDir,{recursive:true,force:true});
+  }
 }
 
 function identities(state) {
@@ -268,7 +331,7 @@ export async function duplicateFromDashboard(page, context, origin, name) {
   return {opened, url, id:url.searchParams.get('file-id')};
 }
 
-async function replay(origin, fixture) {
+async function replay(origin, fixture, modelCommand) {
   const {benchRequire, Client, StreamableHTTPClientTransport} = await import('../replays/mcp.mjs');
   const {chromium} = benchRequire('playwright');
   const client = new Client({name:'omc-ld03-replay', version:'1'});
@@ -276,6 +339,8 @@ async function replay(origin, fixture) {
   const password = randomBytes(20).toString('hex') + 'Aa1!';
   let browser, endpoint;
   let phase = 'prepare disposable account';
+  const modelTools = [];
+  const candidateActions = [];
   try {
     await waitForBackend(origin);
     browser = await chromium.launch({channel:'chrome', headless:true});
@@ -309,14 +374,22 @@ async function replay(origin, fixture) {
     const before = await takeState(execute, id, fixture.start);
     await requireState(fixture.start, before, 'baseline');
     const setupMs = performance.now() - setup;
-    const changes = fixture.expected.styles
-      .filter(style => style.key.startsWith('target.'))
-      .map(style => ({key:style.key,value:style.value}));
     phase = 'apply two original token updates';
     const started = performance.now();
-    const saved = watchSave(editor, origin);
-    await execute(changeFieldRelay(id, changes));
-    assert.equal(await execute(refreshFieldRelay(id)), true);
+    let saved;
+    if (modelCommand) {
+      await runFieldRelayModel({
+        execute,fileId:id,before,modelCommand,modelTools,candidateActions,
+        beforeWrite:() => { saved = watchSave(editor,origin); },
+      });
+    } else {
+      const changes = fixture.expected.styles
+        .filter(style => style.key.startsWith('target.'))
+        .map(style => ({key:style.key,value:style.value}));
+      saved = watchSave(editor, origin);
+      await execute(changeFieldRelay(id, changes));
+      assert.equal(await execute(refreshFieldRelay(id)), true);
+    }
     const candidate = await takeState(execute, id, fixture.expected);
     await requireState(fixture.expected, candidate, 'edited-original');
     const editedMs = performance.now() - started;
@@ -360,24 +433,27 @@ async function replay(origin, fixture) {
     editor = await reopenPage(copy, context, workspace);
     const afterProbeOriginal = await takeState(execute, id, fixture.expected);
     const evidence = {before, candidate, reopened, probe, after_probe_original:afterProbeOriginal,
-      probe_actions:probeActions, copy_before:copyBefore};
+      probe_actions:probeActions, copy_before:copyBefore,
+      ...(modelCommand ? {candidateActions,modelTools} : {})};
     await writeFile(process.env.OMC_BENCH_CANDIDATE, JSON.stringify(evidence) + '\n', {flag:'wx', mode:0o600});
     console.log(JSON.stringify({workload:'LD03', sourceFamily:fixture.source_family_id,
       setupMs, editedMs, reopenedMs, saveResponseObserved:saveResult,
-      scope:'native color and row-gap token edits with idempotent native propagation refresh'}));
+      scope:modelCommand ? 'model-assisted native shared-value edit' : 'native deterministic shared-value edit'}));
   } catch (error) {
     const secrets = [email,password,endpoint?.searchParams.get('userToken')].filter(Boolean);
     const message = secrets.reduce((value, secret) => value.replaceAll(secret, '[redacted]'), String(error));
     throw new Error(`Penpot LD03 ${phase}: ${message}`);
   } finally {
     await Promise.allSettled([client.close(), browser?.close()]);
+    if (modelCommand) await storeObservation('ld03-model-actions.json',{candidateActions,modelTools});
   }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  assert.equal(process.argv.length, 4, 'Use ld03.mjs LOOPBACK_ORIGIN CANONICAL_FIELD_RELAY_JSON');
+  const {positionals,values} = parseArgs({allowPositionals:true,options:{'model-command':{type:'string'}}});
+  assert.equal(positionals.length,2,'Use ld03.mjs LOOPBACK_ORIGIN CANONICAL_FIELD_RELAY_JSON [--model-command EXECUTABLE]');
   assert.ok(process.env.OMC_BENCH_CANDIDATE, 'Set OMC_BENCH_CANDIDATE for the neutral grader');
-  const fixture = JSON.parse(await readFile(process.argv[3], 'utf8'));
+  const fixture = JSON.parse(await readFile(positionals[1], 'utf8'));
   planFieldRelay(fixture);
-  await replay(loopbackOrigin(process.argv[2]), fixture);
+  await replay(loopbackOrigin(positionals[0]),fixture,values['model-command']);
 }
