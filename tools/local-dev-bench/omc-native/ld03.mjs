@@ -8,6 +8,7 @@ import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {pathToFileURL} from 'node:url';
 import {parseArgs} from 'node:util';
+import {runLD03Agent, withLD03Broker} from '../ld03-model.mjs';
 
 const marker = 'LD03 ';
 const styleProperties = {accent: 'fill', spacing: 'gap'};
@@ -194,7 +195,7 @@ export async function captureLD03(api, documentId, fixture) {
   return {document_id: documentId, nodes, styles};
 }
 
-async function runLD03(fixture, plan, report) {
+async function runLD03(fixture, plan, report, modelCommand) {
   const {Client, StreamableHTTPClientTransport} = await import('../replays/mcp.mjs');
   const serviceBinary = join(process.env.OMC_BENCH_BIN_DIR ?? '/Applications/Oh My Canvas.app/Contents/MacOS', 'omc-service');
   report.binarySha256 = createHash('sha256').update(await readFile(serviceBinary)).digest('hex');
@@ -318,12 +319,36 @@ async function runLD03(fixture, plan, report) {
     }
   }
 
+  async function sharedValues(original) {
+    const {variables} = await api.run('variable.list');
+    assert.equal(variables.length, original.variableIds.size);
+    const seen = new Map(variables.map(row => [row.name, row]));
+    for (const [key, id] of original.variableIds) assert.equal(seen.get(key)?.id, id);
+    return Object.fromEntries(['target', 'archive'].map(family => [family, {
+      accent: color(seen.get(`${family}.accent`).value),
+      spacing_px: seen.get(`${family}.spacing`).value,
+    }]));
+  }
+
   try {
     await phase('serviceStart', async () => { await start(); await connect(); });
     const original = await phase('setup', () => seedLD03(api, fixture, plan));
     report.before = await phase('startingReadback', () => captureLD03(api, original.id, fixture));
     report.candidateActions = [];
-    await phase('candidateEdit', () => change(plan.candidate, original.variableIds, report.candidateActions));
+    await phase('candidateEdit', async () => {
+      if (!modelCommand) return change(plan.candidate, original.variableIds, report.candidateActions);
+      const socketPath = join(profile, 'model.sock');
+      report.modelTools = [];
+      await withLD03Broker(socketPath, {
+        inspect: () => sharedValues(original),
+        apply: async ({accent, spacing_px}) => {
+          await sharedValues(original);
+          await change([{key: 'target.accent', value: accent}, {key: 'target.spacing', value: spacing_px}],
+            original.variableIds, report.candidateActions);
+          return sharedValues(original);
+        },
+      }, report.modelTools, () => runLD03Agent(modelCommand, socketPath, signal));
+    });
     await phase('candidateSave', () => rpc('document.save', original.id));
     report.candidate = await phase('candidateReadback', () => captureLD03(api, original.id, fixture));
     await phase('normalServiceReopen', async () => {
@@ -352,12 +377,15 @@ async function runLD03(fixture, plan, report) {
 }
 
 async function main() {
-  const {values} = parseArgs({options: {fixture: {type: 'string'}, 'fixture-only': {type: 'boolean'}}});
+  const {values} = parseArgs({options: {
+    fixture: {type: 'string'}, 'fixture-only': {type: 'boolean'}, 'model-command': {type: 'string'},
+  }});
   assert.ok(values.fixture, 'Supply --fixture from synthetic.py fixture LD03');
   const fixture = JSON.parse(await readFile(values.fixture, 'utf8'));
   const plan = planLD03(fixture);
   const report = {
-    measurementKind: 'installed-headless-deterministic-shared-value-probe',
+    measurementKind: values['model-command'] ? 'installed-headless-model-shared-value-probe' :
+      'installed-headless-deterministic-shared-value-probe',
     workload: fixture.workload, variant: fixture.source_family_id, fixtureSha256: fixture.fixture_sha256,
     logicalObjects: fixture.logical_objects, targetReferences: fixture.target_references,
     localOverrides: plan.overrides, elapsedMs: {},
@@ -367,7 +395,7 @@ async function main() {
       report.status = 'fixture-only';
       report.bindingsPerVariable = Object.fromEntries(plan.bindingGroups.map(row => [row.style.key, row.keys.length]));
     } else {
-      await runLD03(fixture, plan, report);
+      await runLD03(fixture, plan, report, values['model-command']);
       report.status = 'awaiting-canonical-grade';
     }
   } catch (error) {

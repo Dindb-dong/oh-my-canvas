@@ -14,7 +14,7 @@ from threading import Event, Lock
 from uuid import uuid4
 
 from budget_gate import BudgetGate, _object
-from llama_canary import normalize_request, restore_event
+from llama_canary import CANARY, LD03
 
 
 LOOPBACK = "127.0.0.1"
@@ -106,8 +106,8 @@ class ResponsesHandler(BaseHTTPRequestHandler):
             background = request.get("background")
             if request.get("stream") is not True or (background is not None and background is not False):
                 raise ValueError
-            if self.server.llama_synthetic_canary:
-                request = normalize_request(request)
+            if self.server.tool_bridge is not None:
+                request = self.server.tool_bridge.normalize_request(request)
         except ValueError:
             return self.reply_error(400, "invalid_request")
 
@@ -152,16 +152,16 @@ class ResponsesHandler(BaseHTTPRequestHandler):
                     started = True
                 except OSError:
                     downstream_gone = True
-                canary_enabled = bool(request.get("tools"))
+                tools_enabled = bool(request.get("tools"))
                 projection_failed = False
                 for frame, data in sse_frames(response, gate.max_json_bytes):
                     if data == b"[DONE]":
                         break
                     ended = gate.record_event(request_id, data)
-                    if self.server.llama_synthetic_canary and not projection_failed:
+                    if self.server.tool_bridge is not None and not projection_failed:
                         try:
                             original = _object(data, gate.max_json_bytes)
-                            mapped = restore_event(original, canary_enabled=canary_enabled)
+                            mapped = self.server.tool_bridge.restore_event(original, enabled=tools_enabled)
                         except ValueError:
                             projection_failed = True
                             frame = b'event: error\ndata: {"type":"error","code":"unsupported_local_tool","message":"Unsupported local tool event"}\n\n'
@@ -190,16 +190,18 @@ class ResponsesHandler(BaseHTTPRequestHandler):
 
 class ResponsesGateway(ThreadingHTTPServer):
     def __init__(self, upstream_port, token_cap, *, port=0, minimum_output_tokens=1,
-                 upstream_timeout=TIMEOUT_SECONDS, llama_synthetic_canary=False):
+                 upstream_timeout=TIMEOUT_SECONDS, llama_synthetic_canary=False, llama_ld03=False):
         if type(upstream_port) is not int or not 0 < upstream_port < 65536:
             raise ValueError("invalid loopback upstream port")
         if type(upstream_timeout) is not int or upstream_timeout <= 0:
             raise ValueError("invalid loopback upstream socket timeout")
         self.upstream_port = upstream_port
         self.upstream_timeout = upstream_timeout
-        self.llama_synthetic_canary = llama_synthetic_canary
+        if llama_synthetic_canary and llama_ld03:
+            raise ValueError("choose exactly one local tool bridge")
+        self.tool_bridge = CANARY if llama_synthetic_canary else LD03 if llama_ld03 else None
         self.gate = BudgetGate(token_cap, minimum_output_tokens=minimum_output_tokens,
-                               require_exact_input=llama_synthetic_canary)
+                               require_exact_input=self.tool_bridge is not None)
         self.admissions = Lock()
         self.stopping = Event()
         super().__init__((LOOPBACK, port), ResponsesHandler)
@@ -246,8 +248,11 @@ def main():
     parser.add_argument("--minimum-output-tokens", type=int, default=1)
     parser.add_argument("--upstream-timeout", type=int, default=TIMEOUT_SECONDS,
                         help="Upstream socket inactivity timeout in seconds")
-    parser.add_argument("--llama-synthetic-canary", action="store_true",
-                        help="Expose only the synthetic read-only canary to a local llama-server")
+    bridges = parser.add_mutually_exclusive_group()
+    bridges.add_argument("--llama-synthetic-canary", action="store_true",
+                         help="Expose only the synthetic read-only canary to a local llama-server")
+    bridges.add_argument("--llama-ld03", action="store_true",
+                         help="Expose only the registered LD03 shared-value tools to a local llama-server")
     parser.add_argument("--ledger", type=Path, required=True, help="New private JSON evidence file")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, interrupted)
@@ -255,7 +260,7 @@ def main():
         ResponsesGateway(args.upstream_port, args.token_cap,
                          minimum_output_tokens=args.minimum_output_tokens,
                          upstream_timeout=args.upstream_timeout,
-                         llama_synthetic_canary=args.llama_synthetic_canary) as gateway,
+                         llama_synthetic_canary=args.llama_synthetic_canary, llama_ld03=args.llama_ld03) as gateway,
         open(args.ledger, "x", encoding="utf-8", opener=private_open) as ledger,
     ):
         print(json.dumps({"base_url": f"http://{LOOPBACK}:{gateway.server_port}/v1"}), flush=True)

@@ -1,12 +1,13 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+from hashlib import sha256
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from threading import Event, Thread
 import unittest
 
-from llama_canary import FUNCTION, LLAMA_NAME, NAMESPACE, normalize_request
+from llama_canary import CANARY, FUNCTION, LD03, LD03_APPLY, LD03_INSPECT, LD03_NAMESPACE, LD03_TOOLS, LLAMA_NAME, NAMESPACE
 from responses_gateway import COUNT_PATH, CREATE_PATH, LOOPBACK, TIMEOUT_SECONDS, ResponsesGateway, json_bytes
 
 
@@ -26,6 +27,16 @@ def terminal(name, input_tokens, output_tokens, cached_tokens, *, status="comple
             "input_tokens_details": {"cached_tokens": cached_tokens},
         },
     }, multiline=True)
+
+
+def codex_ld03_namespace():
+    return {
+        "type": "namespace", "name": LD03_NAMESPACE, "tools": [
+            {"type": "function", "name": tool["name"], "description": tool["description"],
+             "parameters": tool["inputSchema"], "strict": False}
+            for tool in LD03_TOOLS
+        ],
+    }
 
 
 class FixtureHandler(BaseHTTPRequestHandler):
@@ -123,9 +134,78 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual(count_payload["input"], create_payload["input"])
         self.assertEqual([tool["name"] for tool in create_payload["tools"]], [LLAMA_NAME])
         tool_reply = {"type": "function_call_output", "call_id": "call_1", "output": "CANARY-K7M2"}
-        continued = normalize_request({"tools": tools, "input": [restored, tool_reply]})
+        continued = CANARY.normalize_request({"tools": tools, "input": [restored, tool_reply]})
         self.assertEqual(continued["input"], [done, tool_reply])
         self.assertEqual(self.gateway.gate.snapshot()["observed_total_tokens"], 36)
+
+    def test_ld03_schemas_match_the_pinned_proposal(self):
+        canonical = json.dumps(LD03_TOOLS, sort_keys=True, separators=(",", ":")).encode()
+        self.assertEqual(sha256(canonical).hexdigest(),
+                         "53d716fc47a4f7f8d438aaa876029cfcc72a3c2f606b1c372d2c31a53bc95ec1")
+
+    def test_ld03_exposes_only_registered_tools_and_round_trips_distinct_calls(self):
+        calls = [
+            {"type": "function_call", "id": "fc_1", "call_id": "call_1",
+             "name": "bench_inspect_shared_values", "arguments": "{}"},
+            {"type": "function_call", "id": "fc_2", "call_id": "call_2",
+             "name": "bench_set_shared_values", "arguments": '{"accent":"#136b62","spacing_px":20}'},
+        ]
+        metered = {"input_tokens": 32, "output_tokens": 9, "total_tokens": 41,
+                   "input_tokens_details": {"cached_tokens": 7}}
+        events = [
+            {"type": "response.output_item.added", "item": {**call, "arguments": ""}}
+            for call in calls
+        ] + [
+            {"type": "response.function_call_arguments.delta", "item_id": "fc_2", "delta": calls[1]["arguments"]},
+            *({"type": "response.output_item.done", "item": call} for call in calls),
+            {"type": "response.completed",
+             "response": {"id": "resp-ld03", "status": "completed", "usage": metered, "output": calls}},
+        ]
+        stream = b"".join(b"data: " + json_bytes(event) + b"\n\n" for event in events)
+        self.setup_gateway(60, {"ld03": 32}, {"ld03": stream}, llama_ld03=True)
+        tools = [{"type": "function", "name": "create_goal"}, codex_ld03_namespace(),
+                 {"type": "namespace", "name": NAMESPACE, "tools": []}]
+        status, data = self.post("ld03", tools=tools)
+        self.assertEqual(status, 200)
+        restored = [{**call, "name": name, "namespace": LD03_NAMESPACE}
+                    for call, name in zip(calls, (LD03_INSPECT, LD03_APPLY))]
+        received = [json.loads(line[6:]) for line in data.splitlines() if line.startswith(b"data: ")]
+        self.assertEqual([item["item"] for item in received[:2]], [{**call, "arguments": ""} for call in restored])
+        self.assertEqual(received[2], events[2])
+        self.assertEqual([item["item"] for item in received[3:5]], restored)
+        self.assertEqual(received[-1]["response"]["output"], restored)
+        self.assertEqual(received[-1]["response"]["usage"], metered)
+        count_payload, create_payload = [event[1] for event in self.mock.events]
+        self.assertEqual(count_payload["input"], create_payload["input"])
+        self.assertEqual(count_payload["tools"], create_payload["tools"])
+        self.assertEqual([tool["name"] for tool in create_payload["tools"]], [call["name"] for call in calls])
+        results = [{"type": "function_call_output", "call_id": call["call_id"], "output": "scoped receipt"}
+                   for call in calls]
+        continuation = LD03.normalize_request({"tools": tools, "input": [*restored, *results]})
+        self.assertEqual(continuation["input"], [*calls, *results])
+        self.assertEqual(self.gateway.gate.snapshot()["observed_total_tokens"], 41)
+
+    def test_ld03_rejects_schema_changes_before_counting(self):
+        self.setup_gateway(60, {}, {}, llama_ld03=True)
+        changed = codex_ld03_namespace()
+        changed["tools"][1]["description"] = "Write any value anywhere"
+        self.assertEqual(self.post("ld03", tools=[changed])[0], 400)
+        self.assertEqual(self.mock.events, [])
+
+    def test_ld03_rejects_out_of_contract_completed_arguments(self):
+        call = {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "bench_set_shared_values"}
+        bad = (
+            '{"accent":"#136b62","spacing_px":true}', '{"accent":"#136b62","spacing_px":20.0}',
+            '{"accent":"#136b62","spacing_px":-1}', '{"accent":"#136b62","spacing_px":129}',
+            '{"accent":"#136b62","spacing_px":20,"extra":0}', '{"accent":"#136b62","spacing_px":20,"spacing_px":21}',
+            '{"accent":"red","spacing_px":20}', '{"spacing_px":20}',
+        )
+        for arguments in bad:
+            with self.subTest(arguments=arguments), self.assertRaisesRegex(ValueError, "JSON|schema"):
+                LD03.restore_event({"type": "response.output_item.done", "item": {**call, "arguments": arguments}},
+                                   enabled=True)
+        self.assertEqual(CANARY.normalize_request({"tools": [codex_ld03_namespace()]})["tools"], [])
+        self.assertEqual(LD03.normalize_request({"tools": []})["tools"], [])
 
     def test_llama_bridge_drops_hallucinated_tool_but_drains_usage(self):
         unsupported = {"type": "response.output_item.done", "item": {
