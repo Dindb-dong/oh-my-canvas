@@ -35,6 +35,33 @@ async function rpc(service,session,method,params={}){const response=await fetch(
 function native(external){return 'doc_'+external.replaceAll('-','');}
 
 try{
+ await test('conditional snapshot skips unchanged revisions and sees edits from another session',async()=>{
+  const service=await start(join(temporary,'conditional-snapshot'));
+  try{
+   const {sessionId:reader}=await rpc(service,null,'session.open');
+   const {sessionId:editor}=await rpc(service,null,'session.open');
+   const original=await rpc(service,reader,'workspace.create',{title:'Before'});
+   const documentId=original.id;
+   const revision={epoch:original.epoch,sequence:original.sequence};
+   const snapshot=params=>rpc(service,reader,'document.snapshot',{documentId,...params});
+   assert.deepEqual(await snapshot(),original);
+   assert.equal(await snapshot({ifRevision:revision}),null);
+   assert.deepEqual(await snapshot({ifRevision:{...revision,epoch:'other'}}),original);
+   await assert.rejects(snapshot({ifRevision:{epoch:revision.epoch}}),{code:'invalid_argument'});
+
+   await rpc(service,editor,'workspace.open',{documentId});
+   await rpc(service,editor,'document.command',{envelope:{
+    protocol:'omc.engine/1',requestId:'rename',documentId,targetEpoch:revision.epoch,
+    idempotencyKey:'rename',preconditions:{basis:'latest'},
+    command:{type:'document.rename',title:'After'}
+   }});
+   const updated=await snapshot({ifRevision:revision});
+   assert.equal(updated.title,'After');
+   assert.notEqual(updated.sequence,original.sequence);
+   assert.equal(await snapshot({ifRevision:{epoch:updated.epoch,sequence:updated.sequence}}),null);
+  }finally{await stop(service);}
+ });
+
  await test('legacy HTTPS SDK calls persist pinned identity and real edits across restarts',async()=>{
   const profile=join(temporary,'legacy-https');
   let service=await start(profile,['--legacy-mcp-port','0']);
