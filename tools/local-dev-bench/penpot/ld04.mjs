@@ -62,7 +62,7 @@ function guard(fileId) {
 export function seedResponsive(plan, fileId) {
   return `${guard(fileId)}
   if (root.children.length) throw new Error("Expected blank synthetic baseline");
-  const font = penpot.fonts.findByName("Inter");
+  const font = penpot.fonts.all.find(candidate => candidate.name === "Inter");
   if (!font) throw new Error("Fixture Inter face is unavailable");
   const shapes = new Map();
   for (const node of ${JSON.stringify(plan.nodes)}) {
@@ -73,6 +73,7 @@ export function seedResponsive(plan, fileId) {
       shape.fontSize = String(node.font_size);
       shape.lineHeight = "1";
       shape.growType = "fixed";
+      shape.verticalAlign = "center";
     } else {
       shape.clipContent = false;
     }
@@ -184,14 +185,34 @@ export function readResponsive(fileId) {
   return {document_id:penpot.currentFile.id,nodes,styles};`;
 }
 
-export function selectCanvas(fileId, canvasId) {
+export function verifyWidthSelection(fileId, canvasId) {
   assert.match(canvasId,idPattern);
   return `${guard(fileId)}
   const [canvas] = root.children;
   if (root.children.length !== 1 || canvas.id !== ${JSON.stringify(canvasId)} || keyOf(canvas) !== "canvas" ||
-      canvas.flex?.horizontalSizing !== "fix" || canvas.proportionLock) throw new Error("Wrong native width target");
-  penpot.selection = [canvas];
+      canvas.flex?.horizontalSizing !== "fix" || canvas.proportionLock || penpot.selection.length !== 1 ||
+      penpot.selection[0].id !== canvas.id) throw new Error("Wrong native width target or inspector selection");
   return canvas.id;`;
+}
+
+async function widthInspector(page, execute, fileId, canvasId, evidence) {
+  const panel = page.locator('section[aria-label="shape-measures-section"]');
+  const field = panel.locator('input[aria-label="Width"], [title="Width"] input').filter({visible:true});
+  try {
+    // Select the same native layer through the editor sidebar so the inspector updates with it.
+    const layer = page.locator(`span#layer-name-${canvasId}`);
+    assert.equal(await layer.textContent({timeout:5000}),marker+'canvas');
+    await layer.click({timeout:5000});
+    await field.waitFor({state:'visible',timeout:5000});
+    assert.equal(await execute(verifyWidthSelection(fileId,canvasId)),canvasId);
+    assert.ok(await field.isEnabled(),'The native Width input is disabled');
+    return field;
+  } catch (error) {
+    evidence.width_inspector_diagnostics = await page.locator('section[aria-label="shape-measures-section"]')
+      .locator('input').evaluateAll(inputs => inputs.map(input => ({label:input.getAttribute('aria-label'),
+        parentTitle:input.parentElement?.getAttribute('title'),disabled:input.disabled,visible:input.getClientRects().length > 0})));
+    throw error;
+  }
 }
 
 async function capture(execute, id, width) {
@@ -271,9 +292,9 @@ async function replay(origin, fixture, plan, output) {
     const {opened:copy,id:copyId} = await duplicateFromDashboard(editor,context,origin,fileName);
     assert.notEqual(copyId,id);
     evidence.probe = await capture(execute,copyId,1440);
+    phase = 'open width-only inspector for the verified duplicate canvas';
     const copyCanvas = evidence.probe.nodes.find(node => node.key === 'canvas');
-    assert.equal(await execute(selectCanvas(copyId,copyCanvas.native_id)),copyCanvas.native_id);
-    const widthField = copy.locator('input[aria-label="Width"], [title="Width"] input').filter({visible:true});
+    const widthField = await widthInspector(copy,execute,copyId,copyCanvas.native_id,evidence);
     for (const width of plan.widths) {
       phase = `change only the width of the native duplicate (step ${evidence.probe_actions.length+1})`;
       await widthField.fill(String(width));

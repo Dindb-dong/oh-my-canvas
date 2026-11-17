@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import test from 'node:test';
 import {runInNewContext} from 'node:vm';
-import {adaptResponsive,planResponsive,readResponsive,seedResponsive,selectCanvas} from './ld04.mjs';
+import {adaptResponsive,planResponsive,readResponsive,seedResponsive,verifyWidthSelection} from './ld04.mjs';
 
 const fileId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const canvasId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
@@ -54,9 +54,9 @@ function workspace() {
   }
   return {
     currentFile:{id:fileId,pages:['p']},currentPage:{root},
-    fonts:{findByName:() => ({id:'inter-pinned',applyToText:text => {
+    fonts:{all:[{name:'Inter Tight'}, {name:'Inter',id:'inter-pinned',applyToText:text => {
       text.fontId = 'inter-pinned'; text.fontFamily = 'Inter';
-    }})},
+    }}]},
     createText:text => shape('text',text),createBoard:() => shape('board'),
     library:{local:{colors:[],typographies:[]}},
   };
@@ -79,15 +79,18 @@ test('native layout and visibility readback preserve identity without inventing 
   assert.equal(after.get('card/0').min_width,230);
   assert.equal(after.get('card/0').max_width,360);
   assert.equal(after.get('card/0').basis_width,null);
-  assert.equal(execute(selectCanvas(fileId,canvasId),app),canvasId);
-  const [canvas] = app.selection;
+  const [canvas] = app.currentPage.root.children;
+  app.selection = [];
+  assert.throws(() => execute(verifyWidthSelection(fileId,canvasId),app),/Wrong native width target/);
+  app.selection = [canvas];
+  assert.equal(execute(verifyWidthSelection(fileId,canvasId),app),canvasId);
   assert.equal(canvas.flex.verticalSizing,'auto');
   const collection = canvas.children.find(node => node.name === 'LD04 collection');
   const line = collection.children[0].children[0];
   line.x = canvas.x + canvas.width + 10;
   assert.equal(execute(readResponsive(fileId),app).nodes.find(row => row.native_id === line.id).fully_visible,false);
   canvas.proportionLock = true;
-  assert.throws(() => execute(selectCanvas(fileId,canvasId),app),/Wrong native width target/);
+  assert.throws(() => execute(verifyWidthSelection(fileId,canvasId),app),/Wrong native width target/);
   app.currentFile.id = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
   assert.throws(() => execute(readResponsive(fileId),app),/Wrong isolated LD04 file/);
 });
