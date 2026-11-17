@@ -9,7 +9,7 @@ const fixture = JSON.parse(execFileSync('python3', [
 const file = {fileId: 'synthetic-original', name: 'OMC Benchmark • Synthetic CAP Probe • 2026-11-17'};
 const plan = atlasPlan(fixture, file, 'test-atlas-01');
 const ids = key => 'native/' + key;
-const paperKind = {frame: 'Frame', text: 'Text', rectangle: 'Rectangle'};
+const paperKind = {frame: 'Frame', text: 'Text', rectangle: 'Frame'};
 
 function mock(snapshot, {unknownBounds = false} = {}) {
   const pages = plan.pages.map(row => ({name: row.name, id: ids(row.key)}));
@@ -83,6 +83,7 @@ test('captures all 1,000 layers and detects identity and unrelated data drift', 
   const before = await captureAtlas(original.read,fixture,plan);
   const candidate = await captureAtlas(after.read,fixture,plan);
   assert.equal(before.snapshot.nodes.length,1000);
+  assert.equal(before.snapshot.nodes.filter(row=>row.kind==='rectangle'&&row.native_type==='Frame'&&row.radius===4).length,160);
   assert.equal(before.missingBounds.length,0);
   assert.equal(original.calls.filter(name=>name==='get_node_info').length,1000);
   assert.deepEqual(before.snapshot.selected_native_ids,[]);

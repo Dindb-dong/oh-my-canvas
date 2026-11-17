@@ -7,6 +7,10 @@ const escapes = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#
 const escape = value => value.replace(/[&<>"']/g, symbol => escapes[symbol]);
 const callWith = (read, fileId) => (name, args = {}) => read({name, arguments: {...args, fileId}});
 const kind = {Frame: 'frame', Text: 'text', Rectangle: 'rectangle'};
+function atlasKind(row) {
+  if (row.name === 'marker' && row.component === 'Frame' && row.childCount === 0) return 'rectangle';
+  return kind[row.component];
+}
 
 function prepared(fixture) {
   assert.equal(fixture.workload, 'LD02');
@@ -89,7 +93,7 @@ export async function discoverAtlasEdit(read, plan, brief) {
   assert.equal(station.childCount, 5);
   const {children} = await call('get_children', {nodeId: section.id});
   const status = children.filter(row => row.name === 'status' && row.component === 'Text');
-  const marker = children.filter(row => row.name === 'marker' && row.component === 'Rectangle');
+  const marker = children.filter(row => row.name === 'marker' && atlasKind(row) === 'rectangle');
   assert.equal(status.length, 1);
   assert.equal(marker.length, 1);
   return {
@@ -129,7 +133,7 @@ export async function captureAtlas(read, fixture, plan) {
       const {children} = await call('get_children', {nodeId: parentId});
       assert.equal(children.length, siblingSpecs.length, 'Incomplete or extra children in Paper page');
       const matches = await Promise.all(siblingSpecs.map(async spec => {
-        const matching = children.filter(row => row.name === spec.name && kind[row.component] === spec.kind);
+        const matching = children.filter(row => row.name === spec.name && atlasKind(row) === spec.kind);
         assert.equal(matching.length, 1, `Unidentified or replaced layer ${spec.key}`);
         const layer = await call('get_node_info', {nodeId: matching[0].id});
         assert.equal(layer.id, matching[0].id);
@@ -151,12 +155,16 @@ export async function captureAtlas(read, fixture, plan) {
     for (const [id,{layer,spec,logicalParent,order}] of observed) {
       const css = computed[id];
       assert.ok(css, `Missing native computed style for ${spec.key}`);
+      if (spec.kind === 'rectangle') {
+        assert.match(css.backgroundColor ?? '', /^#[0-9a-f]{6}$/i);
+        assert.notEqual(px(css.borderRadius), null, `Missing native radius for ${spec.key}`);
+      }
       const bounds = [layer.worldX,layer.worldY,layer.width,layer.height];
       const hasBounds = bounds.every(value => typeof value === 'number' && Number.isFinite(value));
       if (!hasBounds) missingBounds.push(spec.key);
       nodes.push({
         key: spec.key, native_id: id, name: layer.name, page: page.key, parent: logicalParent,
-        kind: kind[layer.component], editable: layer.isLocked === false && layer.isVisible === true, bounds: hasBounds ? bounds : null,
+        kind: atlasKind(layer), native_type: layer.component, editable: layer.isLocked === false && layer.isVisible === true, bounds: hasBounds ? bounds : null,
         ...(spec.order === undefined ? {} : {order}),
         ...(spec.text === undefined ? {} : {text: layer.textContent}),
         ...(spec.fill === undefined ? {} : {fill: css.backgroundColor?.toLowerCase()}),

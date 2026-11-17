@@ -19,7 +19,12 @@ Pass a file-scoped Paper MCP reader such as `withPaper` to
 `discoverAtlasEdit` and `captureAtlas`. Discovery performs two exact
 text queries on each registered page and confirms both matches share
 the same editable station. It emits the text request and the two
-native CSS property writes. The observer traverses each actual layer
+native CSS property writes. The installed importer produces a childless
+editable Paper Frame for the filled rounded marker. The adapter maps it
+to the neutral rectangle, retains `native_type: Frame`, and requires
+native fill and radius readback. The installed inventory has no direct
+rectangle-creation command.
+The observer traverses each actual layer
 tree and captures computed styles in batches of 25. The protected
 comparison checks the full normalized content and IDs, with the
 three edited fields and their expected downstream layout movement
