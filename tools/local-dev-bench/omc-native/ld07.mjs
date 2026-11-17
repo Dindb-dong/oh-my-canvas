@@ -26,11 +26,12 @@ const externalId = raw => {
 
 export function preparedBoard(fixture) {
   assert.equal(fixture.workload, 'LD07');
-  assert.equal(fixture.source_family_id, 'transit-departures');
+  assert.ok(['transit-departures', 'clinic-check-in'].includes(fixture.source_family_id));
+  const title = fixture.source_family_id === 'transit-departures' ? 'Transit departures' : 'Clinic check-in';
   const [root, shard] = [id('node', 1), id('shard', 1)];
   const {width, height} = fixture.viewport;
   const nodes = {[root]: {id: root, kind: 'frame', parentId: null, homeShard: shard, rank: rank(1),
-    properties: {name: 'Transit departures', width, height}}};
+    properties: {name: title, width, height}}};
   const parents = new Map();
   const counts = new Map();
   for (const [index, row] of fixture.expected.nodes.entries()) {
@@ -46,7 +47,7 @@ export function preparedBoard(fixture) {
     if (row.parent === 'board/flow') properties.style = {'flex-shrink': 0};
     if (row.kind === 'text') Object.assign(properties, {
       text: row.text, fontFamily: 'Inter', fontSize: row.key === 'board/title' ? 20 : 12,
-      fill: /\/(service|notice)\/label$/.test(row.key) ? '#ffffff' : '#273549',
+      fill: /\/(service(?:-mirror)?|notice)\/label$/.test(row.key) ? '#ffffff' : '#273549',
     });
     if (row.layout) {
       assert.equal(row.layout, 'horizontal');
@@ -60,8 +61,8 @@ export function preparedBoard(fixture) {
       homeShard: shard, rank: rank(ordinal), properties};
     parents.set(row.key, {id: child, left, top});
   }
-  return {title: 'Synthetic LD07 transit departures', nodes, metadata: {},
-    pages: [{id: id('page', 1), title: 'Transit departures', rootNodeId: root, rank: rank(1)}]};
+  return {title: 'Synthetic LD07 ' + title.toLowerCase(), nodes, metadata: {},
+    pages: [{id: id('page', 1), title, rootNodeId: root, rank: rank(1)}]};
 }
 
 function scopedNodes(snapshot) {
@@ -75,17 +76,31 @@ export function proposedCommands(snapshot, operations, nativeByStyle) {
   const styleByNative = new Map([...nativeByStyle].map(([name, native]) => [native, name]));
   const observed = [];
   const commands = operations.map(operation => {
-    assert.equal(operation.collection, 'nodes');
+    const {collection, key, field, to} = operation;
+    if (collection === 'styles') {
+      assert.equal(field, 'value');
+      const entityId = nativeByStyle.get(key);
+      const prefix = 'tokens/' + entityId + '/';
+      assert.equal(snapshot.metadata[prefix + 'name'], key);
+      const from = snapshot.metadata[prefix + 'value'];
+      assert.equal(from, operation.from);
+      const modes = snapshot.metadata[prefix + 'modes'];
+      assert.deepEqual(Object.values(modes), [from]);
+      const [mode] = Object.keys(modes);
+      assert.match(to, /^#[0-9a-f]{6}$/i);
+      observed.push({collection, key, field, from, to});
+      return {type: 'catalog.set', namespace: 'tokens', entityId, properties: {value: to, modes: {[mode]: to}}};
+    }
+    assert.equal(collection, 'nodes');
     const node = nodes.get(operation.key);
     const {layout, fill} = node.properties;
-    const field = operation.field;
     let from;
     let properties;
-    if (field === 'wrap') {
+    if (field === 'wrap' || field === 'gap') {
       assert.equal(layout.type, 'flex');
       assert.equal(layout.direction, 'row');
-      from = layout.wrap;
-      properties = {layout: {...layout, wrap: operation.to}};
+      from = layout[field];
+      properties = {layout: {...layout, [field]: to}};
     } else {
       assert.equal(field, 'bindings.fill');
       from = styleByNative.get(fill.$token);
@@ -241,7 +256,13 @@ async function run(fixture, report, signal, artifactDir) {
     const {value: after} = await rpc('document.snapshot', {documentId}, observer);
     const expected = structuredClone(snapshot);
     expected.sequence = receipt.revision.sequence;
-    for (const {nodeId, properties} of plan.commands) Object.assign(expected.nodes[nodeId].properties, properties);
+    for (const {type, nodeId, namespace, entityId, properties} of plan.commands) {
+      if (type === 'catalog.set') {
+        for (const [key, value] of Object.entries(properties)) expected.metadata[[namespace, entityId, key].join('/')] = value;
+      } else {
+        Object.assign(expected.nodes[nodeId].properties, properties);
+      }
+    }
     assert.deepEqual(after, expected, 'Only the two intended authored properties may change');
     return after;
   }
@@ -270,7 +291,8 @@ async function run(fixture, report, signal, artifactDir) {
         for (const child of layer.children ?? []) walk(child);
       }
       for (const layer of inspected.layers) walk(layer);
-      const {id: collection} = await command('variable.createCollection', {name: 'Departure color families'});
+      const collectionName = fixture.source_family_id === 'transit-departures' ? 'Departure color families' : 'Clinic color families';
+      const {id: collection} = await command('variable.createCollection', {name: collectionName});
       const ids = new Map();
       for (const style of fixture.expected.styles) {
         const variable = await command('variable.create', {collection, name: style.key, type: style.kind, value: style.value});
@@ -310,16 +332,25 @@ async function run(fixture, report, signal, artifactDir) {
       const scopes = scopedNodes(faulty);
       const full = await tool('get_tree', {depth: 7, detail: 'detailed'});
       const scoped = [];
-      for (const {key} of fixture.repair_actions) {
-        const actual = await tool('get_tree', {id: scopes.get(key).id, depth: 1, detail: 'detailed'});
-        assert.equal(actual.value.nodes[0].rawId, scopes.get(key).id);
-        assert.equal(String(actual.value.revision), String(faulty.sequence));
-        scoped.push({key, bytes: actual.bytes, properties: actual.value.nodes[0].properties});
-      }
-      report.readPayloadBytes = {wholeDocument: full.bytes, scoped: scoped.map(({key, bytes}) => ({key, bytes}))};
-      // Validate the two symptoms against scoped native reads before emitting the registered changes.
       const plan = proposedCommands(faulty, fixture.repair_actions, idOf);
-      for (const row of scoped) assert.deepEqual(row.properties, scopes.get(row.key).properties);
+      for (const {collection, key, from} of plan.observed) {
+        if (collection === 'styles') {
+          const actual = await tool('native_tokens', {version: '1', action: 'list'});
+          assert.deepEqual(actual.value.revision, {epoch: faulty.epoch, sequence: faulty.sequence});
+          const style = actual.value.items.find(item => item.id === idOf.get(key));
+          assert.equal(style.name, key);
+          assert.equal(style.value, from);
+          assert.deepEqual(Object.values(style.modes), [from]);
+          scoped.push({key, bytes: actual.bytes, scope: 'token-catalog'});
+        } else {
+          const actual = await tool('get_tree', {id: scopes.get(key).id, depth: 1, detail: 'detailed'});
+          assert.equal(actual.value.nodes[0].rawId, scopes.get(key).id);
+          assert.equal(String(actual.value.revision), String(faulty.sequence));
+          assert.deepEqual(actual.value.nodes[0].properties, scopes.get(key).properties);
+          scoped.push({key, bytes: actual.bytes, scope: 'node-subtree'});
+        }
+      }
+      report.readPayloadBytes = {wholeDocument: full.bytes, scoped};
       report.diagnoses = plan.observed.map(({to, ...observed}) => observed);
       return plan;
     });
