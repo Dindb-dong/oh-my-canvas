@@ -139,6 +139,7 @@ class ResponsesHandler(BaseHTTPRequestHandler):
     def relay_response(self, request_id, request):
         gate = self.server.gate
         ended, started, downstream_gone = False, False, False
+        issue = None
         try:
             with closing(self.server.connection()) as upstream:
                 response = self.server.post(upstream, CREATE_PATH, request)
@@ -179,13 +180,15 @@ class ResponsesHandler(BaseHTTPRequestHandler):
                             downstream_gone = True
                     if ended:
                         break
-        except (OSError, HTTPException, ValueError):
+        except (OSError, HTTPException, ValueError) as error:
+            issue = ("upstream socket timed out before terminal usage" if isinstance(error, TimeoutError)
+                     else f"upstream response interrupted before terminal usage ({type(error).__name__})")
             if not started and not downstream_gone:
                 self.reply_error(502, "upstream_response_unavailable")
         finally:
             if not ended:
                 outcome = "cancelled" if downstream_gone else "stream_ended"
-                gate.end_unmetered(request_id, outcome if started or downstream_gone else "transport_failed")
+                gate.end_unmetered(request_id, outcome if started or downstream_gone else "transport_failed", issue=issue)
 
 
 class ResponsesGateway(ThreadingHTTPServer):

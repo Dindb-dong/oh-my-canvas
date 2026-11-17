@@ -176,12 +176,12 @@ class BudgetGate:
                 return True
             return False
 
-    def end_unmetered(self, request_id, outcome):
+    def end_unmetered(self, request_id, outcome, *, issue=None):
         """Seal an EOF, transport failure or cancellation with no terminal provider meter."""
         if outcome not in ("cancelled", "stream_ended", "transport_failed"):
             raise ValueError("unexpected unmetered outcome")
         with self._lock:
-            self._finish(self._current(request_id), outcome, None)
+            self._finish(self._current(request_id), outcome, None, issue)
 
     def _current(self, request_id):
         if self._active is None or self._active.request_id != request_id:

@@ -102,6 +102,15 @@ class GatewayTest(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 ResponsesGateway(12345, 40, upstream_timeout=invalid)
 
+    def test_provider_stream_timeout_keeps_its_specific_metering_failure(self):
+        self.setup_gateway(40, {"slow": 20}, {"slow": b""}, pause=True, upstream_timeout=1)
+        self.addCleanup(self.mock.continue_generation.set)
+        self.assertEqual(self.post("slow"), (200, b""))
+        ledger = self.gateway.gate.snapshot()
+        self.assertFalse(ledger["usage_complete"])
+        self.assertEqual(ledger["requests"][0]["outcome"], "stream_ended")
+        self.assertEqual(ledger["requests"][0]["issue"], "upstream socket timed out before terminal usage")
+
     def test_llama_bridge_reprojects_the_observed_namespace_and_preserves_call_identity(self):
         call = {"type": "function_call", "id": "fc_1", "call_id": "call_1",
                 "name": LLAMA_NAME, "arguments": "{ }", "status": "completed"}
