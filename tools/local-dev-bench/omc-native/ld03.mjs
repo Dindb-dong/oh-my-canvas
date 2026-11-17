@@ -79,13 +79,7 @@ export async function seedLD03(api, fixture, plan) {
   for (let i = 0; i < cardIds.length; i += 8) {
     await api.run('layout.add', {ids: cardIds.slice(i, i + 8), direction: 'vertical'});
   }
-  for (const {key, field, value} of plan.overrides) {
-    if (field !== 'gap') continue;
-    const id = ids.get(key);
-    const {layout} = await api.call('get_node', {id, depth: 0});
-    assert.equal(layout.direction, 'column');
-    await api.call('set_properties', {ids: [id], props: {layout: {...layout, gap: value}}});
-  }
+  await api.literalGaps(id, plan.overrides.filter(row => row.field === 'gap'));
   const {id: collection} = await api.run('variable.createCollection', {name: 'LD03 shared values'});
   const variableIds = new Map();
   for (const {style, field, keys} of plan.bindingGroups) {
@@ -263,11 +257,11 @@ async function runLD03(fixture, plan, report) {
     await client.connect(transport, {signal, timeout: 10_000});
     assert.ok(transport.sessionId);
   }
-  async function rpc(method, documentId) {
+  async function rpc(method, documentId, args = {}) {
     const response = await fetch(url('/rpc'), {
       method: 'POST',
       headers: {...headers(), 'Content-Type': 'application/json', 'X-OMC-Session': transport.sessionId},
-      body: JSON.stringify({id: randomUUID(), method, params: {documentId: storedId(documentId)}}),
+      body: JSON.stringify({id: randomUUID(), method, params: {documentId: storedId(documentId), ...args}}),
       signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
     });
     const payload = await response.json();
@@ -279,7 +273,30 @@ async function runLD03(fixture, plan, report) {
     assert.ok(!result.isError, `${args.command ?? name}: ${result.content[0]?.text}`);
     return result.structuredContent ?? JSON.parse(result.content[0].text);
   }
+  async function literalGaps(documentId, overrides) {
+    const snapshot = await rpc('document.snapshot', documentId);
+    assert.equal(snapshot.id, storedId(documentId));
+    const commands = overrides.map(({key, value}) => {
+      const nodes = Object.values(snapshot.nodes).filter(node => node.properties.name === marker + key);
+      assert.equal(nodes.length, 1);
+      const [node] = nodes;
+      const {layout} = node.properties;
+      assert.equal(layout.type, 'flex');
+      assert.equal(layout.direction, 'column');
+      return {type: 'node.set', nodeId: node.id, properties: {layout: {...layout, gap: value}}};
+    });
+    const {epoch, sequence} = snapshot;
+    const requestId = randomUUID();
+    const receipt = await rpc('document.command', documentId, {envelope: {
+      protocol: 'omc.engine/1', documentId: snapshot.id, requestId, idempotencyKey: requestId,
+      targetEpoch: epoch, preconditions: {revision: {epoch, sequence}}, command: {type: 'batch', commands},
+    }});
+    assert.equal(receipt.status, 'durable');
+    assert.equal(receipt.revision.epoch, epoch);
+    assert.equal(BigInt(receipt.revision.sequence), BigInt(sequence) + 1n);
+  }
   const api = {
+    literalGaps,
     call, run: (command, params = {}) => call('run_command', {command, params}),
     bind: documentId => rpc('workspace.open', documentId),
     snapshot: documentId => rpc('document.snapshot', documentId),

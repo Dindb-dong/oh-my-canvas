@@ -26,13 +26,15 @@ test('both canonical LD03 variants keep four overrides out of the variable bindi
             created.set(id, args);
             return {id};
           }
-          case 'get_node':
-            return {layout: {type: 'flex', direction: 'column', gap: 42}};
-          case 'set_properties':
-            patched.set(args.ids[0], args.props.layout.gap);
-            return {ok: true};
           default:
             throw new Error(tool);
+        }
+      },
+      async literalGaps(documentId, overrides) {
+        assert.equal(documentId, variant);
+        for (const {key, field, value} of overrides) {
+          assert.equal(field, 'gap');
+          patched.set(key, value);
         }
       },
       async run(command, args) {
@@ -55,7 +57,7 @@ test('both canonical LD03 variants keep four overrides out of the variable bindi
     for (const override of plan.overrides) {
       const [id, node] = [...created].find(([, args]) => args.name === 'LD03 ' + override.key);
       assert.ok(!bound.has(`${id}:${override.field}`));
-      assert.equal(override.field === 'fill' ? node.props.fill : patched.get(id), override.value);
+      assert.equal(override.field === 'fill' ? node.props.fill : patched.get(override.key), override.value);
     }
     assert.deepEqual(plan.candidate.map(style => style.key), ['target.accent', 'target.spacing']);
     assert.deepEqual(plan.probe.map(style => style.key), ['target.accent', 'target.spacing']);
