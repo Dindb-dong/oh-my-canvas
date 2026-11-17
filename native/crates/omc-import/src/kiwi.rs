@@ -17,10 +17,31 @@ struct Definition {
     fields: Vec<Field>,
     tags: BTreeMap<u32, usize>,
 }
+#[derive(Debug, Clone)]
+pub(super) struct NonFiniteFloat {
+    pub schema_type: String,
+    pub field: String,
+    pub offset: usize,
+    pub bits: u32,
+}
+impl NonFiniteFloat {
+    pub fn kind(&self) -> &'static str {
+        if f32::from_bits(self.bits).is_nan() {
+            "NaN"
+        } else if self.bits >> 31 != 0 {
+            "negative infinity"
+        } else {
+            "positive infinity"
+        }
+    }
+}
 pub(super) struct Decoded {
     pub root: Value,
     pub arrays: Vec<Vec<u8>>,
     pub allocation: usize,
+    // Only actual wire float primitives can populate this provenance list. Never
+    // recognize a nonfinite float by matching a source object's member names.
+    pub nonfinite: Vec<NonFiniteFloat>,
 }
 impl Decoded {
     pub fn bytes(&self, value: &Value) -> Option<&[u8]> {
@@ -98,19 +119,16 @@ impl<'a> Reader<'a> {
         self.byte()?;
         Ok(value)
     }
-    fn float(&mut self) -> Result<f64, ImportError> {
+    fn float(&mut self) -> Result<f32, ImportError> {
         let first = self.byte()?;
         if first == 0 {
             return Ok(0.);
         }
         let tail = self.take(3)?;
         let bits = u32::from_le_bytes([first, tail[0], tail[1], tail[2]]).rotate_left(23);
-        let value = f32::from_bits(bits) as f64;
-        if value.is_finite() {
-            Ok(value)
-        } else {
-            Err(invalid("nonfinite Kiwi float"))
-        }
+        // IEEE NaN/infinity are valid Kiwi wire floats. Geometry/style validation
+        // happens in the FIG converter; keep the exact f32 bits until then.
+        Ok(f32::from_bits(bits))
     }
 }
 
@@ -159,6 +177,8 @@ fn decode_inner(
         allocation: 0,
         max_bytes,
         values: 0,
+        float_field: None,
+        nonfinite: Vec::new(),
     };
     let root = decoder.value(root as i32, 0)?;
     if decoder.reader.offset != message_bytes.len() {
@@ -168,6 +188,7 @@ fn decode_inner(
         root,
         arrays: decoder.arrays,
         allocation: decoder.allocation,
+        nonfinite: decoder.nonfinite,
     })
 }
 struct SchemaBudget {
@@ -268,8 +289,10 @@ struct Decoder<'a> {
     allocation: usize,
     max_bytes: usize,
     values: usize,
+    float_field: Option<(&'a str, &'a str)>,
+    nonfinite: Vec<NonFiniteFloat>,
 }
-impl Decoder<'_> {
+impl<'a> Decoder<'a> {
     fn charge(&mut self, bytes: usize) -> Result<(), ImportError> {
         self.allocation = self
             .allocation
@@ -302,6 +325,52 @@ impl Decoder<'_> {
         }
         Ok(Value::Array(values))
     }
+    fn named_field(
+        &mut self,
+        definition: &'a Definition,
+        field: &'a Field,
+        depth: usize,
+    ) -> Result<Value, ImportError> {
+        let previous = self.float_field.replace((&definition.name, &field.name));
+        let value = self.field(field, depth);
+        self.float_field = previous;
+        value
+    }
+    fn float_value(&mut self) -> Result<Value, ImportError> {
+        let offset = self.reader.offset;
+        let value = self.reader.float()?;
+        if value.is_finite() {
+            return Ok(json!(value as f64));
+        }
+        let bits = value.to_bits();
+        let (schema_type, field) = self.float_field.unwrap_or(("Message", "<root>"));
+        if self.nonfinite.len() == self.nonfinite.capacity() {
+            let previous = self.nonfinite.capacity();
+            let capacity = previous.saturating_mul(2).max(4);
+            self.charge(
+                (capacity - previous).saturating_mul(std::mem::size_of::<NonFiniteFloat>()),
+            )?;
+            self.nonfinite
+                .try_reserve_exact(capacity - self.nonfinite.len())
+                .map_err(|_| limit("Kiwi float provenance allocation failed"))?;
+            self.charge(
+                self.nonfinite
+                    .capacity()
+                    .saturating_sub(capacity)
+                    .saturating_mul(std::mem::size_of::<NonFiniteFloat>()),
+            )?;
+        }
+        self.charge(schema_type.len() + field.len() + "$kiwiFloatBits".len() + 64)?;
+        self.nonfinite.push(NonFiniteFloat {
+            schema_type: schema_type.into(),
+            field: field.into(),
+            offset,
+            bits,
+        });
+        // serde_json would silently turn nonfinite numbers into null. An explicit
+        // nonnumeric value keeps number() strict without losing the source bits.
+        Ok(json!({"$kiwiFloatBits":bits}))
+    }
     fn value(&mut self, kind: i32, depth: usize) -> Result<Value, ImportError> {
         self.values += 1;
         if depth > 128 || self.values > 16_000_000 {
@@ -313,7 +382,7 @@ impl Decoder<'_> {
                 -2 => Ok(json!(self.reader.byte()?)),
                 -3 => Ok(json!(self.reader.int()?)),
                 -4 => Ok(json!(self.reader.uint()?)),
-                -5 => Ok(json!(self.reader.float()?)),
+                -5 => self.float_value(),
                 -6 => {
                     let text = self.reader.string_ref()?;
                     self.charge(text.len() + 24)?;
@@ -345,7 +414,10 @@ impl Decoder<'_> {
         if definition.kind == 1 {
             for field in &definition.fields {
                 self.charge(field.name.len() + 64)?;
-                object.insert(field.name.clone(), self.field(field, depth + 1)?);
+                object.insert(
+                    field.name.clone(),
+                    self.named_field(definition, field, depth + 1)?,
+                );
             }
         } else {
             loop {
@@ -359,7 +431,10 @@ impl Decoder<'_> {
                     .and_then(|i| definition.fields.get(*i))
                     .ok_or_else(|| invalid("unknown Kiwi message field"))?;
                 self.charge(field.name.len() + 64)?;
-                object.insert(field.name.clone(), self.field(field, depth + 1)?);
+                object.insert(
+                    field.name.clone(),
+                    self.named_field(definition, field, depth + 1)?,
+                );
             }
         }
         Ok(Value::Object(object))
@@ -375,6 +450,82 @@ fn limit(message: &str) -> ImportError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn kiwi_wire_floats_preserve_ieee_bits_and_truncation_guards() {
+        // Golden exponent-first wire bytes from the upstream Kiwi readVarFloat
+        // contract. Its writer represents zero/denormals (including -0) as [0].
+        for (wire, bits) in [
+            (&[0][..], 0),
+            (&[0x7f, 0, 0, 0][..], 0x3f800000),
+            (&[0x7f, 1, 0, 0][..], 0xbf800000),
+            (&[0xff, 0, 0, 0][..], 0x7f800000),
+            (&[0xff, 1, 0, 0][..], 0xff800000),
+            (&[0xff, 0, 0, 0x80][..], 0x7fc00000),
+            (&[0xff, 0x68, 0x24, 0x80][..], 0x7fc01234),
+        ] {
+            let mut reader = Reader {
+                bytes: wire,
+                offset: 0,
+            };
+            assert_eq!(reader.float().unwrap().to_bits(), bits);
+            assert_eq!(reader.offset, wire.len());
+        }
+        assert!(matches!(
+            Reader {
+                bytes: &[0xff, 0, 0],
+                offset: 0
+            }
+            .float(),
+            Err(ImportError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn nonfinite_float_provenance_is_not_inferred_from_object_member_names() {
+        let float_schema = b"\x01Message\0\x02\x01n\0\x09\0\x01";
+        let decoded = decode(float_schema, &[1, 0xff, 0, 0, 0x80, 0], 4096).unwrap();
+        assert_eq!(decoded.root["n"], json!({"$kiwiFloatBits":0x7fc00000_u32}));
+        assert!(!decoded.root["n"].is_null());
+        assert_eq!(decoded.nonfinite.len(), 1);
+        let source = &decoded.nonfinite[0];
+        assert_eq!(
+            (
+                &*source.schema_type,
+                &*source.field,
+                source.offset,
+                source.bits
+            ),
+            ("Message", "n", 1, 0x7fc00000)
+        );
+        assert_eq!(source.kind(), "NaN");
+        assert!(matches!(
+            decode(float_schema, &[1, 0xff, 0, 0, 0x80, 0], 256),
+            Err(ImportError::ResourceLimit(_))
+        ));
+        let object_schema = b"\x01Message\0\x02\x01$kiwiFloatBits\0\x07\0\x01";
+        let mut message = vec![1];
+        let mut bits = 0x7fc00000_u32;
+        while bits >= 128 {
+            message.push((bits as u8 & 127) | 128);
+            bits >>= 7;
+        }
+        message.extend([bits as u8, 0]);
+        let object = decode(object_schema, &message, 4096).unwrap();
+        assert_eq!(object.root, decoded.root["n"]);
+        assert!(object.nonfinite.is_empty());
+    }
+
+    #[test]
+    fn nonfinite_array_elements_keep_the_declaring_field_context() {
+        let schema = b"\x01Message\0\x02\x01values\0\x09\x01\x01";
+        let message = [1, 2, 0x7f, 0, 0, 0, 0xff, 1, 0, 0, 0];
+        let decoded = decode(schema, &message, 4096).unwrap();
+        assert_eq!(decoded.root["values"][0], json!(1.));
+        assert_eq!(decoded.nonfinite.len(), 1);
+        assert_eq!(decoded.nonfinite[0].field, "values");
+        assert_eq!(decoded.nonfinite[0].offset, 6);
+        assert_eq!(decoded.nonfinite[0].kind(), "negative infinity");
+    }
     #[test]
     fn schema_checks_capacities_and_strings_before_materializing_them() {
         let mut definitions = vec![0x90, 0x4e]; // 10000 definitions

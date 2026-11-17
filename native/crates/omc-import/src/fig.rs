@@ -370,6 +370,7 @@ fn convert(
         diagnostics: Vec::new(),
         source_map: BTreeMap::new(),
     };
+    preserve_nonfinite_floats(decoded, &mut result, budget)?;
     for (index, canvas) in canvases.iter().enumerate() {
         let source = source_nodes[canvas];
         let name = source.get("name").and_then(Value::as_str).unwrap_or("Page");
@@ -780,16 +781,7 @@ fn visit(
         node_bytes(&node).saturating_sub(path_reservation) + id.len() + node.id.len() * 2 + 132,
     )?;
     for diagnostic in &result.diagnostics[diagnostic_start..] {
-        charge(
-            budget,
-            std::mem::size_of::<Diagnostic>()
-                + diagnostic.code.len()
-                + diagnostic.severity.len()
-                + diagnostic.node_id.as_ref().map_or(0, String::len)
-                + diagnostic.property.as_ref().map_or(0, String::len)
-                + diagnostic.original.len()
-                + diagnostic.action.len(),
-        )?;
+        charge(budget, diagnostic_bytes(diagnostic))?;
     }
     let target = node.id.clone();
     result
@@ -819,6 +811,104 @@ fn visit(
     active.remove(id);
     Ok(())
 }
+fn preserve_nonfinite_floats(
+    decoded: &super::kiwi::Decoded,
+    result: &mut ImportResult,
+    budget: Option<&Cell<usize>>,
+) -> Result<(), ImportError> {
+    if decoded.nonfinite.is_empty() {
+        return Ok(());
+    }
+    charge(
+        budget,
+        decoded
+            .nonfinite
+            .len()
+            .saturating_mul(std::mem::size_of::<Value>() + std::mem::size_of::<Diagnostic>())
+            + "figNonFiniteFloats".len()
+            + 64,
+    )?;
+    let mut provenance = Vec::with_capacity(decoded.nonfinite.len());
+    result
+        .diagnostics
+        .try_reserve_exact(decoded.nonfinite.len())
+        .map_err(|_| ImportError::ResourceLimit("FIG float diagnostic allocation failed".into()))?;
+    // Trust the decoder's private provenance, not an object-shaped marker that
+    // could also occur as a legitimate source schema message.
+    for source in &decoded.nonfinite {
+        let semantics = match source.field.as_str() {
+            "stackCounterSpacing" => "Counter-axis layout spacing semantics are unsupported",
+            "stackSpacing" => "Main-axis layout spacing semantics are unsupported",
+            _ => "Native semantics for this nonfinite source float are unsupported",
+        };
+        const CODE: &str = "unsupported_feature";
+        const SEVERITY: &str = "warning";
+        const ACTION: &str = "Preserved IEEE bits and source field in document metadata; no native numeric value was substituted";
+        let overflow =
+            || ImportError::ResourceLimit("FIG float provenance reservation overflow".into());
+        let names = source
+            .schema_type
+            .len()
+            .checked_add(source.field.len())
+            .ok_or_else(overflow)?;
+        // Precharge before any source-name formatting/cloning: two diagnostic
+        // strings (at most 2x their rendered size), one metadata copy of both
+        // names, static JSON map keys/slots, and fixed diagnostic strings.
+        // 128 bounds punctuation, kind, 8 hex digits and a usize offset's digits.
+        let fields = [
+            "schemaType",
+            "field",
+            "messageOffset",
+            "ieee754Bits",
+            "kind",
+        ];
+        let reserved = [
+            names.checked_mul(5).ok_or_else(overflow)?,
+            semantics.len().checked_mul(2).ok_or_else(overflow)?,
+            2 * ("fig-float:.".len() + 128),
+            fields.iter().map(|name| name.len() + 64).sum(),
+            CODE.len() + SEVERITY.len() + ACTION.len() + source.kind().len() + 16,
+        ]
+        .into_iter()
+        .try_fold(0usize, |sum, bytes| {
+            sum.checked_add(bytes).ok_or_else(overflow)
+        })?;
+        charge(budget, reserved)?;
+        result.diagnostics.push(Diagnostic {
+            code: CODE.into(),
+            severity: SEVERITY.into(),
+            node_id: None,
+            property: Some(format!("fig-float:{}.{}", source.schema_type, source.field)),
+            original: format!(
+                "{}.{}: {} (IEEE 0x{:08x}, message offset {}); {semantics}",
+                source.schema_type,
+                source.field,
+                source.kind(),
+                source.bits,
+                source.offset
+            ),
+            action: ACTION.into(),
+            fidelity_lost: true,
+        });
+        let record = json!({"schemaType":source.schema_type,"field":source.field,"messageOffset":source.offset,"ieee754Bits":format!("{:08x}",source.bits),"kind":source.kind()});
+        provenance.push(record);
+    }
+    result
+        .content
+        .metadata
+        .insert("figNonFiniteFloats".into(), Value::Array(provenance));
+    Ok(())
+}
+fn diagnostic_bytes(diagnostic: &Diagnostic) -> usize {
+    std::mem::size_of::<Diagnostic>()
+        + diagnostic.code.capacity()
+        + diagnostic.severity.capacity()
+        + diagnostic.node_id.as_ref().map_or(0, String::capacity)
+        + diagnostic.property.as_ref().map_or(0, String::capacity)
+        + diagnostic.original.capacity()
+        + diagnostic.action.capacity()
+}
+
 // Logical retained-allocation accounting, matching the decoder reservation model.
 // This guards materialized output as well as decoded input; it is not a process RSS cap.
 fn charge(budget: Option<&Cell<usize>>, bytes: usize) -> Result<(), ImportError> {
@@ -1239,6 +1329,147 @@ fn append_path_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn float_fixture(bits: u32) -> super::super::kiwi::Decoded {
+        super::super::kiwi::Decoded {
+            root: json!({"nodeChanges":[
+                {"guid":{"sessionID":1,"localID":1},"type":"CANVAS","name":"Page"},
+                {"guid":{"sessionID":1,"localID":2},"parentIndex":{"guid":{"sessionID":1,"localID":1},"position":"a"},"type":"RECTANGLE","name":"Rectangle","size":{"x":200,"y":100},"stackCounterSpacing":{"$kiwiFloatBits":bits}}
+            ]}),
+            arrays: Vec::new(),
+            allocation: 0,
+            nonfinite: vec![super::super::kiwi::NonFiniteFloat {
+                schema_type: "NodeChange".into(),
+                field: "stackCounterSpacing".into(),
+                offset: 7,
+                bits,
+            }],
+        }
+    }
+    fn convert_float_fixture(
+        decoded: &super::super::kiwi::Decoded,
+        strict: bool,
+    ) -> Result<ImportResult, ImportError> {
+        convert(
+            decoded,
+            &mut |_, _| Ok(None),
+            &"0".repeat(64),
+            106,
+            &ImportOptions {
+                strict,
+                ..Default::default()
+            },
+            None,
+        )
+    }
+    #[test]
+    fn long_float_source_names_reject_a_tiny_conversion_budget_before_copying() {
+        let mut decoded = float_fixture(0x7fc00000);
+        decoded.nonfinite[0].schema_type = "S".repeat(64 * 1024);
+        decoded.nonfinite[0].field = "F".repeat(64 * 1024);
+        let mut result = ImportResult {
+            content: DocumentContent {
+                title: "Budget check".into(),
+                pages: Vec::new(),
+                nodes: BTreeMap::new(),
+                metadata: BTreeMap::new(),
+            },
+            resources: Vec::new(),
+            diagnostics: Vec::new(),
+            source_map: BTreeMap::new(),
+        };
+        let budget = Cell::new(4096);
+        assert!(matches!(
+            preserve_nonfinite_floats(&decoded, &mut result, Some(&budget)),
+            Err(ImportError::ResourceLimit(_))
+        ));
+        assert!(result.diagnostics.is_empty());
+        assert!(result.content.metadata.is_empty());
+        assert!(
+            budget.get() > 3000,
+            "only fixed vector/map reservations should be charged"
+        );
+    }
+    #[test]
+    fn layout_nan_is_preserved_with_field_specific_fidelity_diagnostic() {
+        let decoded = float_fixture(0x7fc01234);
+        let preview = convert_float_fixture(&decoded, false).unwrap();
+        assert_eq!(preview.diagnostics.len(), 1);
+        assert_eq!(
+            preview.diagnostics[0].property.as_deref(),
+            Some("fig-float:NodeChange.stackCounterSpacing")
+        );
+        assert!(
+            preview.diagnostics[0]
+                .original
+                .contains("Counter-axis layout spacing semantics are unsupported")
+        );
+        assert!(preview.diagnostics[0].fidelity_lost);
+        assert_eq!(
+            preview.content.metadata["figNonFiniteFloats"][0]["ieee754Bits"],
+            "7fc01234"
+        );
+        assert_eq!(
+            preview.content.metadata["figNonFiniteFloats"][0]["messageOffset"],
+            7
+        );
+        let rectangle = &preview.content.nodes[&preview.source_map["fig:1:2"]];
+        assert_eq!(rectangle.properties["width"], 200.);
+        assert!(!rectangle.properties.contains_key("layout"));
+        assert!(
+            matches!(convert_float_fixture(&decoded, true), Err(ImportError::Unsupported(message)) if message.contains("NodeChange.stackCounterSpacing"))
+        );
+    }
+    #[test]
+    fn an_object_matching_the_private_marker_is_not_wire_float_provenance() {
+        let mut decoded = float_fixture(0x7fc00000);
+        decoded.nonfinite.clear();
+        let imported = convert_float_fixture(&decoded, true).unwrap();
+        assert!(imported.diagnostics.is_empty());
+        assert!(!imported.content.metadata.contains_key("figNonFiniteFloats"));
+    }
+    #[test]
+    fn nonfinite_geometry_and_paint_values_still_reject_in_preview() {
+        for (case, key) in [
+            (0, "x"),
+            (1, "m00"),
+            (2, "opacity"),
+            (3, "r"),
+            (4, "position"),
+            (5, "opacity"),
+        ] {
+            let mut decoded = float_fixture(0x7fc00000);
+            let source = &mut decoded.root["nodeChanges"][1];
+            source
+                .as_object_mut()
+                .unwrap()
+                .remove("stackCounterSpacing");
+            let marker = json!({"$kiwiFloatBits":0x7fc00000_u32});
+            match case {
+                0 => source["size"]["x"] = marker,
+                1 => source["transform"] = json!({"m00":marker}),
+                2 => source["opacity"] = marker,
+                3 => {
+                    source["fillPaints"] =
+                        json!([{"type":"SOLID","color":{"r":marker,"g":0,"b":0,"a":1}}])
+                }
+                4 => {
+                    source["fillPaints"] = json!([{"type":"GRADIENT_LINEAR","stops":[{"position":marker,"color":{"r":0,"g":0,"b":0,"a":1}},{"position":1,"color":{"r":1,"g":1,"b":1,"a":1}}]}])
+                }
+                5 => source["fillPaints"] = json!([{"type":"SOLID","opacity":marker}]),
+                _ => unreachable!(),
+            }
+            assert!(
+                matches!(convert_float_fixture(&decoded, false), Err(ImportError::Invalid(message)) if message.contains(&format!("nonfinite/invalid FIG {key}"))),
+                "case {case}"
+            );
+        }
+        let mut path = vec![1];
+        path.extend(f32::INFINITY.to_le_bytes());
+        path.extend(0_f32.to_le_bytes());
+        assert!(
+            matches!(path_bytes(&path), Err(ImportError::Invalid(message)) if message == "nonfinite FIG path")
+        );
+    }
     #[test]
     fn repeated_geometry_stops_at_the_shared_output_reservation() {
         let mut bytes = vec![4];
