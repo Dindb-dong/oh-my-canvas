@@ -138,7 +138,7 @@ function concat(parts, field) {
   return ordered.flatMap(part => part[field]);
 }
 
-function normalizeSnapshot(raw, assets, keys) {
+export function normalizeSnapshot(raw, assets, keys) {
   const { document_id, page_id, node_count, styles } = decode(raw.header);
   assert.equal(typeof document_id, 'string', 'Missing Figma file identity');
   assert.equal(typeof page_id, 'string', 'Missing Figma page identity');
