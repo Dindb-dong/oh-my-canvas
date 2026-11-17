@@ -22,7 +22,7 @@ Do not replace this statement with an unqualified claim that OMC is always faste
 
 ## 2. Reading and implementation order
 
-This directory specifies a study and the collector work needed to run it. It does **not** contain a completed cross-product runner or measured comparative results.
+This directory specifies a study and the remaining collector work. The [runner guide](RUNNING.md) documents attempt capture, scheduling, and deterministic diagnostics. The confirmatory comparison still requires qualified collectors and scored workloads.
 
 | Document | Read it to answer |
 | --- | --- |
