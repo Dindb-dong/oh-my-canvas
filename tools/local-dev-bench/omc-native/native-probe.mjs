@@ -13,6 +13,7 @@ import {makeFixture, targetNodeName} from './fixture.mjs';
 import {historySchedule, measureHistory} from './history.mjs';
 import {collectDesktopTrace, measureRendering} from './rendering.mjs';
 import {contentionSchedule, measureContention} from './contention.mjs';
+import {measureAcknowledgedRecovery} from './recovery.mjs';
 
 const {values} = parseArgs({options: {
   experiment: {type: 'string'},
@@ -31,13 +32,14 @@ const {experiment} = values;
 const isHistory = experiment === 'N-C';
 const isRendering = experiment === 'N-D';
 const isContention = ['N-E', 'LD08'].includes(experiment);
+const isRecovery = experiment === 'N-H';
 const desktop = values.desktop ?? (isRendering || isContention ? 'attached' : 'headless');
-const nodeCount = Number(values.nodes ?? (isHistory ? 17 : isRendering || isContention ? 1000 : NaN));
+const nodeCount = Number(values.nodes ?? (isHistory ? 17 : isRendering || isContention || isRecovery ? 1000 : NaN));
 const depth = Number(values.depth);
 const sampleCount = Number(values.samples);
 const cssRules = Number(values['css-rules']);
-assert.ok(['N-A', 'N-B', 'N-C', 'N-D', 'N-E', 'LD08'].includes(experiment),
-  '--experiment must be N-A, N-B, N-C, N-D, N-E or LD08');
+assert.ok(['N-A', 'N-B', 'N-C', 'N-D', 'N-E', 'N-H', 'LD08'].includes(experiment),
+  '--experiment must be N-A, N-B, N-C, N-D, N-E, N-H or LD08');
 assert.ok(isHistory ? nodeCount === 17 : [1000, 10000, 100000].includes(nodeCount) || (experiment === 'N-B' && nodeCount === 100),
   '--nodes must be 1000, 10000, 100000, 100 for the N-B baseline, or 17 for N-C');
 assert.ok([1, 32].includes(depth), '--depth must be 1 or 32');
@@ -53,6 +55,8 @@ assert.ok(isContention || (values['ui-docs'] === undefined && values['background
   '--ui-docs and --background-streams are specific to N-E/LD08');
 assert.ok(!isContention || (desktop === 'attached' && nodeCount === 1000 && depth === 1),
   'N-E/LD08 uses the fixed 1,000-node depth-1 fixture and the isolated background desktop');
+assert.ok(!isRecovery || (desktop === 'headless' && nodeCount === 1000 && depth === 1 && process.platform !== 'win32'),
+  'N-H uses the fixed 1,000-node headless fixture and POSIX process groups');
 const uiDocs = Number(values['ui-docs'] ?? 1);
 const streams = Number(values['background-streams'] ?? 0);
 assert.ok([1, 5, 10].includes(uiDocs), '--ui-docs must be 1, 5 or 10');
@@ -63,7 +67,9 @@ assert.ok(Number.isInteger(historyEdits) && historyEdits >= 0 && historyEdits <=
   '--history-edits must be an even number from 0 through 100000');
 assert.ok(['concentrated', 'distributed'].includes(historyPlacement), '--history-shape must be concentrated or distributed');
 
-let {document, summary} = makeFixture({experiment: isRendering || isContention ? 'N-A' : experiment, nodeCount, depth, cssRules});
+let {document, summary} = makeFixture({
+  experiment: isRendering || isContention || isRecovery ? 'N-A' : experiment, nodeCount, depth, cssRules,
+});
 let input = JSON.stringify(document);
 const expectedCss = document.metadata.css;
 const authoredShapes = isHistory
@@ -122,6 +128,11 @@ if (isContention) {
   report.unavailable.serviceQueueWaitMs = 'Only client offer, dispatch, and response times are observed per request.';
   report.unavailable.assetResidency = 'The qualification fixture contains geometry only.';
 }
+if (isRecovery) {
+  report.unavailable.otherCrashPhases = 'This diagnostic injects process death after an acknowledged durable edit.';
+  report.unavailable.networkAndConvergence = 'No product network interruption or other replicas in this case.';
+  report.unavailable.powerLoss = 'SIGKILL of the task-owned service group is not OS or power failure.';
+}
 
 async function hashFile(path) {
   const hash = createHash('sha256');
@@ -173,7 +184,9 @@ async function run() {
 
     async function startService() {
       const startup = performance.now();
-      service = spawn(serviceBinary, ['--profile', profile, '--port', '0'], {stdio: ['ignore', 2, 2]});
+      service = spawn(serviceBinary, ['--profile', profile, '--port', '0'], {
+        stdio: ['ignore', 2, 2], detached: isRecovery,
+      });
       await once(service, 'spawn');
       let descriptor;
       while (!descriptor && performance.now() - startup < 10_000) {
@@ -286,6 +299,10 @@ async function run() {
     report.stages.workspaceOpen = workspaceOpen;
     assert.equal(initial.pages.length, summary.pageCount);
     assert.equal(Object.keys(initial.nodes).length, summary.documentNodeCount);
+    if (isRecovery) {
+      await measureAcknowledgedRecovery({rpc, crashAndRestart, documentId, report});
+      return;
+    }
     if (isHistory) {
       await measureHistory({
         rpc, restart, signal, profile, documentId, sessionId, initial, authoredShapes, report,
@@ -373,11 +390,24 @@ async function run() {
       report.stages.gracefulShutdownMs = performance.now() - started;
       report.stages.restartedServiceDescriptorMs = await startService();
     }
+
+    async function crashAndRestart() {
+      assert.ok(isRecovery && service.pid > 1 && service.exitCode === null && service.signalCode === null);
+      const killedAt = performance.now();
+      const exited = once(service, 'exit');
+      process.kill(-service.pid, 'SIGKILL');
+      const [, exitSignal] = await exited;
+      assert.equal(exitSignal, 'SIGKILL');
+      const killedMs = performance.now() - killedAt;
+      await client.close();
+      client = undefined;
+      return {killAndExitMs: killedMs, restartedDescriptorMs: await startService(), signal: exitSignal};
+    }
   } finally {
     try {
       await Promise.all([stop(window), client?.close(), renderingClient?.close()]);
     } finally {
-      await stop(service, isHistory ? 'SIGINT' : 'SIGTERM');
+      await stop(service, isHistory || isRecovery ? 'SIGINT' : 'SIGTERM');
       await rm(profile, {recursive: true, force: true, maxRetries: 10});
     }
   }

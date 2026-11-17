@@ -1,5 +1,13 @@
 # Native stage diagnostics
 
+For the acknowledged-edit recovery qualification, run
+`node tools/local-dev-bench/omc-native/native-probe.mjs --experiment N-H`.
+The headless case uses a new profile and its own POSIX service group. It
+checks durable Undo/Redo, then terminates the group immediately after a new
+durable receipt, reopens the original document, retries the exact request
+under the same task-local principal, and checks PNG export. No system,
+power, pre-acknowledgment, network, or replica fault is injected in this case.
+
 The probe uses the installed release service and optionally opens the synthetic document in an unfocused background desktop. It uses a temporary profile and removes it after stopping the task-owned processes. Use `OMC_BENCH_BIN_DIR` to select a different directory containing `omc-service` and `omc-desktop`. The report includes binary and fixture SHA-256 values.
 
 ```sh
