@@ -10,14 +10,17 @@ import {setTimeout as delay} from 'node:timers/promises';
 
 import {fixture, target as edit} from './ld02-fixture.mjs';
 import {Client, StreamableHTTPClientTransport} from './mcp.mjs';
+import {openPhaseSampler} from './phase-sampler.mjs';
 
 const binaryDir = process.env.OMC_BENCH_BIN_DIR ?? '/Applications/Oh My Canvas.app/Contents/MacOS';
 const serviceBinary = join(binaryDir, 'omc-service');
 const desktopBinary = join(binaryDir, 'omc-desktop');
 const [mode, extra] = process.argv.slice(2);
-assert.ok(extra === undefined && [undefined, '--agent'].includes(mode), 'Usage: node omc-ld02.mjs [--agent]');
+assert.ok(extra === undefined && [undefined, '--agent', '--resource-replay'].includes(mode),
+  'Usage: node omc-ld02.mjs [--agent | --resource-replay]');
+const resourceReplay = mode === '--resource-replay';
 const outputDir = process.env.OMC_BENCH_OUTPUT_DIR;
-assert.ok(mode !== '--agent' || outputDir, '--agent requires the runner output directory');
+assert.ok(!mode || outputDir, 'Agent and resource modes require the runner output directory');
 await Promise.all([access(serviceBinary, constants.X_OK), access(desktopBinary, constants.X_OK)]);
 
 const id = (type, n) => `${type}_${BigInt(n).toString(16).padStart(32, '0')}`;
@@ -64,6 +67,7 @@ for (const event of ['SIGTERM', 'SIGINT']) {
 const {signal} = cancellation;
 let service;
 let desktop;
+let sampler;
 
 async function runAgent(endpoint, token) {
   const directory = join(profile, 'agent');
@@ -160,7 +164,7 @@ try {
   const external = documentId.slice(4).replace(/^(........)(....)(....)(....)(............)$/, '$1-$2-$3-$4-$5');
   desktop = spawn(desktopBinary, [
     '--profile', profile, '--automation-background',
-    ...(mode === '--agent' ? [] : ['--smoke-exit-ms', '30000']),
+    ...(mode ? [] : ['--smoke-exit-ms', '30000']),
   ], {stdio: 'inherit'});
   await once(desktop, 'spawn');
   for (let attempt = 0; attempt < 40; attempt++) {
@@ -174,6 +178,13 @@ try {
   await rpc('workspace.open', {documentId}, sessionId);
   const snapshot = () => rpc('document.snapshot', {documentId}, sessionId);
 
+  if (resourceReplay) {
+    sampler = await openPhaseSampler(join(outputDir, 'product-resources'));
+    await sampler.send({command: 'start', root_pids: [service.pid, desktop.pid]});
+    await sampler.send({command: 'baseline'});
+    await delay(60_000, undefined, {signal});
+    await sampler.send({command: 'replay'});
+  }
   const started = performance.now();
   const baseline = await snapshot();
   assert.equal(baseline.pages.length, fixture.pages.length);
@@ -248,19 +259,27 @@ try {
   await rpc('workspace.close', {documentId}, sessionId);
   const reopened = await rpc('workspace.open', {documentId}, sessionId);
   assert.deepEqual(reopened.nodes, after.nodes);
+  const verifiedWorkMs = performance.now() - started;
+  if (resourceReplay) {
+    await sampler.send({command: 'tail', replay_complete: true});
+    await delay(30_000, undefined, {signal});
+    await sampler.send({command: 'stop', tail_complete: true});
+  }
 
   console.log(JSON.stringify({
     workload: fixture.workload,
     measurement: mode === '--agent' ? 'model-assisted-diagnostic' : 'deterministic-replay',
+    ...(resourceReplay && {resourceEvidence: 'product-resources'}),
     editReadbackMs,
     ...(undoRedoVerified
-      ? {serviceSaveUndoRedoReopenMs: performance.now() - started}
+      ? {serviceSaveUndoRedoReopenMs: verifiedWorkMs}
       : {agentSaveRebindMs: performance.now() - started, undoRedoVerified}),
     logicalObjects: fixture.logicalObjects,
     pages: fixture.pages.length,
     changed: changed.length,
   }));
 } finally {
+  await sampler?.close().catch(() => {});
   await client.close().catch(() => {});
   for (const child of [desktop, service]) {
     if (child?.pid && child.exitCode === null && child.signalCode === null) {
