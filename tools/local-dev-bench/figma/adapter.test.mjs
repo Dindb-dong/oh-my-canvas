@@ -126,6 +126,7 @@ for (const [workload, variant] of [
       assert.equal(result.status, 0, result.stderr);
       const fixture = JSON.parse(result.stdout);
       const plan = makePlan(fixture, 'original', 'copy', assets);
+      assert.ok(plan.candidate.code.length <= 50_000, 'Generated plan exceeds the remote Figma MCP limit');
       assert.throws(() => makePlan(fixture, 'original', 'original', assets), /separate copy/);
       if (workload === 'LD03') {
         const colliding = structuredClone(fixture);

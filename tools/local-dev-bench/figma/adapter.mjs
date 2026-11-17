@@ -8,12 +8,15 @@ import { inspect, mutate, seed } from './plugin.mjs';
 const readSkill = 'resource:figma-use';
 const nodeChunk = 24;
 const imageChunk = 4096;
+const maxCodeLength = 50_000;
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
 function payload(description, operation, input, write = false) {
+  const code = `return await (${operation.toString()})(figma, ${JSON.stringify(input)});`;
+  assert.ok(code.length <= maxCodeLength, `${description} exceeds Figma MCP's ${maxCodeLength}-character code limit`);
   return {
     description,
-    code: `return await (${operation.toString()})(figma, ${JSON.stringify(input)});`,
+    code,
     skillNames: write ? `${readSkill},resource:figma-generate-design` : readSkill,
   };
 }
@@ -57,7 +60,9 @@ function plannedNodes(workload, start) {
       const slot = parent?.key === 'board' ? index - 1 : index;
       localBounds = [12 + slot % 4 * 348, 44 + Math.floor(slot / 4) * 526, 336, 520];
     }
-    return { ...node, localBounds, flows, lightText: node.kind === 'text' && Boolean(parent?.fill) };
+    const { key, kind, parent: parentKey, layout, gap, fill, bindings, font_size, text, asset_rgba_sha256 } = node;
+    return { key, kind, parent: parentKey, layout, gap, fill, bindings, font_size, text, asset_rgba_sha256, localBounds,
+      flows: flows || undefined, lightText: (kind === 'text' && Boolean(parent?.fill)) || undefined };
   });
 }
 
