@@ -17,7 +17,10 @@ def command(*argv):
 
 def sha256(path):
     with path.open("rb") as file:
-        return hashlib.file_digest(file, "sha256").hexdigest()
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+        return digest.hexdigest()
 
 
 def app_info(path):

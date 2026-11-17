@@ -84,7 +84,10 @@ def candidate_hash(path):
     if path.is_symlink() or not path.is_file():
         return None
     with path.open("rb") as file:
-        return hashlib.file_digest(file, "sha256").hexdigest()
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+        return digest.hexdigest()
 
 
 def run(manifest, output):
