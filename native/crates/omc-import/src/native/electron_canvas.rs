@@ -287,8 +287,8 @@ fn add_layer(
             "electronComponentRef".into(),
             json!({
                 "sourceId":source_id,
-                "overrides":source.get("overrides"),
-                "isInstanceRoot":source.get("isInstanceRoot")
+                "overrides":component_value("overrides"),
+                "isInstanceRoot":component_value("isInstanceRoot")
             }),
         );
     }
@@ -471,5 +471,25 @@ mod tests {
             text.properties["textRuns"][0]["attributes"]["lineHeight"],
             "24px"
         );
+    }
+    #[test]
+    fn imports_exported_component_extension_and_array_overrides() {
+        let input = json!({
+            "editorPages": [{"id":"page"}],
+            "editorComponents": {"main":{"mainId":"main","name":"Main"}},
+            "pages": [
+                {"id":"main","type":"frame","width":100,"height":100},
+                {"id":"copy","type":"frame","x":150,"width":100,"height":100,
+                 "editorComponent":{"sourceId":"main","overrides":["paint"],"isInstanceRoot":true}}
+            ]
+        });
+        let imported = import(&input, &ImportOptions::default()).unwrap();
+        let copy = &imported.content.nodes[&imported.source_map["electron:page:copy"]];
+        let link = &copy.properties["electronComponentLink"];
+        assert_eq!(link["root"], true);
+        assert_eq!(link["nodeId"], imported.source_map["electron:page:main"]);
+        for key in ["x", "y", "fills", "strokes"] {
+            assert!(link["fields"].get(key).is_none());
+        }
     }
 }

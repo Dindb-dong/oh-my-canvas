@@ -176,6 +176,13 @@ pub fn layout(
             },
         );
     }
+    if order
+        .iter()
+        .map(|id| &snapshot.nodes[id])
+        .any(|node| electron::resized(node, "width") || electron::resized(node, "height"))
+    {
+        electron::center_absolute_children(snapshot, &order, &mut boxes);
+    }
     for id in &order {
         if let Some(style) = styles.get(id) {
             diagnostics.extend(style.diagnostics.iter().cloned());

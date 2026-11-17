@@ -1,7 +1,8 @@
-use super::{alignment, content_alignment, placement, tracks};
-use omc_model::Node;
+use super::{LayoutBox, alignment, content_alignment, placement, tracks};
+use omc_model::{DocumentSnapshot, Node};
 use omc_style::{LengthContext, resolve_length};
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
 use taffy::prelude::*;
 
 pub(super) fn rules(node: &Node) -> &Value {
@@ -212,9 +213,6 @@ pub(super) fn apply(
                 continue;
             }
             let Some(before) = old.as_f64() else { continue };
-            let Some(after) = parent.properties.get(axis).and_then(Value::as_f64) else {
-                continue;
-            };
             let mode = data[format!("{constraint}Constraint")]
                 .as_str()
                 .or_else(|| data["constraints"][constraint].as_str());
@@ -234,7 +232,6 @@ pub(super) fn apply(
                     *position = auto();
                     *opposite = length((before - start - extent) as f32);
                 }
-                Some("center") => *position = length((start + (after - before) / 2.) as f32),
                 Some("stretch" | "leftAndRight" | "topAndBottom") => {
                     *length_target = auto();
                     *opposite = length((before - start - extent) as f32);
@@ -314,6 +311,73 @@ pub(super) fn apply(
     }
 }
 
+pub(super) fn center_absolute_children(
+    snapshot: &DocumentSnapshot,
+    order: &[String],
+    boxes: &mut BTreeMap<String, LayoutBox>,
+) {
+    let mut active = BTreeSet::new();
+    for id in order {
+        let node = &snapshot.nodes[id];
+        let parent_active = node
+            .parent_id
+            .as_ref()
+            .is_some_and(|id| active.contains(id));
+        if parent_active || resized(node, "width") || resized(node, "height") {
+            active.insert(id);
+        }
+        let Some(parent) = node
+            .parent_id
+            .as_ref()
+            .and_then(|id| snapshot.nodes.get(id))
+            .filter(|_| parent_active)
+        else {
+            continue;
+        };
+        let data = rules(node);
+        if flows(parent) && data["absolute"] != true && data["layoutPositioning"] != "absolute" {
+            continue;
+        }
+        let Some(parent_box) = boxes.get(&parent.id).copied() else {
+            continue;
+        };
+        let Some(child) = boxes.get_mut(id) else {
+            continue;
+        };
+        let original = &rules(parent)["original"];
+        for (coordinate, axis, anchor, mode, solved, target) in [
+            (
+                "x",
+                "width",
+                "left",
+                "horizontal",
+                parent_box.width,
+                &mut child.x,
+            ),
+            (
+                "y",
+                "height",
+                "top",
+                "vertical",
+                parent_box.height,
+                &mut child.y,
+            ),
+        ] {
+            let constraint = data[format!("{mode}Constraint")]
+                .as_str()
+                .or_else(|| data["constraints"][mode].as_str());
+            if constraint == Some("center")
+                && data["inlineStyles"][anchor].is_null()
+                && let Some(previous) = original[axis].as_f64()
+                && let Some(start) = node.properties.get(coordinate).and_then(Value::as_f64)
+            {
+                // The parent's resolved size can come from fill or hug instead of its authored size.
+                *target = start + (solved - previous) / 2.;
+            }
+        }
+    }
+}
+
 fn padding(layout: &Value) -> [f32; 4] {
     let input = &layout["padding"];
     if let Some(value) = input.as_f64() {
@@ -333,7 +397,7 @@ fn padding(layout: &Value) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use omc_model::{DocumentContent, DocumentSnapshot, NodeKind};
+    use omc_model::{DocumentContent, NodeKind};
     use serde_json::json;
 
     #[test]
@@ -377,6 +441,24 @@ mod tests {
             [80, 7, 12, 12],
             json!({"original":{"width":12,"height":12},"absolute":true,"horizontalConstraint":"right"}),
         );
+        let parent = doc.nodes.get_mut(&fill).unwrap();
+        parent.kind = NodeKind::Frame;
+        parent.properties.get_mut("electronLayout").unwrap()["layout"] =
+            json!({"type":"flex","direction":"column"});
+        let mut centered = Node::new(NodeKind::Rect);
+        centered.parent_id = Some(fill.clone());
+        centered.properties.extend([
+            ("x".into(), json!(12)),
+            ("y".into(), json!(0)),
+            ("width".into(), json!(10)),
+            ("height".into(), json!(10)),
+            (
+                "electronLayout".into(),
+                json!({"absolute":true, "horizontalConstraint":"center"}),
+            ),
+        ]);
+        let centered_id = centered.id.clone();
+        doc.nodes.insert(centered_id.clone(), centered);
         let board_id = board.id.clone();
         doc.nodes.insert(board_id.clone(), board);
         let mut snapshot = DocumentSnapshot {
@@ -407,5 +489,6 @@ mod tests {
             (40., 20., 115.)
         );
         assert_eq!((after[&absolute].x, after[&absolute].y), (140., 7.));
+        assert_eq!((before[&centered_id].x, after[&centered_id].x), (12., 42.));
     }
 }

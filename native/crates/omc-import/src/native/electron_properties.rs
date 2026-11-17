@@ -212,8 +212,13 @@ pub(super) fn link_components(doc: &Value, import: &mut ImportResult) {
                         &data["overrides"],
                         data["isInstanceRoot"] == true,
                     );
-                    link["sourceChildren"] =
-                        json!(children.get(&source.id).map(Vec::as_slice).unwrap_or(&[]));
+                    if !["childIds", "componentId", "mainComponent"]
+                        .into_iter()
+                        .any(|field| omc_model::electron::has_override(&data["overrides"], field))
+                    {
+                        link["sourceChildren"] =
+                            json!(children.get(&source.id).map(Vec::as_slice).unwrap_or(&[]));
+                    }
                     link
                 });
             Some((node.id.clone(), link))

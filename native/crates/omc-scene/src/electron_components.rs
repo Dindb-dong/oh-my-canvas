@@ -138,9 +138,11 @@ fn resolve(
                 if current.is_null() {
                     projected.properties.remove(*field);
                 } else {
-                    projected
-                        .properties
-                        .insert((*field).into(), current.clone());
+                    let mut value = current.clone();
+                    if *field == "electronLayout" && value.is_object() && local.is_object() {
+                        value["original"] = local["original"].clone();
+                    }
+                    projected.properties.insert((*field).into(), value);
                 }
             }
         }
@@ -219,10 +221,18 @@ mod tests {
         let mut source = Node::new(NodeKind::Rect);
         source.properties.insert("fill".into(), json!("#ff0000"));
         source.properties.insert("width".into(), json!(50));
+        source.properties.insert(
+            "electronLayout".into(),
+            json!({"layout":{"padding":0},"original":{"width":50}}),
+        );
         let mut instance = Node::new(NodeKind::Rect);
+        instance.properties.insert(
+            "electronLayout".into(),
+            json!({"layout":{"padding":0},"original":{"width":55}}),
+        );
         instance.properties.insert("fill".into(), json!("#ff0000"));
         instance.properties.insert("width".into(), json!(55));
-        let link = component_link(&source, &instance, &json!({"width":true}), false);
+        let link = component_link(&source, &instance, &json!(["width"]), false);
         instance
             .properties
             .insert("electronComponentLink".into(), link);
@@ -261,6 +271,20 @@ mod tests {
             .properties
             .insert("fill".into(), json!("#00ff00"));
         assert!(project(&snapshot).is_none());
+        snapshot
+            .nodes
+            .get_mut(&source_id)
+            .unwrap()
+            .properties
+            .get_mut("electronLayout")
+            .unwrap()["layout"]["padding"] = json!(20);
+        let rendered = project(&snapshot).unwrap();
+        assert_eq!(
+            rendered.nodes[&instance_id].properties["electronLayout"],
+            json!({
+                "layout":{"padding":20},"original":{"width":55}
+            })
+        );
     }
     #[test]
     fn component_structure_reflows_through_preserved_instance_tree() {
