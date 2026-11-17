@@ -13,7 +13,7 @@ import {makeFixture, targetNodeName} from './fixture.mjs';
 import {historySchedule, measureHistory} from './history.mjs';
 import {collectDesktopTrace, measureRendering} from './rendering.mjs';
 import {contentionSchedule, measureContention} from './contention.mjs';
-import {measureAcknowledgedRecovery} from './recovery.mjs';
+import {measureAcknowledgedRecovery, measureImportCrash} from './recovery.mjs';
 
 const {values} = parseArgs({options: {
   experiment: {type: 'string'},
@@ -27,6 +27,7 @@ const {values} = parseArgs({options: {
   'ui-docs': {type: 'string'},
   'background-streams': {type: 'string'},
   'drop-receipt': {type: 'boolean'},
+  'crash-import': {type: 'boolean'},
   'fixture-only': {type: 'boolean', default: false},
 }});
 const {experiment} = values;
@@ -59,6 +60,8 @@ assert.ok(!isContention || (desktop === 'attached' && nodeCount === 1000 && dept
 assert.ok(!isRecovery || (desktop === 'headless' && nodeCount === 1000 && depth === 1 && process.platform !== 'win32'),
   'N-H uses the fixed 1,000-node headless fixture and POSIX process groups');
 assert.ok(isRecovery || !values['drop-receipt'], '--drop-receipt is specific to N-H');
+assert.ok(!values['crash-import'] || (isRecovery && !values['drop-receipt']),
+  '--crash-import is a separate N-H fault boundary');
 const uiDocs = Number(values['ui-docs'] ?? 1);
 const streams = Number(values['background-streams'] ?? 0);
 assert.ok([1, 5, 10].includes(uiDocs), '--ui-docs must be 1, 5 or 10');
@@ -131,7 +134,9 @@ if (isContention) {
   report.unavailable.assetResidency = 'The qualification fixture contains geometry only.';
 }
 if (isRecovery) {
-  report.unavailable.otherCrashPhases = 'Pre-commit and background-work crash boundaries are unmeasured.';
+  report.unavailable.otherCrashPhases = values['crash-import']
+    ? 'The exact storage commit boundary is not observed by this job-state fault.'
+    : 'Pre-commit and background-work crash boundaries are unmeasured.';
   report.unavailable.networkAndConvergence = 'No product network interruption or other replicas in this case.';
   report.unavailable.powerLoss = 'SIGKILL of the task-owned service group is not OS or power failure.';
 }
@@ -306,6 +311,17 @@ async function run() {
     assert.equal(initial.pages.length, summary.pageCount);
     assert.equal(Object.keys(initial.nodes).length, summary.documentNodeCount);
     if (isRecovery) {
+      if (values['crash-import']) {
+        const {document} = makeFixture({experiment: 'N-A', nodeCount: 100000, depth: 1, cssRules: 0});
+        document.title = 'Synthetic interrupted import';
+        const payload = JSON.stringify(document);
+        const filePath = join(profile, 'background-import.json');
+        await writeFile(filePath, payload, {mode: 0o600});
+        report.interruptedImportFixture = {nodes: 100000, bytes: Buffer.byteLength(payload),
+          sha256: createHash('sha256').update(payload).digest('hex')};
+        await measureImportCrash({rpc, call, crashAndRestart, filePath, baseline: initial, report, signal});
+        return;
+      }
       const dropReceipt = values['drop-receipt'] ? async (envelope, session) => {
         const started = performance.now();
         const response = await request('document.command', {envelope}, session, 120_000);

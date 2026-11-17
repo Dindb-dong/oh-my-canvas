@@ -67,3 +67,9 @@ Both verify the recovered full snapshot and exact idempotent replay under the
 same durable principal. The lost-receipt fault observes a specific
 post-commit transport boundary. Pre-commit, power failure and replication need
 separate checks.
+
+Add `--crash-import` instead to wait for a deterministic 100,000-node native
+import to report an active job phase and then kill its isolated service group.
+The fresh service must reopen the unchanged original 1,000-node document and
+contain no second document. This fault observes job state at the client; it
+does not directly trace the exact storage commit boundary.

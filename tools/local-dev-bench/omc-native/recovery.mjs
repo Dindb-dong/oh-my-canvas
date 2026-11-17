@@ -1,6 +1,36 @@
 import assert from 'node:assert/strict';
 import {createHash, randomUUID} from 'node:crypto';
+import {setTimeout as delay} from 'node:timers/promises';
 import {targetNodeName} from './fixture.mjs';
+
+export async function measureImportCrash({rpc, call, crashAndRestart, filePath, baseline, report, signal}) {
+  const evidence = {boundary: 'running-background-import', polls: []};
+  report.recovery = evidence;
+  const {jobId} = await call('native_job', {
+    version: '1', action: 'submit', kind: 'import',
+    arguments: {format: 'json', filePath},
+  });
+  assert.match(jobId, /^job_/);
+  const start = performance.now();
+  while (true) {
+    const {state, progress} = await call('native_job', {version: '1', action: 'status', jobId});
+    evidence.polls.push({state, phase: progress?.phase ?? null, elapsedMs: performance.now() - start});
+    if (state === 'running' && progress?.phase && progress.phase !== 'queued') break;
+    assert.ok(['running', 'queued'].includes(state), 'Import became terminal before active fault boundary');
+    assert.ok(performance.now() - start < 5_000, 'No active background import observed within the deadline');
+    await delay(20, undefined, {signal});
+  }
+  evidence.crashAndRestart = await crashAndRestart();
+  const {result: {sessionId}} = await rpc('session.open');
+  const {result: {documents}} = await rpc('workspace.list', {}, sessionId);
+  evidence.reopenedCatalogCount = documents.length;
+  assert.deepEqual(documents.map(document => document.id), [baseline.id], 'Unexpected persistent import staging document');
+  const {result: reopened} = await rpc('workspace.open', {documentId: baseline.id}, sessionId);
+  for (const field of ['id', 'epoch', 'sequence', 'title', 'nodes', 'pages', 'metadata']) {
+    assert.deepEqual(reopened[field], baseline[field], `Existing document changed after interrupted import: ${field}`);
+  }
+  evidence.existingDocumentVerified = {nodes: Object.keys(reopened.nodes).length, revision: reopened.sequence};
+}
 
 export async function measureAcknowledgedRecovery({rpc, crashAndRestart, dropReceipt, documentId, report}) {
   const result = {boundary: dropReceipt ? 'response-headers-before-caller-receipt' : 'after-durable-receipt'};

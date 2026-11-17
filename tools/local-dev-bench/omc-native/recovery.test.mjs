@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {measureAcknowledgedRecovery} from './recovery.mjs';
+import {measureAcknowledgedRecovery, measureImportCrash} from './recovery.mjs';
 
 function mock({loseEdit = false} = {}) {
   const report = {};
@@ -72,4 +72,42 @@ test('N-H verifies exactly-once recovery without recording an unconsumed receipt
   assert.equal(fault.applicationReceiptConsumed, false);
   assert.equal(lastDurable, undefined);
   assert.equal(idempotentRetransmission, true);
+});
+
+test('N-H checks only a running import and rejects a staging document after restart', async () => {
+  const baseline = {id: 'original', epoch: 'e', sequence: '10', nodes: {root: {}}};
+  let staging = false;
+  let crashed = false;
+  const args = {
+    baseline, filePath: '/tmp/synthetic-only.json', report: {},
+    async call(name, {action, arguments: request}) {
+      assert.equal(name, 'native_job');
+      if (action === 'submit') {
+        assert.deepEqual(request, {format: 'json', filePath: '/tmp/synthetic-only.json'});
+        return {jobId: 'job_fixture'};
+      }
+      assert.equal(action, 'status');
+      assert.equal(crashed, false);
+      return {state: 'running', progress: {phase: 'import'}};
+    },
+    async crashAndRestart() {
+      crashed = true;
+      return {signal: 'SIGKILL'};
+    },
+    async rpc(method) {
+      assert.ok(crashed);
+      if (method === 'session.open') return {result: {sessionId: 'new'}};
+      if (method === 'workspace.list') {
+        return {result: {documents: staging ? [baseline, {id: 'unwanted'}] : [baseline]}};
+      }
+      assert.equal(method, 'workspace.open');
+      return {result: baseline};
+    },
+  };
+  await measureImportCrash(args);
+  assert.equal(args.report.recovery.existingDocumentVerified.nodes, 1);
+  assert.equal(args.report.recovery.polls[0].phase, 'import');
+  staging = true;
+  crashed = false;
+  await assert.rejects(measureImportCrash(args), /Unexpected persistent import staging document/);
 });
