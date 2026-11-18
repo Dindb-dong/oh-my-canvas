@@ -5,7 +5,8 @@ import {mkdtemp,readFile,realpath,rm,writeFile,copyFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
-import {spawn} from 'node:child_process';
+import {execFile,spawn} from 'node:child_process';
+import {promisify} from 'node:util';
 import {createServer,connect as connectSocket} from 'node:net';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createMcpFetch} from './support/mcp-fetch.mjs';
@@ -355,6 +356,21 @@ try{
     const text=(await author.call('create_shape',{...doc,type:'text',x:95,y:420,width:90,height:20,properties:{text:'Editable curve label'}})).rawIds[0];
     const path=(await author.call('create_shape',{...doc,type:'ellipse',x:120,y:560,width:340,height:150})).rawIds[0];
     await author.call('edit_text',{...doc,id:text,action:'path_attach',pathId:path});
+    const font=await author.call('fonts',{...doc,family:'Inter'});
+    assert.equal(font.source,'bundled');
+    assert.ok(font.styles.length);
+    await author.call('guides',{...doc,action:'add',ownerId:foreground,offset:42});
+    const shapes=[];
+    for(const x of [310,350])shapes.push((await author.call('create_shape',{
+     ...doc,type:'rect',x,y:320,width:80,height:50,properties:{fills:[{type:'solid',color:'#223355'}]},
+    })).rawIds[0]);
+    const builder=(action,args={})=>author.call('shape_builder',{...doc,action,ids:shapes,...args});
+    const regionPreview=await builder('regions');
+    assert.equal(regionPreview.regions.length,3);
+    const overlap=regionPreview.regions.find(region=>region.sources.length===2);
+    assert.deepEqual(overlap.bounds,[350,320,40,50]);
+    const merged=await builder('merge',{regions:[overlap.index],revision:regionPreview.revision});
+    assert.equal(merged.receipt.status,'durable');
     const table=await author.call('board',{...doc,action:'create_table',x:310,y:30,cells:[['Step','Owner'],['Draft','Ada']]});
     await author.call('board',{...doc,action:'set_table_cell',id:table.id,row:1,column:0,text:'Reviewed'});
     const map=await author.call('board',{...doc,action:'create_mind_map',x:620,y:50,topics:[
@@ -389,10 +405,22 @@ try{
     const specification=await handoff('inspect',{language:'react',styleKeys:['width']});
     assert.equal(specification.annotations[0].label,'Motion review');
     assert.ok(specification.code);
+    const comments=(action,args={})=>author.call('native_comments',{...doc,version:'1',action,...args});
+    const {cursor}=await comments('changes');
+    const thread=await comments('create',{nodeId:moving,body:'Review motion spacing'});
+    const changes=await comments('changes',{cursor});
+    assert.equal(changes.events.length,1);
+    assert.equal(changes.events[0].kind,'comment.added');
+    const isolated=await comments('changes',{documentId:seeded.documentId,cursor});
+    assert.equal(isolated.reset,true);
+    assert.deepEqual(isolated.events,[]);
 
     const motion=(action,args={})=>author.call('native_motion',{...doc,version:'1',action,...args});
     await motion('set_track',{nodeId:moving,property:'translateX',keyframes:[{timeMs:0,value:0},{timeMs:1000,value:95}]});
+    const plain=await motion('sample',{frameId:foreground,timeMs:0});
+    await motion('set_shader',{nodeId:moving,shader:{kind:'stripes',colors:['#E8193A','#223355'],periodPx:8,phasePx:0,speedPxPerSecond:20}});
     const initial=await motion('sample',{frameId:foreground,timeMs:0});
+    assert.notEqual(plain.sha256,initial.sha256);
     const midpoint=await motion('sample',{frameId:foreground,timeMs:500});
     assert.equal(Buffer.from(midpoint.base64,'base64').subarray(1,4).toString(),'PNG');
     assert.notEqual(initial.sha256,midpoint.sha256);
@@ -404,6 +432,15 @@ try{
      const video=await motion('export_video',{frameId:foreground,durationMs:1000,fps:4,filePath});
      assert.equal(video.frameCount,4);
      assert.equal((await readFile(filePath)).subarray(4,8).toString(),'ftyp');
+     const decoder=process.env.OMC_MOTION_FFMPEG;
+     if(decoder){
+      const {stdout}=await promisify(execFile)(decoder,[
+       '-hide_banner','-loglevel','error','-i',filePath,'-f','rawvideo','-pix_fmt','rgb24','pipe:1',
+      ],{encoding:'buffer'});
+      const frameBytes=initial.width*initial.height*3;
+      assert.equal(stdout.length,4*frameBytes);
+      assert.equal(stdout.subarray(0,frameBytes).equals(stdout.subarray(3*frameBytes)),false);
+     }
     }
     await author.call('save_document',{id:documentId});
     await author.call('workspace',{...doc,action:'close'});
@@ -413,6 +450,11 @@ try{
     const tree=await reviewer.call('get_tree',{...doc,detail:'detailed'});
     assert.equal(tree.nodes.find(node=>node.rawId===text).properties.textPath.sourceId,path);
     assert.ok(tree.nodes.some(node=>node.text==='Reviewed'));
+    assert.equal(tree.nodes.find(node=>node.rawId===merged.id).kind,'path');
+    const guides=await reviewer.call('guides',{...doc,action:'list',ownerId:foreground});
+    assert.deepEqual(guides.guides,[{vertical:true,offset:42}]);
+    const review=await reviewer.call('native_comments',{...doc,version:'1',action:'get_thread',threadId:thread.id});
+    assert.equal(review.thread.body,'Review motion spacing');
     const reopenedMap=await reviewer.call('board',{...doc,action:'inspect_mind_map',id:map.id});
     assert.equal(reopenedMap.topics.find(topic=>topic.id===detail.id).connectorId,detail.connectorId);
     assert.ok(tree.nodes.some(node=>node.text==='Decisions'));
