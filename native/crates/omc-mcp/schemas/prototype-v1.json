@@ -1,6 +1,6 @@
 {
   "name": "prototype",
-  "description": "Inspect prototype starts and a layer's interactions, create or rename a flow, and connect a layer to a different frame on click. Uses an explicit documentId and the session's selected page. Existing advanced click behavior is protected.",
+  "description": "Author and inspect prototype flows and interactions on the selected page of an explicit document. Attached desktop presentation is available when the workspace has an attached desktop.",
   "inputSchema": {
     "type": "object",
     "required": ["documentId", "action"],
@@ -9,11 +9,26 @@
       "documentId": { "type": "string", "minLength": 1, "maxLength": 128 },
       "action": {
         "type": "string",
-        "enum": ["inspect", "set_flow", "remove_flow", "set_navigation", "remove_navigation"],
-        "description": "inspect returns start frames and, with sourceId, the specified layer's interactions. set_flow and remove_flow require frameId. set_navigation requires sourceId and destinationId. remove_navigation requires sourceId."
+        "enum": ["inspect", "set_flow", "remove_flow", "set_navigation", "remove_navigation", "set_interactions", "preview_playback", "show_preview", "present", "close_preview"],
+        "description": "inspect returns start frames and, with sourceId, the specified layer's interactions. set_flow and remove_flow require frameId. set_navigation requires sourceId and destinationId. remove_navigation requires sourceId. set_interactions replaces that source layer’s interactions, including triggers, transitions and ordered actions; use an empty array to clear. Navigation and overlay action dest fields use native layer IDs. preview_playback requires frameId, accepts ordered events and untilMs, and optionally renders the final frame and overlay separately. show_preview and present require frameId and an attached desktop; close_preview exits the attached preview."
       },
       "frameId": { "type": "string", "minLength": 1, "maxLength": 128 },
       "sourceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+      "interactions": { "type": "array", "maxItems": 64, "items": { "type": "object" } },
+      "events": {
+        "type": "array", "maxItems": 100,
+        "items": {
+          "type": "object", "required": ["atMs"], "additionalProperties": false,
+          "properties": {
+            "atMs": { "type": "integer", "minimum": 0, "maximum": 600000 },
+            "sourceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "trigger": { "type": "string", "enum": ["onClick","onHover","onPress","onDrag","mouseEnter","mouseLeave","mouseDown","mouseUp","keyPress"] },
+            "key": { "type": "string", "minLength": 1, "maxLength": 100 }
+          }
+        }
+      },
+      "untilMs": { "type": "integer", "minimum": 0, "maximum": 600000 },
+      "render": { "type": "boolean" },
       "destinationId": { "type": "string", "minLength": 1, "maxLength": 128 },
       "name": { "type": "string", "minLength": 1, "maxLength": 400 },
       "description": { "type": "string", "maxLength": 10000 }

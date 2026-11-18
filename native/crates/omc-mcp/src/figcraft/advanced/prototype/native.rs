@@ -1,6 +1,6 @@
 use super::*;
 use crate::figcraft::advanced::prototype_actions::{
-    click_destination, click_navigation, interaction_commands, stored,
+    click_destination, click_navigation, interaction_commands, native_interactions, stored,
 };
 
 impl ToolRouter {
@@ -17,11 +17,26 @@ impl ToolRouter {
             .ok_or_else(|| EngineError::invalid("Current page is unavailable"))?;
         let resolve = |key| self.resolve(session, &snapshot.id, string(args, key)?);
         let action = string(args, "action")?;
-        if action != "inspect" && root.properties.get("locked") == Some(&Value::Bool(true)) {
+        if !matches!(action, "inspect" | "preview_playback")
+            && root.properties.get("locked") == Some(&Value::Bool(true))
+        {
             return Err(EngineError::invalid("Page root is locked"));
         }
         let mut result = Properties::from([("pageId".into(), json!(state.page_id))]);
         let commands = match action {
+            "preview_playback" => {
+                let frame = resolve("frameId")?;
+                result.extend(preview::preview(
+                    self,
+                    session,
+                    snapshot,
+                    &state.page_id,
+                    &root.id,
+                    &frame,
+                    args,
+                )?);
+                Vec::new()
+            }
             "inspect" => {
                 let flows = array(root.properties.get(FLOWS));
                 let invalid_starts = flows
@@ -75,6 +90,38 @@ impl ToolRouter {
                     }]
                 }
             }
+            "set_interactions" => {
+                let source_id = resolve("sourceId")?;
+                let owner = frame_owner(snapshot, &root.id, &source_id, true)?;
+                if !visible_frame(snapshot, &root.id, owner) {
+                    return Err(EngineError::invalid(
+                        "Interactions need a visible source frame",
+                    ));
+                }
+                let interactions = native_interactions(
+                    snapshot,
+                    &root.id,
+                    &source_id,
+                    &|value| {
+                        self.resolve(
+                            session,
+                            &snapshot.id,
+                            value.as_str().ok_or_else(|| {
+                                EngineError::invalid("A destination needs a native layer ID")
+                            })?,
+                        )
+                    },
+                    &args["interactions"],
+                )?;
+                let source = &snapshot.nodes[&source_id];
+                result.insert("sourceId".into(), json!(source_id));
+                result.insert("interactions".into(), json!(interactions));
+                if interactions == stored(source) {
+                    Vec::new()
+                } else {
+                    interaction_commands(source, &interactions)
+                }
+            }
             "set_navigation" | "remove_navigation" => {
                 let source_id = resolve("sourceId")?;
                 let owner = frame_owner(snapshot, &root.id, &source_id, true)?;
@@ -106,11 +153,11 @@ impl ToolRouter {
     }
 }
 
-fn visible_frame(snapshot: &DocumentSnapshot, root: &str, id: &str) -> bool {
+pub(super) fn visible_frame(snapshot: &DocumentSnapshot, root: &str, id: &str) -> bool {
     frame_on_page(snapshot, root, id) && !hidden(&snapshot.nodes[id])
 }
 
-fn hidden(node: &Node) -> bool {
+pub(super) fn hidden(node: &Node) -> bool {
     node.properties.get("hidden") == Some(&Value::Bool(true))
         || node.properties.get("visible") == Some(&Value::Bool(false))
 }

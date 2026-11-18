@@ -1,6 +1,7 @@
 use super::*;
 
 mod native;
+mod preview;
 
 const FLOWS: &str = "prototypeFlows";
 
@@ -18,7 +19,7 @@ pub(super) fn top_level_frame(context: &Context, raw: &str) -> bool {
     frame_on_page(context.snapshot, &context.state.root, raw)
 }
 
-fn frame_on_page(snapshot: &DocumentSnapshot, root: &str, raw: &str) -> bool {
+pub(super) fn frame_on_page(snapshot: &DocumentSnapshot, root: &str, raw: &str) -> bool {
     snapshot.nodes.get(raw).is_some_and(|node| {
         node.kind == NodeKind::Frame
             && node.parent_id.as_deref() == Some(root)

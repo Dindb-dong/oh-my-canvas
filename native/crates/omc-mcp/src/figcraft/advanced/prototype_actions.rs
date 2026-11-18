@@ -20,6 +20,11 @@ pub(super) fn command(context: &Context, name: &str) -> Result<Value> {
     let (family, action) = name
         .split_once('.')
         .ok_or_else(|| EngineError::invalid("Unknown prototype command"))?;
+    let targets = Targets {
+        document: context.snapshot,
+        page_root: &context.state.root,
+        resolve: &|value| context.resolve(value),
+    };
     let mut changes = Vec::new();
     let mut output = json!({"ok":true});
     for id in context.many()? {
@@ -33,7 +38,14 @@ pub(super) fn command(context: &Context, name: &str) -> Result<Value> {
         }
         let mut interactions = stored(node);
         if family == "interaction" {
-            output = edit_interactions(context, &environment, &id, &mut interactions, action)?;
+            output = edit_interactions(
+                context.params,
+                &targets,
+                &environment,
+                &id,
+                &mut interactions,
+                action,
+            )?;
         } else {
             let entry = interactions
                 .get_mut(index(context.params, "index")?)
@@ -42,7 +54,7 @@ pub(super) fn command(context: &Context, name: &str) -> Result<Value> {
                 .as_array_mut()
                 .ok_or_else(|| EngineError::invalid("Interaction has no actions"))?;
             output = if family == "action" {
-                edit_actions(context, &environment, &id, actions, action)?
+                edit_actions(context.params, &targets, &environment, &id, actions, action)?
             } else {
                 edit_blocks(context, &environment, actions, action)?
             };
@@ -119,14 +131,53 @@ fn default_interaction() -> Value {
         "duration_ms":300,"delay_ms":0,"easing":"easeInOut"})
 }
 
+struct Targets<'a> {
+    document: &'a DocumentSnapshot,
+    page_root: &'a str,
+    resolve: &'a dyn Fn(&Value) -> Result<String>,
+}
+
+pub(super) fn native_interactions(
+    snapshot: &DocumentSnapshot,
+    page_root: &str,
+    source: &str,
+    resolve: &dyn Fn(&Value) -> Result<String>,
+    items: &Value,
+) -> Result<Vec<Value>> {
+    let items = items
+        .as_array()
+        .filter(|items| items.len() <= 64)
+        .ok_or_else(|| EngineError::invalid("Expected at most 64 interactions"))?;
+    let env = Environment::new(snapshot);
+    let targets = Targets {
+        document: snapshot,
+        page_root,
+        resolve,
+    };
+    items
+        .iter()
+        .map(|item| {
+            if !item.is_object() {
+                return Err(EngineError::invalid("Interaction must be an object"));
+            }
+            let mut normalized = default_interaction();
+            patch_interaction(&targets, &env, source, &mut normalized, item)?;
+            if normalized["actions"].as_array().is_none_or(Vec::is_empty) {
+                return Err(EngineError::invalid("Provide an action or a destination"));
+            }
+            Ok(normalized)
+        })
+        .collect()
+}
+
 fn edit_interactions(
-    context: &Context,
+    params: &Value,
+    targets: &Targets,
     env: &Environment,
     source: &str,
     items: &mut Vec<Value>,
     action: &str,
 ) -> Result<Value> {
-    let params = context.params;
     let mut output = json!({"ok":true});
     match action {
         "clear" => items.clear(),
@@ -156,9 +207,9 @@ fn edit_interactions(
                     return Err(EngineError::invalid("interaction must be an object"));
                 }
                 item = default_interaction();
-                patch_interaction(context, env, source, &mut item, whole)?;
+                patch_interaction(targets, env, source, &mut item, whole)?;
             }
-            patch_interaction(context, env, source, &mut item, params)?;
+            patch_interaction(targets, env, source, &mut item, params)?;
             if item["actions"].as_array().is_none_or(Vec::is_empty) {
                 return Err(EngineError::invalid("Provide an action or a destination"));
             }
@@ -178,7 +229,7 @@ fn edit_interactions(
 }
 
 fn patch_interaction(
-    context: &Context,
+    targets: &Targets,
     env: &Environment,
     source: &str,
     item: &mut Value,
@@ -223,7 +274,7 @@ fn patch_interaction(
         }
     }
     if let Some(values) = params.get("actions") {
-        item["actions"] = json!(normalize_actions(context, env, source, values, 0)?);
+        item["actions"] = json!(normalize_actions(targets, env, source, values, 0)?);
     } else if let Some(value) = params.get("action").cloned().or_else(|| {
         params
             .get("dest")
@@ -238,7 +289,7 @@ fn patch_interaction(
         {
             value["dest"] = dest.clone();
         }
-        let action = normalize_action(context, env, source, &value, 0)?;
+        let action = normalize_action(targets, env, source, &value, 0)?;
         let list = item["actions"].as_array_mut().unwrap();
         if list.is_empty() {
             list.push(action);
@@ -344,7 +395,7 @@ fn condition(env: &Environment, params: &Value) -> Result<Expr> {
 }
 
 fn normalize_actions(
-    context: &Context,
+    targets: &Targets,
     env: &Environment,
     source: &str,
     values: &Value,
@@ -356,12 +407,12 @@ fn normalize_actions(
         .ok_or_else(|| EngineError::invalid("Expected at most 64 prototype actions"))?;
     values
         .iter()
-        .map(|value| normalize_action(context, env, source, value, depth))
+        .map(|value| normalize_action(targets, env, source, value, depth))
         .collect()
 }
 
 fn normalize_action(
-    context: &Context,
+    targets: &Targets,
     env: &Environment,
     source: &str,
     action: &Value,
@@ -375,19 +426,21 @@ fn normalize_action(
     match kind {
         "back" | "closeOverlay" => {}
         "navigate" | "openOverlay" | "swapOverlay" | "scrollTo" | "changeTo" => {
-            let dest = context.resolve(&action["dest"])?;
-            let node = &context.snapshot.nodes[&dest];
+            let dest = (targets.resolve)(&action["dest"])?;
+            let node = targets
+                .document
+                .nodes
+                .get(&dest)
+                .ok_or_else(|| EngineError::invalid("Invalid prototype destination"))?;
             let valid = match kind {
                 "navigate" | "openOverlay" | "swapOverlay" => {
-                    super::prototype::top_level_frame(context, &dest)
+                    super::prototype::frame_on_page(targets.document, targets.page_root, &dest)
                 }
                 "changeTo" => {
                     node.kind == NodeKind::Component && node.string("variantSetId").is_some()
                 }
                 _ => {
-                    context
-                        .page(&dest)
-                        .is_some_and(|page| page.id == context.state.page_id)
+                    crate::legacy_read::is_descendant(targets.document, &dest, targets.page_root)
                         && node.parent_id.is_some()
                 }
             };
@@ -521,7 +574,7 @@ fn normalize_action(
                     ));
                 };
                 let actions =
-                    normalize_actions(context, env, source, &block["actions"], depth + 1)?;
+                    normalize_actions(targets, env, source, &block["actions"], depth + 1)?;
                 normalized.push(json!({"condition":cond,"actions":actions}));
             }
             result["blocks"] = json!(normalized);
@@ -562,13 +615,13 @@ fn list<'a>(actions: &'a mut Vec<Value>, parents: &[usize]) -> Result<&'a mut Ve
 }
 
 fn edit_actions(
-    context: &Context,
+    params: &Value,
+    targets: &Targets,
     env: &Environment,
     source: &str,
     actions: &mut Vec<Value>,
     mode: &str,
 ) -> Result<Value> {
-    let params = context.params;
     let path = if mode == "add" && params.get("path").is_none() {
         vec![actions.len()]
     } else {
@@ -582,7 +635,7 @@ fn edit_actions(
     match mode {
         "add" | "set" => {
             let replacement =
-                normalize_action(context, env, source, &params["action"], parents.len() / 2)?;
+                normalize_action(targets, env, source, &params["action"], parents.len() / 2)?;
             if mode == "add" {
                 if list.len() >= 64 {
                     return Err(EngineError::invalid("Action list already has 64 actions"));
