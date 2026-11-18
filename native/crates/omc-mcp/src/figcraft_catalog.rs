@@ -915,6 +915,50 @@ fn mode_id<'a>(modes: &'a [Value], value: &str) -> Result<&'a str> {
         .ok_or_else(|| EngineError::invalid(format!("Unknown collection mode {value}")))
 }
 
+pub(crate) fn collection_mode<'a>(
+    collection: &'a Value,
+    requested: Option<&Value>,
+) -> Result<Option<&'a str>> {
+    let modes = collection["modes"]
+        .as_array()
+        .ok_or_else(|| EngineError::invalid("Collection has no modes"))?;
+    match requested {
+        Some(Value::Null) => Ok(None),
+        Some(Value::String(mode)) => mode_id(modes, mode).map(Some),
+        _ => Err(EngineError::invalid("Pass a mode name, ID, or null")),
+    }
+}
+
+pub(crate) fn collection_mode_command(
+    node: &Node,
+    collection: &str,
+    mode: Option<&str>,
+) -> Result<Command> {
+    if !matches!(
+        node.kind,
+        NodeKind::Frame | NodeKind::Component | NodeKind::Instance
+    ) {
+        return Err(EngineError::invalid(
+            "Variable mode overrides belong to a page or frame",
+        ));
+    }
+    let mut overrides = node
+        .properties
+        .get("figcraftVariableModes")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(mode) = mode {
+        overrides.insert(collection.into(), json!(mode));
+    } else {
+        overrides.remove(collection);
+    }
+    Ok(Command::NodeSet {
+        node_id: node.id.clone(),
+        properties: Properties::from([("figcraftVariableModes".into(), json!(overrides))]),
+    })
+}
+
 fn token_value(entries: &Entries, kind: &str, value: &Value, id: &str) -> Result<Value> {
     if let Some(fields) = value.as_object().filter(|fields| fields.len() == 1) {
         let reference = |alias: &str| -> Result<Value> {
@@ -1366,47 +1410,18 @@ impl ToolRouter {
             "setMode" => {
                 let collection = entry(&collections, string(params, "collection")?)?;
                 let id = string(collection, "id")?;
-                let modes = collection["modes"]
-                    .as_array()
-                    .ok_or_else(|| EngineError::invalid("Collection has no modes"))?;
-                let mode = match params.get("mode") {
-                    Some(Value::Null) => None,
-                    Some(Value::String(mode)) => Some(mode_id(modes, mode)?),
-                    _ => return Err(EngineError::invalid("Pass a mode name, ID, or null")),
-                };
+                let mode = collection_mode(collection, params.get("mode"))?;
                 let targets = if params.get("ids").is_none() && selection.is_empty() {
                     vec![self.state(session, &snapshot.id)?.root]
                 } else {
                     self.catalog_targets(session, snapshot, params, selection)?
                 };
                 for node_id in targets {
-                    let node = &snapshot.nodes[&node_id];
-                    if !matches!(
-                        node.kind,
-                        NodeKind::Frame | NodeKind::Component | NodeKind::Instance
-                    ) {
-                        return Err(EngineError::invalid(
-                            "Variable mode overrides belong to a page or frame",
-                        ));
-                    }
-                    let mut overrides = node
-                        .properties
-                        .get("figcraftVariableModes")
-                        .and_then(Value::as_object)
-                        .cloned()
-                        .unwrap_or_default();
-                    if let Some(mode) = mode {
-                        overrides.insert(id.into(), json!(mode));
-                    } else {
-                        overrides.remove(id);
-                    }
-                    commands.push(Command::NodeSet {
-                        node_id,
-                        properties: Properties::from([(
-                            "figcraftVariableModes".into(),
-                            json!(overrides),
-                        )]),
-                    });
+                    commands.push(collection_mode_command(
+                        &snapshot.nodes[&node_id],
+                        id,
+                        mode,
+                    )?);
                 }
                 json!({"ok":true})
             }

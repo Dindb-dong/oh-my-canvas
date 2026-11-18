@@ -1,4 +1,7 @@
-use super::{DocumentSnapshot, EngineError, Result, ToolRouter, Value, json, string};
+use super::{
+    DocumentSnapshot, EngineError, Properties, Result, ToolRouter, Value, json, resources, string,
+};
+use crate::figcraft_catalog::{collection_mode, collection_mode_command};
 
 impl ToolRouter {
     pub(crate) fn inspect_native_token(
@@ -39,5 +42,45 @@ impl ToolRouter {
             "effectiveValue": effective,
             "diagnostics": diagnostics
         }))
+    }
+
+    pub(crate) fn native_token_scope(
+        &self,
+        session: &str,
+        document: &str,
+        snapshot: &DocumentSnapshot,
+        args: &Value,
+        meta: &Value,
+    ) -> Result<Value> {
+        let collections = resources::catalogs(&snapshot.metadata, "figcraftCollections");
+        if args["action"] == "list_collections" {
+            return Ok(json!({
+                "revision": snapshot.revision(),
+                "items": collections.values().collect::<Vec<_>>()
+            }));
+        }
+        let collection_id = string(args, "id")?;
+        let collection = collections
+            .get(collection_id)
+            .ok_or_else(|| EngineError::invalid("collection not found in this document"))?;
+        let mode = collection_mode(collection, args.get("mode"))?;
+        let raw = self.resolve(session, document, string(args, "nodeId")?)?;
+        let node = snapshot
+            .nodes
+            .get(&raw)
+            .ok_or_else(|| EngineError::invalid("layer not found in this document"))?;
+        let command = collection_mode_command(node, collection_id, mode)?;
+        self.submit_with_output(
+            session,
+            document,
+            command,
+            meta,
+            Some(snapshot.sequence),
+            Properties::from([
+                ("id".into(), json!(collection_id)),
+                ("nodeId".into(), json!(raw)),
+                ("mode".into(), json!(mode)),
+            ]),
+        )
     }
 }
