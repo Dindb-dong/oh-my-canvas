@@ -133,4 +133,54 @@ fn motion_keyframes_render_and_survive_reopen() {
     let inspected =
         motion(json!({"version":"1","action":"inspect","documentId":id,"nodeId":layer}));
     assert_eq!(inspected["tracks"]["translateX"][1]["value"], 64.);
+
+    let capabilities = motion(json!({"version":"1","action":"capabilities"}));
+    if capabilities["mp4"]["available"] == true {
+        use std::{
+            path::PathBuf,
+            process::{Command, Stdio},
+        };
+        let output = directory.path().join("motion.mp4");
+        let video = motion(
+            json!({"version":"1","action":"export_video","documentId":id,"frameId":frame,
+            "durationMs":1000,"fps":4,"filePath":output}),
+        );
+        assert_eq!(
+            video["mimeType"].as_str().unwrap_or("video/mp4"),
+            "video/mp4"
+        );
+        assert_eq!(video["frameCount"], 4);
+        assert_eq!(video["durationMs"], 1000.);
+        assert_eq!(video["revision"], inspected["revision"]);
+        let decoder = std::env::var_os("OMC_MOTION_FFMPEG")
+            .map(PathBuf::from)
+            .or_else(|| {
+                [
+                    "/opt/homebrew/bin/ffmpeg",
+                    "/usr/bin/ffmpeg",
+                    "/usr/local/bin/ffmpeg",
+                ]
+                .into_iter()
+                .map(PathBuf::from)
+                .find(|path| path.is_file())
+            })
+            .unwrap();
+        let pixels = Command::new(decoder)
+            .args(["-hide_banner", "-loglevel", "error", "-i"])
+            .arg(output)
+            .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(pixels.status.success());
+        let stride = 96 * 32 * 3;
+        assert_eq!(pixels.stdout.len(), 4 * stride);
+        let color = |frame: usize, x: usize| {
+            let i = frame * stride + (5 * 96 + x) * 3;
+            &pixels.stdout[i..i + 3]
+        };
+        assert!(color(0, 5)[0] > 190 && color(0, 5)[1] < 70);
+        assert!(color(3, 41)[0] > 190 && color(3, 41)[1] < 70);
+        assert!(color(3, 5).iter().all(|channel| *channel > 200));
+    }
 }

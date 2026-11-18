@@ -1,3 +1,5 @@
+mod video;
+
 use super::*;
 use omc_scene::{Affine, Scene};
 use omc_style::Diagnostic;
@@ -40,17 +42,22 @@ type Tracks = BTreeMap<Property, Vec<Keyframe>>;
 pub(crate) fn definition() -> Value {
     json!({
         "name": "native_motion",
-        "description": "Edit persisted layer motion tracks, inspect keyframes, or render a PNG at a selected time. Translation uses parent-space pixels; rotation uses degrees relative to the authored pose. Opacity is absolute. Easing belongs to the interval after its keyframe.",
+        "description": "Edit persisted layer motion tracks, inspect keyframes, render a PNG at a selected time, or encode a short MP4 with an available local FFmpeg encoder. Translation uses parent-space pixels; rotation uses degrees relative to the authored pose. Opacity is absolute. Easing belongs to the interval after its keyframe.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "version": {"type":"string","enum":["1"]},
-                "action": {"type":"string","enum":["inspect","set_track","remove_track","sample"]},
+                "action": {"type":"string","enum":["capabilities","inspect","set_track","remove_track","sample","export_video"]},
                 "documentId": {"type":"string"},
                 "nodeId": {"type":"string"},
                 "frameId": {"type":"string"},
                 "property": {"type":"string","enum":["translateX","translateY","rotation","opacity"]},
                 "timeMs": {"type":"number","minimum":0,"maximum":MAX_TIME_MS},
+                "startMs": {"type":"integer","minimum":0,"maximum":MAX_TIME_MS},
+                "durationMs": {"type":"integer","minimum":100,"maximum":video::MAX_DURATION_MS},
+                "fps": {"type":"integer","minimum":1,"maximum":video::MAX_FPS},
+                "filePath": {"type":"string","minLength":1,"maxLength":4096},
+                "overwrite": {"type":"boolean"},
                 "revision": {"type":"integer","minimum":0},
                 "keyframes": {"type":"array","minItems":1,"maxItems":MAX_KEYFRAMES,"items":{
                     "type":"object",
@@ -63,12 +70,14 @@ pub(crate) fn definition() -> Value {
                     "additionalProperties":false
                 }}
             },
-            "required":["version","action","documentId"],
+            "required":["version","action"],
             "anyOf":[
-                {"type":"object","properties":{"action":{"enum":["inspect"]}},"required":["nodeId"]},
-                {"type":"object","properties":{"action":{"enum":["set_track"]}},"required":["nodeId","property","keyframes"]},
-                {"type":"object","properties":{"action":{"enum":["remove_track"]}},"required":["nodeId","property"]},
-                {"type":"object","properties":{"action":{"enum":["sample"]}},"required":["frameId","timeMs"]}
+                {"type":"object","properties":{"action":{"enum":["capabilities"]}}},
+                {"type":"object","properties":{"action":{"enum":["inspect"]}},"required":["documentId","nodeId"]},
+                {"type":"object","properties":{"action":{"enum":["set_track"]}},"required":["documentId","nodeId","property","keyframes"]},
+                {"type":"object","properties":{"action":{"enum":["remove_track"]}},"required":["documentId","nodeId","property"]},
+                {"type":"object","properties":{"action":{"enum":["sample"]}},"required":["documentId","frameId","timeMs"]},
+                {"type":"object","properties":{"action":{"enum":["export_video"]}},"required":["documentId","frameId","durationMs"]}
             ],
             "additionalProperties":false
         }
@@ -77,12 +86,19 @@ pub(crate) fn definition() -> Value {
 
 impl ToolRouter {
     pub(crate) fn native_motion(&self, session: &str, args: &Value, meta: &Value) -> Result<Value> {
+        let action = string(args, "action")?;
+        if action == "capabilities" {
+            let available = video::available();
+            return Ok(json!({"ok":true,"png":true,"mp4":{
+                "available":available,"encoder":available.then_some("libx264"),
+                "reason":(!available).then_some("Local FFmpeg with libx264 was not found")
+            }}));
+        }
         let id = native_id(string(args, "documentId")?)?;
         self.workspace.document_path(&id)?;
         if self.state(session, &id).is_err() {
             self.context(session, &id)?;
         }
-        let action = string(args, "action")?;
         let edit = matches!(action, "set_track" | "remove_track");
         if edit && let Some(result) = self.replay(session, &id, meta)? {
             return Ok(result);
@@ -96,14 +112,17 @@ impl ToolRouter {
                 "motion target revision changed",
             ));
         }
-        if action == "sample" {
+        if matches!(action, "sample" | "export_video") {
             let frame = self.resolve(session, &id, string(args, "frameId")?)?;
+            if action == "export_video" {
+                return video::export_video(self, session, &snapshot, &frame, args);
+            }
             let time_ms = args["timeMs"]
                 .as_f64()
                 .ok_or_else(|| EngineError::invalid("sample time required"))?;
             let mut prepared = Prepared::new(&snapshot, &frame)?;
             let (mut surface, diagnostics, sampled) =
-                prepared.paint(time_ms, &self.resources()?)?;
+                prepared.paint(time_ms, &self.resources()?, Color::TRANSPARENT)?;
             let bytes = surface
                 .image_snapshot()
                 .encode(None, EncodedImageFormat::PNG, 100)
@@ -336,6 +355,7 @@ impl Prepared {
         &mut self,
         time_ms: f64,
         resources: &dyn omc_render::ResourceProvider,
+        background: Color,
     ) -> Result<(Surface, Vec<Diagnostic>, Value)> {
         self.scene.time_ms = time_ms;
         let mut poses = BTreeMap::new();
@@ -372,7 +392,7 @@ impl Prepared {
         let mut surface = surfaces::raster_n32_premul((self.width, self.height))
             .ok_or_else(|| EngineError::new("resource_limit", "motion frame allocation failed"))?;
         let canvas = surface.canvas();
-        canvas.clear(Color::TRANSPARENT);
+        canvas.clear(background);
         let [a, b, c, d, x, y] = self.camera.0.map(|value| value as f32);
         canvas.concat(&Matrix::new_all(a, c, x, b, d, y, 0., 0., 1.));
         let diagnostics =
