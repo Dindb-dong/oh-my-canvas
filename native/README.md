@@ -1,6 +1,6 @@
 # Native engine implementation
 
-This workspace implements the architecture accepted in PR #14 in reviewable steps. The existing Electron application remains the default until the original native completion gates pass.
+This workspace contains the Rust desktop, document service and MCP CLI. The root README recommends this native workflow. The root npm scripts still launch and package the retained Electron implementation; they are not native launch commands. Native release qualification remains incomplete.
 
 ## Local verification
 
@@ -18,7 +18,7 @@ The MCP suite starts native processes on loopback and removes its temporary prof
 
 ## Foundation
 
-For source-backed performance hypotheses, current probe limitations, and the proposed cross-product study, see the [local development benchmark protocol](../docs/benchmarks/README.md). It compares accepted workflows, complete model usage, visible latency, and whole-product resources. It does not report completed comparative measurements or replace native release qualification.
+For source-backed performance hypotheses, current probe limitations, and the proposed cross-product study, see the [local development benchmark protocol](../docs/benchmarks/README.md). It compares accepted workflows, complete model usage, visible latency, and whole-product resources. The [published pilot and earlier token observations](../docs/benchmarks/results/2026-11-18/README.md) report measured results with their limits; they do not replace native release qualification.
 
 - `omc-model`: stable typed identifiers, ordered pages and nodes, authored properties, revision serialization, relative UTF-16 text positions.
 - `omc-protocol`: validated semantic command envelopes, explicit document epochs and preconditions, durable receipt shape, RFC 8785 canonical request digests, duplicate JSON key rejection and request size limits.

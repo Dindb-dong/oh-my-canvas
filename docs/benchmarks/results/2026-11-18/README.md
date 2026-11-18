@@ -2,9 +2,24 @@
 
 This project-authored exploratory pilot publishes 78 indexed attempts across Oh My Canvas (OMC), Paper, Figma and Penpot. Collection took place on 17–18 November 2026, Korea Standard Time. The dataset retains retries, failures and OMC-only diagnostics. Its measurement source ends at `c0a63518b9f084b6ab18a52cb1a99698efbf3c75`.
 
-OMC recorded shorter accepted completion times than Penpot in the measured LD02, prepared-start LD03 and two LD05 tasks. Observed reductions range from 21% to 55%. Provider token counts were close, with both small increases and decreases for OMC. OMC also recorded smaller sampled local memory peaks than Paper and Penpot in the selected LD02/LD03 attempts. CPU and memory accounting remained incomplete and used different process scopes.
+OMC recorded shorter accepted completion times than Penpot in the measured LD02, prepared-start LD03 and two LD05 tasks. Observed reductions range from 21% to 55%. Provider token counts in the selected 60-second model attempts were close, with both small increases and decreases for OMC. An earlier separate LD03 experiment recorded about 10,000 fewer gross tokens for OMC than Paper/Figma; its conditions and lifecycle gaps are reported below. OMC also recorded smaller sampled local memory peaks than Paper and Penpot in the selected LD02/LD03 attempts. CPU and memory accounting remained incomplete and used different process scopes.
 
 These observations cover individual attempts on a shared host. The [registered protocol](../../README.md) requires more fixtures, repetitions, complete accounting and statistical qualification for broad comparative claims. This pilot changed collectors and execution routes during recovery and uses user-requested 60-second attempts. Confirmation and the original-duration workload matrix remain incomplete.
+
+## Earlier LD03 token observations
+
+An earlier, separately recorded field-relay experiment used the same pinned fixture, prompt v2, Codex 0.169.0 and local Qwen 2.5 3B model across four products. Fresh model servers and Codex homes were used per product. The [sanitized token cross-check](earlier-ld03-tokens.json) preserves complete provider input/output/cache splits, attempt IDs, acceptance scope and original ledger SHA-256 identities. All four archived ledger hashes and terminal summary totals were checked during the README refresh. These earlier runs are additional evidence, **outside the 78 indexed 60-second pilot attempts**; they must not be pooled as the same condition.
+
+| Product | Gross provider tokens | Cached input included | Provider requests | Observed acceptance |
+| --- | ---: | ---: | ---: | --- |
+| OMC | 22,604 | 7,110 | 3 | Common oracle passed, including native reopen and separate copy |
+| Paper | 32,820 | 16,782 | 4 | Edited candidate qualified; normal editor reopen unobserved |
+| Figma | 32,363 | 16,578 | 4 | Edited candidate qualified; normal editor reopen and duplicate unobserved |
+| Penpot | 22,624 | 7,110 | 3 | Common and original oracles passed |
+
+In these individual runs, OMC used **10,216 fewer gross tokens than Paper (31.1%)** and **9,759 fewer than Figma (30.2%)**. Gross totals include cached input plus output, including admitted helper/title requests. Much of the difference is cached input: uncached input was 15,385 for OMC, 15,654 for Paper and 15,479 for Figma. This is not a proportional billing-cost saving. Paper repeated inspection and the same write; Figma performed a mutation and a scoped read. Those extra provider turns are observed workflow differences, not proof that native rendering itself reduces tokens.
+
+These are single exploratory observations with unequal lifecycle coverage, no accompanying resource samples and no statistical qualification. Later guarded 60-second runs below had nearly equal provider totals. Both observations remain reportable within their own conditions. Raw model traces and authenticated setup remain private; the public cross-check is a sanitized aggregate and hash record, not a complete raw-ledger replay package.
 
 ## Published data
 
