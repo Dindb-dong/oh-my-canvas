@@ -171,7 +171,9 @@ try{
   const connection=await api.call('workspace',{action:'connection',transport:'stdio'});
   assert.equal(connection.available,true);
   assert.equal(connection.transport,'stdio');
-  const config=JSON.parse(connection.config).mcpServers['oh-my-canvas'];
+  const {mcpServers}=JSON.parse(connection.config);
+  assert.deepEqual(Object.keys(mcpServers),['oh-my-canvas']);
+  const config=mcpServers['oh-my-canvas'];
   assert.equal(config.args[0],'--profile');
   assert.equal(await realpath(config.args[1]),await realpath(profile));
   assert.equal(config.env,undefined);
@@ -313,11 +315,145 @@ try{
    assert.equal(status.state,'completed');assert.ok(status.result.content.includes('<svg'));
    const cancelled=await client.call('native_job',{version:'1',action:'cancel',jobId:ticket.jobId});assert.equal(cancelled.cancellation,'already_finished');
   });
-  await t.test('official SDK uses the Rust stdio bridge',async()=>{
+  const connectNativeStdio=async name=>{
    const cli=process.env.OMC_CLI_BINARY??join(root,'native/target/debug',process.platform==='win32'?'omc-cli.exe':'omc-cli');
    const transport=new StdioClientTransport({command:cli,args:['--profile',service.profile,'--connect-only'],stderr:'pipe'});
-   const stdio=new Client({name:'stdio-contracts',version:'1.0.0'});
-   try{await stdio.connect(transport);const listed=await stdio.listTools();for(const name of ['board','measure','native_plugins'])assert.ok(listed.tools.some(t=>t.name===name));const result=await stdio.callTool({name:'create_document',arguments:{title:'Rust stdio document'}});assert.notEqual(result.isError,true);assert.ok(result.structuredContent.documentId);}finally{await stdio.close();}
+   const sdkClient=new Client({name,version:'1.0.0'});
+   await sdkClient.connect(transport);
+   return {sdkClient,async call(tool,args={}){
+    const result=await sdkClient.callTool({name:tool,arguments:args});
+    const value=result.structuredContent??JSON.parse(result.content.find(item=>item.type==='text').text);
+    if(result.isError)throw Object.assign(Error(value.message??JSON.stringify(value)),value);
+    return value;
+   }};
+  };
+  await t.test('design authoring works through the default OMC stdio connection and survives reopen',async t=>{
+   const author=await connectNativeStdio('native-design-author');
+   let reviewer;
+   try{
+    const {tools}=await author.sdkClient.listTools();
+    const names=new Set(tools.map(tool=>tool.name));
+    t.diagnostic(`Default OMC tools/list returned ${tools.length} tools`);
+    assert.equal(names.size,tools.length);
+    for(const name of ['board','shape_builder','data_fill','measure','native_tokens','native_motion','native_plugins','native_handoff'])assert.ok(names.has(name),name);
+    assert.ok(!names.has('run_command'));
+    const {starters}=await author.call('workspace',{action:'design_starters'});
+    assert.ok(starters.some(starter=>starter.id==='wireframe-kit'));
+    await assert.rejects(author.call('create_document',{starterId:'wireframe-kit',sample:true}),{code:'invalid_argument'});
+    const seeded=await author.call('create_document',{starterId:'wireframe-kit',title:'Editable starter fixture'});
+    assert.equal(seeded.document.title,'Editable starter fixture');
+    assert.equal(seeded.starterId,'wireframe-kit');
+    const seededTree=await author.call('get_tree',{documentId:seeded.documentId,detail:'detailed'});
+    assert.ok(seededTree.nodes.length>5);
+
+    const {documentId}=await author.call('create_document',{title:'Native workflow fixture'});
+    const doc={documentId};
+    const foreground=(await author.call('create_shape',{...doc,type:'frame',width:240,height:120,properties:{name:'Motion frame'}})).rawIds[0];
+    const moving=(await author.call('create_shape',{...doc,type:'rect',parentId:foreground,x:15,y:30,width:40,height:30,
+     properties:{fills:[{type:'solid',color:'#E8193A'}]}
+    })).rawIds[0];
+    const text=(await author.call('create_shape',{...doc,type:'text',x:95,y:420,width:90,height:20,properties:{text:'Editable curve label'}})).rawIds[0];
+    const path=(await author.call('create_shape',{...doc,type:'ellipse',x:120,y:560,width:340,height:150})).rawIds[0];
+    await author.call('edit_text',{...doc,id:text,action:'path_attach',pathId:path});
+    const table=await author.call('board',{...doc,action:'create_table',x:310,y:30,cells:[['Step','Owner'],['Draft','Ada']]});
+    await author.call('board',{...doc,action:'set_table_cell',id:table.id,row:1,column:0,text:'Reviewed'});
+    const map=await author.call('board',{...doc,action:'create_mind_map',x:620,y:50,topics:[
+     {key:'root',text:'Design review'},{key:'details',parent:'root',text:'Details'},
+    ]});
+    const detail=map.topics.find(topic=>topic.parentId);
+    assert.ok(detail.connectorId);
+    await author.call('board',{...doc,action:'rename_mind_topic',id:map.id,targetId:detail.id,text:'Decisions'});
+
+    const tokens=(action,args={})=>author.call('native_tokens',{...doc,version:'1',action,...args});
+    const collection=await tokens('create_collection',{name:'Design colors',modeNames:['Light','Dark']});
+    const base=await tokens('create',{collectionId:collection.id,type:'color',name:'Base',modes:{Light:'#ffffff',Dark:'#000000'}});
+    const alias=await tokens('create',{collectionId:collection.id,type:'color',name:'Surface',value:{$token:base.id}});
+    const swatch=(await author.call('create_shape',{...doc,type:'rect',parentId:foreground,x:170,y:85,width:25,height:25})).rawIds[0];
+    await tokens('bind',{id:alias.id,nodeId:swatch,property:'fill'});
+    await tokens('set_scope_mode',{id:collection.id,nodeId:foreground,mode:'Dark'});
+    const resolved=await tokens('inspect',{id:alias.id,nodeId:swatch});
+    assert.equal(resolved.effectiveValue,'#000000');
+    await assert.rejects(tokens('set_value',{id:base.id,value:{$token:alias.id}}),/cycle/);
+    const template=(await author.call('create_shape',{...doc,type:'frame',x:0,y:820,width:260,height:96})).rawIds[0];
+    await author.call('create_shape',{...doc,type:'text',parentId:template,
+     properties:{name:'Headline',text:'Template copy'}
+    });
+    const filled=await author.call('data_fill',{...doc,id:template,rows:[{name:'City card',Headline:'Seoul'}]});
+    assert.equal(filled.copies.length,1);
+    const filledTree=await author.call('get_tree',{...doc,id:filled.copies[0].id,detail:'detailed'});
+    assert.equal(filledTree.tree.children[0].text,'Seoul');
+
+    const handoff=(action,args={})=>author.call('native_handoff',{...doc,version:'1',action,nodeId:moving,...args});
+    await handoff('add_annotation',{label:'Motion review',properties:['width'],category:'development'});
+    await handoff('add_resource',{url:'https://example.com/spec'});
+    const specification=await handoff('inspect',{language:'react',styleKeys:['width']});
+    assert.equal(specification.annotations[0].label,'Motion review');
+    assert.ok(specification.code);
+
+    const motion=(action,args={})=>author.call('native_motion',{...doc,version:'1',action,...args});
+    await motion('set_track',{nodeId:moving,property:'translateX',keyframes:[{timeMs:0,value:0},{timeMs:1000,value:95}]});
+    const initial=await motion('sample',{frameId:foreground,timeMs:0});
+    const midpoint=await motion('sample',{frameId:foreground,timeMs:500});
+    assert.equal(Buffer.from(midpoint.base64,'base64').subarray(1,4).toString(),'PNG');
+    assert.notEqual(initial.sha256,midpoint.sha256);
+    assert.equal(initial.width,midpoint.width);
+    const {mp4}=await author.call('native_motion',{version:'1',action:'capabilities'});
+    if(process.env.OMC_MOTION_FFMPEG)assert.equal(mp4.available,true);
+    if(mp4.available){
+     const filePath=join(temporary,'native-motion.mp4');
+     const video=await motion('export_video',{frameId:foreground,durationMs:1000,fps:4,filePath});
+     assert.equal(video.frameCount,4);
+     assert.equal((await readFile(filePath)).subarray(4,8).toString(),'ftyp');
+    }
+    await author.call('save_document',{id:documentId});
+    await author.call('workspace',{...doc,action:'close'});
+
+    reviewer=await connectNativeStdio('native-design-reviewer');
+    await reviewer.call('open_document',{id:documentId});
+    const tree=await reviewer.call('get_tree',{...doc,detail:'detailed'});
+    assert.equal(tree.nodes.find(node=>node.rawId===text).properties.textPath.sourceId,path);
+    assert.ok(tree.nodes.some(node=>node.text==='Reviewed'));
+    const reopenedMap=await reviewer.call('board',{...doc,action:'inspect_mind_map',id:map.id});
+    assert.equal(reopenedMap.topics.find(topic=>topic.id===detail.id).connectorId,detail.connectorId);
+    assert.ok(tree.nodes.some(node=>node.text==='Decisions'));
+    const reopenedToken=await reviewer.call('native_tokens',{...doc,version:'1',action:'inspect',id:alias.id,nodeId:swatch});
+    assert.equal(reopenedToken.effectiveValue,'#000000');
+    const reopened=await reviewer.call('native_motion',{...doc,version:'1',action:'sample',frameId:foreground,timeMs:500});
+    assert.equal(reopened.sha256,midpoint.sha256);
+   }finally{
+    await reviewer?.sdkClient.close();
+    await author.sdkClient.close();
+   }
+  });
+  await t.test('native prototype presents on an isolated background desktop',{
+   skip: !process.env.OMC_TEST_DESKTOP_BINARY&&'set OMC_TEST_DESKTOP_BINARY to run the background desktop',
+  },async()=>{
+   const desktop=spawn(process.env.OMC_TEST_DESKTOP_BINARY,[
+    '--profile',service.profile,'--automation-background','--smoke-exit-ms','45000','--smoke-size','1000x800',
+   ],{stdio:'ignore'});
+   children.push(desktop);
+   const author=await connectNativeStdio('native-background-prototype');
+   try{
+    const {documentId}=await author.call('create_document',{title:'Background native prototype fixture'});
+    const frameId=(await author.call('create_board',{documentId,name:'Entry',width:320,height:220})).rawIds[0];
+    await author.call('prototype',{documentId,action:'set_flow',frameId});
+    let focused=false;
+    for(let attempt=0;attempt<90&&desktop.exitCode===null;attempt++){
+     const opened=await author.call('open_document',{id:documentId,focus:true});
+     if(opened.focused){focused=true;break;}
+     await delay(100);
+    }
+    assert.ok(focused,'background desktop did not open the requested document');
+    const preview=await author.call('prototype',{documentId,action:'show_preview',frameId});
+    assert.equal(preview.prototypeStart,frameId);
+    await author.call('prototype',{documentId,action:'close_preview'});
+    const presented=await author.call('prototype',{documentId,action:'present',frameId});
+    assert.equal(presented.prototypeStart,frameId);
+    await author.call('prototype',{documentId,action:'close_preview'});
+   }finally{
+    await author.sdkClient.close();
+    await stop({child:desktop});
+   }
   });
   await t.test('legacy page duplication, reordering and guides persist and support undo',async()=>{
    const doc=await client.call('create_document',{title:'Page action fixture'});

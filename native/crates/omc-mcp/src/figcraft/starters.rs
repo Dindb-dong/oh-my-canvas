@@ -61,7 +61,7 @@ const STARTERS: &[(&str, &str, &str, &str, &str)] = &[
     ),
 ];
 
-fn list() -> Value {
+pub(crate) fn list() -> Value {
     json!(
         STARTERS
             .iter()
@@ -91,6 +91,17 @@ fn documents() -> Result<&'static Value> {
     })
 }
 
+pub(crate) fn content(id: &str, title: Option<&str>, unknown_id: &str) -> Result<DocumentContent> {
+    if !STARTERS.iter().any(|starter| starter.0 == id) {
+        return Err(EngineError::invalid(unknown_id));
+    }
+    let mut content = convert(&documents()?[id])?;
+    if let Some(title) = title.map(str::trim).filter(|title| !title.is_empty()) {
+        content.title = title.to_owned();
+    }
+    Ok(content)
+}
+
 impl ToolRouter {
     pub(super) fn fig_starter_command(
         &self,
@@ -106,16 +117,12 @@ impl ToolRouter {
         };
         let id = template
             .as_str()
-            .filter(|id| STARTERS.iter().any(|starter| starter.0 == *id))
             .ok_or_else(|| EngineError::invalid("template must be an id from template.list"))?;
-        let mut content = convert(&documents()?[id])?;
-        if let Some(name) = params["name"]
-            .as_str()
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-        {
-            content.title = name.to_owned();
-        }
+        let content = content(
+            id,
+            params["name"].as_str(),
+            "template must be an id from template.list",
+        )?;
         let title = content.title.clone();
         let doc = self.workspace.create(session, &title, Some(content))?;
         self.context_from(session, &doc)?;

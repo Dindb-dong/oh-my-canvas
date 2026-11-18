@@ -1,6 +1,6 @@
 //! A compatibility surface for FigCraft calls on the native OMC document authority.
 mod advanced;
-mod starters;
+pub(crate) mod starters;
 pub(crate) use advanced::{dev_diff, dev_status, prototype_settings};
 mod branches;
 pub(super) mod clipboard;

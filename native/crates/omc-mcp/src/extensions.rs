@@ -57,7 +57,7 @@ impl ExtensionState {
     }
 }
 pub fn capabilities() -> Value {
-    json!({"protocol":"omc.native/1","releaseStatus":"incomplete-preview","browserRuntime":false,"legacyToolCount":50,"legacyParity":"incomplete","extensions":["identity.resume/1","workspace.organization/1","comments/1","tokens/1","code.static/1","query.snapshot/1","jobs/1","plugins/1"],"limits":{"mcpRequestBytes":1048576,"batchOperations":100,"queryPageNodes":200,"queryPageBytes":524288,"snapshotsPerSession":4,"snapshotIdleSeconds":60,"resultBytes":67108864},"qualification":{"databaseCommitKillTests":200,"installedOsInteraction":"NOT_RUN","fourHardwarePeers":"NOT_RUN","fullPerformanceWorkloads":"NOT_RUN"},"unsupported":["complete FIG/Sketch fidelity","full desktop capability matrix","complete 30 shader registry","large staged library updates","portable native history backup"]})
+    json!({"protocol":"omc.native/1","releaseStatus":"incomplete-preview","browserRuntime":false,"legacyToolCount":50,"legacyParity":"incomplete","extensions":["identity.resume/1","workspace.organization/1","comments/1","tokens/1","code.static/1","query.snapshot/1","jobs/1","plugins/1","motion/1","handoff/1"],"limits":{"mcpRequestBytes":1048576,"batchOperations":100,"queryPageNodes":200,"queryPageBytes":524288,"snapshotsPerSession":4,"snapshotIdleSeconds":60,"resultBytes":67108864},"qualification":{"databaseCommitKillTests":200,"installedOsInteraction":"NOT_RUN","fourHardwarePeers":"NOT_RUN","fullPerformanceWorkloads":"NOT_RUN"},"unsupported":["complete FIG/Sketch fidelity","full desktop capability matrix","complete 30 shader registry","large staged library updates","portable native history backup"]})
 }
 pub fn definitions() -> Vec<Value> {
     let defs = [
@@ -79,11 +79,11 @@ pub fn definitions() -> Vec<Value> {
         ),
         (
             "native_comments",
-            "Manage anchored comments with independent per-author Undo. Use list_threads to filter and page root threads and get_thread to read a thread and its replies.",
+            "Manage anchored comments with independent per-author Undo. Use list_threads and get_thread to read filtered comments, and changes for a document-scoped cursor.",
         ),
         (
             "native_tokens",
-            "Manage design tokens and modes. Inspect with documentId and id, plus optional nodeId, to read authored and effective values.",
+            "Author token collections, modes, aliases and layer bindings. Use inspect with documentId and id, plus optional nodeId, to read authored and effective values.",
         ),
         (
             "native_job",
@@ -102,10 +102,20 @@ pub fn definitions() -> Vec<Value> {
         if definition["name"] == "native_comments" {
             definition["inputSchema"]["properties"]["authorId"] = json!({"type":"string","minLength":1,"maxLength":200});
         } else if definition["name"] == "native_tokens" {
-            definition["inputSchema"]["properties"]["mode"] = json!({"anyOf":[{"type":"string","minLength":1},{"type":"null"}]});
+            let props = &mut definition["inputSchema"]["properties"];
+            props["mode"] = json!({"anyOf":[{"type":"string","minLength":1,"maxLength":256},{"type":"null"}]});
+            props["modeNames"] = json!({"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","minLength":1,"maxLength":256}});
+            props["collectionId"] = json!({"type":"string","minLength":1,"maxLength":128});
+            props["fromMode"] = json!({"type":"string","minLength":1,"maxLength":256});
+            props["index"] = json!({"type":"integer","minimum":0,"maximum":63});
+            props["description"] = json!({"type":"string","maxLength":4000});
         }
         definition
-    }).chain(std::iter::once(figcraft::plugins::native_definition())).collect()
+    }).chain([
+        figcraft::plugins::native_definition(),
+        native_motion::definition(),
+        ToolRouter::native_handoff_definition(),
+    ]).collect()
 }
 impl ToolRouter {
     pub(crate) fn extension(
@@ -128,6 +138,12 @@ impl ToolRouter {
         }
         if name == "native_capabilities" {
             return Ok(capabilities());
+        }
+        if name == "native_handoff" {
+            return self.native_handoff(session, &args, &meta);
+        }
+        if name == "native_motion" {
+            return self.native_motion(session, &args, &meta);
         }
         if name == "native_plugins" {
             return self.native_plugins(session, &args);
@@ -266,7 +282,10 @@ impl ToolRouter {
             self.context(session, &id)?;
         }
         if name == "native_comments"
-            && matches!(args["action"].as_str(), Some("get_thread" | "list_threads"))
+            && matches!(
+                args["action"].as_str(),
+                Some("get_thread" | "list_threads" | "changes")
+            )
         {
             return self.review_threads(session, &id, &args);
         }
@@ -300,6 +319,9 @@ impl ToolRouter {
             )
         {
             return self.native_token_scope(session, &id, &snapshot, &args, &meta);
+        }
+        if name == "native_tokens" && native_tokens::is_definition_action(&snapshot, &args) {
+            return self.native_token_definition(session, &id, &snapshot, &args, &meta);
         }
         let namespace = match name {
             "native_tokens" => "tokens",

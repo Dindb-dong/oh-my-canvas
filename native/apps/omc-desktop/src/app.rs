@@ -978,10 +978,6 @@ impl App {
                 "oh-my-canvas": {
                     "command": cli,
                     "args": ["--profile", profile]
-                },
-                "oh-my-canvas-figcraft": {
-                    "command": cli,
-                    "args": ["--profile", profile, "--dialect", "figcraft"]
                 }
             }
         }))

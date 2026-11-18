@@ -9,6 +9,9 @@ pub fn tools() -> &'static Vec<Value> {
         for definition in [
             include_str!("../schemas/board-v1.json"),
             include_str!("../schemas/prototype-v1.json"),
+            include_str!("../schemas/shape-builder-v1.json"),
+            include_str!("../schemas/data-fill-v1.json"),
+            include_str!("../schemas/guides-v1.json"),
         ] {
             tools.push(serde_json::from_str(definition).expect("checked design tool schema"));
         }
@@ -36,6 +39,8 @@ pub fn validate(name: &str, args: &Value) -> Result<()> {
         ("edit_shapes", "layout") => &["layout"],
         ("edit_shapes", "appearance") => &["appearance"],
         ("edit_text", "replace") => &["text"],
+        ("edit_text", "path_attach") => &["pathId"],
+        ("prototype", "show_preview" | "present") => &["frameId"],
         ("edit_text", "range_style") => &["range", "style"],
         ("edit_text", "paragraph_style") => &["style"],
         ("edit_text", "find_replace") => &["find", "replace"],
@@ -44,7 +49,8 @@ pub fn validate(name: &str, args: &Value) -> Result<()> {
         ("styles", "update") => &["id", "patch"],
         ("styles", "apply") => &["id", "ids"],
         ("styles", "detach") => &["ids"],
-        ("libraries", "get" | "remove" | "export") => &["id"],
+        ("libraries", "get" | "remove" | "export" | "check_updates" | "refresh") => &["id"],
+        ("libraries", "link_source") => &["sourceDocumentId"],
         ("libraries", "add") => &["snapshot"],
         ("libraries", "update") => &["id", "snapshot"],
         ("libraries", "enable") => &["id", "enabled"],
@@ -59,6 +65,7 @@ pub fn validate(name: &str, args: &Value) -> Result<()> {
         ("component", "property" | "bind") => &["propertyType"],
         ("component", "edit_property" | "remove_property") => &["property"],
         ("component", "set_property") => &["property", "value"],
+        ("component", "swap") => &["id", "source"],
         ("collaboration", "invite") => &["address"],
         ("collaboration", "join") => &["invite"],
         ("edit_path", "move_nodes") => &["indices", "dx", "dy"],
@@ -82,7 +89,7 @@ pub fn validate(name: &str, args: &Value) -> Result<()> {
         ));
     }
     if name == "import_document"
-        && matches!(args["format"].as_str(), Some("fig" | "sketch"))
+        && matches!(args["format"].as_str(), Some("fig" | "sketch" | "figcraft"))
         && args.get("filePath").is_none()
     {
         return Err(EngineError::invalid("design file import requires filePath"));

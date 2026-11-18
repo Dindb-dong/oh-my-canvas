@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFile, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -8,7 +8,6 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { promisify } from 'node:util'
 
 const chrome = process.env.OMC_CAPTURE_CHROME_BINARY
 const sdk = process.env.OMC_TEST_SDK_ROOT
@@ -24,14 +23,33 @@ function captures() {
 async function captureFixtures() {
   const directory = await mkdtemp(join(tmpdir(), 'omc-web-capture-chrome-'))
   const module = await readFile(captureModule)
-  const server = createServer((request, response) => {
+  let reportCapture
+  const server = createServer(async (request, response) => {
+    if (request.url === '/capture' && request.method === 'POST') {
+      try {
+        const chunks = []
+        let size = 0
+        for await (const chunk of request) {
+          size += chunk.length
+          if (size > 1024 * 1024) throw new Error('Fixture capture exceeds 1 MiB')
+          chunks.push(chunk)
+        }
+        const capture = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        response.writeHead(204).end()
+        reportCapture?.(capture)
+      } catch (error) {
+        response.writeHead(400).end()
+        reportCapture?.({ error: error.message })
+      }
+      return
+    }
     if (request.url === '/capture-web.mjs') {
       response.setHeader('Content-Type', 'text/javascript')
       response.end(module)
       return
     }
     response.setHeader('Content-Type', 'text/html; charset=utf-8')
-    response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:")
+    response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'")
     response.end(`<!doctype html><meta charset="utf-8">
       <style>
         * { box-sizing: border-box }
@@ -58,16 +76,20 @@ async function captureFixtures() {
       </main>
       <div>CAPTURE_NONSELECTED_SECRET</div>
       <div id="outside-clip"><div id="clipped-selection">CAPTURE_PARTIAL_SECRET</div></div>
-      <pre id="capture-output"></pre>
       <script type="module">
-        import capture from '/capture-web.mjs'
-        await document.fonts.ready
-        await Promise.all([...document.images].map(image => image.decode().catch(() => {})))
-        document.querySelector('#state').textContent = innerWidth > 700 ? 'Wide ready' : 'Narrow editing'
-        const selection = capture(document.querySelector('#selected'))
-        const clipped = capture(document.querySelector('#clipped-selection'))
-        const bytes = new TextEncoder().encode(JSON.stringify({ selection, clipped }))
-        document.querySelector('#capture-output').textContent = btoa(String.fromCharCode(...bytes))
+        let result
+        try {
+          const { default: capture } = await import('/capture-web.mjs')
+          await document.fonts.ready
+          await Promise.all([...document.images].map(image => image.decode().catch(() => {})))
+          document.querySelector('#state').textContent = innerWidth > 700 ? 'Wide ready' : 'Narrow editing'
+          const selection = capture(document.querySelector('#selected'))
+          const clipped = capture(document.querySelector('#clipped-selection'))
+          result = { selection, clipped }
+        } catch (error) {
+          result = { error: error.message }
+        }
+        await fetch('/capture', { method: 'POST', body: JSON.stringify(result) })
       </script>`)
   })
   server.listen(0, '127.0.0.1')
@@ -75,24 +97,45 @@ async function captureFixtures() {
   try {
     const results = []
     for (const width of [500, 900]) {
-      const { stdout } = await promisify(execFile)(chrome, [
-        '--headless=new', '--dump-dom', '--no-first-run', '--no-default-browser-check',
+      const report = new Promise(resolve => { reportCapture = resolve })
+      const browser = spawn(chrome, [
+        '--headless=new', '--no-first-run', '--no-default-browser-check',
         '--disable-background-networking', '--disable-component-update', '--disable-sync',
         '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
         `--window-size=${width},650`, `--user-data-dir=${join(directory, String(width))}`,
         `http://127.0.0.1:${server.address().port}/`,
-      ], { timeout: 20000, maxBuffer: 1024 * 1024 })
-      const encoded = stdout.match(/<pre id="capture-output">([A-Za-z0-9+/=]+)<\/pre>/)?.[1]
-      assert.ok(encoded, 'Chrome returned a capture bundle')
-      const { selection, clipped } = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'))
-      assert.equal(clipped.height, 9)
-      assert.ok(clipped.warnings.includes('clipped-text-omitted'))
-      assert.doesNotMatch(JSON.stringify(clipped), /CAPTURE_PARTIAL_SECRET/)
-      results.push(selection)
+      ], { stdio: ['ignore', 'ignore', 'pipe'] })
+      const exited = once(browser, 'exit')
+      let stderr = ''
+      browser.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-1200) })
+      try {
+        const { selection, clipped, error } = await Promise.race([
+          report,
+          exited.then(([code, signal]) => {
+            throw new Error(`Chrome exited before reporting the ${width}px capture (${code ?? signal})\n${stderr}`)
+          }),
+          delay(20000, undefined, { ref: false }).then(() => {
+            throw new Error(`Chrome did not report the ${width}px capture within 20 seconds\n${stderr}`)
+          }),
+        ])
+        assert.ok(selection && clipped, error ?? 'Chrome returned both captured selections')
+        assert.equal(clipped.height, 9)
+        assert.ok(clipped.warnings.includes('clipped-text-omitted'))
+        assert.doesNotMatch(JSON.stringify(clipped), /CAPTURE_PARTIAL_SECRET/)
+        results.push(selection)
+      } finally {
+        reportCapture = undefined
+        if (browser.kill()) {
+          await Promise.race([exited, delay(1500, undefined, { ref: false })])
+          if (browser.exitCode === null && browser.signalCode === null) browser.kill('SIGKILL')
+        }
+        await exited.catch(() => {})
+      }
     }
     return results
   } finally {
     server.close()
+    server.closeAllConnections()
     await rm(directory, { recursive: true, force: true })
   }
 }

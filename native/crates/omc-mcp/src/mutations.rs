@@ -19,6 +19,13 @@ impl Draft {
                 self.created.push(node.id.clone());
                 self.affected.insert(node.id.clone());
             }
+            Command::NodeCreateMany { nodes } => {
+                for node in nodes {
+                    self.snapshot.nodes.insert(node.id.clone(), node.clone());
+                    self.created.push(node.id.clone());
+                    self.affected.insert(node.id.clone());
+                }
+            }
             Command::NodeSet {
                 node_id,
                 properties,
@@ -210,7 +217,12 @@ impl ToolRouter {
                 None,
             );
         }
-        let snapshot = if matches!(name, "update" | "edit_text")
+        let snapshot = if name == "update"
+            || name == "edit_text"
+                && !matches!(
+                    args["action"].as_str(),
+                    Some("path_attach" | "path_options" | "path_detach")
+                )
             || name == "edit_shapes"
                 && matches!(
                     args["action"].as_str(),
@@ -367,6 +379,7 @@ impl ToolRouter {
                 "toId",
                 "targetId",
                 "frameId",
+                "pathId",
                 "sourceId",
                 "destinationId",
             ] {
@@ -392,7 +405,17 @@ impl ToolRouter {
             if matches!(
                 tool,
                 "batch" | "undo" | "redo" | "document_assets" | "export_selection"
-            ) || tool == "prototype" && input["action"] == "inspect"
+            ) || tool == "prototype"
+                && matches!(
+                    input["action"].as_str(),
+                    Some(
+                        "inspect"
+                            | "preview_playback"
+                            | "show_preview"
+                            | "present"
+                            | "close_preview"
+                    )
+                )
             {
                 return Err(EngineError::invalid(
                     "operation cannot be nested in an atomic batch",
@@ -407,7 +430,10 @@ impl ToolRouter {
                     || tool == "component"
                         && matches!(input["action"].as_str(), Some("create" | "instance"))
                     || tool == "board"
-                        && matches!(input["action"].as_str(), Some("create_sticky" | "connect")))
+                        && matches!(
+                            input["action"].as_str(),
+                            Some("create_sticky" | "connect" | "create_table" | "create_mind_map")
+                        ))
                 {
                     return Err(EngineError::invalid(
                         "this batch step has no named node result",
@@ -455,11 +481,14 @@ impl ToolRouter {
         };
         match name {
             "batch" => self.build_batch(session, id, args, draft),
-            "board" | "prototype" => {
-                let (commands, result) = if name == "board" {
-                    self.board_mutation(session, &draft.snapshot, args)?
-                } else {
-                    self.prototype_mutation(session, &draft.snapshot, args)?
+            "board" | "prototype" | "shape_builder" | "guides" => {
+                let (commands, result) = match name {
+                    "board" => self.board_mutation(session, &draft.snapshot, args)?,
+                    "prototype" => self.prototype_mutation(session, &draft.snapshot, args)?,
+                    "shape_builder" => {
+                        self.native_shape_builder_commands(session, &draft.snapshot, args)?
+                    }
+                    _ => self.native_guide_commands(session, &draft.snapshot, args)?,
                 };
                 for command in commands {
                     draft.apply(command)?;
@@ -790,6 +819,14 @@ impl ToolRouter {
                                 text: replacement.into(),
                                 attributes,
                             })?;
+                        }
+                        Ok(())
+                    }
+                    "path_attach" | "path_options" | "path_detach" => {
+                        for command in
+                            self.native_text_path_commands(session, &draft.snapshot, &raw, args)?
+                        {
+                            draft.apply(command)?;
                         }
                         Ok(())
                     }
@@ -1141,6 +1178,19 @@ impl ToolRouter {
             }
             "property" | "bind" | "edit_property" | "set_property" | "remove_property" => {
                 self.component_property_mutation(session, id, args, draft)
+            }
+            "slot_create" | "slot_remove" | "slot_insert" | "slot_reset" | "slot_list" => {
+                let (commands, result) =
+                    self.native_slot_commands(session, &draft.snapshot, args)?;
+                for command in commands {
+                    draft.apply(command)?;
+                }
+                draft.result.extend(result);
+                Ok(())
+            }
+            "swap" => {
+                let command = self.native_instance_swap(session, &draft.snapshot, args)?;
+                draft.apply(command)
             }
             "create" => {
                 let raw = self.resolve(

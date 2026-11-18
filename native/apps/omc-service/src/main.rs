@@ -732,6 +732,14 @@ async fn mcp_request(app: App, headers: HeaderMap, body: Bytes, figcraft: bool) 
             {
                 figcraft_desktop_command(&app, &session, command, params["arguments"].clone()).await
             } else if !figcraft
+                && tool_name == "prototype"
+                && matches!(
+                    params["arguments"]["action"].as_str(),
+                    Some("show_preview" | "present" | "close_preview")
+                )
+            {
+                native_prototype_desktop(&app, &session, params["arguments"].clone()).await
+            } else if !figcraft
                 && tool_name == "workspace"
                 && let Some(action) = params["arguments"]["action"].as_str()
                 && omc_mcp::desktop_commands::is_legacy_workspace_action(action)
@@ -893,6 +901,19 @@ async fn figcraft_open_link(app: &App, session: &str, args: Value) -> Result<Val
             .await?;
     }
     Ok(link)
+}
+
+async fn native_prototype_desktop(app: &App, session: &str, args: Value) -> Result<Value> {
+    let router = app.router.clone();
+    let caller = session.to_owned();
+    let (method, arguments) = tokio::task::spawn_blocking(move || {
+        router.native_prototype_desktop_arguments(&caller, &args)
+    })
+    .await
+    .map_err(|_| EngineError::new("internal_error", "desktop command worker stopped"))??;
+    app.desktop_automation
+        .call(session, method, arguments)
+        .await
 }
 
 async fn legacy_focused_document(

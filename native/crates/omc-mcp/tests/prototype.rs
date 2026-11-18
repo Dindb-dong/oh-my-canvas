@@ -348,7 +348,8 @@ fn native_slide_deck_persists_shared_layout_and_exports_in_saved_order() {
             "export_selection",
             json!({"documentId":id,"format":"svg","ids":[slide]}),
         );
-        assert!(svg["content"].as_str().unwrap().contains("#6633cc"));
+        let content = svg["content"].as_str().unwrap().to_ascii_lowercase();
+        assert!(content.contains("fill=\"#63c\"") || content.contains("fill=\"#6633cc\""));
     }
     let result = call(
         &reader,

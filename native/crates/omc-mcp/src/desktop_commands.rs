@@ -432,6 +432,49 @@ impl ToolRouter {
         Ok(params)
     }
 
+    pub fn native_prototype_desktop_arguments(
+        &self,
+        session: &str,
+        args: &Value,
+    ) -> Result<(&'static str, Value)> {
+        schema::validate("prototype", args)?;
+        let action = match args["action"].as_str() {
+            Some("show_preview") => "proto.preview",
+            Some("present") => "proto.present",
+            Some("close_preview") => "proto.closePreview",
+            _ => return Err(EngineError::invalid("unknown desktop prototype action")),
+        };
+        self.workspace.session(session)?;
+        let document = native_id(crate::string(args, "documentId")?)?;
+        let context = self.workspace.context(&document)?;
+        let mut params = json!({"document":document,"minSequence":context.revision.sequence});
+        if action != "proto.closePreview" {
+            if self.state(session, &document).is_err() {
+                self.context(session, &document)?;
+            }
+            let frame = self.resolve(session, &document, crate::string(args, "frameId")?)?;
+            let state = self.state(session, &document)?;
+            let layer = self
+                .workspace
+                .nodes(&document, std::slice::from_ref(&frame))?;
+            if !layer.into_iter().flatten().any(|node| {
+                node.kind == NodeKind::Frame
+                    && node.parent_id.as_deref() == Some(&state.root)
+                    && node.properties.get("hidden") != Some(&Value::Bool(true))
+                    && node.properties.get("visible") != Some(&Value::Bool(false))
+            }) {
+                return Err(EngineError::invalid(
+                    "choose a visible top-level frame on the selected page",
+                ));
+            }
+            params["startLayer"] = frame.into();
+            params["presentationOptions"] =
+                self.workspace.catalog.lock().unwrap().preference()?["prototypePresentation"]
+                    .clone();
+        }
+        Ok((action, params))
+    }
+
     pub fn fig_window_result(&self, session: &str, result: Value) -> Result<Value> {
         let document = result["documentId"]
             .as_str()
