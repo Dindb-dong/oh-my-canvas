@@ -329,3 +329,33 @@ fn native_guides_keep_page_and_frame_scopes_after_a_contour_edit() {
     assert_ne!(page["ownerId"], frame);
     assert_eq!(page["guides"], json!([{"offset":18.,"vertical":false}]));
 }
+
+#[test]
+fn native_fonts_reports_actual_styles_features_and_missing_families() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(directory.path(), None).unwrap();
+    let router = Arc::new(ToolRouter::new(workspace.clone()));
+    let session = workspace.session_open(None).unwrap()["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let call = |tool: &str, args: Value| router.call(&session, tool, args, Value::Null).unwrap();
+    let created = call("create_document", json!({"title":"Font inspection"}));
+    let document = &created["documentId"];
+    let bundled = call("fonts", json!({"documentId":document,"family":"inter"}));
+    assert_eq!(bundled["available"], true);
+    assert_eq!(bundled["source"], "bundled");
+    assert_eq!(bundled["styleAvailable"], true);
+    assert!(!bundled["styles"].as_array().unwrap().is_empty());
+    assert!(bundled["features"].is_array());
+    assert!(bundled["variation"]["axes"].is_array());
+
+    let absent = call(
+        "fonts",
+        json!({"documentId":document,"family":"OMC absent typeface 450533"}),
+    );
+    assert_eq!(absent["available"], false);
+    assert_eq!(absent["styleAvailable"], false);
+    assert!(absent["features"].is_null());
+    assert!(absent["variation"].is_null());
+}

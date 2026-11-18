@@ -2125,29 +2125,77 @@ fn fonts(params: &Value) -> Result<Value> {
         return Ok(json!(names));
     }
     let requested = params["style"].as_str().unwrap_or("Regular");
-    let found = (0..styles.count())
-        .find(|i| font_style_name(&mut styles, *i).eq_ignore_ascii_case(requested));
-    let face = found.and_then(|i| styles.new_typeface(i)).or_else(|| {
-        if requested.eq_ignore_ascii_case("regular") && styles.count() > 0 {
-            manager.match_family_style(family, skia_safe::FontStyle::normal())
-        } else {
-            None
-        }
-    });
+    let face = font_face(manager, family, &mut styles, requested);
     if params["features"] == true {
         return Ok(json!(
             face.map(|face| omc_text::open_type_features(&face))
                 .unwrap_or_default()
         ));
     }
-    let Some(face) = face else {
-        return Ok(Value::Null);
-    };
+    Ok(face.as_ref().map(font_variation).unwrap_or(Value::Null))
+}
+
+fn font_face(
+    manager: &FontMgr,
+    family: &str,
+    styles: &mut skia_safe::FontStyleSet,
+    requested: &str,
+) -> Option<skia_safe::Typeface> {
+    let found =
+        (0..styles.count()).find(|i| font_style_name(styles, *i).eq_ignore_ascii_case(requested));
+    found.and_then(|i| styles.new_typeface(i)).or_else(|| {
+        if requested.eq_ignore_ascii_case("regular") && styles.count() > 0 {
+            manager.match_family_style(family, skia_safe::FontStyle::normal())
+        } else {
+            None
+        }
+    })
+}
+
+fn font_variation(face: &skia_safe::Typeface) -> Value {
     let axes=face.variation_design_parameters().unwrap_or_default().into_iter().map(|axis|{
         let tag=String::from_utf8_lossy(&axis.tag.to_be_bytes()).into_owned();
         json!({"tag":tag,"name":tag,"min":axis.min,"default":axis.def,"max":axis.max,"hidden":axis.is_hidden()})
     }).collect::<Vec<_>>();
-    Ok(json!({"family":face.family_name(),"axes":axes,"instances":font_instances(&face)}))
+    json!({"family":face.family_name(),"axes":axes,"instances":font_instances(face)})
+}
+
+impl ToolRouter {
+    pub(crate) fn native_font_details(
+        &self,
+        snapshot: &DocumentSnapshot,
+        args: &Value,
+    ) -> Result<Value> {
+        let family = crate::string(args, "family")?.trim();
+        if family.is_empty() {
+            return Err(EngineError::invalid("font family is empty"));
+        }
+        let requested = args["style"].as_str().unwrap_or("Regular");
+        let (system, loaded, bundled) = family_managers();
+        let mut sources = loaded
+            .iter()
+            .map(|manager| ("profile", manager))
+            .chain([("bundled", &bundled), ("system", &system)]);
+        let (source, names, face) = sources
+            .find_map(|(source, manager)| {
+                let name = manager
+                    .family_names()
+                    .find(|name| name.eq_ignore_ascii_case(family))?;
+                let mut styles = manager.match_family(&name);
+                let names = (0..styles.count())
+                    .map(|i| font_style_name(&mut styles, i))
+                    .collect::<Vec<_>>();
+                let face = font_face(manager, &name, &mut styles, requested);
+                Some((Some(source), names, face))
+            })
+            .unwrap_or_default();
+        Ok(json!({
+            "ok": true, "revision": snapshot.sequence, "family": family, "requestedStyle": requested,
+            "available": source.is_some(), "source": source, "styles": names, "styleAvailable": face.is_some(),
+            "features": face.as_ref().map(omc_text::open_type_features),
+            "variation": face.as_ref().map(font_variation)
+        }))
+    }
 }
 
 fn be16(bytes: &[u8], offset: usize) -> Option<u16> {
