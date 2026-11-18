@@ -31,7 +31,7 @@ fn native_handoff_returns_scoped_code_and_persists_mapping_and_review_links() {
         invoke(&first, "create_shape", args)["rawIds"][0].clone()
     };
     let source = create("frame", json!({"name":"Button source"}), None);
-    let label = create(
+    create(
         "text",
         json!({"name":"Label","text":"Default caption"}),
         Some(&source),
@@ -48,7 +48,9 @@ fn native_handoff_returns_scoped_code_and_persists_mapping_and_review_links() {
         args["action"] = json!(action);
         invoke(&first, "component", args)
     };
-    let main = component("create", json!({"id":source,"name":"Button"}))["componentId"].clone();
+    let created = component("create", json!({"id":source,"name":"Button"}));
+    let main = created["rawIds"][0].clone();
+    let label = &created["rawIds"][1];
     let prop = component(
         "bind",
         json!({"id":main,"layer":label,"name":"Label","propertyType":"text"}),
@@ -81,7 +83,7 @@ fn native_handoff_returns_scoped_code_and_persists_mapping_and_review_links() {
     assert_eq!(before["componentId"], main);
     assert_eq!(before["code"]["sourceId"], instance);
     assert_eq!(before["computedStyle"].as_object().unwrap().len(), 1);
-    assert_eq!(before["bounds"][2], 160);
+    assert_eq!(before["bounds"][2].as_f64(), Some(160.0));
 
     let hint = call(
         &first,
