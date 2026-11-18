@@ -21,9 +21,13 @@ impl ToolRouter {
         if !(1..=200).contains(&limit) {
             return Err(EngineError::invalid("limit must be between 1 and 200"));
         }
+        let action = string(args, "action")?;
+        if action == "changes" {
+            return self.read_review_changes(document, args["cursor"].as_str(), limit as usize);
+        }
         let snapshot = self.workspace.snapshot(document)?;
         let entries = resources::catalogs(&snapshot.metadata, "comments");
-        let (items, thread) = match string(args, "action")? {
+        let (items, thread) = match action {
             "list_threads" => {
                 let node = args["nodeId"]
                     .as_str()
@@ -185,5 +189,90 @@ mod tests {
             Value::Null,
         );
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod change_tests {
+    use super::*;
+    use omc_workspace::Workspace;
+    use std::sync::Arc;
+
+    #[test]
+    fn review_changes_follow_only_the_target_document_across_sessions() {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = Workspace::open(directory.path(), None).unwrap();
+        let session = || {
+            workspace.session_open(None).unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        let writer = session();
+        let reader = session();
+        let router = Arc::new(ToolRouter::new(workspace));
+        let call =
+            |session: &str, name, args| router.call(session, name, args, Value::Null).unwrap();
+        let first = call(&writer, "create_document", json!({"title":"First review"}));
+        let second = call(&writer, "create_document", json!({"title":"Second review"}));
+        let comments = |session: &str, doc: &Value, action: &str, mut args: Value| {
+            args["version"] = json!("1");
+            args["documentId"] = doc["documentId"].clone();
+            args["action"] = json!(action);
+            call(session, "native_comments", args)
+        };
+        let idle = comments(&reader, &first, "changes", json!({}));
+        assert_eq!(idle["events"], json!([]));
+        let thread = comments(&writer, &first, "create", json!({"body":"First comment"}));
+        let hidden = comments(&writer, &second, "create", json!({"body":"Other document"}));
+        let reply = comments(
+            &writer,
+            &first,
+            "reply",
+            json!({"threadId":thread["id"],"body":"Reply"}),
+        );
+        let nested = comments(
+            &writer,
+            &first,
+            "reply",
+            json!({"threadId":reply["id"],"body":"Nested"}),
+        );
+        comments(&writer, &first, "undo", json!({}));
+
+        let first_event = comments(
+            &reader,
+            &first,
+            "changes",
+            json!({"cursor":idle["cursor"],"limit":1}),
+        );
+        assert_eq!(first_event["events"][0]["commentId"], thread["id"]);
+        assert_eq!(first_event["events"][0]["sequence"], 1);
+        assert_eq!(first_event["hasMore"], true);
+        let rest = comments(
+            &reader,
+            &first,
+            "changes",
+            json!({"cursor":first_event["cursor"]}),
+        );
+        assert_eq!(rest["events"].as_array().unwrap().len(), 3);
+        assert_eq!(rest["events"][0]["sequence"], 2);
+        assert_eq!(rest["events"][1]["commentId"], nested["id"]);
+        assert_eq!(rest["events"][1]["threadId"], thread["id"]);
+        assert_eq!(rest["events"][2]["kind"], "comment.undo");
+        assert_eq!(rest["hasMore"], false);
+        assert!(!rest.to_string().contains(hidden["id"].as_str().unwrap()));
+
+        let wrong = comments(
+            &reader,
+            &second,
+            "changes",
+            json!({"cursor":rest["cursor"]}),
+        );
+        assert_eq!(wrong["reset"], true);
+        assert_eq!(wrong["events"], json!([]));
+        assert_eq!(wrong["dropped"], 0);
+        let no_change = comments(&reader, &first, "changes", json!({"cursor":rest["cursor"]}));
+        assert_eq!(no_change["events"], json!([]));
+        assert_eq!(no_change["cursor"], rest["cursor"]);
     }
 }
