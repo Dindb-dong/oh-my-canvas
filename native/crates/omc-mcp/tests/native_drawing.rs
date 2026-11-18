@@ -27,7 +27,7 @@ fn native_text_path_keeps_editable_text_and_source_and_restores_placement() {
     let shape = |params: Value| call(&edit_session, "create_shape", params)["rawIds"][0].clone();
     let text = shape(json!({
         "documentId":document,"type":"text","x":12,"y":24,"width":140,"height":35,
-        "properties":{"text":"Curved design","fontSize":18}
+        "properties":{"text":"Curved design"}
     }));
     let ellipse = shape(json!({
         "documentId":document,"type":"ellipse","x":420,"y":180,"width":220,"height":140

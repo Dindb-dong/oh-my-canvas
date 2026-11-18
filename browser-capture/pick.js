@@ -1,6 +1,6 @@
 (() => {
   globalThis.omcCaptureCancel?.()
-  const nonce = crypto.randomUUID()
+  const nonce = crypto.getRandomValues(new Uint32Array(4)).join('-')
   const controller = new AbortController()
   const options = { capture: true, signal: controller.signal }
   const outline = document.createElement('div')
@@ -33,7 +33,11 @@
   }, options)
   addEventListener('pointermove', event => {
     if (selected || !(event.target instanceof Element)) return
-    const { x, y, width, height } = event.target.getBoundingClientRect()
+    const target = event.target
+    const root = target instanceof SVGElement && !(target instanceof SVGSVGElement)
+      ? target.ownerSVGElement ?? target
+      : target
+    const { x, y, width, height } = root.getBoundingClientRect()
     Object.assign(outline.style, { left: x + 'px', top: y + 'px', width: width + 'px', height: height + 'px' })
   }, options)
 

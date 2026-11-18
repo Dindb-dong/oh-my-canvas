@@ -12,6 +12,10 @@ pub(crate) fn published(metadata: &Properties) -> Option<&Value> {
         .and_then(|record| record.get("extensions"))
 }
 
+pub(crate) fn is_library_variant_set(node: &Node) -> bool {
+    node.kind == NodeKind::Frame && node.properties.get("isVariantSet") == Some(&Value::Bool(true))
+}
+
 fn visible(row: &Value) -> bool {
     row["published"] != false
 }
@@ -246,15 +250,29 @@ pub(crate) fn publication(snapshot: &DocumentSnapshot, params: &Value) -> Result
     };
     let mut components = Map::new();
     let mut objects = Map::new();
+    let mut variant_sets = BTreeSet::new();
     while let Some(id) = deps.components.pop_first() {
-        if components.contains_key(&id) {
+        if components.contains_key(&id) || variant_sets.contains(&id) {
             continue;
         }
         let node = snapshot
             .nodes
             .get(&id)
-            .filter(|node| node.kind == NodeKind::Component)
             .ok_or_else(|| EngineError::invalid("Published component dependency is missing"))?;
+        let is_set = is_library_variant_set(node);
+        if is_set {
+            deps.components.extend(
+                children(snapshot, &id)
+                    .into_iter()
+                    .filter(|child| child.kind == NodeKind::Component)
+                    .map(|child| child.id.clone()),
+            );
+            variant_sets.insert(id.clone());
+        } else if node.kind != NodeKind::Component {
+            return Err(EngineError::invalid(
+                "Published component dependency is missing",
+            ));
+        }
         let properties = node
             .properties
             .get("componentPropertyDefinitions")
@@ -277,18 +295,22 @@ pub(crate) fn publication(snapshot: &DocumentSnapshot, params: &Value) -> Result
                 );
             }
         }
-        components.insert(
-            id.clone(),
-            json!({
-                "id":id,"name":node.string("name").unwrap_or("Component"),"mainId":id,
-                "properties":properties,"published":explicit_components.contains(&id)
-            }),
-        );
+        if !is_set {
+            components.insert(
+                id.clone(),
+                json!({
+                    "id":id,"name":node.string("name").unwrap_or("Component"),"mainId":id,
+                    "properties":properties,"published":explicit_components.contains(&id)
+                }),
+            );
+        }
         let mut queue = vec![node];
         let mut subtree = BTreeMap::new();
         while let Some(node) = queue.pop() {
             subtree.insert(&node.id, node);
-            queue.extend(children(snapshot, &node.id));
+            if !is_set {
+                queue.extend(children(snapshot, &node.id));
+            }
             if objects.contains_key(&node.id) {
                 continue;
             }
@@ -319,9 +341,11 @@ pub(crate) fn publication(snapshot: &DocumentSnapshot, params: &Value) -> Result
                 "id":node.id,"type":node.kind,"parentId":node.parent_id,"rank":node.rank,"properties":data,
             }));
         }
-        let bytes = serde_json::to_vec(&subtree)
-            .map_err(|error| EngineError::invalid(error.to_string()))?;
-        components.get_mut(&id).unwrap()["fingerprint"] = json!(hex::encode(Sha256::digest(bytes)));
+        if let Some(component) = components.get_mut(&id) {
+            let bytes = serde_json::to_vec(&subtree)
+                .map_err(|error| EngineError::invalid(error.to_string()))?;
+            component["fingerprint"] = json!(hex::encode(Sha256::digest(bytes)));
+        }
     }
     let mut styles = Map::new();
     for id in std::mem::take(&mut deps.styles) {

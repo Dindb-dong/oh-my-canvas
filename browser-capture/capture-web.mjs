@@ -6,6 +6,9 @@ export default function captureWebSelection(root) {
   if (root.closest('[data-omc-private], [contenteditable]:not([contenteditable="false"])')) {
     throw new Error('The selected element is marked private or editable')
   }
+  if (root instanceof SVGElement && !(root instanceof SVGSVGElement)) {
+    root = root.ownerSVGElement ?? root
+  }
 
   const layers = []
   const warnings = new Set()

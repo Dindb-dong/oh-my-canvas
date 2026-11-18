@@ -429,6 +429,18 @@ try{
     assert.equal(Buffer.from(midpoint.base64,'base64').subarray(1,4).toString(),'PNG');
     assert.notEqual(initial.sha256,midpoint.sha256);
     assert.equal(initial.width,midpoint.width);
+    const motionTemplate=(await author.call('create_shape',{...doc,type:'frame',width:120,height:80})).rawIds[0];
+    const motionDefinition=(await author.call('component',{...doc,action:'create',id:motionTemplate,name:'Animated component'})).rawIds[0];
+    const motionChild=(await author.call('create_shape',{...doc,type:'rect',parentId:motionDefinition,width:20,height:20,
+     properties:{fills:[{type:'solid',color:'#E8193A'}]}
+    })).rawIds[0];
+    await motion('set_track',{nodeId:motionChild,property:'translateX',keyframes:[{timeMs:0,value:0},{timeMs:1000,value:40}]});
+    const instanceFrame=(await author.call('create_shape',{...doc,type:'frame',width:120,height:80})).rawIds[0];
+    await author.call('component',{...doc,action:'instance',source:motionDefinition,parent:instanceFrame});
+    const instanceStart=await motion('sample',{frameId:instanceFrame,timeMs:0});
+    const instanceEnd=await motion('sample',{frameId:instanceFrame,timeMs:1000});
+    assert.deepEqual(Object.values(instanceEnd.values),[{translateX:40}]);
+    assert.notEqual(instanceStart.sha256,instanceEnd.sha256);
     const {mp4}=await author.call('native_motion',{version:'1',action:'capabilities'});
     if(process.env.OMC_MOTION_FFMPEG)assert.equal(mp4.available,true);
     if(mp4.available){

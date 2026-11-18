@@ -260,6 +260,20 @@ impl ToolRouter {
             }
             component_map.insert(key.clone(), native.clone());
         }
+        let variant_sets: BTreeMap<_, _> = objects
+            .iter()
+            .filter(|(_, object)| {
+                object["type"] == "frame" && object["properties"]["isVariantSet"] == true
+            })
+            .map(|(key, _)| (key.clone(), mapping[key].clone()))
+            .collect();
+        let source_parent = |key: &str| {
+            let parent = objects[key]["parentId"].as_str()?;
+            if definition_roots.contains_key(key) && !variant_sets.contains_key(parent) {
+                return None;
+            }
+            mapping.contains_key(parent).then_some(parent)
+        };
         let mut token_map = BTreeMap::new();
         let mut collection_map = BTreeMap::new();
         if let Some(collections) = source.get("collections").and_then(Value::as_object) {
@@ -332,11 +346,7 @@ impl ToolRouter {
         while !remaining.is_empty() {
             let key = remaining
                 .iter()
-                .find(|key| {
-                    let parent = objects[*key]["parentId"].as_str();
-                    definition_roots.contains_key(*key)
-                        || parent.is_none_or(|p| !mapping.contains_key(p) || installed.contains(p))
-                })
+                .find(|key| source_parent(key).is_none_or(|parent| installed.contains(parent)))
                 .cloned()
                 .ok_or_else(|| EngineError::invalid("cyclic library objects"))?;
             remaining.remove(&key);
@@ -368,15 +378,10 @@ impl ToolRouter {
             };
             let mut node = Node::new(kind);
             node.id = mapping[&key].clone();
-            node.parent_id = Some(if definition_roots.contains_key(&key) {
-                container_id.clone()
-            } else {
-                object["parentId"]
-                    .as_str()
-                    .and_then(|p| mapping.get(p))
-                    .cloned()
-                    .unwrap_or(container_id.clone())
-            });
+            node.parent_id = Some(
+                source_parent(&key)
+                    .map_or_else(|| container_id.clone(), |parent| mapping[parent].clone()),
+            );
             node.rank = object["rank"]
                 .as_str()
                 .filter(|rank| omc_model::valid_rank(rank))
@@ -441,8 +446,21 @@ impl ToolRouter {
             {
                 node.properties.insert(
                     "componentPropertyDefinitions".into(),
-                    library_component_properties(properties, &component_map, &mapping)?,
+                    library_component_properties(
+                        properties,
+                        &component_map,
+                        &mapping,
+                        &variant_sets,
+                    )?,
                 );
+            }
+            if let Some(mapped) = node
+                .properties
+                .get("variantSetId")
+                .and_then(Value::as_str)
+                .and_then(|id| variant_sets.get(id))
+            {
+                node.properties.insert("variantSetId".into(), json!(mapped));
             }
             for key in ["slotContentFor", "slotInstanceFor"] {
                 if let Some(target) = node.properties.get(key).and_then(Value::as_str)
@@ -576,14 +594,58 @@ impl ToolRouter {
             .get(&library_id)
             .and_then(|entry| entry["nodeIds"].as_array())
         {
-            let obsolete = old
+            let obsolete: BTreeSet<_> = old
                 .iter()
                 .filter_map(Value::as_str)
                 .filter(|id| !native_ids.contains(*id) && snapshot.nodes.contains_key(*id))
+                .collect();
+            let definitions: BTreeSet<_> = obsolete
+                .iter()
+                .copied()
+                .filter(|id| {
+                    let node = &snapshot.nodes[*id];
+                    node.kind == NodeKind::Component || library_ops::is_library_variant_set(node)
+                })
+                .collect();
+            for node in snapshot
+                .nodes
+                .values()
+                .filter(|node| !definitions.is_empty() && !obsolete.contains(node.id.as_str()))
+            {
+                if [
+                    "componentId",
+                    "componentProperties",
+                    "propertyValues",
+                    "componentOverrides",
+                    "overrides",
+                    "componentPropertyDefinitions",
+                ]
+                .iter()
+                .filter_map(|key| node.properties.get(*key))
+                .any(|value| references_removed_definition(value, &definitions))
+                {
+                    return Err(EngineError::new(
+                        "conflict",
+                        format!(
+                            "Library update would remove a component still referenced by layer {}",
+                            node.id
+                        ),
+                    ));
+                }
+            }
+            let roots: Vec<_> = obsolete
+                .iter()
+                .copied()
+                .filter(|id| {
+                    snapshot.nodes[*id]
+                        .parent_id
+                        .as_deref()
+                        .is_none_or(|parent| !obsolete.contains(parent))
+                })
                 .map(str::to_owned)
-                .collect::<Vec<_>>();
-            if !obsolete.is_empty() {
-                commands.push(Command::NodeDelete { node_ids: obsolete });
+                .collect();
+            if !roots.is_empty() {
+                commands.push(Command::NodeDelete { node_ids: roots });
             }
         }
         let enabled = entries
@@ -656,10 +718,24 @@ fn remap_token_refs(value: &mut Value, tokens: &BTreeMap<String, String>) {
     }
 }
 
+fn references_removed_definition(value: &Value, definitions: &BTreeSet<&str>) -> bool {
+    match value {
+        Value::String(id) => definitions.contains(id.as_str()),
+        Value::Array(items) => items
+            .iter()
+            .any(|item| references_removed_definition(item, definitions)),
+        Value::Object(items) => items
+            .values()
+            .any(|item| references_removed_definition(item, definitions)),
+        _ => false,
+    }
+}
+
 fn library_component_properties(
     properties: &Value,
     component_map: &BTreeMap<String, String>,
     node_map: &BTreeMap<String, String>,
+    variant_sets: &BTreeMap<String, String>,
 ) -> Result<Value> {
     let properties = properties
         .as_array()
@@ -691,7 +767,7 @@ fn library_component_properties(
                 .map(|asset| {
                     asset
                         .as_str()
-                        .and_then(|id| component_map.get(id))
+                        .and_then(|id| component_map.get(id).or_else(|| variant_sets.get(id)))
                         .cloned()
                         .ok_or_else(|| {
                             EngineError::invalid("library slot preferred component missing")

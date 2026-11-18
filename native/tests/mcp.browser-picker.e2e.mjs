@@ -13,8 +13,8 @@ import { promisify } from 'node:util'
 import { chromium } from 'playwright'
 
 const extension = fileURLToPath(new URL('../../browser-capture/', import.meta.url))
-const service = process.env.OMC_SERVICE_BINARY ?? fileURLToPath(new URL('../target/debug/omc-service', import.meta.url))
-const cli = process.env.OMC_CLI_BINARY ?? fileURLToPath(new URL('../target/debug/omc-cli', import.meta.url))
+const service = process.env.OMC_SERVICE_BINARY ?? fileURLToPath(new URL('../target/debug/omc-service' + (process.platform === 'win32' ? '.exe' : ''), import.meta.url))
+const cli = process.env.OMC_CLI_BINARY ?? fileURLToPath(new URL('../target/debug/omc-cli' + (process.platform === 'win32' ? '.exe' : ''), import.meta.url))
 const sdk = process.env.OMC_TEST_SDK_ROOT
 const { Client } = await import(sdk ? pathToFileURL(join(sdk, 'dist/esm/client/index.js')).href : '@modelcontextprotocol/sdk/client/index.js')
 const { StdioClientTransport } = await import(sdk ? pathToFileURL(join(sdk, 'dist/esm/client/stdio.js')).href : '@modelcontextprotocol/sdk/client/stdio.js')
@@ -104,6 +104,7 @@ test('one default MCP call captures a real browser selection into a durable edit
     browser = await chromium.launchPersistentContext(join(directory, 'chromium'), {
       channel: 'chromium', headless: true, viewport: { width: 900, height: 650 },
       args: ['--enable-unsafe-extension-debugging', '--disable-background-networking',
+        '--no-proxy-server', '--host-resolver-rules=MAP omc-capture.test 127.0.0.1',
         '--disable-extensions-except=' + extension, '--load-extension=' + extension],
     })
     const worker = browser.serviceWorkers()[0] ?? await browser.waitForEvent('serviceworker')
@@ -115,15 +116,19 @@ test('one default MCP call captures a real browser selection into a durable edit
     await settings.getByRole('status').filter({ hasText: 'Connection saved.' }).waitFor()
 
     const page = await browser.newPage()
-    await page.goto('http://localhost:' + site.address().port)
+    await page.goto('http://omc-capture.test:' + site.address().port)
+    assert.equal(await page.evaluate(() => isSecureContext), false)
     const browserSession = await browser.browser().newBrowserCDPSession()
     const { targetInfos } = await browserSession.send('Target.getTargets', { filter: [{ type: 'tab' }] })
     const target = targetInfos.find(info => info.url === page.url())
     assert.ok(target, 'Chromium returned the fixture tab target')
-    await browserSession.send('Extensions.triggerAction', { id: extensionId, targetId: target.targetId })
-    await page.locator('[aria-hidden="true"]').waitFor({ state: 'attached' })
-    await page.locator('#card').click({ position: { x: 5, y: 5 } })
-    await page.locator('[aria-hidden="true"]').waitFor({ state: 'detached' })
+    const select = async (selector, position) => {
+      await browserSession.send('Extensions.triggerAction', { id: extensionId, targetId: target.targetId })
+      await page.locator('[aria-hidden="true"]').waitFor({ state: 'attached' })
+      await page.locator(selector).click({ position })
+      await page.locator('[aria-hidden="true"]').waitFor({ state: 'detached' })
+    }
+    await select('#card', { x: 5, y: 5 })
     await page.getByRole('button', { name: 'Change state' }).click()
     assert.equal(await page.locator('#label').textContent(), 'After browser selection')
 
@@ -152,6 +157,11 @@ test('one default MCP call captures a real browser selection into a durable edit
     assert.notEqual(original.sha256, edited.sha256)
     await call(writer, 'save_document', { id: documentId })
     await call(writer, 'workspace', { documentId, action: 'close' })
+    await select('#card svg path', { x: 16, y: 8 })
+    const direct = await call(writer, 'capture_web', { title: 'Direct SVG selection' })
+    const directTree = await call(writer, 'get_tree', { ...args, documentId: direct.documentId })
+    assert.ok(directTree.nodes.some(node => node.kind === 'path'))
+    assert.doesNotMatch(JSON.stringify(directTree), /After browser selection|OMC_PRIVATE_|OMC_OUTSIDE_SELECTION/)
     await assert.rejects(call(writer, 'capture_web'), { code: 'browser_selection_unavailable' })
     await writer.close()
     writer = null

@@ -168,7 +168,7 @@ impl ToolRouter {
             .ok_or_else(|| {
                 EngineError::invalid("motion layer must be an authored layer in this document")
             })?;
-        let mut tracks = read_tracks(node)?;
+        let mut tracks = read_tracks(&node.properties)?;
         if !edit {
             return Ok(
                 json!({"ok":true,"nodeId":node_id,"tracks":tracks,"shader":node.properties.get(PROCEDURAL_SHADER_PROPERTY),"revision":snapshot.revision()}),
@@ -287,8 +287,8 @@ fn decode<T: serde::de::DeserializeOwned>(value: &Value) -> Result<T> {
         .map_err(|e| EngineError::invalid(format!("Invalid motion data: {e}")))
 }
 
-fn read_tracks(node: &Node) -> Result<Tracks> {
-    let Some(stored) = node.properties.get(TRACKS) else {
+fn read_tracks(properties: &Properties) -> Result<Tracks> {
+    let Some(stored) = properties.get(TRACKS) else {
         return Ok(Tracks::new());
     };
     let tracks: Tracks = decode(stored)?;
@@ -391,10 +391,8 @@ impl Prepared {
             if child.hidden {
                 continue;
             }
-            if let Some(node) = snapshot.nodes.get(&child.id)
-                && node.properties.contains_key(TRACKS)
-            {
-                let set = read_tracks(node)?;
+            if child.properties.contains_key(TRACKS) {
+                let set = read_tracks(&child.properties)?;
                 track_count += set.len();
                 if track_count > MAX_ACTIVE_TRACKS {
                     return Err(EngineError::new(

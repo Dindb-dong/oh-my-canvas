@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { chromium } from 'playwright'
 
 const chrome = process.env.OMC_CAPTURE_CHROME_BINARY
 const sdk = process.env.OMC_TEST_SDK_ROOT
@@ -21,28 +22,8 @@ function captures() {
 }
 
 async function captureFixtures() {
-  const directory = await mkdtemp(join(tmpdir(), 'omc-web-capture-chrome-'))
   const module = await readFile(captureModule)
-  let reportCapture
-  const server = createServer(async (request, response) => {
-    if (request.url === '/capture' && request.method === 'POST') {
-      try {
-        const chunks = []
-        let size = 0
-        for await (const chunk of request) {
-          size += chunk.length
-          if (size > 1024 * 1024) throw new Error('Fixture capture exceeds 1 MiB')
-          chunks.push(chunk)
-        }
-        const capture = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-        response.writeHead(204).end()
-        reportCapture?.(capture)
-      } catch (error) {
-        response.writeHead(400).end()
-        reportCapture?.({ error: error.message })
-      }
-      return
-    }
+  const server = createServer((request, response) => {
     if (request.url === '/capture-web.mjs') {
       response.setHeader('Content-Type', 'text/javascript')
       response.end(module)
@@ -76,67 +57,41 @@ async function captureFixtures() {
       </main>
       <div>CAPTURE_NONSELECTED_SECRET</div>
       <div id="outside-clip"><div id="clipped-selection">CAPTURE_PARTIAL_SECRET</div></div>
-      <script type="module">
-        let result
-        try {
+      `)
+  })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  let browser
+  try {
+    browser = await chromium.launch({ executablePath: chrome, headless: true })
+    const results = []
+    for (const width of [500, 900]) {
+      const page = await browser.newPage({ viewport: { width, height: 650 } })
+      try {
+        await page.goto(`http://127.0.0.1:${server.address().port}/`)
+        const { selection, clipped } = await page.evaluate(async () => {
           const { default: capture } = await import('/capture-web.mjs')
           await document.fonts.ready
           await Promise.all([...document.images].map(image => image.decode().catch(() => {})))
           document.querySelector('#state').textContent = innerWidth > 700 ? 'Wide ready' : 'Narrow editing'
-          const selection = capture(document.querySelector('#selected'))
-          const clipped = capture(document.querySelector('#clipped-selection'))
-          result = { selection, clipped }
-        } catch (error) {
-          result = { error: error.message }
-        }
-        await fetch('/capture', { method: 'POST', body: JSON.stringify(result) })
-      </script>`)
-  })
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  try {
-    const results = []
-    for (const width of [500, 900]) {
-      const report = new Promise(resolve => { reportCapture = resolve })
-      const browser = spawn(chrome, [
-        '--headless=new', '--no-first-run', '--no-default-browser-check',
-        '--disable-background-networking', '--disable-component-update', '--disable-sync',
-        '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
-        `--window-size=${width},650`, `--user-data-dir=${join(directory, String(width))}`,
-        `http://127.0.0.1:${server.address().port}/`,
-      ], { stdio: ['ignore', 'ignore', 'pipe'] })
-      const exited = once(browser, 'exit')
-      let stderr = ''
-      browser.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-1200) })
-      try {
-        const { selection, clipped, error } = await Promise.race([
-          report,
-          exited.then(([code, signal]) => {
-            throw new Error(`Chrome exited before reporting the ${width}px capture (${code ?? signal})\n${stderr}`)
-          }),
-          delay(20000, undefined, { ref: false }).then(() => {
-            throw new Error(`Chrome did not report the ${width}px capture within 20 seconds\n${stderr}`)
-          }),
-        ])
-        assert.ok(selection && clipped, error ?? 'Chrome returned both captured selections')
+          return {
+            selection: capture(document.querySelector('#selected')),
+            clipped: capture(document.querySelector('#clipped-selection')),
+          }
+        })
         assert.equal(clipped.height, 9)
         assert.ok(clipped.warnings.includes('clipped-text-omitted'))
         assert.doesNotMatch(JSON.stringify(clipped), /CAPTURE_PARTIAL_SECRET/)
         results.push(selection)
       } finally {
-        reportCapture = undefined
-        if (browser.kill()) {
-          await Promise.race([exited, delay(1500, undefined, { ref: false })])
-          if (browser.exitCode === null && browser.signalCode === null) browser.kill('SIGKILL')
-        }
-        await exited.catch(() => {})
+        await page.close()
       }
     }
     return results
   } finally {
+    await browser?.close()
     server.close()
     server.closeAllConnections()
-    await rm(directory, { recursive: true, force: true })
   }
 }
 
@@ -169,8 +124,8 @@ test('default native MCP imports browser geometry, edits layers and reopens them
   const { Client } = await import(clientModule)
   const { StdioClientTransport } = await import(transportModule)
   const directory = await mkdtemp(join(tmpdir(), 'omc-web-capture-native-'))
-  const service = process.env.OMC_SERVICE_BINARY ?? fileURLToPath(new URL('../target/debug/omc-service', import.meta.url))
-  const cli = process.env.OMC_CLI_BINARY ?? fileURLToPath(new URL('../target/debug/omc-cli', import.meta.url))
+  const service = process.env.OMC_SERVICE_BINARY ?? fileURLToPath(new URL('../target/debug/omc-service' + (process.platform === 'win32' ? '.exe' : ''), import.meta.url))
+  const cli = process.env.OMC_CLI_BINARY ?? fileURLToPath(new URL('../target/debug/omc-cli' + (process.platform === 'win32' ? '.exe' : ''), import.meta.url))
   const child = spawn(service, ['--profile', directory, '--port', '0'], { stdio: ['ignore', 'ignore', 'pipe'] })
   const exit = once(child, 'exit')
   let stderr = ''

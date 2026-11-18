@@ -116,7 +116,10 @@ test('default OMC stdio edits slots, swaps typed instances and refreshes durable
     await text(slotFrame, 'Default glyph');
     const glyph = await definition('Glyph');
     await text(glyph, 'Replacement glyph');
-    const slot = await component('slot_create', { id: slotFrame, name: 'Leading', preferred: [glyph] });
+    const light = await definition('Theme=Light');
+    const dark = await definition('Theme=Dark');
+    const variantSet = raw(await component('combine', { ids: [light, dark], name: 'Glyph variants' }));
+    const slot = await component('slot_create', { id: slotFrame, name: 'Leading', preferred: [glyph, variantSet] });
     const cardInstance = raw(await component('instance', { source: card }));
     const slotBefore = (await component('slot_list', { id: cardInstance })).slots[0];
     assert.equal(slotBefore.property, slot.property);
@@ -161,6 +164,15 @@ test('default OMC stdio edits slots, swaps typed instances and refreshes durable
     assert.deepEqual((await library(source, 'publication')).publication, published);
     const linked = await library(consumer, 'link_source', { sourceDocumentId: source, expectedVersion: 1 });
     assert.equal(linked.installedVersion, 1);
+    const installedTree = (await api.call('get_tree', { documentId: consumer, detail: 'detailed', depth: 12 })).nodes;
+    const installedNode = id => installedTree.find(node => node.properties?.sourceNodeId === id);
+    const installedSet = installedNode(variantSet);
+    assert.equal(installedSet.properties.isVariantSet, true);
+    for (const id of [light, dark]) {
+      assert.equal(installedNode(id).properties.variantSetId, installedSet.rawId);
+    }
+    const installedSlot = installedNode(card).properties.componentPropertyDefinitions.find(entry => entry.id === slot.property);
+    assert.ok(installedSlot.preferred.includes(installedSet.rawId));
     const installed = await library(consumer, 'insert', { id: linked.id, componentId: second.id });
     const libraryInstance = raw(installed);
     const initial = await svg(consumer, libraryInstance);
@@ -193,6 +205,18 @@ test('default OMC stdio edits slots, swaps typed instances and refreshes durable
     assert.equal(await svg(consumer, libraryInstance), refreshed);
     assert.equal((await check()).installedVersion, 2);
     assert.equal((await check()).updateAvailable, false);
+    await api.call('open_document', { id: source });
+    await api.call('delete', { documentId: source, ids: [first.id] });
+    const withoutUnused = (await library(source, 'publish')).publication;
+    assert.equal((await library(consumer, 'refresh', { id: linked.id, expectedVersion: withoutUnused.version })).installedVersion, 3);
+    assert.equal(await svg(consumer, libraryInstance), refreshed);
+
+    await api.call('delete', { documentId: source, ids: [second.id] });
+    const withoutUsed = (await library(source, 'publish')).publication;
+    await assert.rejects(library(consumer, 'refresh', { id: linked.id, expectedVersion: withoutUsed.version }),
+      { code: 'conflict', message: /still referenced/ });
+    assert.equal((await check()).installedVersion, 3);
+    assert.equal(await svg(consumer, libraryInstance), refreshed);
   } finally {
     await api?.client.close();
     await runningService?.stop();

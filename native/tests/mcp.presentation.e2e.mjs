@@ -138,6 +138,28 @@ test('default OMC stdio replays fixed-clock prototypes and exports a persistent 
       const reordered = await prototype({ action: 'set_deck', frameIds: [next, home, overlay] });
       assert.deepEqual(reordered.layoutInstanceIds, applied.layoutInstanceIds);
 
+      const ref = from => ({ from, field: 'id' });
+      const { documentId: batchDocument } = await call('create_document', { title: 'Named prototype targets' });
+      const batch = await call('batch', { documentId: batchDocument, ops: [
+        { tool: 'create_shape', as: 'firstSlide', args: { type: 'frame', width: 100, height: 100 } },
+        { tool: 'create_shape', as: 'lastSlide', args: { type: 'frame', width: 100, height: 100 } },
+        { tool: 'prototype', args: { action: 'set_deck', frameIds: [ref('firstSlide'), ref('lastSlide')] } },
+        { tool: 'prototype', args: { action: 'set_interactions', sourceId: ref('firstSlide'), interactions: [
+          { trigger: 'onClick', actions: [{ type: 'conditional', blocks: [
+            { expression: 'true', actions: [{ type: 'navigate', dest: ref('lastSlide') }] },
+            { actions: [{ type: 'navigate', dest: ref('lastSlide') }] },
+          ] }] },
+        ] } },
+      ] });
+      const firstSlide = batch.namedResults.firstSlide.id;
+      const lastSlide = batch.namedResults.lastSlide.id;
+      const batchInteractions = (await call('prototype', {
+        documentId: batchDocument, action: 'inspect', sourceId: firstSlide,
+      })).interactions;
+      assert.equal(batchInteractions[0].actions[0].blocks[0].actions[0].dest, lastSlide);
+      const batchDeck = await call('prototype', { documentId: batchDocument, action: 'inspect_deck' });
+      assert.deepEqual(batchDeck.frameIds, [firstSlide, lastSlide]);
+
       await call('edit_shapes', {
         documentId, action: 'patch', ids: [layoutBar], properties: { fills: solid('#6633cc') },
       });

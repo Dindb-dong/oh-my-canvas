@@ -382,14 +382,26 @@ impl ToolRouter {
                 "pathId",
                 "sourceId",
                 "destinationId",
+                "layoutComponentId",
             ] {
                 if let Some(value) = input.get_mut(key) {
                     resolve_step_id(value, &named)?;
                 }
             }
-            if let Some(ids) = input.get_mut("ids").and_then(Value::as_array_mut) {
-                for id in ids {
-                    resolve_step_id(id, &named)?;
+            for field in ["ids", "frameIds"] {
+                if let Some(ids) = input.get_mut(field).and_then(Value::as_array_mut) {
+                    for id in ids {
+                        resolve_step_id(id, &named)?;
+                    }
+                }
+            }
+            if tool == "prototype"
+                && input["action"] == "set_interactions"
+                && let Some(interactions) =
+                    input.get_mut("interactions").and_then(Value::as_array_mut)
+            {
+                for interaction in interactions {
+                    resolve_prototype_action_ids(interaction, &named)?;
                 }
             }
             schema::validate(tool, &input)?;
@@ -1418,6 +1430,22 @@ impl ToolRouter {
         Ok(())
     }
 }
+fn resolve_prototype_action_ids(item: &mut Value, named: &BTreeMap<&str, Value>) -> Result<()> {
+    if let Some(actions) = item.get_mut("actions").and_then(Value::as_array_mut) {
+        for action in actions {
+            if let Some(dest) = action.get_mut("dest") {
+                resolve_step_id(dest, named)?;
+            }
+            if let Some(blocks) = action.get_mut("blocks").and_then(Value::as_array_mut) {
+                for block in blocks {
+                    resolve_prototype_action_ids(block, named)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn resolve_step_id(value: &mut Value, named: &BTreeMap<&str, Value>) -> Result<()> {
     let Some(reference) = value.as_object() else {
         return Ok(());
