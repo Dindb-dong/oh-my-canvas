@@ -1,7 +1,7 @@
 //! FigCraft catalog commands backed by the native document authority.
 pub(crate) mod library_archive;
 pub(crate) mod library_ops;
-mod library_swap;
+pub(crate) mod library_swap;
 pub(crate) mod library_team;
 pub(crate) mod variable_definition;
 mod variable_io;

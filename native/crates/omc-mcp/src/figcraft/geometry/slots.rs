@@ -73,6 +73,84 @@ impl ToolRouter {
         Ok(result)
     }
 
+    pub(crate) fn native_instance_swap(
+        &self,
+        session: &str,
+        snapshot: &DocumentSnapshot,
+        args: &Value,
+    ) -> Result<Command> {
+        let state = self.state(session, &snapshot.id)?;
+        let raw = self.resolve(session, &snapshot.id, string(args, "id")?)?;
+        let source = self.resolve(session, &snapshot.id, string(args, "source")?)?;
+        let instance = slot_target(snapshot, &state.root, &raw, true)?;
+        if instance.kind != NodeKind::Instance {
+            return Err(EngineError::invalid("choose an editable linked instance"));
+        }
+        let definition = snapshot
+            .nodes
+            .get(&source)
+            .filter(|node| node.kind == NodeKind::Component)
+            .ok_or_else(|| EngineError::invalid("replacement must be a component definition"))?;
+        if let Some(library) = definition.string("libraryId")
+            && !crate::resources::catalogs(&snapshot.metadata, "libraries")
+                .get(library)
+                .is_some_and(|entry| entry["enabled"] != false)
+        {
+            return Err(EngineError::invalid(
+                "replacement library is disabled or unlinked",
+            ));
+        }
+        if instance.string("componentId") != Some(&source) {
+            if instance
+                .properties
+                .get("componentPropertyRefs")
+                .is_some_and(|refs| refs.get("mainComponent").is_some())
+            {
+                return Err(EngineError::new(
+                    "conflict",
+                    "instance component is controlled by a property",
+                ));
+            }
+            if !replacement_map(instance).is_empty()
+                || children(snapshot, &raw)
+                    .iter()
+                    .any(|node| node.properties.contains_key(SLOT_CONTENT))
+            {
+                return Err(EngineError::new(
+                    "conflict",
+                    "reset slot overrides before swapping this instance",
+                ));
+            }
+        }
+        let mut parent = instance.parent_id.as_deref();
+        while let Some(ancestor) = parent.and_then(|id| snapshot.nodes.get(id)) {
+            let owner = if ancestor.kind == NodeKind::Component {
+                if ancestor.string("libraryId").is_some() {
+                    return Err(EngineError::invalid(
+                        "published component definitions are read-only",
+                    ));
+                }
+                Some(ancestor.id.as_str())
+            } else {
+                ancestor.string("componentId")
+            };
+            if owner.is_some_and(|owner| reaches_component(snapshot, &source, owner)) {
+                return Err(EngineError::invalid("component swap would create a cycle"));
+            }
+            parent = ancestor.parent_id.as_deref();
+        }
+        let mut properties = crate::figcraft_catalog::library_swap::instance_patch(
+            snapshot, instance, &source, false,
+        )?;
+        if instance.string("libraryId") != definition.string("libraryId") {
+            properties.insert("libraryId".into(), json!(definition.string("libraryId")));
+        }
+        Ok(Command::NodeSet {
+            node_id: raw,
+            properties,
+        })
+    }
+
     pub(crate) fn native_slot_commands(
         &self,
         session: &str,
@@ -536,12 +614,44 @@ fn reaches_component(snapshot: &DocumentSnapshot, start: &str, target: &str) -> 
         if !seen.insert(id) {
             continue;
         }
-        if let Some(component) = snapshot
-            .nodes
-            .get(id)
-            .and_then(|node| node.string("componentId"))
-        {
+        let Some(node) = snapshot.nodes.get(id) else {
+            continue;
+        };
+        if let Some(component) = node.string("componentId") {
             pending.push(component);
+            if let Some(definition) = snapshot.nodes.get(component) {
+                for property in definition
+                    .properties
+                    .get(DEFINITIONS)
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if property["type"] == "swap"
+                        && let Some(property_id) = property["id"].as_str()
+                        && let Some(value) = ["componentProperties", "propertyValues"]
+                            .into_iter()
+                            .find_map(|key| {
+                                node.properties
+                                    .get(key)
+                                    .and_then(|values| values.get(property_id))
+                            })
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.is_empty())
+                    {
+                        pending.push(value);
+                    }
+                }
+            }
+        }
+        if let Some(definitions) = node.properties.get(DEFINITIONS).and_then(Value::as_array) {
+            pending.extend(
+                definitions
+                    .iter()
+                    .filter(|entry| entry["type"] == "swap")
+                    .filter_map(|entry| entry["default"].as_str())
+                    .filter(|value| !value.is_empty()),
+            );
         }
         pending.extend(
             children(snapshot, id)
