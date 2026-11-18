@@ -1,6 +1,7 @@
 mod video;
 
 use super::*;
+use omc_render::{PROCEDURAL_SHADER_PROPERTY, ProceduralShader};
 use omc_scene::{Affine, Scene};
 use omc_style::Diagnostic;
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,7 @@ use skia_safe::{Color, EncodedImageFormat, Matrix, Surface, surfaces};
 const TRACKS: &str = "motionTracks";
 const MAX_TIME_MS: u32 = 120_000;
 const MAX_KEYFRAMES: usize = 128;
+const MAX_ACTIVE_TRACKS: usize = 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,12 +44,12 @@ type Tracks = BTreeMap<Property, Vec<Keyframe>>;
 pub(crate) fn definition() -> Value {
     json!({
         "name": "native_motion",
-        "description": "Edit persisted layer motion tracks, inspect keyframes, render a PNG at a selected time, or encode a short MP4 with an available local FFmpeg encoder. Translation uses parent-space pixels; rotation uses degrees relative to the authored pose. Opacity is absolute. Easing belongs to the interval after its keyframe.",
+        "description": "Edit persisted layer motion tracks, inspect keyframes, render a PNG at a selected time, edit a procedural stripe overlay, or encode a short MP4 with an available local FFmpeg encoder. Translation uses parent-space pixels; rotation uses degrees relative to the authored pose. Opacity is absolute. Easing belongs to the interval after its keyframe.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "version": {"type":"string","enum":["1"]},
-                "action": {"type":"string","enum":["capabilities","inspect","set_track","remove_track","sample","export_video"]},
+                "action": {"type":"string","enum":["capabilities","inspect","set_track","remove_track","set_shader","clear_shader","sample","export_video"]},
                 "documentId": {"type":"string"},
                 "nodeId": {"type":"string"},
                 "frameId": {"type":"string"},
@@ -58,6 +60,14 @@ pub(crate) fn definition() -> Value {
                 "fps": {"type":"integer","minimum":1,"maximum":video::MAX_FPS},
                 "filePath": {"type":"string","minLength":1,"maxLength":4096},
                 "overwrite": {"type":"boolean"},
+                "shader": {"type":"object","properties":{
+                    "kind":{"type":"string","enum":["stripes"]},
+                    "colors":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"string","minLength":1,"maxLength":64}},
+                    "periodPx":{"type":"number","minimum":2,"maximum":4096},
+                    "angleDeg":{"type":"number","minimum":-360,"maximum":360},
+                    "phasePx":{"type":"number","minimum":-4096,"maximum":4096},
+                    "speedPxPerSecond":{"type":"number","minimum":-2048,"maximum":2048}
+                },"required":["kind","colors","periodPx"],"additionalProperties":false},
                 "revision": {"type":"integer","minimum":0},
                 "keyframes": {"type":"array","minItems":1,"maxItems":MAX_KEYFRAMES,"items":{
                     "type":"object",
@@ -76,6 +86,8 @@ pub(crate) fn definition() -> Value {
                 {"type":"object","properties":{"action":{"enum":["inspect"]}},"required":["documentId","nodeId"]},
                 {"type":"object","properties":{"action":{"enum":["set_track"]}},"required":["documentId","nodeId","property","keyframes"]},
                 {"type":"object","properties":{"action":{"enum":["remove_track"]}},"required":["documentId","nodeId","property"]},
+                {"type":"object","properties":{"action":{"enum":["set_shader"]}},"required":["documentId","nodeId","shader"]},
+                {"type":"object","properties":{"action":{"enum":["clear_shader"]}},"required":["documentId","nodeId"]},
                 {"type":"object","properties":{"action":{"enum":["sample"]}},"required":["documentId","frameId","timeMs"]},
                 {"type":"object","properties":{"action":{"enum":["export_video"]}},"required":["documentId","frameId","durationMs"]}
             ],
@@ -89,17 +101,22 @@ impl ToolRouter {
         let action = string(args, "action")?;
         if action == "capabilities" {
             let available = video::available();
-            return Ok(json!({"ok":true,"png":true,"mp4":{
-                "available":available,"encoder":available.then_some("libx264"),
-                "reason":(!available).then_some("Local FFmpeg with libx264 was not found")
-            }}));
+            return Ok(
+                json!({"ok":true,"png":true,"proceduralShaders":["stripes"],"mp4":{
+                    "available":available,"encoder":available.then_some("libx264"),
+                    "reason":(!available).then_some("Local FFmpeg with libx264 was not found")
+                }}),
+            );
         }
         let id = native_id(string(args, "documentId")?)?;
         self.workspace.document_path(&id)?;
         if self.state(session, &id).is_err() {
             self.context(session, &id)?;
         }
-        let edit = matches!(action, "set_track" | "remove_track");
+        let edit = matches!(
+            action,
+            "set_track" | "remove_track" | "set_shader" | "clear_shader"
+        );
         if edit && let Some(result) = self.replay(session, &id, meta)? {
             return Ok(result);
         }
@@ -131,9 +148,10 @@ impl ToolRouter {
                 .to_vec();
             let mut result = self.deliver_export(
                 session,
-                &Value::Null,
+                args,
                 export(&snapshot, bytes, "png", "image/png", diagnostics),
             )?;
+            result["mimeType"] = json!("image/png");
             result["frameId"] = json!(frame);
             result["timeMs"] = json!(time_ms);
             result["width"] = json!(prepared.width);
@@ -153,7 +171,7 @@ impl ToolRouter {
         let mut tracks = read_tracks(node)?;
         if !edit {
             return Ok(
-                json!({"ok":true,"nodeId":node_id,"tracks":tracks,"revision":snapshot.revision()}),
+                json!({"ok":true,"nodeId":node_id,"tracks":tracks,"shader":node.properties.get(PROCEDURAL_SHADER_PROPERTY),"revision":snapshot.revision()}),
             );
         }
         let mut current = Some(node);
@@ -165,6 +183,47 @@ impl ToolRouter {
                 .parent_id
                 .as_ref()
                 .and_then(|id| snapshot.nodes.get(id));
+        }
+        if matches!(action, "set_shader" | "clear_shader") {
+            let (command, shader) = if action == "set_shader" {
+                if !ProceduralShader::supports(node.kind) {
+                    return Err(EngineError::invalid(
+                        "procedural shader requires a fillable shape",
+                    ));
+                }
+                let shader =
+                    ProceduralShader::parse(&args["shader"]).map_err(EngineError::invalid)?;
+                let value = json!(shader);
+                (
+                    Command::NodeSet {
+                        node_id: node_id.clone(),
+                        properties: Properties::from([(
+                            PROCEDURAL_SHADER_PROPERTY.into(),
+                            value.clone(),
+                        )]),
+                    },
+                    value,
+                )
+            } else {
+                if !node.properties.contains_key(PROCEDURAL_SHADER_PROPERTY) {
+                    return Err(EngineError::invalid("layer has no procedural shader"));
+                }
+                (
+                    Command::NodeUnset {
+                        node_id: node_id.clone(),
+                        properties: vec![PROCEDURAL_SHADER_PROPERTY.into()],
+                    },
+                    Value::Null,
+                )
+            };
+            return self.submit_with_output(
+                session,
+                &id,
+                command,
+                meta,
+                Some(snapshot.sequence),
+                Properties::from([("nodeId".into(), json!(node_id)), ("shader".into(), shader)]),
+            );
         }
         let property: Property = decode(&args["property"])?;
         let command = if action == "set_track" {
@@ -326,6 +385,7 @@ impl Prepared {
             .ok_or_else(|| EngineError::invalid("motion frame transform is singular"))?;
         let mut pending = vec![frame_index];
         let mut tracks = Vec::new();
+        let mut track_count = 0;
         while let Some(index) = pending.pop() {
             let child = &scene.items[index];
             if child.hidden {
@@ -335,6 +395,13 @@ impl Prepared {
                 && node.properties.contains_key(TRACKS)
             {
                 let set = read_tracks(node)?;
+                track_count += set.len();
+                if track_count > MAX_ACTIVE_TRACKS {
+                    return Err(EngineError::new(
+                        "resource_limit",
+                        "motion frame exceeds the active track limit",
+                    ));
+                }
                 if !set.is_empty() {
                     tracks.push((index, set));
                 }

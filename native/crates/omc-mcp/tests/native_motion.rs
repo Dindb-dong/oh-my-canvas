@@ -145,10 +145,7 @@ fn motion_keyframes_render_and_survive_reopen() {
             json!({"version":"1","action":"export_video","documentId":id,"frameId":frame,
             "durationMs":1000,"fps":4,"filePath":output}),
         );
-        assert_eq!(
-            video["mimeType"].as_str().unwrap_or("video/mp4"),
-            "video/mp4"
-        );
+        assert_eq!(video["mimeType"], "video/mp4");
         assert_eq!(video["frameCount"], 4);
         assert_eq!(video["durationMs"], 1000.);
         assert_eq!(video["revision"], inspected["revision"]);
@@ -183,4 +180,33 @@ fn motion_keyframes_render_and_survive_reopen() {
         assert!(color(3, 41)[0] > 190 && color(3, 41)[1] < 70);
         assert!(color(3, 5).iter().all(|channel| *channel > 200));
     }
+    let set_shader = |phase, speed| {
+        motion(json!({
+            "version":"1","action":"set_shader","documentId":id,"nodeId":layer,
+            "shader":{"kind":"stripes","colors":["#ff0000","#0000ff"],"periodPx":8,"phasePx":phase,"speedPxPerSecond":speed}
+        }))
+    };
+    set_shader(0, 8);
+    let sample_color = |time, point| {
+        let png = motion(
+            json!({"version":"1","action":"sample","documentId":id,"frameId":frame,"timeMs":time}),
+        );
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(png["base64"].as_str().unwrap())
+            .unwrap();
+        let image = Image::from_encoded(Data::new_copy(&bytes))
+            .unwrap()
+            .make_raster_image(None, None)
+            .unwrap();
+        image.peek_pixels().unwrap().get_color(point)
+    };
+    assert_eq!(sample_color(0, (2, 5)), Color::RED);
+    assert_eq!(sample_color(500, (18, 5)), Color::BLUE);
+    let modified = set_shader(4, 0);
+    assert_eq!(modified["shader"]["phasePx"], 4.);
+    assert_eq!(sample_color(0, (2, 5)), Color::BLUE);
+    let cleared =
+        motion(json!({"version":"1","action":"clear_shader","documentId":id,"nodeId":layer}));
+    assert!(cleared["shader"].is_null());
+    assert_eq!(sample_color(0, (2, 5)), Color::RED);
 }
