@@ -17,9 +17,9 @@
 
 <a id="screenshots"></a>
 
-## 重新拍摄的应用截图
+## 应用截图
 
-2026 年 11 月 18 日，在隔离配置下以隐藏、不聚焦方式运行已安装的原生 macOS 应用并截图。已有 HTML 设计系统通过 MCP 导入为可编辑图层。这是实际运行画面；安装的二进制构建于 11 月 17 日，并非当前 HEAD 的重新构建。
+按图层编辑通过 HTML/CSS 创建的界面，并在本地文档列表中管理画布。
 
 ![Native local canvas library](assets/readme/native-library.png)
 
@@ -51,7 +51,7 @@ Node.js 用于保留的 Electron 实现和 JavaScript 测试客户端，原生�
 
 在原生应用中点击 **MCP → Copy MCP configuration**，将 stdio 配置加入客户端。配置指向安装的 `omc-cli` 和对应配置目录，不会自动修改全局设置。
 
-**OMC 方言提供 59 个 MCP 工具：50 个基本工具与 9 个原生扩展。** 独立的 **FigCraft 兼容方言通过 19 个 MCP 工具提供 643 个命令 ID**，并不是 643 个 MCP 工具。本次更新已通过安装版的 `tools/list` 确认两组工具数量。
+**OMC 方言提供 59 个 MCP 工具：50 个基本工具与 9 个原生扩展。** 独立的 **FigCraft 兼容方言通过 19 个 MCP 工具提供 643 个命令 ID**，并不是 643 个 MCP 工具。
 
 从 `list_documents` → `open_document` 或 `create_document` → `get_context` 开始。修改文档须指定 `documentId`。用 `create_board`、`write_html`、`edit_shapes`、`components`、`batch` 和 `screenshot` 完成创作与检查。原生扩展支持有界查询、评论、令牌、任务和代码导出。
 

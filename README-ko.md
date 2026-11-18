@@ -17,9 +17,9 @@
 
 <a id="screenshots"></a>
 
-## 새로 촬영한 앱 화면
+## 앱 화면
 
-2026년 11월 18일, 설치된 네이티브 macOS 앱을 격리된 프로필에서 숨김·비활성 상태로 실행해 촬영했습니다. 기존 HTML 디자인 시스템을 MCP로 삽입한 편집 가능한 레이어입니다. 목업이 아닌 실제 실행 화면이며, 설치 바이너리는 11월 17일 빌드로 현재 HEAD를 다시 빌드한 것은 아닙니다.
+HTML/CSS로 만든 화면을 레이어 단위로 편집하고, 로컬 문서 목록에서 캔버스를 관리하세요.
 
 ![Native local canvas library](assets/readme/native-library.png)
 
@@ -51,7 +51,7 @@ Node.js는 남아 있는 Electron 구현과 JavaScript 테스트 클라이언트
 
 네이티브 앱의 **MCP → Copy MCP configuration**에서 stdio 설정을 복사해 클라이언트에 등록하세요. 설치된 `omc-cli`와 프로필을 가리키며 글로벌 클라이언트 설정을 자동으로 변경하지 않습니다.
 
-**OMC 방언은 MCP 도구 59개(편집·작업 공간 50개 + 네이티브 확장 9개)**를 제공합니다. 별도 **FigCraft 호환 방언은 MCP 도구 19개를 통해 명령 ID 643개**를 노출합니다. 명령 643개가 MCP 도구 643개를 뜻하지는 않습니다. 두 도구 수는 이번 작업에서 설치 앱의 `tools/list`로 직접 확인했습니다.
+**OMC 방언은 MCP 도구 59개(편집·작업 공간 50개 + 네이티브 확장 9개)**를 제공합니다. 별도 **FigCraft 호환 방언은 MCP 도구 19개를 통해 명령 ID 643개**를 노출합니다. 명령 643개가 MCP 도구 643개를 뜻하지는 않습니다.
 
 `list_documents` → `open_document` 또는 `create_document` → `get_context` 순서로 시작하세요. 문서 변경에는 `documentId`가 필요합니다. `create_board`, `write_html`, `edit_shapes`, `components`, `batch`, `screenshot`으로 생성·수정·확인합니다. 네이티브 확장에는 범위 제한 조회, 댓글, 토큰, 작업과 코드 내보내기가 있습니다.
 

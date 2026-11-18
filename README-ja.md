@@ -17,9 +17,9 @@
 
 <a id="screenshots"></a>
 
-## 新しいアプリ画面
+## アプリ画面
 
-2026年11月18日、インストール済みネイティブmacOSアプリを隔離プロファイルで非表示・非フォーカスのまま撮影。既存HTMLデザインシステムをMCPで編集可能なレイヤーとして挿入した実行画面です。バイナリは11月17日ビルドで、現在のHEADの再ビルドではありません。
+HTML/CSSで作成した画面をレイヤー単位で編集し、ローカル文書一覧でキャンバスを管理できます。
 
 ![Native local canvas library](assets/readme/native-library.png)
 
@@ -51,7 +51,7 @@ Node.jsは旧Electron実装とJavaScriptテストで使用し、ネイティブ�
 
 ネイティブアプリの **MCP → Copy MCP configuration** でstdio設定をコピーしてください。インストール先の`omc-cli`とプロファイルを参照し、グローバル設定を自動変更しません。
 
-**OMC方言は59個のMCPツール（基本50個＋ネイティブ拡張9個）**を提供します。別の**FigCraft互換方言は19個のMCPツール経由で643個のコマンドID**を公開します。643個のMCPツールではありません。両方のツール数を今回`tools/list`で確認しました。
+**OMC方言は59個のMCPツール（基本50個＋ネイティブ拡張9個）**を提供します。別の**FigCraft互換方言は19個のMCPツール経由で643個のコマンドID**を公開します。643個のMCPツールではありません。
 
 `list_documents` → `open_document`または`create_document` → `get_context`から開始。変更には`documentId`を指定します。`create_board`、`write_html`、`edit_shapes`、`components`、`batch`、`screenshot`で作成・検証します。拡張は範囲制限クエリ、コメント、トークン、ジョブ、コード出力に対応します。
 

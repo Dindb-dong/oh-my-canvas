@@ -19,7 +19,7 @@
 
 ## App screenshots
 
-Captured on 18 November 2026 from the installed native macOS app in an isolated, hidden, unfocused profile. The existing HTML design-system fixture was inserted through MCP as editable layers. These are real runtime captures, not mockups; the installed binary dates from 17 November and is not a rebuild of the current HEAD.
+Design interfaces with editable layers, reusable elements and HTML/CSS, then organize your work in the local canvas library.
 
 ![Native local canvas library](assets/readme/native-library.png)
 
@@ -51,7 +51,7 @@ Create main components, linked instances and variants, then edit text, visibilit
 
 Click **MCP → Copy MCP configuration** in the native app and add the generated stdio configuration to your client. It references this installation's `omc-cli` and profile; no global client settings are silently changed.
 
-The native **OMC dialect exposes 59 MCP tools: 50 editor/workspace tools plus 9 native extensions**. The separate **FigCraft-compatible dialect has 19 MCP tools and exposes 643 command IDs** through its command interface. These are different counts, not 643 separate MCP tools. Both `tools/list` counts were read back from the installed app during this refresh.
+The native **OMC dialect exposes 59 MCP tools: 50 editor/workspace tools plus 9 native extensions**. The separate **FigCraft-compatible dialect has 19 MCP tools and exposes 643 command IDs** through its command interface. These are different counts, not 643 separate MCP tools.
 
 Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Document edits require `documentId`. Use `create_board`, `write_html`, `edit_shapes`, `components`, `batch` and `screenshot` for a complete design loop. Native extensions add bounded queries, comments, tokens, jobs and code export.
 
