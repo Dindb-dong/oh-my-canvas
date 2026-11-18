@@ -119,6 +119,26 @@ impl ToolRouter {
                 }
                 table_response(table.id.clone(), &cells, commands)
             }
+            action @ ("create_mind_map" | "inspect_mind_map" | "add_mind_topic"
+            | "rename_mind_topic" | "remove_mind_topic" | "layout_mind_map") => {
+                let mut args = args.clone();
+                let target = if action == "create_mind_map" {
+                    if args.get("parentId").is_some() {
+                        resolve("parentId")?
+                    } else {
+                        root.id.clone()
+                    }
+                } else {
+                    resolve("id")?
+                };
+                if action == "add_mind_topic" {
+                    args["parentId"] = json!(resolve("parentId")?);
+                }
+                if matches!(action, "rename_mind_topic" | "remove_mind_topic") {
+                    args["targetId"] = json!(resolve("targetId")?);
+                }
+                mind_map::command(snapshot, root, &target, &args, action)
+            }
             "connect" | "reattach" => {
                 let scene = paths::scene(snapshot, &state.page_id)?;
                 let endpoint = |id_field, side_field, at_field| {
@@ -199,7 +219,7 @@ fn table_response(
     ))
 }
 
-fn on_page<'a>(
+pub(super) fn on_page<'a>(
     snapshot: &'a DocumentSnapshot,
     root: &str,
     id: &str,

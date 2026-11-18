@@ -2,6 +2,7 @@ use super::*;
 
 mod connectors;
 mod grid;
+mod mind_map;
 mod native;
 mod table;
 mod templates;

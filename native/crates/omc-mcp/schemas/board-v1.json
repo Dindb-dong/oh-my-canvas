@@ -1,6 +1,6 @@
 {
   "name": "board",
-  "description": "Create or edit sticky notes and tables, or connect and reattach layers on the current page. Model-backed connectors follow their targets. All changes are document-scoped.",
+  "description": "Edit sticky notes, tables and mind maps or connect layers on the current page. Model-backed connectors follow their targets. All changes are document-scoped.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -49,9 +49,15 @@
           "create_table",
           "inspect_table",
           "edit_table",
-          "set_table_cell"
+          "set_table_cell",
+          "create_mind_map",
+          "inspect_mind_map",
+          "add_mind_topic",
+          "rename_mind_topic",
+          "remove_mind_topic",
+          "layout_mind_map"
         ],
-        "description": "update_sticky requires id plus text or color. connect requires fromId and toId. reattach requires id, end and targetId. create_table accepts cells or dimensions. inspect_table, edit_table, and set_table_cell require the table id. edit_table requires operation. set_table_cell requires zero-based row and column plus text."
+        "description": "update_sticky requires id plus text or color. connect requires fromId and toId. reattach requires id, end and targetId. create_table accepts cells or dimensions. inspect_table, edit_table, and set_table_cell require the table id. edit_table requires operation. set_table_cell requires zero-based row and column plus text. create_mind_map requires ordered topics. Each key must be unique; a parent key must precede its children, and only the first topic omits parent. Other mind-map actions require the map id. add_mind_topic takes parentId and text, rename_mind_topic takes targetId and text, and remove_mind_topic removes the subtree of targetId."
       },
       "x": {
         "type": "number",
@@ -231,6 +237,40 @@
         "type": "integer",
         "minimum": 0,
         "maximum": 19
+      },
+      "name": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "topics": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 50,
+        "items": {
+          "type": "object",
+          "required": [
+            "key",
+            "text"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "parent": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 512
+            }
+          }
+        }
       }
     }
   }
