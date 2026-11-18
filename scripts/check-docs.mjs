@@ -5,7 +5,7 @@ const nativeFiles=(await readdir('docs/native-engine')).filter(x=>x.endsWith('.m
 const nativeSpecs=new Set(['docs/NATIVE_ENGINE_PLAN.md',...nativeFiles]);
 const benchmarkRoot='docs/benchmarks/results/2026-11-18';
 const benchmarkDocs=(await readdir(benchmarkRoot,{recursive:true})).filter(file=>file.endsWith('.md')).map(file=>`${benchmarkRoot}/${file}`);
-const files=[...readmes,'native/README.md',...benchmarkDocs,'CONTRIBUTING.md','SECURITY.md',...['GETTING_STARTED','ARCHITECTURE','TESTING','TROUBLESHOOTING'].map(x=>`docs/${x}.md`),...['ko','ja','zh-CN'].map(x=>`docs/contributing/${x}.md`),'.github/PULL_REQUEST_TEMPLATE.md',...['MIT_READINESS','DEPENDENCIES','REPLACEMENT'].map(x=>`docs/licensing/${x}.md`),'docs/NATIVE_ENGINE_PLAN.md','docs/DESIGN_FILE_IMPORT.md','IMPLEMENTATION.md',...nativeFiles];
+const files=[...readmes,'native/README.md','docs/MCP_PARITY.md','fixtures/design-files/README.md',...benchmarkDocs,'CONTRIBUTING.md','SECURITY.md',...['GETTING_STARTED','ARCHITECTURE','TESTING','TROUBLESHOOTING'].map(x=>`docs/${x}.md`),...['ko','ja','zh-CN'].map(x=>`docs/contributing/${x}.md`),'.github/PULL_REQUEST_TEMPLATE.md',...['MIT_READINESS','DEPENDENCIES','REPLACEMENT'].map(x=>`docs/licensing/${x}.md`),'docs/NATIVE_ENGINE_PLAN.md','docs/DESIGN_FILE_IMPORT.md','IMPLEMENTATION.md',...nativeFiles];
 const contents=new Map(await Promise.all(files.map(async file=>[file,await readFile(file,'utf8')])));
 const slug=s=>s.toLowerCase().replace(/<[^>]*>|[`*]/g,'').replace(/[^\p{L}\p{N}_ -]/gu,'').replace(/ /g,'-');
 let checked=0,jsonExamples=0;
