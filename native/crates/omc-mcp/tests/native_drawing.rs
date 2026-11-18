@@ -105,3 +105,83 @@ fn native_text_path_keeps_editable_text_and_source_and_restores_placement() {
     assert!(rejected.is_err());
     assert_eq!(tree(&edit_session, &text)["tree"]["properties"], original);
 }
+
+#[test]
+fn native_shape_builder_previews_and_edits_the_selected_regions() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(directory.path(), None).unwrap();
+    let router = Arc::new(ToolRouter::new(workspace.clone()));
+    let registration = workspace.session_open(None).unwrap();
+    let session = registration["sessionId"].as_str().unwrap();
+    let call = |tool: &str, params: Value| router.call(session, tool, params, Value::Null).unwrap();
+    let doc = call("create_document", json!({"title":"Shape builder"}));
+    let document = &doc["documentId"];
+    let rect = |x| {
+        call(
+            "create_shape",
+            json!({"documentId":document,"type":"rect","x":x,"y":50,"width":80,"height":50,
+                "properties":{"fills":[{"type":"solid","color":"#223355"}]}}),
+        )["rawIds"][0]
+            .clone()
+    };
+    let left = rect(40);
+    let right = rect(80);
+    let ids = json!([left, right]);
+    let preview = || {
+        call(
+            "shape_builder",
+            json!({"documentId":document,"ids":ids,"action":"regions"}),
+        )
+    };
+    let first = preview();
+    assert_eq!(first["regions"].as_array().unwrap().len(), 3);
+    let overlap = |output: &Value| {
+        let common = output["regions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|region| region["sources"].as_array().unwrap().len() == 2)
+            .unwrap();
+        assert_eq!(common["bounds"], json!([80., 50., 40., 50.]));
+        common["index"].clone()
+    };
+    let merge = |preview: &Value| {
+        router.call(
+            session,
+            "shape_builder",
+            json!({"documentId":document,"ids":ids,"action":"merge",
+                "regions":[overlap(preview)],"revision":preview["revision"]}),
+            Value::Null,
+        )
+    };
+    call(
+        "edit_shapes",
+        json!({"documentId":document,"ids":[left],"action":"patch","properties":{"name":"Left"}}),
+    );
+    assert_eq!(merge(&first).unwrap_err().code, "stale_revision");
+    let merged = merge(&preview()).unwrap();
+    assert_eq!(merged["receipt"]["status"], "durable");
+    let inspect = |id: &Value| {
+        call(
+            "get_tree",
+            json!({"documentId":document,"id":id,"detail":"detailed"}),
+        )["tree"]
+            .clone()
+    };
+    assert_eq!(inspect(&left)["properties"]["visible"], false);
+    let path = inspect(&merged["id"]);
+    assert_eq!(path["kind"], "path");
+    assert!(
+        path["properties"]["path"]
+            .as_str()
+            .unwrap()
+            .starts_with('M')
+    );
+    let removed = call(
+        "shape_builder",
+        json!({"documentId":document,"ids":[merged["id"]],"action":"remove","points":[[100,70]]}),
+    );
+    assert_eq!(removed["removed"], json!([merged["id"]]));
+    call("undo", json!({"documentId":document}));
+    assert_eq!(inspect(&merged["id"])["properties"], path["properties"]);
+}
