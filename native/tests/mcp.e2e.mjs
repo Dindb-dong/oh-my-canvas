@@ -316,9 +316,9 @@ try{
    assert.equal(status.state,'completed');assert.ok(status.result.content.includes('<svg'));
    const cancelled=await client.call('native_job',{version:'1',action:'cancel',jobId:ticket.jobId});assert.equal(cancelled.cancellation,'already_finished');
   });
-  const connectNativeStdio=async name=>{
+  const connectNativeStdio=async (name,profile=service.profile)=>{
    const cli=process.env.OMC_CLI_BINARY??join(root,'native/target/debug',process.platform==='win32'?'omc-cli.exe':'omc-cli');
-   const transport=new StdioClientTransport({command:cli,args:['--profile',service.profile,'--connect-only'],stderr:'pipe'});
+   const transport=new StdioClientTransport({command:cli,args:['--profile',profile,'--connect-only'],stderr:'pipe'});
    const sdkClient=new Client({name,version:'1.0.0'});
    await sdkClient.connect(transport);
    return {sdkClient,async call(tool,args={}){
@@ -355,7 +355,11 @@ try{
     })).rawIds[0];
     const text=(await author.call('create_shape',{...doc,type:'text',x:95,y:420,width:90,height:20,properties:{text:'Editable curve label'}})).rawIds[0];
     const path=(await author.call('create_shape',{...doc,type:'ellipse',x:120,y:560,width:340,height:150})).rawIds[0];
+    const textPreview={...doc,id:text,mode:'overview'};
+    const plainText=await author.call('screenshot',textPreview);
     await author.call('edit_text',{...doc,id:text,action:'path_attach',pathId:path});
+    const curvedText=await author.call('screenshot',textPreview);
+    assert.notEqual(curvedText.base64,plainText.base64);
     const font=await author.call('fonts',{...doc,family:'Inter'});
     assert.equal(font.source,'bundled');
     assert.ok(font.styles.length);
@@ -449,6 +453,7 @@ try{
     await reviewer.call('open_document',{id:documentId});
     const tree=await reviewer.call('get_tree',{...doc,detail:'detailed'});
     assert.equal(tree.nodes.find(node=>node.rawId===text).properties.textPath.sourceId,path);
+    assert.equal((await reviewer.call('screenshot',textPreview)).base64,curvedText.base64);
     assert.ok(tree.nodes.some(node=>node.text==='Reviewed'));
     assert.equal(tree.nodes.find(node=>node.rawId===merged.id).kind,'path');
     const guides=await reviewer.call('guides',{...doc,action:'list',ownerId:foreground});
@@ -470,12 +475,14 @@ try{
   await t.test('native prototype presents on an isolated background desktop',{
    skip: !process.env.OMC_TEST_DESKTOP_BINARY&&'set OMC_TEST_DESKTOP_BINARY to run the background desktop',
   },async()=>{
+   const isolated=await start(join(temporary,'background-prototype'));
    const desktop=spawn(process.env.OMC_TEST_DESKTOP_BINARY,[
-    '--profile',service.profile,'--automation-background','--smoke-exit-ms','45000','--smoke-size','1000x800',
+    '--profile',isolated.profile,'--automation-background','--smoke-exit-ms','45000','--smoke-size','1000x800',
    ],{stdio:'ignore'});
    children.push(desktop);
-   const author=await connectNativeStdio('native-background-prototype');
+   let author;
    try{
+    author=await connectNativeStdio('native-background-prototype',isolated.profile);
     const {documentId}=await author.call('create_document',{title:'Background native prototype fixture'});
     const frameId=(await author.call('create_board',{documentId,name:'Entry',width:320,height:220})).rawIds[0];
     await author.call('prototype',{documentId,action:'set_flow',frameId});
@@ -493,8 +500,9 @@ try{
     assert.equal(presented.prototypeStart,frameId);
     await author.call('prototype',{documentId,action:'close_preview'});
    }finally{
-    await author.sdkClient.close();
+    await author?.sdkClient.close();
     await stop({child:desktop});
+    await stop(isolated);
    }
   });
   await t.test('legacy page duplication, reordering and guides persist and support undo',async()=>{
