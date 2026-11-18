@@ -2,7 +2,7 @@
 <h1 align="center">Oh My Canvas</h1>
 <p align="center"><strong>HTML/CSS to editable designs. Humans and agents, together.</strong></p>
 <p align="center">A local-first native design studio built in Rust, with Skia rendering, HTML/CSS authoring and concurrent MCP agents.</p>
-<p align="center"><img src="assets/readme/badges.svg" alt="Native Rust · 59 OMC MCP tools · HTML/CSS · Multi-agent" width="660"></p>
+<p align="center"><img src="assets/readme/badges.svg" alt="Native Rust · Native MCP · HTML/CSS · Multi-agent" width="660"></p>
 <p align="center"><strong>English</strong> · <a href="README-ko.md">한국어</a> · <a href="README-ja.md">日本語</a> · <a href="README-zh-CN.md">简体中文</a></p>
 
 <p align="center"><img src="assets/readme/native-editor.png" alt="Native Oh My Canvas editor with HTML-imported editable design system, layers and inspector" width="1280"></p>
@@ -51,7 +51,7 @@ Create main components, linked instances and variants, then edit text, visibilit
 
 Click **MCP → Copy MCP configuration** in the native app and add the generated stdio configuration to your client. It references this installation's `omc-cli` and profile; no global client settings are silently changed.
 
-The native **OMC dialect exposes 59 MCP tools: 50 editor/workspace tools plus 9 native extensions**. The separate **FigCraft-compatible dialect has 19 MCP tools and exposes 643 command IDs** through its command interface. These are different counts, not 643 separate MCP tools.
+The default OMC endpoint exposes native design, review, and workspace tools. The separate FigCraft-compatible endpoint supports its own command protocol. Use each endpoint’s live tool list for the installed build.
 
 Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Document edits require `documentId`. Use `create_board`, `write_html`, `edit_shapes`, `components`, `batch` and `screenshot` for a complete design loop. Native extensions add bounded queries, comments, tokens, jobs and code export.
 

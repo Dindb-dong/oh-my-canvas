@@ -4,7 +4,15 @@ use std::sync::OnceLock;
 pub fn tools() -> &'static Vec<Value> {
     static TOOLS: OnceLock<Vec<Value>> = OnceLock::new();
     TOOLS.get_or_init(|| {
-        serde_json::from_str(include_str!("../schemas/tools-v1.json")).expect("checked schema")
+        let mut tools: Vec<Value> =
+            serde_json::from_str(include_str!("../schemas/tools-v1.json")).expect("checked schema");
+        for definition in [
+            include_str!("../schemas/board-v1.json"),
+            include_str!("../schemas/prototype-v1.json"),
+        ] {
+            tools.push(serde_json::from_str(definition).expect("checked design tool schema"));
+        }
+        tools
     })
 }
 pub fn validate(name: &str, args: &Value) -> Result<()> {
@@ -26,6 +34,7 @@ pub fn validate(name: &str, args: &Value) -> Result<()> {
         ("edit_shapes", "resize") => &["width", "height"],
         ("edit_shapes", "rotate") => &["angle"],
         ("edit_shapes", "layout") => &["layout"],
+        ("edit_shapes", "appearance") => &["appearance"],
         ("edit_text", "replace") => &["text"],
         ("edit_text", "range_style") => &["range", "style"],
         ("edit_text", "paragraph_style") => &["style"],
@@ -185,8 +194,16 @@ pub fn check(schema: &Value, value: &Value, path: &str) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
-    fn catalog_has_pinned_50_tools() {
-        assert_eq!(tools().len(), 50);
+    fn catalog_includes_design_tools_and_rejects_invalid_arguments() {
+        for name in [
+            "create_shape",
+            "board",
+            "measure",
+            "prototype",
+            "document_assets",
+        ] {
+            assert!(tools().iter().any(|tool| tool["name"] == name));
+        }
         assert!(validate("create_shape", &serde_json::json!({"type":"rect"})).is_err());
         assert!(validate("get_context", &serde_json::json!({"authorId":"fake"})).is_err());
     }

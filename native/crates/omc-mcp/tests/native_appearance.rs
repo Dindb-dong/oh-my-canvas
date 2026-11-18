@@ -1,7 +1,9 @@
 use base64::Engine;
 use omc_mcp::ToolRouter;
+use omc_protocol::{Command, CommandEnvelope};
 use omc_workspace::Workspace;
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 #[test]
 fn indexed_appearance_edits_preserve_siblings_and_render_in_order() {
@@ -11,7 +13,7 @@ fn indexed_appearance_edits_preserve_siblings_and_render_in_order() {
         .as_str()
         .unwrap()
         .to_owned();
-    let router = ToolRouter::new(workspace.clone());
+    let router = Arc::new(ToolRouter::new(workspace.clone()));
     let call = |name: &str, args: Value| router.call(&session, name, args, Value::Null);
     let document = call("create_document", json!({"title":"Appearance test"})).unwrap();
     let document = document["documentId"].as_str().unwrap();
@@ -30,7 +32,22 @@ fn indexed_appearance_edits_preserve_siblings_and_render_in_order() {
         json!({"type":"solid","color":"#0000FF"}),
         json!({"type":"solid","color":"#00FF00"}),
     );
-    let front = shape(json!({"fills":[red,blue],"stroke":"#111111","strokeWidth":3}));
+    let front = shape(json!({"fills":[red,blue],"strokeWidth":3}));
+    let native_id = format!("doc_{}", document.replace('-', ""));
+    let snapshot = workspace.snapshot(&native_id).unwrap();
+    workspace
+        .execute(
+            &session,
+            CommandEnvelope::new(
+                &native_id,
+                &snapshot.epoch,
+                Command::NodeSet {
+                    node_id: front.clone(),
+                    properties: [("stroke".into(), json!("#111111"))].into(),
+                },
+            ),
+        )
+        .unwrap();
     let empty = shape(json!({}));
     let edit = |ids: Value, appearance: Value| {
         call(

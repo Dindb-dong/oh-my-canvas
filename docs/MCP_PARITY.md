@@ -1,6 +1,6 @@
 # MCP capability map
 
-The shared OMC catalog contains 50 tools: 37 editor tools and 13 workspace tools. The Rust service adds 9 `native_*` extensions for **59 OMC-dialect MCP tools**. Its separate FigCraft-compatible dialect exposes **19 MCP tools**, with **643 command IDs** behind the command interface; command IDs are not separate MCP tools. Existing tools keep their names. `workspace({action:"capabilities"})` returns the actual catalog, targeting requirements, file limits and platform availability for the running build. Reconnect clients that cache an older tool list after updating the app.
+The default OMC catalog includes the shared editor and workspace tools, native design operations and versioned `native_*` extensions. The separate FigCraft-compatible dialect exposes 19 MCP tools and 643 command IDs through its command interface. Existing tools keep their names. `workspace({action:"capabilities"})` returns the actual catalog, targeting requirements, file limits and platform availability for the running build. Reconnect clients that cache an older tool list after updating the app.
 
 MCP exposes semantic operations: creating a path replaces drawing gestures, a typed value replaces an inspector dialog, and a returned payload replaces a clipboard export. It does not need to click a toolbar or open a picker to do the underlying work. The public schemas returned by `tools/list` are authoritative for arguments.
 

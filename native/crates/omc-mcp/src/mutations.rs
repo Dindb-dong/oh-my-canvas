@@ -356,7 +356,19 @@ impl ToolRouter {
             }
             input["documentId"] = document_id.clone().into();
             for key in [
-                "id", "parentId", "target", "parent", "source", "layer", "maskId",
+                "id",
+                "parentId",
+                "target",
+                "parent",
+                "source",
+                "layer",
+                "maskId",
+                "fromId",
+                "toId",
+                "targetId",
+                "frameId",
+                "sourceId",
+                "destinationId",
             ] {
                 if let Some(value) = input.get_mut(key) {
                     resolve_step_id(value, &named)?;
@@ -380,7 +392,8 @@ impl ToolRouter {
             if matches!(
                 tool,
                 "batch" | "undo" | "redo" | "document_assets" | "export_selection"
-            ) {
+            ) || tool == "prototype" && input["action"] == "inspect"
+            {
                 return Err(EngineError::invalid(
                     "operation cannot be nested in an atomic batch",
                 ));
@@ -392,7 +405,9 @@ impl ToolRouter {
                 }
                 if !(matches!(tool, "create_shape" | "create_board" | "duplicate")
                     || tool == "component"
-                        && matches!(input["action"].as_str(), Some("create" | "instance")))
+                        && matches!(input["action"].as_str(), Some("create" | "instance"))
+                    || tool == "board"
+                        && matches!(input["action"].as_str(), Some("create_sticky" | "connect")))
                 {
                     return Err(EngineError::invalid(
                         "this batch step has no named node result",
@@ -440,6 +455,18 @@ impl ToolRouter {
         };
         match name {
             "batch" => self.build_batch(session, id, args, draft),
+            "board" | "prototype" => {
+                let (commands, result) = if name == "board" {
+                    self.board_mutation(session, &draft.snapshot, args)?
+                } else {
+                    self.prototype_mutation(session, &draft.snapshot, args)?
+                };
+                for command in commands {
+                    draft.apply(command)?;
+                }
+                draft.result.extend(result);
+                Ok(())
+            }
             "create_shape" | "create_board" => {
                 let kind = if name == "create_board" {
                     NodeKind::Frame
@@ -821,11 +848,19 @@ impl ToolRouter {
             .iter()
             .map(|v| self.resolve(session, id, v.as_str().unwrap()))
             .collect::<Result<_>>()?;
+        let action = string(args, "action")?;
+        if action == "appearance" {
+            for command in
+                self.native_appearance_command(&draft.snapshot, &ids, &args["appearance"])?
+            {
+                draft.apply(command)?;
+            }
+            return Ok(());
+        }
         let nodes: Vec<_> = ids
             .iter()
             .map(|id| draft.node(id).cloned())
             .collect::<Result<_>>()?;
-        let action = string(args, "action")?;
         if matches!(action, "distribute" | "tidy") {
             return space_layers(draft, nodes, action, args);
         }

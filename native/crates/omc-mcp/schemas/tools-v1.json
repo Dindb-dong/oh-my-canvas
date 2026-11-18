@@ -703,7 +703,7 @@
   },
   {
     "name": "batch",
-    "description": "Apply 1–100 supported writes atomically to one explicit document. Name a create_board, create_shape, duplicate, component create or component instance step with as. Later node-ID arguments and ids array entries accept {from: step name, field: id}. namedResults returns each named root node ID.",
+    "description": "Apply 1–100 supported writes atomically to one explicit document. Named steps can include create_board, create_shape, duplicate, component creation or instancing, and board sticky or connector creation. Later node-ID arguments and ids array entries accept {from: step name, field: id}. namedResults returns each named root node ID.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -722,6 +722,8 @@
                   "delete",
                   "create_board",
                   "create_shape",
+                  "board",
+                  "prototype",
                   "component",
                   "edit_shapes",
                   "edit_text",
@@ -2064,7 +2066,7 @@
   },
   {
     "name": "edit_shapes",
-    "description": "Atomically edit explicit layers using native inspector properties, structure, geometry, layout or arrangement operations. Never uses the human selection. Requires explicit documentId; never targets the visible tab implicitly.",
+    "description": "Atomically edit explicit layers using native inspector properties, structure, geometry, layout, arrangement or indexed paint and effect operations. Never uses the human selection. Requires explicit documentId; never targets the visible tab implicitly.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2085,7 +2087,8 @@
             "translate",
             "resize",
             "rotate",
-            "layout"
+            "layout",
+            "appearance"
           ]
         },
         "ids": {
@@ -2098,6 +2101,20 @@
           "minItems": 1,
           "maxItems": 200
         },
+        "appearance": {
+          "type": "object",
+          "description": "Use zero-based stack indices. Insert also accepts the stack length; move uses the final index. Detach a linked appearance style before editing its stack.",
+          "properties": {
+            "stack": {"type": "string", "enum": ["fills", "strokes", "effects"]},
+            "operation": {"type": "string", "enum": ["insert", "replace", "remove", "move"]},
+            "index": {"type": "integer", "minimum": 0, "maximum": 128},
+            "to": {"type": "integer", "minimum": 0, "maximum": 128},
+            "entry": {"type": "object", "additionalProperties": true}
+          },
+          "required": ["stack", "operation", "index"],
+          "additionalProperties": false
+        },
+        "revision": {"type": "integer", "minimum": 0},
         "properties": {
           "type": "object",
           "properties": {
@@ -3478,7 +3495,7 @@
   },
   {
     "name": "document_assets",
-    "description": "Manage embedded images, SVG and font assets. Sources must be embedded data URLs; no implicit filesystem or network fetch. Requires explicit documentId; never targets the visible tab implicitly.",
+    "description": "Manage embedded images, SVG and font assets. Sources must be embedded data URLs; no implicit filesystem or network fetch. Requires explicit documentId. For inspect_original or download_original, supply exactly one catalog id or nodeId. A zero-based index selects a font face or image fill. Download returns a session-scoped native_result ID.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3488,7 +3505,9 @@
             "list",
             "add",
             "remove",
-            "place"
+            "place",
+            "inspect_original",
+            "download_original"
           ]
         },
         "id": {
@@ -3496,6 +3515,8 @@
           "minLength": 1,
           "maxLength": 200
         },
+        "nodeId": {"type": "string", "minLength": 1, "maxLength": 200},
+        "index": {"type": "integer", "minimum": 0, "maximum": 999},
         "kind": {
           "type": "string",
           "enum": [
@@ -4278,7 +4299,7 @@
   },
   {
     "name": "export_document",
-    "description": "Export a targeted canvas to typed content or an explicit absolute file path. For OMC, mode merge exports the native causal history. Existing files are preserved unless overwrite is explicitly true.",
+    "description": "Export a targeted canvas to typed content or an explicit absolute file path. For OMC, mode merge exports the native causal history. For PDF, pdfFrameIds exports one page per visible frame in supplied order, including frames across document pages. Existing files are preserved unless overwrite is explicitly true.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4300,6 +4321,13 @@
             "pdf",
             "html"
           ]
+        },
+        "pdfFrameIds": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1, "maxLength": 200},
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true
         },
         "filePath": {
           "type": "string",
@@ -4532,6 +4560,20 @@
         "action",
         "documentId"
       ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "measure",
+    "description": "Measure spacing or container margins between two layers on the selected page, using world-space pixel bounds. Requires an explicit documentId.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "documentId": {"type": "string", "minLength": 36, "maxLength": 36, "pattern": "^[a-f0-9-]{36}$"},
+        "from": {"type": "string", "minLength": 1, "maxLength": 200},
+        "to": {"type": "string", "minLength": 1, "maxLength": 200}
+      },
+      "required": ["documentId", "from", "to"],
       "additionalProperties": false
     }
   }

@@ -20,6 +20,8 @@ mod legacy_read;
 mod legacy_view;
 mod libraries;
 mod mutations;
+mod native_review;
+mod native_tokens;
 mod paths;
 mod resources;
 pub mod schema;
@@ -265,6 +267,7 @@ impl ToolRouter {
                     self.context(session, &id)?;
                 }
                 match name {
+                    "measure" => self.measure_layers(session, &id, &args),
                     "image" => self.image_operation(session, &id, &args, &meta),
                     "select_page" => {
                         let snapshot = self.workspace.snapshot(&id)?;

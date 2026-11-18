@@ -194,10 +194,61 @@ try{
   let service=await start(join(temporary,'primary'));let client=await connect(service);const identity=client.registration;assert.ok(identity?.credential);
   const initial=await client.call('create_document',{title:'SDK contract canvas'});const documentId=initial.documentId;const doc=native(documentId);
   await t.test('pinned tools and shared native command authority',async()=>{
-   const {tools}=await client.client.listTools();assert.equal(tools.filter(t=>!t.name.startsWith('native_')).length,50);
+   const {tools}=await client.client.listTools();for(const name of ['board','measure','native_plugins'])assert.ok(tools.some(t=>t.name===name));
    const result=await client.call('create_shape',{documentId,type:'rect',x:12,y:18,width:80,height:40,properties:{name:'Red box',fills:[{type:'solid',color:'#ff0000'}]}});
    assert.equal(result.receipt.status,'durable');assert.equal(result.createdIds.length,1);
    const tree=await client.call('get_tree',{documentId,detail:'detailed'});assert.equal(tree.nodes.find(n=>n.name==='Red box').width,80);
+  });
+  await t.test('native design authoring and inspection use explicit document targets', async () => {
+   const {documentId}=await client.call('create_document',{title:'Native design coverage'});
+   const shape=async(x,name)=>(await client.call('create_shape',{documentId,type:'rect',x,y:0,width:40,height:24,properties:{name,fills:[{type:'solid',color:'#dc2626'}]}})).rawIds[0];
+   const from=await shape(0,'Left');const to=await shape(60,'Right');
+   const grouped=await client.call('batch',{documentId,ops:[
+    {tool:'board',as:'start',args:{action:'create_sticky',text:'Source',x:40,y:130}},
+    {tool:'board',as:'destination',args:{action:'create_sticky',text:'Destination',x:320,y:130}},
+    {tool:'board',as:'connector',args:{action:'connect',fromId:{from:'start',field:'id'},toId:{from:'destination',field:'id'}}},
+   ]});
+   assert.equal(grouped.receipt.status,'durable');
+   assert.ok(grouped.namedResults.connector.id);
+   const measured=await client.call('measure',{documentId,from,to});
+   assert.equal(measured.unit,'px');
+   assert.equal(measured.from.rawId,from);
+   assert.equal(measured.to.rawId,to);
+   await client.call('edit_shapes',{documentId,action:'appearance',ids:[to],appearance:{
+    stack:'fills',operation:'replace',index:0,entry:{type:'solid',color:'#2563eb'},
+   }});
+   const tree=await client.call('get_tree',{documentId,detail:'detailed'});
+   assert.equal(tree.nodes.find(node=>node.rawId===to).properties.fills[0].color,'#2563EB');
+   const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
+   const asset=await client.call('document_assets',{documentId,action:'add',kind:'image',name:'Original pixel',dataUrl:`data:image/png;base64,${png}`});
+   const original=await client.call('document_assets',{documentId,action:'download_original',id:asset.id});
+   const bytes=await client.call('native_result',{version:'1',resultId:original.resultId});
+   assert.equal(original.mimeType,'image/png');
+   assert.equal(bytes.base64,png);
+   await client.call('native_result',{version:'1',action:'release',resultId:original.resultId});
+   const createFrame=async(width,height)=>(await client.call('create_shape',{documentId,type:'frame',width,height})).rawIds[0];
+   const first=await createFrame(120,70);
+   const second=await createFrame(200,60);
+   const pdf=await client.call('export_document',{id:documentId,format:'pdf',pdfFrameIds:[second,first]});
+   assert.equal(pdf.pages,2);
+   const content=Buffer.from(pdf.base64,'base64').toString('latin1');
+   assert.ok(content.startsWith('%PDF'));
+   assert.ok(content.indexOf('/MediaBox [0 0 200 60]')>=0);
+   assert.ok(content.indexOf('/MediaBox [0 0 120 70]')>content.indexOf('/MediaBox [0 0 200 60]'));
+   const prototype=args=>client.call('prototype',{documentId,...args});
+   await prototype({action:'set_flow',frameId:first,name:'Entry'});
+   await prototype({action:'set_navigation',sourceId:first,destinationId:second});
+   const graph=await prototype({action:'inspect',sourceId:first});
+   assert.equal(graph.flows[0].start,first);
+   assert.equal(graph.interactions[0].trigger.type,'onClick');
+   assert.ok(JSON.stringify(graph.interactions[0]).includes(second));
+   const comment=(action,args)=>client.call('native_comments',{version:'1',documentId,action,...args});
+   const note=await comment('create',{nodeId:from,body:'Move edge to the token grid.'});
+   await comment('reply',{threadId:note.id,body:'Updated.'});
+   const threads=await comment('list_threads',{nodeId:from,resolved:false});
+   assert.deepEqual(threads.items.map(thread=>thread.id),[note.id]);
+   const thread=await comment('get_thread',{threadId:note.id});
+   assert.equal(thread.replies[0].body,'Updated.');
   });
   await t.test('failed batch leaves no first-operation mutation',async()=>{
    const tree=await client.call('get_tree',{documentId,detail:'detailed'});const box=tree.nodes.find(n=>n.name==='Red box');
@@ -266,7 +317,7 @@ try{
    const cli=process.env.OMC_CLI_BINARY??join(root,'native/target/debug',process.platform==='win32'?'omc-cli.exe':'omc-cli');
    const transport=new StdioClientTransport({command:cli,args:['--profile',service.profile,'--connect-only'],stderr:'pipe'});
    const stdio=new Client({name:'stdio-contracts',version:'1.0.0'});
-   try{await stdio.connect(transport);const listed=await stdio.listTools();assert.equal(listed.tools.filter(t=>!t.name.startsWith('native_')).length,50);const result=await stdio.callTool({name:'create_document',arguments:{title:'Rust stdio document'}});assert.notEqual(result.isError,true);assert.ok(result.structuredContent.documentId);}finally{await stdio.close();}
+   try{await stdio.connect(transport);const listed=await stdio.listTools();for(const name of ['board','measure','native_plugins'])assert.ok(listed.tools.some(t=>t.name===name));const result=await stdio.callTool({name:'create_document',arguments:{title:'Rust stdio document'}});assert.notEqual(result.isError,true);assert.ok(result.structuredContent.documentId);}finally{await stdio.close();}
   });
   await t.test('legacy page duplication, reordering and guides persist and support undo',async()=>{
    const doc=await client.call('create_document',{title:'Page action fixture'});

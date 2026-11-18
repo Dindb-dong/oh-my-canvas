@@ -300,6 +300,42 @@ ${designCopy.slice(8).replace(/=+$/,'')}(/figma)-->"></span>`,x:240,y:300});
     assert.equal(await countLayers(),0);
     assert.equal((await run('plugin.remove',{id:pluginId})).removed,true);
     assert.deepEqual((await run('plugin.list')).plugins,[]);
+    const native = new Client({ name: 'native-scoped-plugin', version: '1.0.0' });
+    try {
+      await native.connect(new StreamableHTTPClientTransport(new URL(endpoint + '/mcp'), {
+        requestInit: { headers: { Authorization: `Bearer ${token}` } },
+      }));
+      const nativeCall = async (name, args) => {
+        const result = await native.callTool({ name, arguments: args });
+        if (result.isError) throw new Error(result.content[0].text);
+        return result.structuredContent;
+      };
+      const plugins = (action, args = {}) => nativeCall('native_plugins', { version: '1', action, ...args });
+      const { documentId } = await nativeCall('create_document', { title: 'Scoped Wasm design' });
+      const layer = async (type, name) => (await nativeCall('create_shape', {
+        documentId, type, properties: { name },
+      })).rawIds[0];
+      const scopeId = await layer('frame', 'Plugin frame');
+      const outside = await layer('rect', 'Outside plugin frame');
+      const count = async () => (await nativeCall('get_tree', { documentId, id: scopeId }))
+        .nodes.filter(node => node.name === 'Wasm edited layer').length;
+      await plugins('import', { manifest, wasm: wasmPlugin });
+      assert.equal((await plugins('list')).plugins[0].id, pluginId);
+      await assert.rejects(plugins('run', { documentId, scopeId, id: pluginId, ids: [outside] }), /outside the plugin subtree/);
+      assert.equal(await count(), 0);
+      const created = await plugins('run', { documentId, scopeId, id: pluginId });
+      assert.equal(created.rawIds.length, 2);
+      assert.equal(created.receipt.status, 'durable');
+      assert.equal(await count(), 2);
+      await nativeCall('undo', { documentId });
+      assert.equal(await count(), 0);
+      await plugins('import', { manifest, wasm: wasmTrap });
+      await assert.rejects(plugins('run', { documentId, scopeId, id: pluginId }), /crashed/);
+      assert.equal(await count(), 0);
+      assert.equal((await plugins('remove', { id: pluginId })).removed, true);
+    } finally {
+      await native.close();
+    }
     // A Wasm widget returns different paints on insertion and callbacks, with a hover style.
     const widgetWasm=[
       'AGFzbQEAAAABDAJgAn9/AX9gAX8BfwIwAghmaWdjcmFmdApyZXBseV9yZWFkAAAIZmlnY3JhZnQNd2lk',

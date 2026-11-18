@@ -284,6 +284,8 @@ impl ToolRouter {
             router: self,
             session,
             root: &view.root,
+            scope: None,
+            scope_violation: false,
             manifest: &manifest,
             snapshot: snapshot.clone(),
             selection,

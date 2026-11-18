@@ -220,7 +220,7 @@ impl Tree<'_> {
     }
 }
 
-fn is_descendant(snapshot: &DocumentSnapshot, node: &str, root: &str) -> bool {
+pub(crate) fn is_descendant(snapshot: &DocumentSnapshot, node: &str, root: &str) -> bool {
     let mut current = Some(node);
     while let Some(id) = current {
         if id == root {
