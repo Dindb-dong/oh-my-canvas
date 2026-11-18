@@ -18,17 +18,17 @@ There is no promised response deadline, bounty, or blanket third-party testing a
 
 | Boundary | Current behavior |
 | --- | --- |
-| Renderer | Context isolation, sandbox, no Node integration, restrictive asset/CSP routing, denied navigation/windows/permissions/downloads |
-| IPC | Main verifies the sender and exposes an action allowlist through preload; native exports validate file data before a user-selected save |
-| MCP | Loopback-only certificate-verified HTTPS/legacy bridge, persistent private token (0600), exact Host/port and Origin checks, credential-free version-2 runtime descriptor (0600), per-session HTTP agents and separate stdio author IDs |
-| Collaboration | Separate TLS listener, certificate pinning, private invitation, maximum host plus three guests, protocol version checks |
-| Documents | Size/schema/metadata validation and speculative CRDT validation before live changes; serialized atomic persistence and recovery backup |
+| Native desktop | Native windows and Skia presentation; no browser renderer, preload bridge or Node integration |
+| Local service | Authenticated loopback routing, validated commands and explicit document/session ownership |
+| MCP | Native stdio CLI; optional legacy HTTPS uses a pinned profile certificate and private bearer |
+| Collaboration | Separate TLS listener, pinned invitations, native room limit of four participants |
+| Documents | Schema/size/revision validation before publication; transactional SQLite writes and durable receipts |
 
 Do not forward the MCP bridge port or weaken token, Origin, sender, or TLS checks to solve a connection problem. A collaboration listener intentionally accepts invited remote participants when the user hosts; it is not the MCP endpoint. The app does not configure a public network route or router rule.
 
 TLS authenticates the persistent profile identity before HTTP bearer credentials are sent. Clients must trust that specific public certificate; disabling TLS verification or downgrading to HTTP exposes the bearer to a port impostor. The app does not install OS trust. The private TLS key stays in private app data and must never appear in diagnostics. Codex GUI certificate trust remains unverified.
 
-HTTP authentication is checked before protocol/session routing for every method. The listener rejects browser Origins and IPv6, bounds request bodies, active requests and sessions, and expires idle sessions. The persistent token survives app restarts; it is separate from the disposable credential-free runtime descriptor. Migration creates a separate `mcp-token-v2` credential, revoking any older `mcp-token` previously exposed to pre-TLS relays. Those relays fail closed on the new descriptor and must be restarted with the current bundled SDK-based relay; no HTTP downgrade is accepted. Treat the bearer as local editing authority. These controls do not isolate malicious processes running as the same OS user. If credentials are exposed, stop the app, replace its token and update the client privately; never put the token in logs or reports.
+The default stdio route and optional legacy HTTPS listener are separate transport configurations of the native service. Keep their private profile state private. If a credential is exposed, stop the affected service and renew it through a reviewed profile-specific procedure; never publish credentials in logs or reports. These controls do not isolate malicious processes running as the same OS user.
 
 ## Redact before sharing
 
@@ -36,6 +36,6 @@ Never attach private TLS key files, `mcp-token-v2`, obsolete `mcp-token`, `mcp-r
 
 ## Scope of verification
 
-The [current verification record](docs/independent/VERIFICATION.md) identifies the independent engine's tested local authentication, storage, TLS, author isolation, Undo and export boundaries, along with current open work. It is scoped evidence, not an exhaustive security audit or a guarantee about every dependency and hostile input. Earlier private-engine reports do not establish current coverage. External internet/NAT, real power-cut/disk-failure injection and Windows/Linux execution remain unverified. The local macOS build is unsigned and not notarized.
+The [native guide](native/README.md), [qualification record](docs/native-engine/QUALIFICATION.md), and [testing guide](docs/TESTING.md) describe current verification entry points and gaps. Historical Electron-engine records do not establish native coverage. Tests are scoped evidence, not an exhaustive security audit. External internet/NAT, real power-cut/disk-failure behavior and cross-platform execution require their own qualification.
 
 Keep original license and provenance notices. This policy grants no new software license; see [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -43,7 +43,7 @@ The native runtime does not require Node.js. Native packaging and cross-platform
 
 ## Editable components and design systems
 
-Create main components, linked instances and variants, then edit text, visibility and instance overrides. Shared styles and tokens support repeated designs. The [older example library](docs/design/system/component-library.omc) has 170 variants and uses the Electron file format; it is not a native-format starter file. See [component behavior](docs/design/components-implementation.md) and [migration](docs/MCP_PARITY.md#files-and-repeatable-output).
+Create main components, linked instances and variants, then edit text, visibility and instance overrides. Shared styles and tokens support repeated designs. See the [native component, style and library operations](docs/MCP_PARITY.md) for the editable workflow.
 
 <a id="mcp"></a>
 

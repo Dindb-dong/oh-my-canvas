@@ -43,7 +43,7 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 
 ## 편집 가능한 컴포넌트와 디자인 시스템
 
-원본 컴포넌트·연결된 인스턴스·variant를 만들고 텍스트·표시 여부·개별 override를 바꿉니다. 공유 스타일과 토큰으로 반복 요소를 관리합니다. [기존 예제 라이브러리](docs/design/system/component-library.omc)는 variant 170개를 담은 Electron 형식이며 네이티브 시작 파일은 아닙니다. [컴포넌트 계약](docs/design/components-implementation.md) · [이전 방법](docs/MCP_PARITY.md#files-and-repeatable-output).
+원본 컴포넌트·연결된 인스턴스·variant를 만들고 텍스트·표시 여부·개별 override를 바꿉니다. 공유 스타일과 토큰으로 반복 요소를 관리합니다. [네이티브 컴포넌트·스타일·라이브러리 도구](docs/MCP_PARITY.md)를 참고하세요.
 
 <a id="mcp"></a>
 

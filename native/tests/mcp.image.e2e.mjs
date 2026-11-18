@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { inflateSync } from 'node:zlib';
-import { createMcpFetch } from '../../core/mcp-fetch.mjs';
+import { createMcpFetch } from './support/mcp-fetch.mjs';
 
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const sdk = process.env.OMC_TEST_SDK_ROOT;

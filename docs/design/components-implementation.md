@@ -1,8 +1,11 @@
 # Reusable components implementation
 
+> Historical web-editor component implementation. The runtime described here has been removed. Current native operations are documented in the [MCP capability map](../MCP_PARITY.md).
+
+
 ## Implementation and authoring inputs
 
-The independent component implementation lives in `editor/components/`, with UI, command, document, and MCP integration in the adjacent `editor/` modules. Its required scope includes main components, live instances, grouped overrides, variants, text/boolean/instance-swap properties, local Assets, and the editable design-system document. The earlier inherited algorithms and copied tests are retired. See the [implementation provenance](../independent/PROVENANCE.md) and [component lane authoring record](../../editor/components/IMPLEMENTATION.md).
+The independent component implementation lives in `editor/components/`, with UI, command, document, and MCP integration in the adjacent `editor/` modules. Its required scope includes main components, live instances, grouped overrides, variants, text/boolean/instance-swap properties, local Assets, and the editable design-system document. The earlier inherited algorithms and copied tests are retired. See the [implementation provenance](../independent/PROVENANCE.md) and [component lane authoring record](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/editor/components/IMPLEMENTATION.md).
 
 The [behavior contract](../independent/behavior-contract.md) records compatibility requirements. Public [Penpot variants](https://help.penpot.app/user-guide/design-systems/variants/) and [design-system documentation](https://help.penpot.app/user-guide/design-systems/) provide behavioral vocabulary; they are not a source-code license grant. Planning source exposure is documented in the provenance record, and the project makes no unexposed clean-room claim.
 

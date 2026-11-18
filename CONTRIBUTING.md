@@ -1,115 +1,49 @@
 # Contributing to Oh My Canvas
 
-**English** · [한국어](docs/contributing/ko.md) · [日本語](docs/contributing/ja.md) · [简体中文](docs/contributing/zh-CN.md)
+Oh My Canvas is a Rust-native app. Make focused changes using existing model, service, renderer and UI patterns. Keep unrelated edits and private user data out of commits.
 
-Help make a dependable design studio: report a reproducible bug, improve a translation, refine a component, or propose a focused code change.
+## Local development
 
-> **License and provenance.** Original project contributions are under the [MIT license](LICENSE); external materials retain their own terms. Submit only work you can license, preserve [third-party notices](THIRD_PARTY_NOTICES.md), and do not reintroduce retired company source or copied tests. No new CLA or rights assignment is introduced here.
-
-## Choose a contribution
-
-| Contribution | Include |
-| --- | --- |
-| Bug fix | Small synthetic reproduction, expected/actual result, regression test |
-| UI change | Before/after screenshots, keyboard/focus behavior, relevant viewport checks |
-| Component or variant | Source/instance behavior, overrides, Undo and persistence checks |
-| Documentation or translation | Working links, accurate commands and matching limits in all affected languages |
-| Larger feature | Problem, concrete use case, scope and tradeoffs before implementation |
-
-The repository is currently private at [Dindb-dong/oh-my-canvas](https://github.com/Dindb-dong/oh-my-canvas). Collaborators with access can use the issue forms and PR template. Do not assume a downloadable release or automatic CI exists.
-
-## Set up locally
-
-Use Node.js **22.12+**, npm and a Git checkout you are authorized to use. From the repository root:
+Use Rustup with Rust 1.92.0. From the repository root:
 
 ```sh
-npm ci
-npm run build
-npm start
+cd native
+cargo build --locked -p omc-desktop -p omc-service -p omc-cli
+./target/debug/omc-desktop
 ```
 
-`npm run dev` runs the local development workflow. Fresh local acceptance runs use macOS arm64; the [current verification record](docs/independent/VERIFICATION.md) distinguishes passed checks from open work. Windows/Linux execution remains unverified. Packaged desktop users do not need a separate Node installation for the bundled MCP CLI.
-
-See the [getting started](docs/GETTING_STARTED.md) and [architecture](docs/ARCHITECTURE.md) guides. Use synthetic documents and separate test profiles. Never use your only copy of an important canvas as a fixture. Export a portable `.omc` backup before testing storage or format changes.
-
-## Make one focused change
-
-1. Start a branch such as `fix/text-undo`, `feat/component-property`, or `docs/japanese-readme` from the agreed base commit. Preserve unrelated work.
-2. Reproduce the problem before changing code. Trace callers and reuse the existing editor, storage or UI pattern.
-3. Keep the change within one reviewable responsibility. Add a regression test for non-trivial behavior; document user-visible changes and compatibility limits.
-4. Run the checks that exercise the affected path. Do not describe an unrun check as passing.
-5. Review the diff for personal documents, secrets, generated artifacts and unrelated edits. Commit with a clear English subject, for example `fix: preserve text session undo`.
-6. Prepare the PR or local review note using the [PR template](.github/PULL_REQUEST_TEMPLATE.md). Ask for review; do not merge or publish without the maintainer's approval.
-
-## Verify the right behavior
-
-Run ordinary checks locally; no Docker setup is required for this workflow.
+For JavaScript test and benchmark tooling, use Node.js 22.12+:
 
 ```sh
-npm run check          # JavaScript syntax and TypeScript
-npm test               # Replica, persistence, TLS and MCP boundaries
-npm run test:editor    # Editor regressions
+npm ci --ignore-scripts
+npm run check
+npm test
+npm run test:native
 ```
 
-For changes to app integration, build first and run the relevant actual Electron checks:
+Build the native service and CLI before `test:native`. These npm commands do not build, launch or package an Electron application. See [testing](docs/TESTING.md) for crate-level checks, optional integration requirements and evidence limits.
 
-```sh
-npm run build
-npm run test:e2e
-node scripts/independent-host-e2e.mjs
-node scripts/independent-ui-e2e.mjs
-node scripts/independent-render-e2e.mjs
-node scripts/independent-library-e2e.mjs
-```
+## Implementation and verification
 
-These are separate acceptance scripts; select the ones affected by the change and record exactly what ran. They launch real Electron processes with temporary profiles. Some refresh screenshots/results under `docs/qa/`; inspect those changes instead of committing them blindly. On a sandboxed host, local TLS/loopback and Electron startup may need the host's normal execution permission.
+1. Reproduce the problem with synthetic data and trace all affected callers.
+2. Make the smallest complete change. Preserve input validation, durable writes, ownership, Undo and error handling.
+3. Run the smallest relevant test first, then broader checks when shared contracts change. Record actual results, skips and failures.
+4. Keep internal plans and local evidence under the primary checkout's ignored `internal/docs/`. Maintained public documentation must not link there.
+5. Review the diff for private data and unrelated changes. Write English Git/GitHub artifacts with commit subjects such as `fix: preserve document ownership`.
+6. Create PRs as drafts. Begin the body with the evaluation table, give actual check commands and runtime evidence where applicable, list remaining gaps, and retain the required author line. Do not merge or deploy without explicit authorization.
 
-For packaging changes, build first, then use the local staging helper. It copies locked runtime dependencies as real files into task-owned staging and reuses the installed Electron runtime; packaging directly through an inter-worktree `node_modules` symlink can omit dependencies:
+## Native desktop QA
 
-```sh
-npm run build
-node scripts/package-local.mjs
-node scripts/packaged-smoke.mjs
-```
+Use a task-owned profile and `omc-desktop --profile <isolated-directory> --automation-background`. Keep the window hidden and unfocused, seed only synthetic data and stop task-owned processes afterward. Never test against the user's default profile. Foreground interaction requires explicit permission. Use real runtime screenshots for visual changes; headless service results do not verify presentation.
 
-These commands create and check local artifacts without publishing or replacing the installed app. Do not modify an installed app or global MCP settings for unrelated verification. Legacy `--installed` and default-profile scripts are not the current independent-engine acceptance workflow; use them only for a separately authorized, reviewed installation check.
+## Reports, privacy and rights
 
-For documentation-only changes, run `node scripts/check-docs.mjs` and review rendered images and translations; a full app rebuild is normally unnecessary. See the [testing guide](docs/TESTING.md), [troubleshooting](docs/TROUBLESHOOTING.md), and [verification record](docs/independent/VERIFICATION.md) for tested scope and known gaps; historical test counts are evidence snapshots, not permanent badges.
+Use the [bug form](.github/ISSUE_TEMPLATE/bug_report.yml) or [feature form](.github/ISSUE_TEMPLATE/feature_request.yml). Include revision, OS, reproduction steps and expected/actual behavior. Submit only a minimal synthetic fixture and redacted logs. Exclude private keys, authorization tokens, profile descriptors, invitations and personal canvases. Removing visible content does not reliably scrub retained history. Follow [security](SECURITY.md) for private reports.
 
-## Preserve the important contracts
+Contribute only material you have permission to provide. The [MIT license](LICENSE) covers eligible project work; preserve [third-party notices](THIRD_PARTY_NOTICES.md). Do not reintroduce retired company source or copied tests. No additional CLA is required here.
 
-- **Local data:** edits must remain durable and recoverable. Keep atomic writes, validation before live mutation, backup recovery and explicit size limits.
-- **Collaboration:** preserve convergence, peer-specific Undo, coherent geometry and session capacity. The verified four-client test is local TLS; it does not prove external internet/NAT reachability.
-- **MCP:** keep the bridge on loopback with its authentication and Origin/Host checks. Never port-forward MCP. During a user text edit or scrub, reads remain available and mutations return `busy` until the transaction ends.
-- **Formats:** the writer and collaboration protocol use v2; v1 files remain readable. Test compatibility and reject incompatible peers explicitly rather than silently mixing representations.
-- **Privacy:** no telemetry, remote assets, account dependency or paid-service dependency should appear without an explicit product decision.
+## Documentation and translations
 
-## Report a bug
+Keep all four README languages consistent on commands, tool counts and measured claims. Explain product behavior rather than task history. Historical verification records describe their own source revisions and do not certify the current app. Keep local links and images portable and run `npm run check`.
 
-Use the [bug form](.github/ISSUE_TEMPLATE/bug_report.yml). Give the app/source commit, OS and architecture, precise steps, expected behavior and actual behavior. For data or collaboration issues, include save/reopen, Undo and connection state when relevant.
-
-Attach only a minimal synthetic canvas and redacted screenshots/logs. **Do not attach** real customer designs, personal records, credentials, session invitations, tokens, `mcp-runtime.json`, or a full user-data folder. An invitation grants editing access; a portable `.omc` includes embedded assets and merge history. Removing a visible layer is not a reliable way to scrub its prior content. Recreate the reproduction in a new synthetic document.
-
-For a suspected security problem, follow [SECURITY.md](SECURITY.md). Do not put secrets, a live exploit against someone else's system, or sensitive document contents into a public issue. Use a private channel already agreed with the maintainer. This repository does not currently advertise a dedicated security-report address or response SLA.
-
-## Propose a feature
-
-Use the [feature form](.github/ISSUE_TEMPLATE/feature_request.yml). Describe the problem and the smallest behavior that solves it. Include alternatives, design evidence where relevant, and any effect on local storage, collaboration, MCP, permissions or network use. Do not promise a release date or implementation before review.
-
-## Keep translations aligned
-
-The English README and this guide are the reference text for commands and shared technical facts. Keep the Korean, Japanese and Simplified Chinese versions consistent when changing prerequisites, counts, file formats, limits or verified platforms. Preserve the actual English UI labels, tool names and commands so users can find them in the app. Localize explanations rather than changing API names.
-
-Use relative links and repository-owned images so the documents work in an offline checkout as well as on a future Git host. Add descriptive alt text. Screenshots should show the actual app, not a fabricated capability or private user document.
-
-## Review checklist
-
-- [ ] The change solves a concrete problem and preserves unrelated work.
-- [ ] Relevant checks ran; results and remaining gaps are stated.
-- [ ] A behavioral fix has a meaningful regression check.
-- [ ] UI changes include real screenshots and keyboard/focus verification where relevant.
-- [ ] Documentation and affected translations match actual behavior.
-- [ ] No private data, secrets, session invitations or generated private files are included.
-- [ ] Existing license and attribution notices remain intact.
-
-Be specific and respectful in reviews: discuss the behavior, evidence and code rather than the person. Small fixes and careful bug reports are useful contributions.
+[Architecture](docs/ARCHITECTURE.md) · [Native guide](native/README.md) · [Testing](docs/TESTING.md) · [한국어](docs/contributing/ko.md) · [日本語](docs/contributing/ja.md) · [简体中文](docs/contributing/zh-CN.md)

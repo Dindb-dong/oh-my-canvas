@@ -1,5 +1,7 @@
 # Frozen integration contract
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 Inputs: independently worded source-observed behavior inventory and existing original host interoperability boundaries. Source-exposed planning; no clean-room claim. No old algorithms, implementations or test bodies belong in new modules.
 
 ## Module entry points (exclusive owners)

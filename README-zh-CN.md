@@ -43,7 +43,7 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 
 ## 可编辑组件与设计系统
 
-支持主组件、关联实例、变体、文字与可见性覆盖，以及共享样式和令牌。[旧示例库](docs/design/system/component-library.omc)包含 170 个变体，使用 Electron 格式，并非原生入门文件。[组件约定](docs/design/components-implementation.md) · [迁移](docs/MCP_PARITY.md#files-and-repeatable-output)。
+创建主组件、关联实例与变体，编辑文字、可见性和实例覆盖。通过共享样式与令牌管理重复设计。参阅[原生组件、样式与组件库工具](docs/MCP_PARITY.md)。
 
 <a id="mcp"></a>
 

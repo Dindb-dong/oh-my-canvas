@@ -123,7 +123,7 @@ The extended 32 GiB profile may use 4,096 MiB managed CPU and 1,024 MiB managed 
 
 ### Commands that exist today
 
-In a normal complete checkout, follow [CONTRIBUTING.md](../../CONTRIBUTING.md), install the locked Node dependencies with `npm ci`, then run `node scripts/check-docs.mjs` for this documentation set. Current Electron verification commands remain in [TESTING.md](../TESTING.md). A documentation check is not a native engine test.
+In a normal complete checkout, follow [CONTRIBUTING.md](../../CONTRIBUTING.md), install the locked Node dependencies with `npm ci`, then run `node scripts/check-docs.mjs` for this documentation set. Current native verification commands are documented in [TESTING.md](../TESTING.md). A documentation check is not a native engine test.
 
 ### Proposed native command surface
 

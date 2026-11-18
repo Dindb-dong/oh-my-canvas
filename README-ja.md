@@ -43,7 +43,7 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 
 ## 編集できるコンポーネントとデザインシステム
 
-メインコンポーネント、リンクされたインスタンス、variant、共有スタイルとトークンを利用できます。[旧サンプル](docs/design/system/component-library.omc)は170個のvariantを含むElectron形式で、ネイティブ用の初期ファイルではありません。[コンポーネント仕様](docs/design/components-implementation.md) · [移行](docs/MCP_PARITY.md#files-and-repeatable-output)。
+メインコンポーネント、リンクされたインスタンス、variantを作り、テキスト・表示状態・個別の上書きを編集できます。共有スタイルとトークンで反復要素を管理します。[ネイティブのコンポーネント・スタイル・ライブラリ操作](docs/MCP_PARITY.md)を参照してください。
 
 <a id="mcp"></a>
 

@@ -1,12 +1,14 @@
 # Installed projection refresh: follow-up review
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 Reviewed 2026-11-03 with the requested GPT-6 Astra high review workflow. **Verdict: APPROVE. Architectural status: CLEAR for this bounded change.** No actionable finding remains in the one-line runtime change or its added regression. The broader limits in [the earlier final review](ASTRA_FINAL_REVIEW.md) remain unchanged.
 
 ## Scope and conclusion
 
-This read-only code review covers the event condition at [editor/ui/index.ts:1422](../../editor/ui/index.ts#L1422) and the projected insertion/rename/removal regression at [ui-inspector-locking.test.ts:209](../../editor/__tests__/ui-inspector-locking.test.ts#L209). Only this review document was authored. Retired restricted sources were not accessed; no unrelated audit or runtime edits were performed.
+This read-only code review covers the event condition at [editor/ui/index.ts:1422](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/editor/ui/index.ts) and the projected insertion/rename/removal regression at [ui-inspector-locking.test.ts:209](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/editor/__tests__/ui-inspector-locking.test.ts). Only this review document was authored. Retired restricted sources were not accessed; no unrelated audit or runtime edits were performed.
 
-The parent reproduced an installed MCP create/read/Undo sequence in which the authoritative host and editor document were restored, but the layer tree retained the removed record. The cause agrees with the actual code: [receiveDocument at line 350](../../editor/document/index.ts#L350) emits both `projection: true` and `deltas: true`, while the old UI condition rejected every event containing `deltas`.
+The parent reproduced an installed MCP create/read/Undo sequence in which the authoritative host and editor document were restored, but the layer tree retained the removed record. The cause agrees with the actual code: [receiveDocument at line 350](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/editor/document/index.ts) emits both `projection: true` and `deltas: true`, while the old UI condition rejected every event containing `deltas`.
 
 The new condition preserves the viewport/hover exclusions and allows `projection` to override the preview-delta exclusion:
 

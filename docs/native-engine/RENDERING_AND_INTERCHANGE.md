@@ -165,7 +165,7 @@ Keep a stable export map from design IDs to emitted source elements/components w
 
 ## 8. FIG, Sketch, SVG and legacy migration
 
-The current independently authored importer in [design-file.ts](../../editor/formats/design-file.ts), [format evidence](../DESIGN_FILE_IMPORT.md) and [real fixture manifest](../../fixtures/design-files/README.md) are implementation inputs. Port documented behavior and independently licensed algorithms; do not claim the entire source format is specified merely because the existing decoder imports the fixture.
+The current independently authored importer in [design-file.ts](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/editor/formats/design-file.ts), [format evidence](../DESIGN_FILE_IMPORT.md) and [real fixture manifest](../../fixtures/design-files/README.md) are implementation inputs. Port documented behavior and independently licensed algorithms; do not claim the entire source format is specified merely because the existing decoder imports the fixture.
 
 Split native work into archive validation/decompression, source graph decode, reference/index construction, semantic conversion, asset ingestion, page/shard publication and layout. Measure each phase. Shared source graph work may precede any complete page; bounded worker execution preserves input responsiveness but does not make that cost disappear. Spill/index intermediate data when valid, or reject a source that cannot fit the declared safe reservation.
 

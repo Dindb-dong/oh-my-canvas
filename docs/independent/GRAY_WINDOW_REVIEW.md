@@ -1,5 +1,7 @@
 # Independent review: native dialogs and interface icons
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 Reviewer: GPT-6 Astra, high reasoning. Scope: the production change from `aad1e97` to the frozen native-dialog and Tabler icon implementation. This is a fresh scoped review, separate from earlier independent-engine approvals.
 
 **Verdict: APPROVE. Architecture: CLEAR.** No confirmed correctness, security or lifecycle defect blocks local installation.

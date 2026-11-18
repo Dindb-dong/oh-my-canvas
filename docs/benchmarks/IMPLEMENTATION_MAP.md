@@ -132,14 +132,14 @@ They help discover the complete process group and explain queue pressure. They d
 
 ### 4.5 Legacy/Electron evidence
 
-The following scripts remain useful within their stated scope, but are not native Rust evidence:
+The following removed scripts are available at their historical source revision, but are not native Rust evidence:
 
 | Existing artifact | Actual scope | Do not infer |
 | --- | --- | --- |
-| [`scripts/benchmark-canvas.mjs`](../../scripts/benchmark-canvas.mjs) | JavaScript editing and SVG DOM work under jsdom; script explicitly excludes browser layout/paint, FPS, IPC and durable save | Native GUI speed or actual browser compositing speed |
-| [`scripts/benchmark-document-core.mjs`](../../scripts/benchmark-document-core.mjs) | JavaScript import/asset persistence/Replica/storage phases and a same-process reopen, with scoped memory snapshots | Native reopen, GPU memory, whole process-group peak, or cold-disk startup |
-| [`scripts/benchmark-editor.mjs`](../../scripts/benchmark-editor.mjs) | Official SDK stdio → Electron → renderer → durable commit path on the component-library fixture; ten timed edits after one warm-up | Cross-product results, native paths, or reliable extreme-tail percentiles |
-| [`scripts/large-document-e2e.mjs`](../../scripts/large-document-e2e.mjs) and PR #12/#13 QA records | Historical Electron journeys with declared DOM, rAF, and trace observation boundaries | Current native performance or hardware presentation without the corresponding measurement |
+| [`scripts/benchmark-canvas.mjs`](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/scripts/benchmark-canvas.mjs) | JavaScript editing and SVG DOM work under jsdom; script explicitly excludes browser layout/paint, FPS, IPC and durable save | Native GUI speed or actual browser compositing speed |
+| [`scripts/benchmark-document-core.mjs`](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/scripts/benchmark-document-core.mjs) | JavaScript import/asset persistence/Replica/storage phases and a same-process reopen, with scoped memory snapshots | Native reopen, GPU memory, whole process-group peak, or cold-disk startup |
+| [`scripts/benchmark-editor.mjs`](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/scripts/benchmark-editor.mjs) | Official SDK stdio → Electron → renderer → durable commit path on the component-library fixture; ten timed edits after one warm-up | Cross-product results, native paths, or reliable extreme-tail percentiles |
+| [`scripts/large-document-e2e.mjs`](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/scripts/large-document-e2e.mjs) and PR #12/#13 QA records | Historical Electron journeys with declared DOM, rAF, and trace observation boundaries | Current native performance or hardware presentation without the corresponding measurement |
 
 Keep historical results attached to their own revision, fixture, OS, application path, and completion boundary. Never average historical Electron samples with new native results.
 

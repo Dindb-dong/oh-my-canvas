@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createMcpFetch } from '../../core/mcp-fetch.mjs';
+import { createMcpFetch } from './support/mcp-fetch.mjs';
 
 const sdk = process.env.OMC_TEST_SDK_ROOT;
 const { Client } = await import(sdk

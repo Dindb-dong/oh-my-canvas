@@ -1,5 +1,8 @@
 # Design-file import and large-document boundaries
 
+> Historical implementation/transition record. The Electron application and web-editor sources have been removed. For current runtime and commands, see the [native workspace](../native/README.md) and [architecture](ARCHITECTURE.md).
+
+
 Status: **incremental architecture and progressive loading implemented; native performance and source fidelity are qualified separately**. Updated 2026-11-11.
 
 PR #12 established new storage, editing and rendering boundaries. PR #13 adds progressive first-page import/reopen and a translated SVG pan surface. PR #11 is a historical reference checkpoint; its successful structure import is not proof of acceptable performance or source fidelity. The [full original fixture](../fixtures/design-files/README.md) is available through Git LFS and its byte count and SHA-256 were verified during this work.
@@ -135,7 +138,7 @@ One core-process journey on Linux x64, Node 24.22.1, Intel Xeon Platinum 8573C m
 
 The warm rename samples were 3.31, 3.64, 2.94, 2.01 and 2.05 ms. Each produced a 49-byte Yjs update and a 319-byte journal record, with no full-state encoding during validation. The edited page contained 18,380 objects. The process snapshot after reopen reported 1,344,315,392 bytes RSS and 590,392,904 bytes of used JavaScript heap; these are not peaks and do not include a desktop renderer. This establishes bounded small-edit work in that core path, not a desktop input-latency or frame-rate result. Initial import and reopen remain expensive and do not meet a responsiveness claim.
 
-The [testing guide](TESTING.md#large-design-file-journey) describes the separate native journey, including UI paint versus durable acknowledgment, pan/hover/drag, portable exports and fresh-profile reopen. The native runner records its actual GPU environment and failures; a timeout is a failed acceptance. The historical macOS timings below must not be treated as a same-host comparison with these Linux core observations.
+The [testing guide](TESTING.md#native-contracts) describes the separate native journey, including UI paint versus durable acknowledgment, pan/hover/drag, portable exports and fresh-profile reopen. The native runner records its actual GPU environment and failures; a timeout is a failed acceptance. The historical macOS timings below must not be treated as a same-host comparison with these Linux core observations.
 
 The sections below preserve **historical PR #11 measurements and review findings**. They describe the prototype that motivated this work.
 

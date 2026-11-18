@@ -1,6 +1,6 @@
 # Native engine implementation
 
-This workspace contains the Rust desktop, document service and MCP CLI. The root README recommends this native workflow. The root npm launch and packaging scripts are obsolete Electron-era entry points; use the native commands below for the current app. Native release qualification remains incomplete.
+This workspace contains the Rust desktop, document service and MCP CLI. The root README recommends this native workflow. Root npm commands run development checks only; build and launch the app with Cargo as shown below. Native release qualification remains incomplete.
 
 ## Local verification
 
@@ -43,7 +43,7 @@ FigCraft v1 archive interchange supports the portable subset of layers and docum
 
 For MCP image background removal, run `node scripts/prepare-background-removal.mjs --native native/target/debug` from the repository root. For a packaged build, pass the service binary’s directory or the macOS `Contents/Resources` directory. The script stages the verified model and its license notices. `OMC_BACKGROUND_MODEL` can point to the same verified file. `image` reports `background_model_unavailable` for background removal if the file is absent or fails verification. Original restoration uses the document’s stored asset.
 
-For legacy Streamable HTTP clients, launch the native service with `--legacy-mcp-port 47831`, or set `OMC_LEGACY_MCP_PORT=47831` in the environment of a desktop or CLI process starting the service. Use `0` for an independent test listener. Read the active port and certificate path from `mcp-runtime.json` in the selected profile. The endpoint is `https://127.0.0.1:<port>/mcp` with the existing profile's pinned `mcp-cert.pem` and `mcp-token-v2` bearer. A profile with an existing TLS identity reuses it. The port must be free. The installed Electron app and native service should use separate ports and profiles when run together. The native listener supports v2 Streamable HTTP. Legacy relay discovery with an embedded token requires fresh credentials.
+For legacy Streamable HTTP clients, launch the native service with `--legacy-mcp-port 47831`, or set `OMC_LEGACY_MCP_PORT=47831` in the environment of a desktop or CLI process starting the service. Use `0` for an independent test listener. Read the active port and certificate path from `mcp-runtime.json` in the selected profile. The endpoint is `https://127.0.0.1:<port>/mcp` with the existing profile's pinned `mcp-cert.pem` and `mcp-token-v2` bearer. A profile with an existing TLS identity reuses it. The port must be free. An older client and the native service must use separate ports and profiles when run together. The native listener supports v2 Streamable HTTP. Legacy relay discovery with an embedded token requires fresh credentials.
 
 The legacy `get_path` and `edit_path` tools inspect and edit native vectors in world coordinates, including node moves, splits, handles, contours, endpoint joins, and polygon/star regeneration. Editable Bézier geometry is retained in the native document. Page and top-level frame guides appear on the native canvas when rulers are enabled. The FigCraft dialect can edit guides, layout grids, and per-layer export settings and keep them in FigCraft v1 archives.
 

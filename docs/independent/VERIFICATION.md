@@ -1,5 +1,7 @@
 # Independent engine verification
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 Runtime implementation and local publication engineering review are complete. The [Astra final review](ASTRA_FINAL_REVIEW.md) concludes **APPROVE**, architectural status **WATCH**, with no open actionable blockers. The accepted lock, saved-font and exported-SVG defects were repaired and independently reproduced successfully; the screenshot privacy finding was also closed. This is scoped engineering approval, not legal clearance or authorization to upload.
 
 ## Current evidence

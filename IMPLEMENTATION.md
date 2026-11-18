@@ -1,15 +1,13 @@
 # Implementation contract
 
-This is the historical contract for the initial Electron implementation and local-only development phase. See [current architecture](docs/ARCHITECTURE.md) for implemented behavior and the [native engine rewrite plan](docs/NATIVE_ENGINE_PLAN.md) for the accepted replacement architecture and qualification gates. The original publication, renderer, MCP-transport and size-limit choices below are historical; recovery, validation, ownership and provenance requirements remain relevant.
+Oh My Canvas runs as a Rust-native desktop, local document service and MCP CLI. The former Electron application, web renderer, JavaScript document engine and their build/test paths have been removed.
 
-Local repository only. No git remote, telemetry, paid API, authentication service, cloud database or auto-publishing.
+- Keep document authority and durable writes in the service/engine, outside the presentation layer.
+- Validate external inputs, identities, revisions, referenced assets and file destinations before publication.
+- Preserve attributed Undo, idempotent receipts, recovery and document isolation across clients.
+- Use Skia-native rendering and native text/layout services; do not introduce a browser runtime for app rendering.
+- Keep local MCP and invited collaboration as separate authenticated network boundaries.
+- Preserve supported older file-format conversion in the Rust importer and test it using explicit fixtures.
+- Run desktop QA with an isolated profile and `--automation-background`; never use the user's normal profile.
 
-1. Use the independently authored editor/ document, geometry, components, renderer, interaction, formats and MCP services in a sandboxed Electron renderer. Retired company code and copied tests are excluded from the publication source.
-2. Store native documents and CRDT updates atomically on disk; library, import/export, recovery, local assets and fonts work offline.
-3. Local MCP uses the official SDK over stdio; a loopback-only authenticated bridge reaches the visible editor, never a LAN-facing MCP port.
-4. Collaboration uses pinned-certificate TLS WebSockets, host + 3 guests, secret invite, reconnect, persistent local replicas and field-level Yjs merge. Presence/cursors are ephemeral. Collaboration and MCP use separate credentials/ports.
-5. Unified limits: 16 MiB current document and CRDT history, 24 MiB wire/file envelope. Validate speculative patches, remote merges and Undo/Redo before live mutation. Concurrent last-page deletion projects one deterministic root-only recovery canvas.
-6. Tests cover convergence, deletion/order repair, undo isolation, persistence recovery, network authentication, fifth-peer refusal, reconnect and assets. Electron E2E uses actual renderer and four separate processes.
-7. Build a local macOS app, inspect runtime screenshots, run relevant editor tests, obtain GPT-6 Astra high review and fix actionable findings.
-
-No promise of universal NAT traversal: the host must be reachable. Guests keep working offline and can rehost a replica. Character-by-character simultaneous rich-text editing is outside the first version: rich-text content is an atomic shape property with deterministic conflict resolution.
+[Architecture](docs/ARCHITECTURE.md) · [Native workspace](native/README.md) · [Tool and format contracts](docs/MCP_PARITY.md) · [Qualification](docs/native-engine/QUALIFICATION.md)

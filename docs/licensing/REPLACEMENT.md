@@ -1,5 +1,8 @@
 # Independent engine and maintained boundaries
 
+> Historical implementation/transition record. The Electron application and web-editor sources have been removed. For current runtime and commands, see the [native workspace](../../native/README.md) and [architecture](../ARCHITECTURE.md).
+
+
 Oh My Canvas now uses the independently authored `editor/` implementation behind the existing desktop host. The earlier inherited implementation, helper and copied tests are excluded from the intended publication source. Authorization to relicense the company source was unavailable; replacing that source does not change the rights in the original private history.
 
 The required behavior remains the full [feature contract](../independent/behavior-contract.md). This architecture is not permission to narrow the scope when a workflow is difficult or slow. Current results and unresolved acceptance work belong in [VERIFICATION.md](../independent/VERIFICATION.md).

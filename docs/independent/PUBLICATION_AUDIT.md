@@ -1,5 +1,7 @@
 # Local publication preview: dependency, asset and privacy review
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 Reviewed on 2026-11-03. This is a bounded read-only review of the first 271-file local publication preview, not approval of a later export or a legal-clearance opinion. No download, external service, restricted-source inspection, package build, installation or upload was performed for this review. Only this report was authored in the integration tree.
 
 The reviewed `PUBLICATION_MANIFEST.json` records snapshot digest `2bb7b164bf1793ae953574b589f92c42ff526bc630c8dd42479a1d7558150d56` and source digest `da39f1dfb2974e5c9cab3e00ebe8e7e4359f4b161be4a67826e6a0628fe6bbe5`. These identify this preview, not the final snapshot after pending source fixes and evidence cleanup. See the [publication policy](publication-policy.md) and [current verification record](VERIFICATION.md).
@@ -50,7 +52,7 @@ The runtime metadata categories are MIT (90 locations), ISC (8), BSD-3-Clause (4
 
 The [native notice manifest](../../licenses/native/manifest.json) preserves 38 recorded notice/evidence files across 17 logical native/toolchain component groups. All 38 hashes and byte lengths matched in this preview. The bundle includes the complete collected ICU notice, FreeType FTL selection and credit, JPEG credit, WebP patent notice, Wuffs copyright/license, Emscripten/system-library texts and embedded Noto Mono OFL text. This is the existing conservative source-mapped collection, not an exact linked-object SBOM, reproducible-build attestation or universal legal-compliance claim.
 
-Electron's development-dependency classification does not remove its distribution obligations. The build copies the installed Electron MIT and full Chromium notices into the application alongside npm/native notices; [package provenance checks](../../scripts/check-package-provenance.mjs) must be rerun against the final app. The source snapshot alone is not an application bundle or proof of its final contents.
+Electron's development-dependency classification does not remove its distribution obligations. The build copies the installed Electron MIT and full Chromium notices into the application alongside npm/native notices; [package provenance checks](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/scripts/check-package-provenance.mjs) must be rerun against the final app. The source snapshot alone is not an application bundle or proof of its final contents.
 
 ## Fonts, icon and synthetic assets
 

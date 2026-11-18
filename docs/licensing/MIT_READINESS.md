@@ -1,5 +1,8 @@
 # MIT publication guidance
 
+> Historical implementation/transition record. The Electron application and web-editor sources have been removed. For current runtime and commands, see the [native workspace](../../native/README.md) and [architecture](../ARCHITECTURE.md).
+
+
 The root [MIT license](../../LICENSE) applies to eligible independently authored Oh My Canvas implementation and contributions. The active engine is under `editor/`; the previously inherited company implementation, paint helper, and copied tests are retired from the intended publication tree. The license does not grant rights over that retired source or the original private Git history.
 
 No source, history, or package has been uploaded. Current verification status and unresolved acceptance work are recorded in [VERIFICATION.md](../independent/VERIFICATION.md), separately from the question of who can grant a license.
