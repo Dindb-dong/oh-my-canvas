@@ -20,7 +20,7 @@ fn local_library_publication_and_refresh_preserve_existing_instance_identity() {
     let frame = call(
         session,
         "create_shape",
-        json!({"documentId":source,"type":"frame","width":150,"height":60}),
+        json!({"documentId":source,"type":"frame","width":200,"height":60}),
     );
     let component = call(
         session,
@@ -31,7 +31,7 @@ fn local_library_publication_and_refresh_preserve_existing_instance_identity() {
     let text = call(
         session,
         "create_shape",
-        json!({"documentId":source,"type":"text","parentId":component,"properties":{"text":"ORIGINAL LABEL"}}),
+        json!({"documentId":source,"type":"text","parentId":component,"width":190,"height":24,"properties":{"text":"ORIGINAL LABEL"}}),
     );
     let text = &text["rawIds"][0];
     let publication = call(

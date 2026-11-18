@@ -19,7 +19,7 @@ fn native_slots_render_replacement_and_restore_default_after_reopen() {
         call(session, "component", args)
     };
     let frame = |parent| {
-        let mut args = json!({"documentId":document,"type":"frame","width":160,"height":64});
+        let mut args = json!({"documentId":document,"type":"frame","width":240,"height":64});
         if let Some(parent) = parent {
             args["parentId"] = parent;
         }
@@ -29,7 +29,7 @@ fn native_slots_render_replacement_and_restore_default_after_reopen() {
         call(
             session,
             "create_shape",
-            json!({"documentId":document,"type":"text","parentId":parent,"properties":{"text":title}}),
+            json!({"documentId":document,"type":"text","parentId":parent,"width":230,"height":24,"properties":{"text":title}}),
         );
     };
     let card = component("create", json!({"id":frame(None),"name":"Card"}));

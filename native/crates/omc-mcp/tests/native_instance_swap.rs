@@ -21,19 +21,19 @@ fn swaps_rendered_definitions_and_preserves_matching_typed_overrides() {
     let create = |name, badge, with_property| {
         let frame = call(
             "create_shape",
-            json!({"documentId":document,"type":"frame","width":180,"height":80}),
+            json!({"documentId":document,"type":"frame","width":240,"height":80}),
         );
         let definition = component("create", json!({"id":frame["rawIds"][0],"name":name}));
         let definition = definition["rawIds"][0].clone();
         call(
             "create_shape",
-            json!({"documentId":document,"parentId":definition,"type":"text","y":30,"properties":{"text":badge}}),
+            json!({"documentId":document,"parentId":definition,"type":"text","y":30,"width":230,"height":24,"properties":{"text":badge}}),
         );
         let mut property = Value::Null;
         if with_property {
             let label = call(
                 "create_shape",
-                json!({"documentId":document,"parentId":definition,"type":"text","properties":{"text":"DEFAULT LABEL"}}),
+                json!({"documentId":document,"parentId":definition,"type":"text","width":230,"height":24,"properties":{"text":"DEFAULT LABEL"}}),
             );
             property = component(
                 "bind",
