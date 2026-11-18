@@ -1,0 +1,187 @@
+{
+  "name": "board",
+  "description": "Create or edit a sticky note and connect or reattach layers on the current page. Model-backed connectors follow their targets. All changes are document-scoped.",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "documentId",
+      "action"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "documentId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "parentId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "fromId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "toId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "targetId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "action": {
+        "type": "string",
+        "enum": [
+          "create_sticky",
+          "update_sticky",
+          "connect",
+          "reattach"
+        ],
+        "description": "update_sticky requires id plus text or color. connect requires fromId and toId. reattach requires id, end and targetId."
+      },
+      "x": {
+        "type": "number",
+        "minimum": -1000000,
+        "maximum": 1000000
+      },
+      "y": {
+        "type": "number",
+        "minimum": -1000000,
+        "maximum": 1000000
+      },
+      "text": {
+        "type": "string",
+        "maxLength": 32000
+      },
+      "color": {
+        "type": "string",
+        "maxLength": 128
+      },
+      "author": {
+        "type": "string",
+        "maxLength": 128
+      },
+      "fromSide": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "top",
+          "right",
+          "bottom",
+          "left"
+        ]
+      },
+      "toSide": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "top",
+          "right",
+          "bottom",
+          "left"
+        ]
+      },
+      "side": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "top",
+          "right",
+          "bottom",
+          "left"
+        ]
+      },
+      "fromAt": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "toAt": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "at": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "style": {
+        "type": "string",
+        "enum": [
+          "straight",
+          "elbow",
+          "curved"
+        ]
+      },
+      "startCap": {
+        "type": "string",
+        "enum": [
+          "none",
+          "lineArrow",
+          "triangleArrow",
+          "triangle",
+          "circleFilled",
+          "circle",
+          "diamondFilled",
+          "diamond",
+          "squareFilled",
+          "square",
+          "round"
+        ]
+      },
+      "endCap": {
+        "type": "string",
+        "enum": [
+          "none",
+          "lineArrow",
+          "triangleArrow",
+          "triangle",
+          "circleFilled",
+          "circle",
+          "diamondFilled",
+          "diamond",
+          "squareFilled",
+          "square",
+          "round"
+        ]
+      },
+      "label": {
+        "type": "string",
+        "maxLength": 8192
+      },
+      "end": {
+        "type": "string",
+        "enum": [
+          "from",
+          "to"
+        ]
+      }
+    }
+  }
+}

@@ -157,8 +157,17 @@ fn endpoint(context: &Context, target: &Value, side: &Value, at: &Value) -> Resu
         ));
     }
     let scene = paths::scene(context.snapshot, &context.state.page_id)?;
+    bound_endpoint(&scene, &layer, side, at)
+}
+
+pub(super) fn bound_endpoint(
+    scene: &omc_scene::Scene,
+    layer: &str,
+    side: &Value,
+    at: &Value,
+) -> Result<Value> {
     let item = scene
-        .item(&layer)
+        .item(layer)
         .ok_or_else(|| EngineError::invalid("Connector target is unavailable"))?;
     let fallback = item.world.point(item.width / 2., item.height / 2.);
     let side = enumeration(side, "side", SIDES, Some("auto"))?;
@@ -187,7 +196,7 @@ fn required_number(params: &Value, key: &str) -> Result<f64> {
     number(params, key, 0.)
 }
 
-fn validate_ends(connector: &Value) -> Result<()> {
+pub(super) fn validate_ends(connector: &Value) -> Result<()> {
     let from = &connector["from"];
     let to = &connector["to"];
     if (!from["layer"].is_null() && from["layer"] == to["layer"])
