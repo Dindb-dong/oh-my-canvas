@@ -6,7 +6,7 @@ use std::path::Path;
 const PUBLICATION: &str = "figcraftPublishedLibrary";
 const MAX_FILE: usize = 16 * 1024 * 1024;
 
-pub(super) fn published(metadata: &Properties) -> Option<&Value> {
+pub(crate) fn published(metadata: &Properties) -> Option<&Value> {
     metadata
         .get(PUBLICATION)
         .and_then(|record| record.get("extensions"))
@@ -16,7 +16,7 @@ fn visible(row: &Value) -> bool {
     row["published"] != false
 }
 
-pub(super) fn summary(snapshot: &Value) -> Value {
+pub(crate) fn summary(snapshot: &Value) -> Value {
     let mut output = json!({});
     for key in ["id", "name", "version", "description", "time"] {
         output[key] = snapshot[key].clone();
@@ -179,7 +179,7 @@ pub(super) fn publishable(snapshot: &DocumentSnapshot) -> Value {
     json!({"components":components,"styles":catalog("styles","styles"),"collections":catalog("figcraftCollections","collections")})
 }
 
-pub(super) fn publication(snapshot: &DocumentSnapshot, params: &Value) -> Result<(Value, Command)> {
+pub(crate) fn publication(snapshot: &DocumentSnapshot, params: &Value) -> Result<(Value, Command)> {
     let include = list_refs(params, "include")?;
     let exclude = list_refs(params, "exclude")?;
     let previous = published(&snapshot.metadata);
@@ -265,6 +265,16 @@ pub(super) fn publication(snapshot: &DocumentSnapshot, params: &Value) -> Result
                 && let Some(target) = property["default"].as_str().filter(|s| !s.is_empty())
             {
                 deps.components.insert(target.into());
+            }
+            if property["type"] == "slot" {
+                deps.components.extend(
+                    property["preferred"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned),
+                );
             }
         }
         components.insert(
