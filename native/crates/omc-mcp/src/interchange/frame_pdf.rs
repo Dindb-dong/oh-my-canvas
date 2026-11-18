@@ -208,7 +208,7 @@ mod tests {
             call(
                 "create_shape",
                 json!({"documentId":id,"type":"frame","x":150,"y":65,"width":width,"height":height,
-                    "properties":{"fill":color}}),
+                    "properties":{"fills":[{"type":"solid","color":color}]}}),
             )["rawIds"][0]
                 .as_str()
                 .unwrap()
