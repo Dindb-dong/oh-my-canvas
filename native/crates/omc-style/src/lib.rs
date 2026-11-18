@@ -11,7 +11,7 @@ mod length;
 pub mod prototype;
 mod references;
 mod selectors;
-pub use references::{ReferenceContext, catalog_entities};
+pub use references::{ReferenceContext, TokenSource, catalog_entities};
 
 pub use color::{Color, parse_color};
 pub use color_profile::{

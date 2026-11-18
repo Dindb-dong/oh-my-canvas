@@ -33,6 +33,12 @@ pub struct ReferenceContext<'a> {
     active_mode: Option<String>,
 }
 
+pub struct TokenSource<'a> {
+    pub token: &'a Value,
+    pub mode: Option<&'a str>,
+    pub value: Option<&'a Value>,
+}
+
 impl<'a> ReferenceContext<'a> {
     pub fn new(snapshot: &'a DocumentSnapshot) -> Self {
         Self {
@@ -49,6 +55,22 @@ impl<'a> ReferenceContext<'a> {
 
     pub fn resolve_value(&self, value: &Value, node: Option<&Node>) -> Result<Value, String> {
         self.resolve(value, node, &mut BTreeSet::new(), 0)
+    }
+
+    pub fn token_source<'b>(&'b self, id: &str, node: Option<&'b Node>) -> Option<TokenSource<'b>> {
+        let token = self.tokens.get(id)?;
+        let mode = node
+            .zip(token.get("collectionId").and_then(Value::as_str))
+            .and_then(|(node, collection)| self.mode_for(node, collection))
+            .or_else(|| token.get("activeMode").and_then(Value::as_str))
+            .or(self.active_mode.as_deref());
+        let selected = mode
+            .zip(token.get("modes"))
+            .and_then(|(mode, modes)| modes.get(mode).map(|value| (Some(mode), value)));
+        let (mode, value) = selected.map_or((None, token.get("value")), |(mode, value)| {
+            (mode, Some(value))
+        });
+        Some(TokenSource { token, mode, value })
     }
 
     pub fn token_variables(&self) -> (BTreeMap<String, String>, Vec<Diagnostic>) {
@@ -233,7 +255,7 @@ impl<'a> ReferenceContext<'a> {
         (properties, diagnostics)
     }
 
-    fn mode_for(&self, node: &Node, collection: &str) -> Option<String> {
+    fn mode_for<'b>(&'b self, node: &'b Node, collection: &str) -> Option<&'b str> {
         let mut current = Some(node);
         // Cap traversal for unvalidated readers as with layout.
         for _ in 0..512 {
@@ -244,7 +266,7 @@ impl<'a> ReferenceContext<'a> {
                 .and_then(|modes| modes.get(collection))
                 .and_then(Value::as_str)
             {
-                return Some(mode.to_owned());
+                return Some(mode);
             }
             current = node
                 .parent_id
@@ -264,20 +286,11 @@ impl<'a> ReferenceContext<'a> {
         if depth > 32 || !seen.insert(id.to_owned()) {
             return Err("Token reference cycle or depth limit".into());
         }
-        let token = self
-            .tokens
-            .get(id)
+        let source = self
+            .token_source(id, node)
             .ok_or_else(|| format!("Missing token {id}"))?;
-        let inherited = node
-            .zip(token.get("collectionId").and_then(Value::as_str))
-            .and_then(|(node, collection)| self.mode_for(node, collection));
-        let mode = inherited
-            .as_deref()
-            .or_else(|| token.get("activeMode").and_then(Value::as_str))
-            .or(self.active_mode.as_deref());
-        let value = mode
-            .and_then(|mode| token.get("modes").and_then(|m| m.get(mode)))
-            .or_else(|| token.get("value"))
+        let value = source
+            .value
             .ok_or_else(|| format!("Token {id} has no value for the active mode"))?;
         let result = self.resolve(value, node, seen, depth + 1);
         seen.remove(id);
@@ -577,6 +590,52 @@ mod tests {
         assert_eq!(
             ReferenceContext::new(&s).properties(&n).0["fill"],
             json!("blue")
+        );
+    }
+
+    #[test]
+    fn token_source_reports_the_value_selected_by_inherited_mode() {
+        let content = DocumentContent::empty("modes");
+        let mut snapshot = DocumentSnapshot {
+            id: "test".into(),
+            title: content.title,
+            epoch: "epoch".into(),
+            sequence: 1,
+            pages: content.pages,
+            nodes: content.nodes,
+            metadata: Properties::from([
+                ("tokens/surface/collectionId".into(), json!("theme")),
+                ("tokens/surface/activeMode".into(), json!("light")),
+                ("tokens/surface/value".into(), json!("#ffffff")),
+                (
+                    "tokens/surface/modes".into(),
+                    json!({"light":"#eeeeee","dark":{"$token":"black"}}),
+                ),
+                ("tokens/black/value".into(), json!("#000000")),
+            ]),
+        };
+        let mut frame = Node::new(NodeKind::Frame);
+        frame
+            .properties
+            .insert("figcraftVariableModes".into(), json!({"theme":"dark"}));
+        let mut child = Node::new(NodeKind::Rect);
+        child.parent_id = Some(frame.id.clone());
+        snapshot.nodes.insert(frame.id.clone(), frame);
+        let context = ReferenceContext::new(&snapshot);
+        let source = context.token_source("surface", Some(&child)).unwrap();
+        assert_eq!(source.mode, Some("dark"));
+        assert_eq!(source.value, Some(&json!({"$token":"black"})));
+        assert_eq!(
+            context.resolve_value(&json!({"$token":"surface"}), Some(&child)),
+            Ok(json!("#000000"))
+        );
+        assert_eq!(
+            context.token_source("surface", None).unwrap().mode,
+            Some("light")
+        );
+        assert_eq!(
+            context.token_source("black", Some(&child)).unwrap().mode,
+            None
         );
     }
 }
