@@ -1,164 +1,109 @@
-<p align="center"><img src="public/app-icon.png" alt="Oh My Canvas のアイコン" width="80"></p>
+<p align="center"><img src="public/app-icon.png" alt="Oh My Canvas" width="80"></p>
 <h1 align="center">Oh My Canvas</h1>
-<p align="center"><strong>あなたのキャンバス。あなたのファイル。あなたのエージェント。</strong></p>
-<p align="center">再利用できるコンポーネント、MCP、最大4人の共同編集を備えたローカルのデザインスタジオ。</p>
-<p align="center"><img src="assets/readme/badges.svg" alt="ローカルファースト · MCPツール31個 · 最大4人で共同編集 · macOS arm64対象" width="660"></p>
+<p align="center"><strong>HTML/CSSから編集可能なデザインへ。人と複数のエージェントが一緒に。</strong></p>
+<p align="center">RustとSkiaによるローカル優先のネイティブデザインスタジオ。HTML/CSSで描き、複数のMCPエージェントと同時に作業できます。</p>
+<p align="center"><img src="assets/readme/badges.svg" alt="Native Rust · 59 OMC MCP tools · HTML/CSS · Multi-agent" width="660"></p>
 <p align="center"><a href="README.md">English</a> · <a href="README-ko.md">한국어</a> · <strong>日本語</strong> · <a href="README-zh-CN.md">简体中文</a></p>
-<p align="center"><a href="#quick-start">クイックスタート</a> · <a href="#screenshots">スクリーンショット</a> · <a href="#components">コンポーネント</a> · <a href="#mcp">MCP</a> · <a href="#contributing">貢献する</a></p>
 
-<p align="center"><img src="assets/readme/hero.svg" alt="編集できる青いキャンバスが、ローカルファイル、再利用できるコンポーネント、ローカルエージェントをつなぎます。" width="1280"></p>
+<p align="center"><img src="assets/readme/native-editor.png" alt="Native Oh My Canvas editor with HTML-imported editable design system, layers and inspector" width="1280"></p>
 
-## 次のアイデアを広げる場所
+## Oh My Canvasの特長
 
-インターフェースをデザインし、コンポーネントライブラリを作り、同じ編集可能なキャンバスでエージェントと作業できます。ドキュメントと埋め込みアセットは自分のコンピューターに保存されます。Leviosaへのログイン、Paperのサブスクリプション、アプリ内クレジット、クラウドデータベース、テレメトリーは組み込まれていません。
-
-**エディターとローカルMCPに利用クレジットの課金はありません。** 選択したAIクライアントの契約や利用制限は別途適用されます。共同編集では、参加者が接続可能なホストへ直接接続します。開発者が運営するサーバーは使用しません。
-
-| 作る | 手元に残す | 一緒に進める |
-| --- | --- | --- |
-| ベクター図形、パス、テキスト、画像、フレーム、ページ、オートレイアウト | ローカル自動保存、アトミック書き込み、復旧用バックアップ、持ち運べる `.omc` ファイル | 証明書を固定検証するTLSで最大4人が接続。エージェントにはローカルMCP |
-| メインコンポーネント、リンクされたインスタンス、バリアント、テキスト・表示・差し替えプロパティ | 画像の埋め込み、同梱の英語・韓国語フォント、オフライン編集 | 再接続時にオフラインの変更をマージ。各参加者がローカル複製を保持 |
+- **HTML/CSSで直接作成。** HTMLを貼り付けるか、MCPの`write_html`を使用します。対応するCSSは編集可能なレイヤー・テキスト・レイアウトになります。
+- **複数エージェントで同時作業。** 各エージェントに`documentId`を指定し、バックグラウンド文書で作業できます。Undoは作成者ごとに分離されます。同じレイヤーへの変更は調整してください。
+- **ローカルのネイティブ構成。** デスクトップとサービスはElectronやブラウザレンダラーなしで動作。ローカル保存、コンポーネント、スタイル、変数、エクスポートを提供します。
+- **必要なコンテキストに集中。** HTML/CSS作成、一括操作、範囲を絞った読み取りに対応。初期LD03実験ではPaper/Figmaより総トークン数が約1万少なくなりました。条件は下記を参照してください。
+- **アプリの利用クレジット不要。** ローカルMCPに呼び出し単位の課金はありません。到達可能なTLSホストで最大4人が共同作業できます。AIクライアントの料金・制限は別です。
 
 <a id="screenshots"></a>
 
-## アプリのスクリーンショット
+## アプリ画面
 
-以下は独立実装の `editor/` をElectron上で実行し、合成ローカルドキュメントで撮影した画面です。エディター画面は **2026-11-04** のUI配置検査で更新し、共同編集・ドキュメント一覧は以前の4クライアント受け入れ検査で撮影しました。UIは英語で、一部のコンポーネント名に韓国語を使います。4言語のREADMEはUIの4言語対応を意味しません。
+HTML/CSSで作成した画面をレイヤー単位で編集し、ローカル文書一覧でキャンバスを管理できます。
 
-<p align="center"><img src="docs/qa/editor.png" alt="レイヤー、サンプルボード、デザインインスペクター、描画ツールを備えたOh My Canvasエディター" width="1200"></p>
-<p align="center"><em>左にレイヤー、中央にキャンバス、右にプロパティ。</em></p>
+![Native local canvas library](assets/readme/native-library.png)
 
-<details>
-<summary><strong>実際のコンポーネントライブラリとドキュメント一覧を見る</strong></summary>
-
-![実際のAssetsプレビューと編集可能なボタンバリアントを表示するコンポーネントライブラリ](docs/qa/independent-library-e2e/01-assets-library.png)
-
-実際の1,065オブジェクトの文書で170バリアントと254プロパティバインドを保持します。16個すべてのAssetsプレビューとラベル収容検査は、初回読み込みと別プロセスでの再読み込みで合格しました。
-
-![検索、お気に入り、グリッド・リスト切り替え、プレビューを備えたローカルドキュメント一覧](docs/qa/library-populated.png)
-
-合格した操作と適用範囲の制限は [現在の検証記録](docs/independent/VERIFICATION.md) に分けて記載しています。スクリーンショットは検査したローカル操作の資料であり、外部インターネットからの接続を証明しません。
-
-</details>
+ローカル文書一覧と実際のキャンバスプレビュー。
 
 <a id="quick-start"></a>
 
-## ローカルで始める
+## ネイティブアプリを起動
 
-### 1. ビルドして起動
-
-既存のローカルチェックアウトと、**Node.js 22.12以上**、npmを使用します。依存関係のインストールにはネットワーク接続が必要です。ビルド後のエディターはオフラインで動作します。
+Rustupと固定されたRust 1.92.0を使用します。3つのバイナリを一緒にビルドしてから起動してください。
 
 ```sh
-cd /path/to/oh-my-canvas
-npm ci
-npm run build
-npm start
+cd /path/to/oh-my-canvas/native
+cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
+./target/release/omc-desktop
 ```
 
-現在のチェックアウトはローカル専用で、公開ダウンロードはありません。`/Applications/Oh My Canvas.app` の既存のインストールは独立エンジンへの置き換え前の版かもしれません。現在の実装はこのチェックアウトをビルドして実行してください。
-
-<details>
-<summary>macOSアプリバンドルを作る</summary>
-
-```sh
-npm run dist:mac
-```
-
-ビルドは `--publish never` を使い、`release/mac-arm64/Oh My Canvas.app` と `release/` 内のZIPを生成します。現在のmacOS arm64パッケージ、同梱CLI、正確なバイト比較によるパッケージ出自検査は合格しました。署名・公証は行っておらず、Windows/Linuxでの実行は未検証です。依存関係を共有するチェックアウトでは、先にビルドし、`node scripts/package-local.mjs` で実体ファイルをステージしてから `node scripts/packaged-smoke.mjs` で検査してください。別worktreeの `node_modules` リンクから直接梱包すると依存が欠落する場合があります。
-
-</details>
-
-### 2. 作ってみる
-
-新しいキャンバスを作成するか、ライブラリが空の場合は **Explore a sample** を選びます。下部ツールバーでテキストや図形を追加し、レイヤーを整理し、**Design** でプロパティを編集します。変更はローカルに保存されます。**Export → Oh My Canvas** で編集可能なバックアップを書き出せます。JSON、SVG、PNGにも対応し、レイヤー別の書き出しはDesignパネルから実行できます。
-
-[インストール、保存場所、復旧、書き出し形式、制限（英語）→](docs/GETTING_STARTED.md)
+ネイティブアプリの実行にNode.jsは不要です。ネイティブパッケージと各OSのリリース検証は未完了です。[ネイティブガイド](native/README.md)。
 
 <a id="components"></a>
 
-## 本当に編集できるデザインシステム
+## 編集できるコンポーネントとデザインシステム
 
-同梱の [Component Library](docs/design/system/component-library.omc) を **Open file** で開いてください。ボタン、入力欄、選択コントロール、ナビゲーション、バッジ、リスト、カード、ツールチップ、ダイアログを、**14種類・170バリアントと、5つのネストしたインスタンスを含む2つの複合コンポーネント**として収録しています。
-
-合成ライブラリ全体でコンポーネント・プロパティ・バリアント・ソース編集、永続保存の照合、別プロセスでの再読み込みが合格しました。範囲と資料は [現在の検証記録](docs/independent/VERIFICATION.md) を参照してください。
-
-1. ライブラリのドキュメントを複製し、画面を作るページを追加します。
-2. **Components → Assets** を開き、コンポーネントをクリックしてリンクされたインスタンスを挿入します。
-3. Designパネルで状態、テキスト、表示・非表示を変更します。
-4. メインコンポーネントを編集すると、各インスタンスのオーバーライドを保ったまま変更が反映されます。
-
-**Create component**（macOSでは `⌥⌘K`）、**Combine variants**、**Add variant** で独自の部品も作れます。**Reset all changes** は元の状態に戻し、**Detach instance** はリンクを解除します。
-
-[コンポーネントの動作とMCP契約（英語）→](docs/design/components-implementation.md) · [ビジュアル方針（英語）→](DESIGN.md)
+メインコンポーネント、リンクされたインスタンス、variantを作り、テキスト・表示状態・個別の上書きを編集できます。共有スタイルとトークンで反復要素を管理します。[ネイティブのコンポーネント・スタイル・ライブラリ操作](docs/MCP_PARITY.md)を参照してください。
 
 <a id="mcp"></a>
 
-## エージェントにも本物のキャンバスを
+## エージェントごとにキャンバスを接続
 
-MCP now defaults to the app-owned Streamable HTTP endpoint `https://127.0.0.1:47831/mcp`, authenticated with the private persistent `OMC_MCP_TOKEN`. The client must trust this profile's TLS certificate; the app never installs OS trust. Keep the app running and use **MCP → Copy configuration**. Read the [HTTP setup and stdio rollback guide (English)](docs/MCP.md); the app never edits global client settings automatically.
+ネイティブアプリの **MCP → Copy MCP configuration** でstdio設定をコピーしてください。インストール先の`omc-cli`とプロファイルを参照し、グローバル設定を自動変更しません。
 
-> 開いているキャンバスに1440 × 900のダッシュボードを作ってください。青、水色、淡いラベンダー、白、黒を使い、ナビゲーションとボタンを再利用できるコンポーネントにしてください。最後にスクリーンショットで確認してください。
+**OMC方言は59個のMCPツール（基本50個＋ネイティブ拡張9個）**を提供します。別の**FigCraft互換方言は19個のMCPツール経由で643個のコマンドID**を公開します。643個のMCPツールではありません。
 
-Choose a canvas with `list_documents` and `open_document` or `create_document`, then read `get_context` and `get_guide`. Supply its `documentId` to every document mutation; then use `create_board`, `write_html`, `update`, `components`, and `component`. There are **50 tools**, including native page, shape, text, style, library, asset, clipboard, export and collaboration operations. See the [capability map](docs/MCP_PARITY.md). Component actions run outside `batch`; variant switching can return a new selection ID. Agent edits use the same persistence and collaborative Undo path as local edits.
+`list_documents` → `open_document`または`create_document` → `get_context`から開始。変更には`documentId`を指定します。`create_board`、`write_html`、`edit_shapes`、`components`、`batch`、`screenshot`で作成・検証します。拡張は範囲制限クエリ、コメント、トークン、ジョブ、コード出力に対応します。
 
-The desktop MCP can list, create, open, rename, and duplicate local canvases without manual library clicks. Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Use stable document IDs with `rename_document` and `duplicate_document`; `select_page` changes the active page. Multiple canvases stay open in tabs, with independent background editors for agents. MCP open/create/duplicate default to background operation; `focus:true` reveals the result. Tab switching preserves each session’s target, and explicit document IDs also separate repositories sharing one transport. In the UI, click the canvas title to edit it in place; Enter or blur saves and Escape cancels. **File → Rename canvas** opens the same inline field. The library also offers **Actions → Rename canvas**. See the [workspace tool contract](docs/MCP.md#documents-and-pages).
+各エージェントは背景文書を維持できます。人の編集中に`busy`が返ったら完了後に再試行してください。Undoは他の作成者の履歴を消費せず、表示中のタブを暗黙の変更対象にしません。
 
-ユーザーが文字を入力したり値をスクラブ操作したりしている間も、読み取りツールは使用できます。エージェントの変更操作とUndoは `busy` を返すので、ユーザーのトランザクション終了後に再試行してください。MCPブリッジは認証付きのループバック専用で、共同編集とは分離されています。**MCPのポートを転送したり、`mcp-runtime.json` を共有したりしないでください。**
+[ツール仕様と移行](docs/MCP_PARITY.md) · [接続と共同作業](native/README.md)
 
-[設定とトラブルシューティング（英語）→](docs/TROUBLESHOOTING.md) · [信頼境界（英語）→](SECURITY.md)
+## 速度・メモリ・トークンの測定
 
-## ホスティング用バックエンドなしで、最大4人
+プロジェクト独自のパイロットでOMC・Paper・Figma・Penpotを比較しました。選択した60秒試行では、OMCはPenpotより**受け入れ済み作業を21–55%早く完了**しました。Paper/Figmaは同じ検証を完了できませんでした。LD02/LD03ではPaper/Penpotより低いRAMピークも観測しましたが、集計範囲は不完全で製品ごとに異なります。
 
-ホストが **Collaborate → Host a canvas** を開き、招待を非公開で共有します。残り3人は **Join a canvas** から参加できます。全員がローカルコピーを持ち、接続が切れても編集を続け、再接続後に変更をマージできます。
+同じモデル・課題・プロンプトを使った**以前のLD03実験**：
 
-新しいローカル受け入れ検査では、独立した4つのElectronプロセスによる実際のTLS通信、同時挿入、作業者別Undo、埋め込み画像、公式SDK stdio、ローカル書き出し、オフライン再接続、永続保存後の再読み込み、旧形式ファイルのマージが合格しました。家庭・企業のNATや公開インターネットをまたぐ外部コンピューター間の接続は未検証です。
+| Product | Gross provider tokens | Cached input included |
+| --- | ---: | ---: |
+| OMC | 22,604 | 7,110 |
+| Paper | 32,820 | 16,782 |
+| Figma | 32,363 | 16,578 |
+| Penpot | 22,624 | 7,110 |
 
-![実際のTLSで共同編集する4つのローカルElectronクライアント](docs/qa/collaboration.png)
+この実験では**Paperより10,216トークン（31.1%）**、**Figmaより9,759トークン（30.2%）**少ない結果でした。キャッシュ入力と出力を含む全受付リクエストの合計です。OMC/Penpotは共通検証を通過し、Paper/Figmaは編集結果のみ確認され、再オープン等の検証が不足しています。単発の探索実験であり、一般的な削減保証や請求額比較ではありません。後の60秒LD02/LD03では各製品の合計がほぼ同じでした。
 
-ホストに到達できる必要があります。自動NAT越え、リレー、TURNサービス、自動ホスト移行はありません。インターネット経由では、共同編集ポートの手動転送と到達可能なアドレスが必要になる場合があり、CGNATでは接続できないことがあります。アプリはルーター設定を変更しません。全参加者がプロトコルv2に対応したアプリを使用してください。招待を持つ人は信頼できる編集者として扱います。読み取り専用ロールやメンバー単位の権限取り消しはありません。
+[結果と限界](docs/benchmarks/results/2026-11-18/README.md) · [初期トークン記録](docs/benchmarks/results/2026-11-18/LD03/earlier-tokens.json) · [プロトコル](docs/benchmarks/README.md)
 
-<details>
-<summary>マージの動作とファイル互換性</summary>
+### 実験インデックス
 
-独立した図形プロパティはYjsでマージします。正規化したジオメトリから一貫した描画境界を再構成し、親リンクから子要素リストを修復します。同じテキストレイヤーではリッチテキストプロパティ単位で競合を解決するため、**文字単位の同時入力マージには対応していません。** テキスト作業はレイヤーを分けてください。
+| ID | 内容 | 記録 |
+| --- | --- | --- |
+| [LD01](docs/benchmarks/results/2026-11-18/LD01/README.md) | 画面作成 | 8 |
+| [LD02](docs/benchmarks/results/2026-11-18/LD02/README.md) | 大規模文書の部分編集 | 4 |
+| [LD03](docs/benchmarks/results/2026-11-18/LD03/README.md) | 共有コンポーネント・スタイル編集 | 16 |
+| [LD04](docs/benchmarks/results/2026-11-18/LD04/README.md) | レスポンシブレイアウト | 11 |
+| [LD05](docs/benchmarks/results/2026-11-18/LD05/README.md) | コード ↔ キャンバス往復 | 8 |
+| [LD06](docs/benchmarks/results/2026-11-18/LD06/README.md) | アセット・フォント・コンテンツ | 10 |
+| [LD07](docs/benchmarks/results/2026-11-18/LD07/README.md) | 不具合の診断・修正 | 2 |
+| [LD08](docs/benchmarks/results/2026-11-18/LD08/README.md) | 同時文書作業 | 9 |
+| [LD09](docs/benchmarks/results/2026-11-18/LD09/README.md) | 起動・インポート・再オープン | 7 |
+| [LD10](docs/benchmarks/results/2026-11-18/LD10/README.md) | 操作・アイドル時の資源 | 中断・部分記録 |
+| [LD11](docs/benchmarks/results/2026-11-18/LD11/README.md) | 保存・復旧 | 3 |
+| [LD12](docs/benchmarks/results/2026-11-18/LD12/README.md) | ビルド・IDEとの資源競合 | 補助観測のみ |
+| [LD13](docs/benchmarks/results/2026-11-18/LD13/README.md) | 4人共同作業 | 未測定 |
 
-書き込み形式は `.omc` v2で、v1ファイルも読み込めます。古い共同編集の招待・ハンドシェイクはドキュメント交換前に拒否します。元のホストが離れた場合は、参加者が保存済みの複製を再ホストし、新しい招待を共有できます。Undo/Redoの履歴は現在のセッション内だけに保持され、ドキュメントを開き直しても復元されません。
+78 試行で、失敗と再試行を含みます。初期LD03トークン実験は別条件です。
 
-</details>
+## 人同士の共同作業
 
-[接続手順と制限（英語）→](docs/GETTING_STARTED.md#collaboration)
-
-## 検証できる実装
-
-| 領域 | 検証対象 |
-| --- | --- |
-| ドキュメントの整合性 | 正規化ジオメトリ、同時編集、事前検証、作業者・グループの分離、Undo/Redo |
-| 永続保存 | 直列化したアトミック保存、fsync、メタデータ検証、バックアップ復旧、ポータブル形式の取り込み・再読み込み |
-| ネットワーク境界 | TLSの接続先確認、招待認証、4人制限、Origin拒否、分離されたローカルMCP |
-| 実際のアプリ | 4クライアント共同編集、コンポーネント操作、テキスト編集、SVGの折り返し、ネイティブ書き出し、インストール済みパッケージの照合 |
-
-現在の実行では **14ファイル・353件のエディターテスト**、**40件のホストテスト**、**ネイティブUI 37/37件・レンダラーエラー0件**が合格しました。描画検査は32シナリオ・830アサーションと、大規模フィクスチャ・キャッシュの8アサーションを含みます。実際のコンポーネントライブラリと現在のパッケージ検査も合格しました。これは範囲を定めたローカル結果であり、全機能レコードに個別テストがあるという主張ではありません。独立エンジニアリングレビューは **APPROVE**、アーキテクチャは **WATCH** です。新しい履歴のソース候補もmanifest・プライバシー検査に合格しました。[最終レビュー](docs/independent/ASTRA_FINAL_REVIEW.md)と[検証記録](docs/independent/VERIFICATION.md)を参照してください。
-
-[現在の検証と制限（英語）→](docs/independent/VERIFICATION.md) · [検査の実行方法（英語）→](docs/TESTING.md)
+ネイティブTLSルームをホストし、証明書を固定検証する招待を非公開で共有します。最大4人が永続ローカル複製を保持します。ホストへの到達性が必要で、自動NAT越え・リレー・ホスト移行はありません。外部ネットワークと実機4台での検証は未完了。FigCraftサーバー公開は別の任意オンライン経路です。[ガイド](native/README.md)。
 
 <a id="contributing"></a>
 
-## プロジェクトを一緒に育てる
+## 貢献と検証
 
-再現できるバグ報告、目的を絞った修正、役立つコンポーネント例、内容の揃った翻訳を歓迎します。まず貢献ガイドを読み、非公開のデザイン、招待、実行時トークン、個人情報を報告に含めないでください。
+[貢献](CONTRIBUTING.md) · [テスト](docs/TESTING.md) · [ネイティブ検証](native/README.md) · [セキュリティ](SECURITY.md) · [デザイン](DESIGN.md)
 
-- [貢献ガイド](docs/contributing/ja.md) — 作業手順、変更範囲、検査、英語のコミット、レビュー基準
-- [Pull requestテンプレート（英語）](.github/PULL_REQUEST_TEMPLATE.md) — 問題、動作、検証結果、制限
-- [バグ報告フォーム（英語）](.github/ISSUE_TEMPLATE/bug_report.yml) · [機能提案フォーム（英語）](.github/ISSUE_TEMPLATE/feature_request.yml)
-- [アーキテクチャ（英語）](docs/ARCHITECTURE.md) · [セキュリティ（英語）](SECURITY.md) · [トラブルシューティング（英語）](docs/TROUBLESHOOTING.md)
-
-リポジトリは [Dindb-dong/oh-my-canvas](https://github.com/Dindb-dong/oh-my-canvas) に非公開でホストしています。アクセス権のある共同作業者はIssueフォームとPRテンプレートを利用できます。ダウンロード可能なリリースやホスト型サービスを提供するという意味ではありません。
-
-## ライセンスと出自
-
-独立して記述したプロジェクト実装には [MITライセンス](LICENSE) が適用されます。外部ライブラリ、ネイティブランタイム、フォントは各自のライセンスを維持します。[外部ライセンスの通知](THIRD_PARTY_NOTICES.md)と[依存関係一覧](docs/licensing/DEPENDENCIES.md)を参照してください。
-
-現在のエディターは `editor/` に実装しています。以前取り込んだエディター、補助コード、コピーしたテストは公開対象のソースから除去しました。計画参加者は以前の実装を閲覧しており、非公開ソースに触れていないクリーンルーム実装とは称しません。[実装の出自](docs/independent/PROVENANCE.md)と[機能契約](docs/independent/behavior-contract.md)は英語です。
-
-このリポジトリは、確認済みの独立実装ソースのスナップショットから、別のGit履歴で開始しています。除去した会社コードの過去の履歴は含みません。MITは対象となるプロジェクト実装に適用され、会社コードや外部著作物のライセンスは変更しません。現在のアクセス範囲は非公開です。
+実装は[MIT](LICENSE)、依存関係・フォントは各ライセンスに従います。[第三者告知](THIRD_PARTY_NOTICES.md) · [実装の来歴](docs/independent/PROVENANCE.md)。ソースコードは[GitHub](https://github.com/Dindb-dong/oh-my-canvas)で公開しています。

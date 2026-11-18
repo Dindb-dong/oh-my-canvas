@@ -1,8 +1,10 @@
 # Local publication snapshot policy
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 This policy defines a fail-closed **local source snapshot**, separate from the private working repository. The exporter does not grant rights, establish independent authorship, or declare the application release-ready. The source provenance, dependency notices, synthetic-data eligibility and fresh verification still require review.
 
-The implementation is [prepare-publication.mjs](../../scripts/prepare-publication.mjs). Creating a snapshot or initializing Git does not upload anything. This task leaves export execution and any new initial commit to the parent after review.
+The implementation is [prepare-publication.mjs](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/scripts/prepare-publication.mjs). Creating a snapshot or initializing Git does not upload anything. This task leaves export execution and any new initial commit to the parent after review.
 
 ## Inputs and staging boundary
 
@@ -94,6 +96,6 @@ The exemption is checked only after the notice hash and origin route have been v
 
 ## Focused exporter regression evidence
 
-The fresh [publication exporter tests](../../tests/publication-export.test.mjs) cover allowlist/private-path/token gates, included project links and anchors, verified upstream notice exemptions and tamper failures, actual preserved notice checksums, deterministic fresh-history `.omc` encoding with deleted historical content absent, source-buffer preservation, and refusal to overwrite an existing output directory. Run `node --test tests/publication-export.test.mjs`. The focused run passed 8/8 tests; it creates no source snapshot and cleans its one task-owned temporary gate directory. These checks do not replace the full staged-tree preflight, manifest review or release gates.
+The fresh [publication exporter tests](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/tests/publication-export.test.mjs) cover allowlist/private-path/token gates, included project links and anchors, verified upstream notice exemptions and tamper failures, actual preserved notice checksums, deterministic fresh-history `.omc` encoding with deleted historical content absent, source-buffer preservation, and refusal to overwrite an existing output directory. Run `node --test tests/publication-export.test.mjs`. The focused run passed 8/8 tests; it creates no source snapshot and cleans its one task-owned temporary gate directory. These checks do not replace the full staged-tree preflight, manifest review or release gates.
 
 Generated production font binaries and CanvasKit WASM are omitted from the source snapshot and ignored after a build. `npm run build` recreates them from the locked, audited packages. The application bundle still includes and verifies those runtime resources and their notices. The five licensed test-fixture font inputs remain included.

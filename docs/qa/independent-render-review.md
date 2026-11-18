@@ -1,5 +1,7 @@
 # Independent renderer regression evidence
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 Implementation barrier: `f86e063`. All tests in this report were independently authored and executed after that barrier. No inherited editor test bodies were read or imported. The run uses the installed Playwright Electron driver, installed esbuild, actual Chromium DOM/Canvas/font/image decoders, and installed Poppler. No dependency was installed and no default application profile was opened.
 
 ## Result

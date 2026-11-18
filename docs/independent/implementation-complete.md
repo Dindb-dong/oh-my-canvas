@@ -1,5 +1,7 @@
 # Historical implementation-complete checkpoint
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 ## Final local engineering approval
 
 **Current status: runtime and local publication engineering review complete.** [Astra final review](ASTRA_FINAL_REVIEW.md) concludes **APPROVE**, architecture **WATCH**, with no open actionable blockers. The three accepted runtime defect groups were independently reproduced and their repairs verified. The screenshot privacy finding is closed by the reviewed exclusions/recapture. [Publication audit](PUBLICATION_AUDIT.md) records the bounded source/notice/history/privacy evidence; its earlier findings are closed by the final Astra candidate review.

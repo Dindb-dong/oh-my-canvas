@@ -1,5 +1,7 @@
 # Full editable component library: desktop regression
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 Harness: `scripts/independent-library-e2e.mjs`. Fresh Playwright/Electron coverage authored after barrier `f86e063`; no inherited test body was reused. It uses installed dependencies and the parent's shared `dist`, and never builds, uploads, edits the original fixture or installs over the user's application. The native dialog's selected filename is the only import override: the actual Open-file button, main-process decoder, editor, IPC persistence and disk store execute normally.
 
 ## Behavioral result

@@ -1,181 +1,109 @@
-<p align="center"><img src="public/app-icon.png" alt="Oh My Canvas icon" width="80"></p>
+<p align="center"><img src="public/app-icon.png" alt="Oh My Canvas" width="80"></p>
 <h1 align="center">Oh My Canvas</h1>
-<p align="center"><strong>Your canvas. Your files. Your agents.</strong></p>
-<p align="center">A local desktop design studio with reusable components, MCP, and four-person collaboration.</p>
-<p align="center"><img src="assets/readme/badges.svg" alt="Local-first · 31 MCP tools · Up to 4 collaborators · macOS arm64 target" width="660"></p>
+<p align="center"><strong>HTML/CSS to editable designs. Humans and agents, together.</strong></p>
+<p align="center">A local-first native design studio built in Rust, with Skia rendering, HTML/CSS authoring and concurrent MCP agents.</p>
+<p align="center"><img src="assets/readme/badges.svg" alt="Native Rust · 59 OMC MCP tools · HTML/CSS · Multi-agent" width="660"></p>
 <p align="center"><strong>English</strong> · <a href="README-ko.md">한국어</a> · <a href="README-ja.md">日本語</a> · <a href="README-zh-CN.md">简体中文</a></p>
-<p align="center"><a href="#quick-start">Quick start</a> · <a href="#screenshots">Screenshots</a> · <a href="#components">Components</a> · <a href="#mcp">MCP</a> · <a href="#contributing">Contribute</a></p>
 
-<p align="center"><img src="assets/readme/hero.svg" alt="An editable blue canvas connects local files, reusable components, and a local agent." width="1280"></p>
+<p align="center"><img src="assets/readme/native-editor.png" alt="Native Oh My Canvas editor with HTML-imported editable design system, layers and inspector" width="1280"></p>
 
-## A little room for your next idea
+## Why Oh My Canvas
 
-Design interfaces, build a component library, and let an agent work on the same editable canvas. Your documents and embedded assets stay on your computer. No Leviosa login, Paper subscription, application credits, cloud database, or telemetry is built into the app.
-
-**The editor and local MCP do not charge usage credits.** Your chosen AI client's subscription and limits still apply. Collaboration connects participants directly to a reachable host; it does not use a developer-operated server.
-
-| Make it | Keep it | Work together |
-| --- | --- | --- |
-| Vector shapes, paths, text, images, frames, pages, and auto layout | Local autosave, atomic writes, a recovery backup, and portable `.omc` files | Up to four participants over pinned-certificate TLS; local MCP for agents |
-| Main components, linked instances, variants, text/visibility/swap properties | Embedded images, bundled English/Korean fonts, offline editing | Reconnect and merge offline changes; each participant keeps a local replica |
+- **Draw with HTML/CSS.** Paste HTML in the app or call `write_html` through MCP. Supported CSS becomes editable layers, text and layout. Inspect the result and keep refining it on the canvas.
+- **Work with several agents at once.** Give each agent an explicit `documentId`. Agents can work in separate background documents while you keep designing; per-author Undo keeps their histories separate. Coordinate edits to the same layers.
+- **Keep the workflow local.** The native desktop and service run without an Electron/browser renderer. Local persistence, reusable components, styles, variables and exports keep your design work close to your code.
+- **Spend context on the change.** HTML/CSS creation, batched operations and scoped queries let agents work without repeatedly sending an entire document. In an earlier LD03 experiment, OMC used about 10,000 fewer gross provider tokens than Paper/Figma; see the measured scope below.
+- **Collaborate without app credits.** Local MCP has no per-use app credits. Up to four participants can share a reachable native TLS room; your AI client's pricing and limits still apply.
 
 <a id="screenshots"></a>
 
 ## App screenshots
 
-These screenshots show the independent `editor/` implementation running synthetic local documents in Electron. The editor view was refreshed in the **2026-11-04** interface layout audit; the collaboration and document-browser views come from the earlier four-client acceptance run. The UI uses English with some Korean component labels; four README languages do not imply four-language UI support.
+Design interfaces with editable layers, reusable elements and HTML/CSS, then organize your work in the local canvas library.
 
-<p align="center"><img src="docs/qa/editor.png" alt="Oh My Canvas editor with layers, a sample board, a design inspector, and drawing tools" width="1200"></p>
-<p align="center"><em>The editor: layers on the left, your canvas in the middle, properties on the right.</em></p>
+![Native local canvas library](assets/readme/native-library.png)
 
-<details>
-<summary><strong>Explore the real component library and document browser</strong></summary>
-
-![Actual component library with rendered Assets previews and editable button variants](docs/qa/independent-library-e2e/01-assets-library.png)
-
-The real 1,065-object document preserves 170 variants and 254 property bindings. All 16 Assets previews and label-containment checks passed on initial open and fresh-process reopen.
-
-![Local document browser with search, favorites, grid/list controls, and a canvas preview](docs/qa/library-populated.png)
-
-The [current verification record](docs/independent/VERIFICATION.md) states which workflows passed and their remaining limits. Screenshots document the tested local flow; they do not establish external-internet reachability.
-
-</details>
+Local document library and rendered canvas preview.
 
 <a id="quick-start"></a>
 
-## Start locally
+## Start the native app
 
-### 1. Build and launch
-
-Use an existing local checkout and **Node.js 22.12+** with npm. Dependency installation needs network access; the built editor works offline.
+Use Rustup with the pinned Rust 1.92.0 toolchain. Build the three binaries together, then launch the desktop:
 
 ```sh
-cd /path/to/oh-my-canvas
-npm ci
-npm run build
-npm start
+cd /path/to/oh-my-canvas/native
+cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
+./target/release/omc-desktop
 ```
 
-This checkout is currently local-only; published downloads are not available. An existing installation at `/Applications/Oh My Canvas.app` may predate the independent engine; build this checkout to try the current implementation.
-
-<details>
-<summary>Build a macOS app bundle</summary>
-
-```sh
-npm run dist:mac
-```
-
-The build writes `release/mac-arm64/Oh My Canvas.app` and a ZIP under `release/`, using `--publish never`. The current macOS arm64 package, bundled CLI, and exact-byte package provenance checks passed. The macOS build is unsigned and not notarized; Windows/Linux execution remains unverified. For shared dependency checkouts, build first and use `node scripts/package-local.mjs` to stage real dependency files before `node scripts/packaged-smoke.mjs`; packaging directly through an inter-worktree `node_modules` symlink can omit packages.
-
-</details>
-
-### 2. Make something
-
-Create a canvas, or choose **Explore a sample** when the library is empty. Add text and shapes with the bottom toolbar, organize layers, and edit properties in **Design**. Changes save locally. Use **Export → Oh My Canvas** for a portable, editable backup; JSON, SVG, and PNG are also available. Per-layer exports are in the Design panel.
-
-[Installation, data locations, recovery, export formats, and limits →](docs/GETTING_STARTED.md)
+The native runtime does not require Node.js. Native packaging and cross-platform release qualification remain incomplete. See the [native guide](native/README.md).
 
 <a id="components"></a>
 
-## A design system you can actually edit
+## Editable components and design systems
 
-Open the included [Component Library](docs/design/system/component-library.omc) with **Open file**. It contains **14 families, 170 variants, and two composed components with five nested instances**: buttons, fields, selection controls, navigation, badges, lists, cards, tooltips, and dialogs.
-
-The full synthetic library passed component/property/variant/source-edit workflows, durable disk readback, and fresh-process reopen. See the [current verification record](docs/independent/VERIFICATION.md) for scope and evidence.
-
-1. Duplicate the library document and add a page for your screens.
-2. Open **Components → Assets** and click a component to insert a linked instance.
-3. Change its state, text, or visibility in the Design panel.
-4. Edit the main component to update its instances while keeping their overrides.
-
-Create your own with **Create component** (`⌥⌘K` on macOS), **Combine variants**, and **Add variant**. **Reset all changes** restores the source; **Detach instance** removes the link.
-
-[Component behavior and MCP contract →](docs/design/components-implementation.md) · [Visual direction →](DESIGN.md)
+Create main components, linked instances and variants, then edit text, visibility and instance overrides. Shared styles and tokens support repeated designs. See the [native component, style and library operations](docs/MCP_PARITY.md) for the editable workflow.
 
 <a id="mcp"></a>
 
-## Give your agent a real canvas
+## Give every agent a real canvas
 
-Keep the desktop app running, click **MCP → Copy configuration**, and register the app-owned Streamable HTTP endpoint in your MCP client. The normal URL is `https://127.0.0.1:47831/mcp`; supply its persistent private token through `OMC_MCP_TOKEN`. Your client must also trust this profile's TLS certificate; the app does not install OS trust or silently edit global Codex or Claude settings. See [HTTP setup, credentials, and stdio rollback](docs/MCP.md) before connecting.
+Click **MCP → Copy MCP configuration** in the native app and add the generated stdio configuration to your client. It references this installation's `omc-cli` and profile; no global client settings are silently changed.
 
-> In this open canvas, create a 1440 × 900 dashboard. Use blue, sky, pale lavender, white, and black. Make the navigation and buttons reusable components. Check the result with a screenshot.
+The native **OMC dialect exposes 59 MCP tools: 50 editor/workspace tools plus 9 native extensions**. The separate **FigCraft-compatible dialect has 19 MCP tools and exposes 643 command IDs** through its command interface. These are different counts, not 643 separate MCP tools.
 
-Choose a canvas with `list_documents` and `open_document` or `create_document`, then read `get_context` and `get_guide`. Supply its `documentId` to every document mutation; then use `create_board`, `write_html`, `update`, `components`, and `component`. There are **50 tools**, including native page, shape, text, style, library, asset, clipboard, export and collaboration operations. See the [capability map](docs/MCP_PARITY.md). Component actions run outside `batch`; variant switching can return a new selection ID. Agent edits use the same persistence and collaborative Undo path as local edits.
+Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Document edits require `documentId`. Use `create_board`, `write_html`, `edit_shapes`, `components`, `batch` and `screenshot` for a complete design loop. Native extensions add bounded queries, comments, tokens, jobs and code export.
 
-The desktop MCP can list, create, open, rename, and duplicate local canvases without manual library clicks. Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Use stable document IDs with `rename_document` and `duplicate_document`; `select_page` changes the active page. Multiple canvases stay open in tabs, with independent background editors for agents. MCP open/create/duplicate default to background operation; `focus:true` reveals the result. Tab switching preserves each session’s target, and explicit document IDs also separate repositories sharing one transport. In the UI, click the canvas title to edit it in place; Enter or blur saves and Escape cancels. **File → Rename canvas** opens the same inline field. The library also offers **Actions → Rename canvas**. See the [workspace tool contract](docs/MCP.md#documents-and-pages).
+Separate agents can keep separate documents open in the background. A human's active transaction may return `busy`; finish it before retrying. Agent-scoped Undo does not consume another author's history. A shared transport does not make the visible tab an implicit edit target.
 
-While a user is typing or scrubbing a value, read tools stay available and agent mutations/Undo return `busy`. Finish the user transaction before retrying. The MCP bridge is authenticated, loopback-only, and separate from collaboration. **Never forward its port or share `mcp-runtime.json`.**
+[Tool contracts and migration](docs/MCP_PARITY.md) · [Native stdio, optional legacy HTTPS and collaboration setup](native/README.md)
 
-[Setup and troubleshooting →](docs/TROUBLESHOOTING.md) · [Trust boundaries →](SECURITY.md)
+## Measured speed, memory and token usage
 
-## Four people, without a hosted backend
+The project-authored pilot covers OMC, Paper, Figma and Penpot. In the selected 60-second tasks, OMC completed accepted work **21–55% sooner than Penpot**. Paper/Figma did not complete the same acceptance gates within those attempts. OMC also recorded lower sampled RAM peaks than Paper/Penpot in LD02/LD03, but resource scopes were incomplete and differed between products.
 
-A host opens **Collaborate → Host a canvas** and privately shares an invitation. Three teammates can join with **Join a canvas**. Everyone keeps a local copy; a disconnected participant can keep editing and merge after reconnecting.
+An **earlier LD03 experiment**, with the same model, fixture and prompt, recorded:
 
-The fresh local acceptance run passed with four independent Electron processes over real TLS: concurrent inserts, author Undo, embedded images, official SDK stdio, local exports, offline rejoin, durable reopen, and older-file merging. Connections between external computers across residential/enterprise NATs or the public internet remain unverified.
-
-![Four local Electron clients collaborating over TLS](docs/qa/collaboration.png)
-
-A host must be reachable. There is no automatic NAT traversal, relay, TURN service, or automatic host migration. Internet use may require a manually forwarded collaboration port and a reachable address; CGNAT can prevent that. The app does not change router settings. All teammates need protocol v2. Treat invite holders as trusted editors: there are no read-only roles or per-member revocations.
-
-<details>
-<summary>Merge behavior and file compatibility</summary>
-
-Independent shape properties merge with Yjs. Canonical geometry is projected into consistent render bounds. Child lists are repaired from parent links. The same text layer uses rich-text property conflict resolution, **not character-by-character concurrent typing**. Split text work into separate layers.
-
-The writer uses `.omc` v2 and reads v1 files. Old collaboration invitations/handshakes are rejected before document exchange. A former guest can rehost a saved replica and share a new invitation if the original host leaves. Undo/Redo stacks are session-local and are not restored when a document is reopened.
-
-</details>
-
-[Connection steps and boundaries →](docs/GETTING_STARTED.md#collaboration)
-
-## Built to be inspected
-
-| Area | Verification target |
-| --- | --- |
-| Document integrity | Canonical geometry, concurrent edits, speculative validation, author/group isolation, Undo/Redo |
-| Durable storage | Serialized atomic saves, fsync, metadata validation, backup recovery, portable import/reopen |
-| Network boundaries | TLS identity, invite authentication, four-person limit, Origin rejection, isolated local MCP |
-| Actual application | Four-client collaboration, component workflows, text editing, SVG wrapping, native exports, installed-package readback |
-
-The current run passed **353 editor tests across 14 files**, **40 host tests**, and **37/37 native UI cases with zero renderer errors**. Rendering checks covered 32 scenarios with 830 assertions plus eight large-fixture/cache assertions. The real component-library journey and current package checks also passed. These are scoped local results, not a claim that every feature record has its own test. Independent engineering review is **APPROVE**, with architecture marked **WATCH**; the reviewed clean-history source candidate also passed its manifest and privacy audit. See the [final review](docs/independent/ASTRA_FINAL_REVIEW.md) and [verification record](docs/independent/VERIFICATION.md).
-
-[Current verification and limits →](docs/independent/VERIFICATION.md) · [How to run checks →](docs/TESTING.md)
-
-## Local development benchmark results
-
-In our project-authored 60-second pilot, **OMC completed the accepted LD02, prepared-start LD03 and two LD05 tasks 21–55% sooner than Penpot**. Paper and Figma attempts in those tasks ended with unmet acceptance checks or the deadline. The pilot retained all 78 indexed attempts, including failures and retries.
-
-| Measured task | OMC accepted time | Penpot accepted time |
+| Product | Gross provider tokens | Cached input included |
 | --- | ---: | ---: |
-| Scoped edit, LD02 | 41.63 s | 53.55 s |
-| Shared style edit, LD03 | 40.09 s | 50.80 s |
-| Three source round trips, LD05 Route Board | 22.71 s | 47.53 s |
-| Three source round trips, LD05 Supply Ledger | 20.34 s | 45.05 s |
+| OMC | 22,604 | 7,110 |
+| Paper | 32,820 | 16,782 |
+| Figma | 32,363 | 16,578 |
+| Penpot | 22,624 | 7,110 |
 
-Provider tokens were close. OMC used 8,916 tokens on LD02, compared with Paper 8,915, Figma 9,080 and Penpot 8,919. On LD03, OMC used 8,640, compared with Paper 8,575, Figma 8,567 and Penpot 8,578. Deterministic LD05 adapters invoked zero generation-model calls. Complete operator-agent token usage remains unobserved.
+That is **10,216 fewer tokens than Paper (31.1%)** and **9,759 fewer than Figma (30.2%)** in this experiment. Counts include cached input and output across all admitted provider requests. OMC/Penpot passed the common oracle; Paper/Figma qualified the edited candidate but lacked full lifecycle observations. These are single exploratory runs, not a general saving guarantee or a billing-cost comparison. Later guarded 60-second LD02/LD03 runs had nearly equal provider totals across products.
 
-OMC recorded smaller sampled local RAM peaks than Paper and Penpot in the selected LD02/LD03 attempts. CPU/RAM observations are incomplete and include different process sets, model/client work and shared-host activity. The report states these boundaries, preparation differences, failed quality gates and Figma's later MCP quota exhaustion. Single-attempt pilot observations leave broad token, compute and statistical superiority unqualified.
+[Full results and limits](docs/benchmarks/results/2026-11-18/README.md) · [Earlier token records](docs/benchmarks/results/2026-11-18/LD03/earlier-tokens.json) · [Protocol](docs/benchmarks/README.md)
 
-[Results, limitations and all measured attempts →](docs/benchmarks/results/2026-11-18/README.md) · [Benchmark protocol →](docs/benchmarks/README.md)
+### Experiment index
+
+| ID | Task | Records |
+| --- | --- | --- |
+| [LD01](docs/benchmarks/results/2026-11-18/LD01/README.md) | Dashboard creation | 8 |
+| [LD02](docs/benchmarks/results/2026-11-18/LD02/README.md) | Scoped large-document edit | 4 |
+| [LD03](docs/benchmarks/results/2026-11-18/LD03/README.md) | Shared component/style edit | 16 |
+| [LD04](docs/benchmarks/results/2026-11-18/LD04/README.md) | Responsive layout | 11 |
+| [LD05](docs/benchmarks/results/2026-11-18/LD05/README.md) | Code ↔ canvas round trips | 8 |
+| [LD06](docs/benchmarks/results/2026-11-18/LD06/README.md) | Assets, fonts and content | 10 |
+| [LD07](docs/benchmarks/results/2026-11-18/LD07/README.md) | Defect diagnosis and repair | 2 |
+| [LD08](docs/benchmarks/results/2026-11-18/LD08/README.md) | Concurrent documents | 9 |
+| [LD09](docs/benchmarks/results/2026-11-18/LD09/README.md) | Startup/import/reopen | 7 |
+| [LD10](docs/benchmarks/results/2026-11-18/LD10/README.md) | Interaction and idle use | Interrupted |
+| [LD11](docs/benchmarks/results/2026-11-18/LD11/README.md) | Save and recovery | 3 |
+| [LD12](docs/benchmarks/results/2026-11-18/LD12/README.md) | Build/IDE contention | Companion only |
+| [LD13](docs/benchmarks/results/2026-11-18/LD13/README.md) | Four-person collaboration | Not measured |
+
+78 attempts, including failures/retries; the earlier LD03 token experiment is separate.
+
+## People can work together too
+
+Host a native TLS room and privately share its pinned-certificate invitation. Up to four participants keep durable local replicas. The host must be reachable: automatic NAT traversal, relays and host migration are not provided. External-network and four-hardware-peer qualification remain incomplete. Optional FigCraft server publishing is a separate online route; see the [native guide](native/README.md).
 
 <a id="contributing"></a>
 
-## Help shape the project
+## Contribute and inspect
 
-Reproducible bugs, focused fixes, useful component examples, and aligned translations make the project better. Start with the contribution guide and keep private designs, invitations, runtime tokens, and personal data out of reports.
+[Contributing](CONTRIBUTING.md) · [Testing](docs/TESTING.md) · [Native verification](native/README.md) · [Security](SECURITY.md) · [Design direction](DESIGN.md)
 
-- [Contributing](CONTRIBUTING.md) — workflow, scope, checks, English commits, and review expectations
-- [Pull request template](.github/PULL_REQUEST_TEMPLATE.md) — problem, behavior, evidence, and limits
-- [Bug report form](.github/ISSUE_TEMPLATE/bug_report.yml) · [Feature request form](.github/ISSUE_TEMPLATE/feature_request.yml)
-- [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
-
-The repository is hosted privately at [Dindb-dong/oh-my-canvas](https://github.com/Dindb-dong/oh-my-canvas). Collaborators with repository access can use the issue forms and PR template. No downloadable release or hosted service is promised.
-
-## License and provenance
-
-The independently authored project implementation is licensed under [MIT](LICENSE). External libraries, native runtime components and fonts retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md) and the [dependency inventory](docs/licensing/DEPENDENCIES.md).
-
-The active editor is implemented in `editor/`. The earlier inherited editor, helper and copied tests have been retired from the intended source tree. Planning participants inspected the old implementation; this is not described as an unexposed clean-room process. Read the [implementation provenance](docs/independent/PROVENANCE.md) and [feature contract](docs/independent/behavior-contract.md).
-
-This repository starts from the reviewed independent-source snapshot, with a separate Git history. The retired company-source history is not included. MIT covers the eligible project implementation and does not relicense company code or third-party materials. Repository access is currently private.
+The implementation is [MIT licensed](LICENSE); dependencies and fonts keep their own licenses. See [third-party notices](THIRD_PARTY_NOTICES.md) and [implementation provenance](docs/independent/PROVENANCE.md). Source code is available on [GitHub](https://github.com/Dindb-dong/oh-my-canvas).

@@ -1,0 +1,83 @@
+{
+  "condition": "Earlier exploratory LD03 field-relay; separate from the 60-second pilot",
+  "prompt_sha256": "ba6ef5539243f1e0628726923a7f6a3a3c46e469de78e39611764691696e3558",
+  "model": "qwen2.5:3b-instruct",
+  "products": {
+    "OMC": {
+      "attempt_id": "omc-field-relay-06",
+      "acceptance": "common oracle passed",
+      "ledger_sha256": "e95c49e4cbdb07172908538584eb7203cb7308175775125b3b2e99a803d141de",
+      "usage": {
+        "normalization_version": 1,
+        "status": "COMPLETE",
+        "source": "responses-budget-ledger-v1",
+        "record_count": 3,
+        "issues": [],
+        "input_tokens": 22495,
+        "output_tokens": 109,
+        "total_tokens": 22604,
+        "uncached_input_tokens": 15385,
+        "cache_read_input_tokens": 7110,
+        "cache_write_input_tokens": null,
+        "reasoning_output_tokens": null
+      }
+    },
+    "Penpot": {
+      "attempt_id": "penpot-field-relay-01",
+      "acceptance": "common and original oracles passed",
+      "ledger_sha256": "a9db427fad3f6174fbf31e6e692373f6b2f3b9b7631cf6bc78d5d716fc5d247c",
+      "usage": {
+        "normalization_version": 1,
+        "status": "COMPLETE",
+        "source": "responses-budget-ledger-v1",
+        "record_count": 3,
+        "issues": [],
+        "input_tokens": 22495,
+        "output_tokens": 129,
+        "total_tokens": 22624,
+        "uncached_input_tokens": 15385,
+        "cache_read_input_tokens": 7110,
+        "cache_write_input_tokens": null,
+        "reasoning_output_tokens": null
+      }
+    },
+    "Paper": {
+      "attempt_id": "paper-field-relay-01",
+      "acceptance": "candidate qualified, native editor reopen unobserved",
+      "ledger_sha256": "81d50d1d44c387c26d5b7ffa41b7f9de5287388953bf664687712b79e7700d2a",
+      "usage": {
+        "normalization_version": 1,
+        "status": "COMPLETE",
+        "source": "responses-budget-ledger-v1",
+        "record_count": 4,
+        "issues": [],
+        "input_tokens": 32436,
+        "output_tokens": 384,
+        "total_tokens": 32820,
+        "uncached_input_tokens": 15654,
+        "cache_read_input_tokens": 16782,
+        "cache_write_input_tokens": null,
+        "reasoning_output_tokens": null
+      }
+    },
+    "Figma": {
+      "attempt_id": "figma-field-relay-01",
+      "acceptance": "candidate qualified, native editor reopen and duplicate unobserved",
+      "ledger_sha256": "24a3113bda427dfe78d9054d6eed9da233bf0b7ccecd36a41b15ad3afacd8c6f",
+      "usage": {
+        "normalization_version": 1,
+        "status": "COMPLETE",
+        "source": "responses-budget-ledger-v1",
+        "record_count": 4,
+        "issues": [],
+        "input_tokens": 32057,
+        "output_tokens": 306,
+        "total_tokens": 32363,
+        "uncached_input_tokens": 15479,
+        "cache_read_input_tokens": 16578,
+        "cache_write_input_tokens": null,
+        "reasoning_output_tokens": null
+      }
+    }
+  }
+}

@@ -366,7 +366,7 @@ For an aggregate release gate, FAIL dominates; otherwise any INCOMPLETE or NOT_R
 
 ## Commands and reproduction entry points
 
-**Existing documentation check:** in a complete current checkout with locked Node dependencies installed, run node scripts/check-docs.mjs as described by the [implementation guide](IMPLEMENTATION_GUIDE.md#commands-that-exist-today). Existing Electron/FIG checks remain documented in [TESTING.md](../TESTING.md) and the fixture manifest; they do not run this native suite.
+**Existing documentation check:** in a complete current checkout with locked Node dependencies installed, run node scripts/check-docs.mjs as described by the [implementation guide](IMPLEMENTATION_GUIDE.md#commands-that-exist-today). Current native/FIG checks are documented in [TESTING.md](../TESTING.md) and the fixture manifest; they do not run this native suite.
 
 **Proposed future commands, not currently executable:** the native workspace and xtask runner do not exist at the planning revision. WP-01/WP-02 must implement the interfaces below, fixture generation, evidence writers and failure exit codes before they are advertised as working commands.
 

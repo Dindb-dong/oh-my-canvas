@@ -1,5 +1,7 @@
 # Independent UI regression evidence
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 All tests in this lane were authored after implementation checkpoint `f86e063`. No inherited test bodies or restricted implementation trees were read. Tests use synthetic fixtures. The native runner uses the installed Playwright/Electron dependency and a new temporary profile; it does not expose production debug globals or use the default user profile.
 
 ## Current execution

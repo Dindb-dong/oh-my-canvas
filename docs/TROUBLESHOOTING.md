@@ -1,52 +1,25 @@
 # Troubleshooting
 
-[README](../README.md) · [Getting started](GETTING_STARTED.md) · [Safe reporting](../SECURITY.md)
+## App does not start
 
-Use a copy of your document while investigating. Include the app version/source commit, OS/architecture, a minimal synthetic reproduction, and the exact error. Never include private invitations, tokens, `mcp-runtime.json`, customer designs, or unsanitized `.omc` history in a public report.
+Build `omc-desktop`, `omc-service` and `omc-cli` together with the pinned Rust toolchain. Keep the binaries together. Root npm commands only run development checks. See [getting started](GETTING_STARTED.md).
 
-<a id="mcp"></a>
+## MCP cannot connect
 
-## An agent cannot connect or edit
+Copy the stdio configuration from the intended native profile and check that its CLI path exists. Verify the client is using that same profile and dialect. Reconnect after updating cached tool schemas. For optional legacy HTTPS, use the profile's pinned public certificate and private bearer as described in the [native guide](../native/README.md); do not disable TLS checks or expose MCP on a public interface.
 
-- Launch the app and open a document in the editor. A library-only screen has no active editable canvas.
-- Re-copy **MCP → Copy configuration** from this app/profile. The default is the app-owned HTTPS URL; supply the private bearer in the client environment. Check [MCP credentials and rollback](MCP.md), particularly GUI environment inheritance. Rebuild a source checkout before using its bundled CLI.
-- Trust the profile's specific public TLS certificate through the client's supported trust or pinning mechanism. The app does not install OS trust. Never disable certificate verification or downgrade to plain HTTP; a port impostor must not receive the bearer. Codex GUI trust setup remains unverified.
-- An older pre-TLS stdio relay reports an invalid runtime after migration. Restart that client connection with the current bundled relay. The version-2 descriptor intentionally contains no token, and the old exposed token is replaced by the separate private `mcp-token-v2` credential; do not restore an old descriptor or downgrade to HTTP.
-- The installed app uses its own Electron Node mode; a separate Node runtime is unnecessary. Keep the quoted executable path intact if it contains spaces.
-- Refresh the MCP client connection after installing a new binary. An already-open Codex chat may need a new chat to discover newly registered tools.
-- `busy` while typing/scrubbing is expected. Finish that user transaction, then retry the write. Read tools remain available.
-- Separate HTTP sessions and stdio processes have separate author identities. Undo cannot revert another agent's or the user's latest step. A restart or document replacement discards aliases; start with a fresh `get_context`. Read back an uncertain write before making another mutation.
-- Variant switching can replace the instance root; use the returned selection alias for subsequent calls. Component actions are outside `batch`.
-- An invalid or expired TLS identity leaves MCP unavailable. Restore the profile's original private identity files, or explicitly renew the identity and update the client's certificate trust. Do not replace a certificate from an unverified listening port.
-- A port conflict leaves editing available and MCP unavailable. Close the conflicting server normally or launch this profile with a separate explicit `--mcp-port`; do not terminate unrelated processes.
-- Do not forward the MCP port, remove authentication, or change certificate checks to work around a connection error.
+## Agent edits appear in another canvas
 
-## A teammate cannot join
+Supply the intended `documentId` to every document mutation and refresh `get_context` after opening or restarting. Background documents do not follow the visible tab. A `busy` response means an active user transaction must finish before retrying.
 
-All participants need the current collaboration protocol v3. Old invitations are rejected; create a new invitation from the updated host. The host must remain running and reachable. Ending hosting invalidates the invitation. There are four total slots, including the host; a fifth connection is refused.
+## Save or import fails
 
-Current protocol tests cover bounded state/blob transfers and multiple peers. The earlier same-machine four-Electron-client acceptance predates protocol v3; it does not establish full 153-MiB-source collaboration or external internet/NAT behavior. On another machine, verify the collaboration address is reachable from that machine. An automatically displayed local address may belong to the wrong interface or VPN. Public internet, double NAT, CGNAT, firewalls, and router rules may block access. A port-forward rule, where appropriate, must target the collaboration port—not MCP. The app does not create those rules, supply a relay, or guarantee a network route.
+Preserve the original profile and input. Review the exact error and conversion diagnostics before retrying in an isolated profile. Do not delete databases or overwrite the only backup. Earlier Yjs files and native history packages are different formats; consult [migration and export](MCP_PARITY.md#files-and-repeatable-output).
 
-Do not disable TLS verification or publish an invitation for someone to test. Ask a trusted participant to join privately. If the host is gone, a participant can rehost their saved replica with a new invitation.
+## Collaboration cannot connect
 
-## A save or import fails
+The host must be directly reachable. Native rooms do not provide automatic NAT traversal or relay services. Check the invitation privately and use a supported protocol on every peer. A local four-process test does not prove internet reachability.
 
-A malformed or oversized file is rejected before import. Portable image packages use `.omc` v4; v1/v2 raw-state files and v3 gzip files remain readable. Opening an older portable copy merges with newer local history rather than erasing it.
+## Report a problem
 
-Ordinary documents/CRDT states are limited to 16 MiB; imported design libraries use a 256 MiB budget. Portable files have a 384 MiB limit. The collaboration frame limit is independently 1 MiB; larger states and missing bitmaps use bounded, verified chunks. Individual external bitmaps are limited to 64 MiB. Portable v4 files and collaboration v3 require the current app. Reduce large assets or duplicate a readable current document to start fresh history. A duplicate has a new document ID and is separate from the existing collaboration room.
-
-For recovery, keep the profile's complete `documents/` directory, including `.omc-data/<id>/`, shared `assets/`, each manifest and its `.bak`, before attempting manual changes. The new local `<id>.omc` has the `oh-my-canvas-local` format, which older apps cannot read; the manifest alone is not a portable file. Use Export to create a complete portable copy. An incomplete last journal append is discarded; corruption in a complete journal record reports an error. Manifest/checkpoint recovery can use a valid backup and marks recovery. Export a separate portable copy after recovery. An unreadable file appears as a damaged document rather than breaking the whole library. Do not use Delete as a repair operation: it removes this device's manifest, backup and that document's checkpoint/journal directory. Shared bitmap assets remain retained because other documents or history may need them.
-
-## An export is cancelled or fails
-
-Check the native save dialog. Cancel intentionally produces no file. Choose a writable destination; a failed per-layer write shows an inline error and can be retried. SVG uses the renderer's measured layout; PNG may be a downscaled preview. Per-layer PDF is raster-backed. Report a synthetic document if measured text or geometry differs from the export.
-
-## Build or package issues
-
-Use the lockfile with `npm ci`, Node 22.12+, and `npm run build`. A network connection is needed to install dependencies/Electron initially. Build before running E2E or source MCP. Packaging from a `node_modules` symlink can omit indirect dependencies; use the checkout's real installed directory.
-
-The current large-document source app is exercised on Linux x64 with Electron and Xvfb/software rendering. Earlier macOS arm64 package verification belongs to its recorded source; the latest candidate's packaged macOS/Linux/Windows builds are not qualified by that result or by configured build targets. The personal macOS build is unsigned/unnotarized; the repository has no published installer or automatic updater. Do not bypass operating-system security prompts as a generic troubleshooting step.
-
-## Report it
-
-Use the [bug form](../.github/ISSUE_TEMPLATE/bug_report.yml) as a checklist. If no remote issue tracker exists, save a local report and share it through an already trusted maintainer channel. Follow [CONTRIBUTING.md](../CONTRIBUTING.md); do not invent a release URL or send private project files to a public tracker.
+Include source revision, OS, steps, expected and actual behavior, and a minimal synthetic input. Exclude tokens, profile descriptors, private keys, invitations and personal designs. See [contributing](../CONTRIBUTING.md), [security](../SECURITY.md), and [testing](TESTING.md).

@@ -1,5 +1,7 @@
 # Native window dimming and interface icons
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 ## Diagnosis and scope
 
 The reported screenshot has a uniform gray veil over the entire native canvas window. An isolated macOS run reproduced that native compositor effect: opening the editor's renderer-owned file input changed `BrowserWindow.isEnabled()` from true to false and white native-window pixels from RGB 255 to RGB 204. There was no HTML modal, inert root, opacity or filter change. Reloading the renderer while that picker remained pending retained the disabled, dimmed window. A renderer screenshot alone misses this effect.

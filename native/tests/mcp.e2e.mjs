@@ -8,7 +8,7 @@ import {pathToFileURL,fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {createServer,connect as connectSocket} from 'node:net';
 import {setTimeout as delay} from 'node:timers/promises';
-import {createMcpFetch} from '../../core/mcp-fetch.mjs';
+import {createMcpFetch} from './support/mcp-fetch.mjs';
 
 const root=resolve(fileURLToPath(new URL('../..',import.meta.url)));
 const sdk=process.env.OMC_TEST_SDK_ROOT;

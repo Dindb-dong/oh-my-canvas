@@ -1,82 +1,23 @@
 # Local MCP connection and recovery
 
-The app owns the HTTPS endpoint `https://127.0.0.1:47831/mcp` during normal operation. It uses the installed official SDK's **2025-11-25 protocol family**, including initialize and session IDs. It does not claim support for the later sessionless protocol. The desktop catalog has 50 tools. Start with `list_documents`, choose a document, then read `get_context` and `get_guide`. The reusable embedded editor exposes 37 editor tools.
-
-Keep the app running; document discovery and creation work even in an empty library. **MCP → Copy configuration** provides URL configuration without embedding the secret. The app never rewrites global client settings. A failed MCP startup leaves local editing available; inspect the connection dialog rather than forwarding a port or disabling authentication. A port conflict never falls back to a random port during normal operation or terminates another process.
-
-For isolated development and test profiles, `--profile=/absolute/profile` uses an ephemeral port. `--mcp-port=0` explicitly selects an ephemeral port; `--mcp-port=47832` selects a separate fixed port. `--mcp-disabled` runs the editor without MCP. Use the URL shown by that profile, rather than assuming the normal port.
+The native application provides stdio MCP through `omc-cli`. Choose **MCP → Copy MCP configuration** in the desktop, then register the generated configuration with your client. It names the installed CLI and selected profile. The app does not silently change global client settings.
 
 ## Documents and pages
 
-The desktop library belongs to the current app profile. It is not a filesystem browser. Document IDs are stable library IDs, distinct from page IDs and session-local layer aliases.
+Start with `list_documents`, `open_document` or `create_document`, then `get_context`. Mutations require an explicit `documentId`; the visible tab is never an implicit target. Background agents can use separate documents while the user continues editing. A human transaction can return `busy`; retry when it finishes. Each author has separate Undo ownership.
 
-| Tool | Arguments | Behavior |
-|---|---|---|
-| `list_documents` | `query?`, `offset?`, `limit?` | Return metadata, `total`, `nextOffset`, tabs, `activeTabId`, and the caller's `boundDocumentId`. Default page size 50, maximum 100. No thumbnail or document payload. |
-| `create_document` | `title?`, `focus?`, `sample?` | Create, persist and mount a blank or sample canvas; bind the caller. |
-| `open_document` | `id`, `focus?` | Mount an existing canvas and bind the caller, retaining other document runtimes and sessions. |
-| `rename_document` | `id`, `title` | Persist the specified canvas name without changing the caller's binding or visible tab. |
-| `duplicate_document` | `id`, `title?`, `focus?` | Flush and copy the specified canvas, then bind the caller to the copy. |
-| `select_page` | `documentId`, `id` | Select an existing page inside the specified canvas. Use `page` for page lifecycle and guides. |
-
-MCP open/create/duplicate default to `focus:false`; pass `focus:true` to reveal the canvas. UI actions reveal their result. Switching tabs never changes an agent's binding. Reads accept an explicit `documentId` or use the session's bound document. **Every document mutation requires `documentId`**, including `select_page`, `undo`, component actions and `batch`. A batch has one outer document ID; nested overrides are rejected. This also supports several repositories sharing one transport session: use the intended stable document ID on every call.
-
-Titles are trimmed, nonempty strings of at most 120 characters. Unknown properties, invalid IDs and out-of-range pagination fail validation. Lifecycle success waits for persistence and editor initialization. Document edits use the targeted canvas's gesture/dialog guard; another canvas's editing does not block them. Renaming does not rename a portable export or synchronize titles between collaborators.
-
-Example: `list_documents({query:"Product"})` → `open_document({id:"<document ID>"})` → `get_context({documentId:"<document ID>"})` → `select_page({documentId:"<document ID>",id:"<page ID>"})`. Use the resulting context before editing: `create_board({documentId:"<document ID>",name:"Dashboard",width:1440,height:900})`. `rename_document({id:"<document ID>",title:"Product exploration"})` also works for an inactive canvas.
-
-The app keeps an independent editor, page, selection, Undo history and render context for each resident canvas. Closing a tab saves it. If an MCP agent or collaboration session still uses it, its runtime remains available in the background; the library reports that activity. End those sessions before deleting that canvas. Up to eight document runtimes can be resident; an additional open returns `resource_limit` without evicting active work. Close an unused tab or end its agent session to release resources. App shutdown flushes all resident canvases; a save failure keeps the app open and reports the error.
-
-The [capability map](MCP_PARITY.md) covers native editing, pages, shared styles, libraries, assets/fonts, clipboard, file import/export, collaboration and workspace operations. Profile switching remains a process-launch option; no UI profile switch exists. The library rename entry is **Actions → Rename canvas**; an open canvas title edits in place on click, with Enter/blur to save and Escape to cancel. **File → Rename canvas** opens the same field.
+The OMC dialect has 59 tools: 50 shared operations and 9 native extensions. The separate FigCraft-compatible dialect has 19 tools with 643 command IDs. Use each running server's `tools/list` as the schema authority. See [capability and targeting contracts](MCP_PARITY.md).
 
 ## Credentials and registration
 
-Each profile has a private `mcp-token-v2` file in its application-data directory. It contains a persistent bearer token, is mode 0600, and survives app restarts. `mcp-runtime.json` is a disposable version-2 descriptor containing the active endpoint and public certificate path; it contains no token. Credentials stay in the separate private token file. Do not share token files or private profile diagnostics, or include their contents in logs, screenshots, commits, or issue reports. The normal macOS data directory is `~/Library/Application Support/oh-my-canvas`.
+Stdio connects to the authenticated local service for the chosen profile. Treat profile descriptors, credentials and invitations as private. Never forward local MCP ports or attach profile files to bug reports. See [security](../SECURITY.md).
 
-The profile also keeps a persistent self-signed TLS identity. Its public `mcp-cert.pem` path is available in the connection dialog; the private key and certificate are stored together in private `mcp-identity.json` (0600). Never copy or share that identity file. Before supplying a bearer, configure the client to trust that specific certificate from the profile's public certificate file using its supported certificate-store or pinning mechanism. Never establish trust by downloading a certificate from the listening port. The app does not install OS certificate trust. Never disable TLS verification (`NODE_TLS_REJECT_UNAUTHORIZED=0`, `--insecure`, or equivalent) or send the bearer over plain HTTP: a different process occupying the same port must fail certificate verification before receiving it. The token, certificate, and private key persist across restarts. Newly generated certificates last 365 days; invalid or expired identity files stop MCP startup rather than silently replacing client trust. Renewing an identity requires explicitly updating the client's trusted certificate. Protect the private key like the token; the public certificate itself is not a bearer secret.
-
-For the repository's Node SDK consumers, `createMcpFetch(cert)` from `core/mcp-fetch.mjs` supplies a fetch implementation pinned to the profile certificate. Pass it as the official SDK HTTP transport's `fetch` option. The newly bundled stdio relay also verifies this certificate and connects through the official SDK HTTP client, forwarding explicit request cancellation. An independently launched Codex GUI's certificate-trust and credential-inheritance path remains unverified; retain a working registration until both are confirmed. The registration below assumes certificate trust has already been configured.
-
-Set `OMC_MCP_TOKEN` privately in the environment inherited by the MCP client. A shell export alone does not establish that a GUI-launched client inherited it. Confirm the actual GUI connection and app restart behavior before retiring an existing working registration. No client setup command below reads or prints the token.
-
-```sh
-codex mcp add oh-my-canvas \
-  --url https://127.0.0.1:47831/mcp \
-  --bearer-token-env-var OMC_MCP_TOKEN
-```
-
-Equivalent Codex configuration:
-
-```toml
-[mcp_servers.oh-my-canvas]
-url = "https://127.0.0.1:47831/mcp"
-bearer_token_env_var = "OMC_MCP_TOKEN"
-```
-
-Use the HTTP registration on its own. Do not combine `command`, `args`, `ELECTRON_RUN_AS_NODE`, or stdio `env` with this entry. A client with protected static-header support may instead supply the bearer privately, subject to that client's secret-storage behavior. This app does not configure the client's credential store.
+For older Streamable HTTP clients, the native service supports an optional pinned-certificate HTTPS listener. It is not the default desktop stdio path. Setup, port selection and persistent token/certificate handling are documented in the [native guide](../native/README.md). Never disable certificate verification to fix a connection.
 
 ## Sessions, cancellation, and uncertain results
 
-Every initialized HTTP session receives a separate server-generated agent, even when clients have identical names or JSON-RPC request IDs. Aliases, Undo ownership, and idempotency keys belong to that agent within the targeted document runtime. DELETE, idle expiry, and successful app shutdown end the session. A failed native close resumes the session and its completed replay entries. Tab switching, library navigation and opening another canvas preserve existing sessions and aliases.
-
-Requests capture their explicit document and runtime generation at admission. A renderer restart invalidates only that canvas's in-flight work and aliases; read fresh `get_context` before retrying it. A queued page-scoped mutation fails if that canvas's page context changed, including a switch away and back. The app never redirects a stale request to the visible canvas. Responses identify the addressed `documentId` and generation; `get_context` also reports whether that canvas is visible.
-
-Explicit SDK cancellation stops queued work and font preparation before mutation. Disconnecting a socket is not an explicit cancellation. A write that already applied is not automatically undone when its response is cancelled or lost. Success responses continue to wait for durable persistence.
-
-After a timeout, lost response, or restart, read the explicitly addressed document before deciding whether to issue another write. Never automatically replay `create_board`, `duplicate`, `write_html`, or `undo`. The optional `oh-my-canvas/idempotency-key` metadata deduplicates matching calls only within the live agent's bounded in-memory cache (500 entries / 8 MiB for editor operations). Workspace mutations keep a separate cache across tab changes, bounded to 100 entries / 1 MiB across live agents. It does not provide exactly-once behavior across session termination, eviction, or app restart; editor-layer replay entries are also lost when that document runtime is disposed or restarted.
-
-## Stdio rollout and rollback
-
-The newly bundled CLI remains as stdio compatibility for clients that need it. It uses the official SDK HTTP client internally and the same authenticated HTTPS `/mcp` sessions, including cancellation; it does not use a separate `/rpc` tool-execution path. This is stdio compatibility, not the old HTTP+SSE transport. The installed CLI uses Electron's Node mode, so the installed app does not require a separate Node installation.
-
-Older pre-TLS relays already running in a client cannot safely consume the version-2 descriptor: it deliberately omits their expected token, so they fail closed with an invalid-runtime error. Stop those connections and restart the client with the newly bundled relay. Migration creates a separate private `mcp-token-v2` credential; any older `mcp-token` is retained as obsolete data and is no longer accepted as the HTTPS bearer, even if the old runtime descriptor was already removed. There is no HTTP downgrade or old-descriptor fallback.
-
-Before changing a working client registration, privately save only that entry. Register the HTTP URL, connect to a synthetic document, and verify initialize/list/call, durable readback, and reconnection after app restart. Confirm that a new HTTP connection creates no stdio relay. If a client cannot supply HTTP credentials, restore that saved entry using the current bundled stdio relay without modifying other MCP registrations; a pre-TLS relay must still be restarted. The app's internal `mcp-info` action with `{transport:'stdio'}` still returns the legacy registration used by compatibility scripts.
-
-Existing stdio processes are not automatically killed. End their client connections or restart the client normally. This transport change neither modifies nor disables any external plugin updater, and it makes no disk-reclamation guarantee.
+Reconnect and read the current document context after a restart. If a request loses its response, inspect the durable result or document before repeating a mutation. Cancellation after commit cannot undo a durable edit. Do not assume a transport disconnect rolled back the operation.
 
 ## Local checks
 
-After building, `node scripts/ultimate-mcp-e2e.mjs` checks native authoring, resources, private clipboard/history, all export formats, explicit file safety, isolated collaboration and restart readback. `node scripts/multi-document-e2e.mjs` exercises same-profile concurrent document targeting, shared transports, background rendering, tab close, IPC identity and renderer restart. `node scripts/workspace-mcp-e2e.mjs` checks empty-library discovery, document lifecycle, session isolation, rename UI and restart persistence using a synthetic profile. `node scripts/mcp-http-e2e.mjs` launches an isolated real Electron profile and exercises official SDK sessions over certificate-pinned HTTPS, tools, author isolation, failed-close cache preservation, durable readback, and restart invalidation. `node scripts/packaged-smoke.mjs` checks both certificate-pinned HTTPS and the bundled stdio CLI in the packaged app. Automated Electron checks opt into `OMC_TEST_BACKGROUND=1` with isolated `--profile` directories. The main process suppresses Dock activation and creates the window hidden before loading it; normal development launch is unchanged. The failed-close fixture intentionally replaces its temporary `documents` directory with a file and expects a filesystem error such as `EEXIST` or `ENOTDIR`, then restores the directory. That error is test injection in a synthetic profile, not evidence of a user-profile save failure.
-
-These checks do not establish certificate trust or credential inheritance by an independently launched Codex GUI.
+Build the native service and CLI, install locked test tooling, then run `npm run test:native`. Services use temporary isolated profiles. See [testing](TESTING.md).

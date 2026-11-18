@@ -1,5 +1,8 @@
 # Native engine rewrite plan
 
+> Historical implementation/transition record. The Electron application and web-editor sources have been removed. For current runtime and commands, see the [native workspace](../native/README.md) and [architecture](ARCHITECTURE.md).
+
+
 [Current architecture](ARCHITECTURE.md) · [MCP capability map](MCP_PARITY.md) · [Large-document evidence](DESIGN_FILE_IMPORT.md) · [Testing](TESTING.md)
 
 **Decision date:** 2026-11-11.  
@@ -51,7 +54,7 @@ No hosted account, paid service, cloud database or telemetry dependency is intro
 
 ## 2. What the current evidence establishes
 
-The current editor uses a retained DOM/SVG scene. CanvasKit is used for path operations and stroke outlining, including live boolean geometry; it is not the main screen rasterizer. See [rendering](../editor/render/index.ts), [vector operations](../editor/render/vector.ts) and [outlining](../editor/render/outline.ts).
+The current editor uses a retained DOM/SVG scene. CanvasKit is used for path operations and stroke outlining, including live boolean geometry; it is not the main screen rasterizer. See [rendering](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/editor/render/index.ts), [vector operations](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/editor/render/vector.ts) and [outlining](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/editor/render/outline.ts).
 
 PR #12/#13 already implemented external original-image blobs, changed-path edits, revisioned deltas, a durable append journal, checkpoints, progressive page publication and a first-page reopen cache. Preserve the useful contracts. Do not propose those completed changes as if they were the new native architecture.
 
@@ -72,10 +75,10 @@ These are observations from one two-logical-CPU Linux/Xvfb runner using software
 
 Code-confirmed remaining costs span several layers:
 
-- [Authority restoration](../electron/document-manager.mjs) waits for the complete stored replica before cached edits can be accepted and saved. [Replica hydration](../core/replica.mjs) applies Yjs state, materializes and validates the document, and can encode full state.
-- [Import](../editor/formats/design-file.ts) parses shared source structure before page publication. Parsing already uses a worker, but large-page publication still performs substantial synchronous document work.
-- [Draft finalization](../editor/document/draft.ts) still enumerates and can shallow-copy a large page object index. Small gestures can therefore retain page-size-dependent work.
-- [Text measurement](../editor/render/text.ts) and scene presentation depend on browser layout/DOM. These dependencies are removed by the native target.
+- [Authority restoration](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/electron/document-manager.mjs) waits for the complete stored replica before cached edits can be accepted and saved. [Replica hydration](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/core/replica.mjs) applies Yjs state, materializes and validates the document, and can encode full state.
+- [Import](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/editor/formats/design-file.ts) parses shared source structure before page publication. Parsing already uses a worker, but large-page publication still performs substantial synchronous document work.
+- [Draft finalization](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/editor/document/draft.ts) still enumerates and can shallow-copy a large page object index. Small gestures can therefore retain page-size-dependent work.
+- [Text measurement](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/editor/render/text.ts) and scene presentation depend on browser layout/DOM. These dependencies are removed by the native target.
 
 The evidence does not establish DOM, CanvasKit, Yjs or fsync as the sole cause of every delay. The rewrite addresses document ownership, storage granularity, scheduling and rendering together. No language or graphics-library choice alone establishes a latency or memory guarantee.
 
@@ -297,7 +300,7 @@ Preserve distinct milestones for first usable content, command acceptance, local
 
 ### Migration and legacy interoperability
 
-Provide explicit readers/converters for legacy portable OMC v1/v2/v3, portable v4 packages and the current working manifest/checkpoint/journal/blob representation. Use current code and [storage documentation](ARCHITECTURE.md#working-storage-and-portable-files) as the authority for exact formats; historical root documents contain older limits and protocol descriptions.
+Provide explicit readers/converters for legacy portable OMC v1/v2/v3, portable v4 packages and the current working manifest/checkpoint/journal/blob representation. Use current code and [storage documentation](ARCHITECTURE.md#edits-and-persistence) as the authority for exact formats; historical root documents contain older limits and protocol descriptions.
 
 During development, migration writes and verifies a new representation while retaining a recoverable original. Do not overwrite the only old copy. Record source/version/checksums, completion state and known semantic losses. Identity-preserving import and independent-copy import are distinct operations. A schema or CRDT reseed must explicitly define what happens to merge identity, history and old peers.
 

@@ -1,5 +1,7 @@
 # Source-observed behavioral compatibility inventory
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 An interface/behavior analyst inspected the old implementation and returned this inventory before implementation. No old code or private test bodies are included. Runtime parity is unverified. This source-exposed planning process is not a clean-room claim. The frozen contracts and Astra PLAN also apply.
 
 ## Complete feature surface

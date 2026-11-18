@@ -1,4 +1,10 @@
-# External dependency inventory
+# Dependency inventory
+
+The application runtime is Rust-native. Its dependencies are pinned in [`native/Cargo.lock`](../../native/Cargo.lock) and declared by the [workspace](../../native/Cargo.toml). Root npm dependencies are development-only: the MCP SDK and WebSocket test client, documentation parsers, and browser/TypeScript tooling used by cross-product benchmark adapters. They do not add a browser runtime to the app.
+
+The following older npm inventory is a historical record for the removed Electron/web implementation. It does not describe current installed or bundled runtime dependencies. Original license notices are retained for provenance.
+
+## Historical web-runtime inventory
 
 ## Direct dependencies
 
@@ -69,4 +75,4 @@ The icon was supplied by the user and edited for transparency. On 2026-11-03 the
 
 The independent renderer no longer imports `rbush`; its direct dependency and unused `quickselect` transitive dependency were removed from the lockfile without installing additional packages. Counts above describe the current graph, not the historical pre-replacement graph.
 
-The vendored Tabler Icons v3.50.0 subset is a separate MIT-licensed asset dependency, not an npm dependency. See [source, hashes and license](../../editor/ui/icons/tabler/README.md).
+The vendored Tabler Icons v3.50.0 subset is a separate MIT-licensed asset dependency, not an npm dependency. See [source, hashes and license](https://github.com/Dindb-dong/oh-my-canvas/blob/dade9931ee6cb58b376c60967d742a1c83e6cdc8/editor/ui/icons/tabler/README.md).

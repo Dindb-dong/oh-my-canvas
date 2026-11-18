@@ -1,5 +1,7 @@
 # Integration code review
 
+> Historical verification record for its stated source revision. The Electron/web runtime and its test scripts have been removed; see the [current testing guide](../TESTING.md) for native checks.
+
 Scope: the independently authored editor, its owned desktop/CRDT/MCP integration, build/package boundary and local publication exporter. This review does not inspect restricted retired source as an implementation template, prove legal independence, or claim exhaustive security analysis.
 
 ## Findings repaired before independent final review
