@@ -20,6 +20,7 @@ struct Capture {
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "kebab-case")]
 enum CaptureWarning {
+    ClippedTextOmitted,
     CssEffectsApproximated,
     EmbeddedContentOmitted,
     FormValuesOmitted,
@@ -37,6 +38,11 @@ enum CaptureWarning {
 impl CaptureWarning {
     fn diagnostic(&self) -> Diagnostic {
         let (code, action, fidelity_lost) = match self {
+            Self::ClippedTextOmitted => (
+                "clipped_text_omitted",
+                "Omitted text that extended outside the visible scrollport",
+                true,
+            ),
             Self::CssEffectsApproximated => (
                 "css_effects_approximated",
                 "Retained the box and supported paint properties",

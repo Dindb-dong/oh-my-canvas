@@ -9,17 +9,40 @@ export default function captureWebSelection(root) {
 
   const layers = []
   const warnings = new Set()
-  const selection = root.getBoundingClientRect()
-  const origin = {
-    x: Math.max(0, selection.left),
-    y: Math.max(0, selection.top),
+  const clipsOverflow = value => ['hidden', 'clip', 'auto', 'scroll'].includes(value)
+  const intersect = (rect, clip) => ({
+    left: Math.max(rect.left, clip.left), right: Math.min(rect.right, clip.right),
+    top: Math.max(rect.top, clip.top), bottom: Math.min(rect.bottom, clip.bottom),
+  })
+  function scrollport(element, rect, clip, [x, y]) {
+    return intersect(clip, {
+      left: x ? rect.left + element.clientLeft : clip.left,
+      right: x ? rect.left + element.clientLeft + element.clientWidth : clip.right,
+      top: y ? rect.top + element.clientTop : clip.top,
+      bottom: y ? rect.top + element.clientTop + element.clientHeight : clip.bottom,
+    })
   }
-  const width = Math.min(document.documentElement.clientWidth, selection.right) - origin.x
-  const height = Math.min(document.documentElement.clientHeight, selection.bottom) - origin.y
+
+  let browserClip = {
+    left: 0, right: document.documentElement.clientWidth,
+    top: 0, bottom: document.documentElement.clientHeight,
+  }
+  for (let ancestor = root.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    const style = getComputedStyle(ancestor)
+    const axes = [style.overflowX, style.overflowY].map(clipsOverflow)
+    if (style.opacity === '0') throw new Error('The selection is visually hidden')
+    if (axes.some(Boolean) && ancestor !== document.scrollingElement) {
+      browserClip = scrollport(ancestor, ancestor.getBoundingClientRect(), browserClip, axes)
+    }
+  }
+  const selection = root.getBoundingClientRect()
+  const viewport = intersect(selection, browserClip)
+  const origin = { x: viewport.left, y: viewport.top }
+  const width = viewport.right - viewport.left
+  const height = viewport.bottom - viewport.top
   if (!(width > 0 && height > 0 && width <= 16384 && height <= 16384)) {
     throw new RangeError('Selection must fit a visible capture viewport')
   }
-  const viewport = { left: origin.x, top: origin.y, right: origin.x + width, bottom: origin.y + height }
   let assetCharacters = 0
   const range = document.createRange()
   const controls = new Set(['input', 'textarea', 'select', 'option'])
@@ -28,10 +51,8 @@ export default function captureWebSelection(root) {
   const pixels = value => Number.parseFloat(value) || 0
   const visible = (rect, clip) => rect.right > clip.left && rect.left < clip.right
     && rect.bottom > clip.top && rect.top < clip.bottom
-  const intersect = (rect, clip) => ({
-    left: Math.max(rect.left, clip.left), right: Math.min(rect.right, clip.right),
-    top: Math.max(rect.top, clip.top), bottom: Math.min(rect.bottom, clip.bottom),
-  })
+  const contained = (rect, clip) => rect.left >= clip.left && rect.right <= clip.right
+    && rect.top >= clip.top && rect.bottom <= clip.bottom
 
   function add(kind, name, rect, parent, position, extra = {}) {
     if (layers.length >= 4000) throw new RangeError('The capture exceeds 4000 editable layers')
@@ -124,7 +145,7 @@ export default function captureWebSelection(root) {
     if (['::before', '::after'].some(pseudo => !['none', 'normal'].includes(getComputedStyle(element, pseudo).content))) {
       warnings.add('generated-content-omitted')
     }
-    const clips = [style.overflowX, style.overflowY].map(value => ['hidden', 'clip', 'auto', 'scroll'].includes(value))
+    const clips = [style.overflowX, style.overflowY].map(clipsOverflow)
     if (clips[0] !== clips[1]) warnings.add('one-axis-clipping-approximated')
     if (element.shadowRoot) warnings.add('shadow-content-omitted')
 
@@ -148,7 +169,7 @@ export default function captureWebSelection(root) {
       warnings.add('form-values-omitted')
       return
     }
-    if (name !== 'img') visitChildren(element, here, rect, depth, style, clips[0] || clips[1] ? intersect(rect, clip) : clip)
+    if (name !== 'img') visitChildren(element, here, rect, depth, style, clips.some(Boolean) ? scrollport(element, rect, clip, clips) : clip)
   }
 
   function visitChildren(element, parent, rect, depth, style, clip) {
@@ -159,6 +180,10 @@ export default function captureWebSelection(root) {
         range.selectNodeContents(node)
         const box = range.getBoundingClientRect()
         if (!(box.width > 0 && box.height > 0) || !visible(box, clip)) continue
+        if (!contained(box, clip)) {
+          warnings.add('clipped-text-omitted')
+          continue
+        }
         if (range.getClientRects().length > 1) warnings.add('wrapped-text-approximated')
         if (style.textTransform !== 'none' || style.writingMode !== 'horizontal-tb') warnings.add('text-style-approximated')
         const text = ['pre', 'pre-wrap', 'break-spaces'].includes(style.whiteSpace)

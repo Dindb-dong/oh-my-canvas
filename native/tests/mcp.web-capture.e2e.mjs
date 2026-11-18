@@ -40,6 +40,7 @@ async function captureFixtures() {
         #card { padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: #ffffff }
         #scroll { height: 42px; overflow: auto }
         #past { height: 70px }
+        #outside-clip { height: 9px; overflow: hidden }
         span::after { content: "generated content" }
         img, svg { display: block; width: 24px; height: 24px }
         @media (max-width: 700px) { #card { grid-template-columns: 1fr } }
@@ -56,14 +57,16 @@ async function captureFixtures() {
         </div>
       </main>
       <div>CAPTURE_NONSELECTED_SECRET</div>
+      <div id="outside-clip"><div id="clipped-selection">CAPTURE_PARTIAL_SECRET</div></div>
       <pre id="capture-output"></pre>
       <script type="module">
         import capture from '/capture-web.mjs'
         await document.fonts.ready
         await Promise.all([...document.images].map(image => image.decode().catch(() => {})))
         document.querySelector('#state').textContent = innerWidth > 700 ? 'Wide ready' : 'Narrow editing'
-        const result = capture(document.querySelector('#selected'))
-        const bytes = new TextEncoder().encode(JSON.stringify(result))
+        const selection = capture(document.querySelector('#selected'))
+        const clipped = capture(document.querySelector('#clipped-selection'))
+        const bytes = new TextEncoder().encode(JSON.stringify({ selection, clipped }))
         document.querySelector('#capture-output').textContent = btoa(String.fromCharCode(...bytes))
       </script>`)
   })
@@ -81,7 +84,11 @@ async function captureFixtures() {
       ], { timeout: 20000, maxBuffer: 1024 * 1024 })
       const encoded = stdout.match(/<pre id="capture-output">([A-Za-z0-9+/=]+)<\/pre>/)?.[1]
       assert.ok(encoded, 'Chrome returned a capture bundle')
-      results.push(JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')))
+      const { selection, clipped } = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'))
+      assert.equal(clipped.height, 9)
+      assert.ok(clipped.warnings.includes('clipped-text-omitted'))
+      assert.doesNotMatch(JSON.stringify(clipped), /CAPTURE_PARTIAL_SECRET/)
+      results.push(selection)
     }
     return results
   } finally {
