@@ -37,7 +37,7 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 ./target/release/omc-desktop
 ```
 
-Node.jsは旧Electron実装とJavaScriptテストで使用し、ネイティブ実行には不要です。ネイティブパッケージと各OSのリリース検証は未完了です。[ネイティブガイド](native/README.md)。
+ネイティブアプリの実行にNode.jsは不要です。ネイティブパッケージと各OSのリリース検証は未完了です。[ネイティブガイド](native/README.md)。
 
 <a id="components"></a>
 
@@ -79,12 +79,6 @@ Node.jsは旧Electron実装とJavaScriptテストで使用し、ネイティブ�
 ## 人同士の共同作業
 
 ネイティブTLSルームをホストし、証明書を固定検証する招待を非公開で共有します。最大4人が永続ローカル複製を保持します。ホストへの到達性が必要で、自動NAT越え・リレー・ホスト移行はありません。外部ネットワークと実機4台での検証は未完了。FigCraftサーバー公開は別の任意オンライン経路です。[ガイド](native/README.md)。
-
-## `electron/`が残っている理由
-
-`native/`はネイティブデスクトップ・サービス・CLIです。`electron/`、`editor/`、`core/`は旧実装、移行、回帰検証に残っています。ルートの**`npm start`、`npm run build`、`npm run dist:mac`は今もElectron用**であり、ネイティブ起動・パッケージ作成には使いません。
-
-`electron/`だけを削除すると既存スクリプトとテストが壊れます。互換・開発経路として保持し、このREADMEでは上記のネイティブ手順を案内します。旧`.omc`のYjs履歴は直接移行されません。元ファイルを保存し、canvas JSONのエクスポートとネイティブへのインポートで編集内容を移せます。
 
 <a id="contributing"></a>
 

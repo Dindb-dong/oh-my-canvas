@@ -1,6 +1,6 @@
 # Native engine implementation
 
-This workspace contains the Rust desktop, document service and MCP CLI. The root README recommends this native workflow. The root npm scripts still launch and package the retained Electron implementation; they are not native launch commands. Native release qualification remains incomplete.
+This workspace contains the Rust desktop, document service and MCP CLI. The root README recommends this native workflow. The root npm launch and packaging scripts are obsolete Electron-era entry points; use the native commands below for the current app. Native release qualification remains incomplete.
 
 ## Local verification
 

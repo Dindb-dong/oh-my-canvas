@@ -37,7 +37,7 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 ./target/release/omc-desktop
 ```
 
-Node.js 用于保留的 Electron 实现和 JavaScript 测试客户端，原生运行时无需 Node.js。原生打包与跨平台发布验证尚未完成。[原生指南](native/README.md)。
+原生应用运行无需 Node.js。原生打包与跨平台发布验证尚未完成。[原生指南](native/README.md)。
 
 <a id="components"></a>
 
@@ -79,12 +79,6 @@ Node.js 用于保留的 Electron 实现和 JavaScript 测试客户端，原生�
 ## 人与人也能协作
 
 托管原生 TLS 房间，私下共享固定证书验证邀请。最多四人保留持久本地副本。主机必须可访问；不提供自动 NAT 穿透、中继或主机迁移。外部网络和四台真实设备验证尚未完成。可选的 FigCraft 服务器发布属于独立在线路径。[原生指南](native/README.md)。
-
-## 为什么还保留 `electron/`？
-
-`native/` 包含原生桌面、服务和 CLI。`electron/`、`editor/`、`core/` 保留旧实现、迁移支持和回归测试。根目录的 **`npm start`、`npm run build`、`npm run dist:mac` 仍然指向 Electron**，不会启动或打包原生应用。
-
-只删除 `electron/` 会破坏这些脚本和测试，因此保留其兼容与开发用途。本 README 推荐上述原生命令。Electron `.omc` 的 Yjs 历史不能直接变为原生历史；请保留原始备份，导出 canvas JSON 后导入原生应用以迁移可编辑内容。
 
 <a id="contributing"></a>
 

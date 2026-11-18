@@ -37,7 +37,7 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 ./target/release/omc-desktop
 ```
 
-Node.js는 남아 있는 Electron 구현과 JavaScript 테스트 클라이언트에서 사용하며 네이티브 런타임에는 필요하지 않습니다. 네이티브 패키징과 플랫폼별 출시 검증은 아직 완료되지 않았습니다. [네이티브 안내](native/README.md).
+네이티브 앱 실행에는 Node.js가 필요하지 않습니다. 네이티브 패키징과 플랫폼별 출시 검증은 아직 완료되지 않았습니다. [네이티브 안내](native/README.md).
 
 <a id="components"></a>
 
@@ -79,12 +79,6 @@ Node.js는 남아 있는 Electron 구현과 JavaScript 테스트 클라이언트
 ## 사람끼리도 함께 작업하기
 
 네이티브 TLS 방을 호스팅하고 인증서를 고정 검증하는 초대장을 비공개로 공유합니다. 최대 4인이 영속 로컬 복제본을 유지합니다. 호스트에 직접 접속할 수 있어야 하며 자동 NAT 통과·중계·호스트 이전은 제공하지 않습니다. 외부 네트워크·실물 기기 4대 검증은 미완료입니다. 선택적 FigCraft 서버 게시 기능은 별도 온라인 경로입니다. [네이티브 안내](native/README.md).
-
-## `electron/` 폴더는 왜 남아 있나요?
-
-`native/`에는 네이티브 데스크톱·서비스·CLI가 있습니다. `electron/`, `editor/`, `core/`는 이전 구현·마이그레이션·회귀 검사용으로 남아 있습니다. 루트 `package.json`의 **`npm start`, `npm run build`, `npm run dist:mac`는 아직 Electron 경로**이며 네이티브 앱 실행·패키징 명령이 아닙니다.
-
-`electron/`만 삭제하면 해당 스크립트와 테스트가 깨집니다. 호환·개발 경로로 유지하고, 이 README는 위 네이티브 명령을 안내합니다. Electron `.omc`의 Yjs 이력은 네이티브 이력으로 직접 변환되지 않습니다. 기존 백업을 보관하고 canvas JSON으로 내보낸 뒤 네이티브에 가져오면 편집 내용을 이전할 수 있습니다.
 
 <a id="contributing"></a>
 

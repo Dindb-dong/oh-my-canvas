@@ -37,7 +37,7 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 ./target/release/omc-desktop
 ```
 
-Node.js is used by the retained Electron implementation and JavaScript test clients; it is not the native runtime. Native packaging and cross-platform release qualification remain incomplete. See the [native guide](native/README.md).
+The native runtime does not require Node.js. Native packaging and cross-platform release qualification remain incomplete. See the [native guide](native/README.md).
 
 <a id="components"></a>
 
@@ -79,12 +79,6 @@ That is **10,216 fewer tokens than Paper (31.1%)** and **9,759 fewer than Figma 
 ## People can work together too
 
 Host a native TLS room and privately share its pinned-certificate invitation. Up to four participants keep durable local replicas. The host must be reachable: automatic NAT traversal, relays and host migration are not provided. External-network and four-hardware-peer qualification remain incomplete. Optional FigCraft server publishing is a separate online route; see the [native guide](native/README.md).
-
-## Why is `electron/` still here?
-
-`native/` contains the native desktop, service and CLI. `electron/`, `editor/` and `core/` retain the earlier implementation, migration support and regression fixtures. The root `package.json` still routes **`npm start`, `npm run build` and `npm run dist:mac` to Electron**. Those commands do not launch or package the native app.
-
-Deleting `electron/` alone would break those scripts and their tests. It remains an explicitly retained compatibility/development path; the native commands above are the recommended path in this README. Electron `.omc` files use Yjs history and do not directly become native history: export canvas JSON and import it into native to migrate editable content, keeping the original backup.
 
 <a id="contributing"></a>
 
