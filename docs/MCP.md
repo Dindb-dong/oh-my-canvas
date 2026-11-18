@@ -19,9 +19,18 @@ Use the default OMC endpoint for design authoring, inspection, assets, and revie
 - Use `native_tokens` to author collections, modes and typed aliases, then inspect the effective value on a layer. Use `component` for editable slots and instance swaps, and `libraries` to publish and refresh a local design library.
 - Use `document_assets` with `inspect_original` or `download_original` for original bytes associated with a document asset or image layer. Read downloads in bounded chunks with `native_result` in the same session.
 - Use `export_document` with PDF `pdfFrameIds` to export one page per frame in the requested order, including frames on different canvas pages.
-- Use `import_document` with `web-capture` for a computed layout bundle produced by `scripts/capture-web.mjs` from a browser selection. Review fidelity diagnostics after import. Use the `figcraft` format with an archive file path to import a compatible design. Export Android Vector Drawable using `format: "xml"`.
+- Use `capture_web` to bring the selected browser element into a new editable canvas. Use `import_document` with `web-capture` for an existing capture bundle, or `figcraft` with an archive file path. Export Android Vector Drawable using `format: "xml"`.
 - Use `native_motion` for keyframes, PNG samples and editable procedural stripes. Local MP4 export requires FFmpeg with `libx264`. Check the tool’s capabilities before requesting an encode.
 - Use `native_plugins` for local Wasm plugins. A run targets an explicit document and layer subtree. Plugin manifests, resource limits and document validation apply to each run.
+
+## Capture a browser selection
+
+1. In Chromium's extensions page, enable Developer mode and load the repository's [browser capture extension](../browser-capture/) as an unpacked extension.
+2. Run `omc-cli --profile YOUR_PROFILE --browser-capture-connection` with the same CLI and profile as your MCP configuration. Paste its output into the extension's options and save the connection. The pairing is private and applies to the current OMC service and browser session. Re-pair after either restarts.
+3. On the page you want to capture, click **Oh My Canvas Browser Capture** in the browser toolbar, then click an element. The outline follows the element under the pointer. Escape cancels the selection.
+4. Call `capture_web` once from the default OMC MCP with an optional `title`. It reads the element's live rendered state, returns a new document ID and conversion diagnostics, and consumes the selection. Inspect and edit the layers with `get_tree` and the usual OMC tools.
+
+The extension sends the selected element over the local connection when the tool requests it. Form values, private subtrees, cross-origin frames and other unsupported content are excluded by the capture producer. Select again to capture another state. Selection expires after two minutes and requires the same page element to remain present.
 
 ## Credentials and registration
 

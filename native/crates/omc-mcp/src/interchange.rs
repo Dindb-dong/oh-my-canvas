@@ -218,7 +218,8 @@ impl ToolRouter {
                             result["diagnostics"] = diagnostics;
                             return Ok(result);
                         }
-                        let bytes = resources::read_explicit(string(&args, "filePath")?, file_limit)?;
+                        let bytes =
+                            resources::read_explicit(string(&args, "filePath")?, file_limit)?;
                         job.check_cancelled()?;
                         router.import_tool_bytes(&session, &args, &bytes, Some(&job))
                     },
@@ -231,6 +232,17 @@ impl ToolRouter {
             resources::read_explicit(string(&args, "filePath")?, file_limit)?
         };
         self.import_tool_bytes(session, &args, &bytes, None)
+    }
+
+    pub fn import_browser_capture(
+        self: &Arc<Self>,
+        session: &str,
+        title: Option<&str>,
+        bytes: &[u8],
+    ) -> Result<Value> {
+        self.workspace.session(session)?;
+        let args = json!({"format":"web-capture","title":title,"strict":false});
+        self.import_tool_bytes(session, &args, bytes, None)
     }
 
     fn import_tool_bytes(

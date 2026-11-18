@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Oh My Canvas Browser Capture</title>
+<h1>Connect browser capture</h1>
+<form>
+  <label for="pairing">OMC pairing data</label>
+  <p id="help">Paste the output of <code>omc-cli --profile YOUR_PROFILE --browser-capture-connection</code>.
+    The extension uses this connection to send selected elements to your local OMC service.</p>
+  <textarea id="pairing" rows="4" cols="56" required spellcheck="false" autocomplete="off" aria-describedby="help"></textarea>
+  <button>Save connection</button>
+</form>
+<p id="status" role="status"></p>
+<script type="module" src="options.js"></script>
+</html>

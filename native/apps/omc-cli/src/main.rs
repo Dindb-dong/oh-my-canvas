@@ -18,6 +18,9 @@ struct Args {
     profile: PathBuf,
     #[arg(long)]
     connect_only: bool,
+    /// Print the local browser extension pairing data and exit.
+    #[arg(long)]
+    browser_capture_connection: bool,
     #[arg(long, value_enum, default_value = "omc")]
     dialect: Dialect,
 }
@@ -67,6 +70,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let descriptor = descriptor.ok_or("service startup deadline")?;
     let endpoint = descriptor["endpoint"].as_str().ok_or("endpoint missing")?;
+    if args.browser_capture_connection {
+        let key = descriptor["browserCaptureKey"]
+            .as_str()
+            .ok_or("workspace service does not offer browser capture")?;
+        println!("{}", json!({"endpoint":endpoint,"key":key}));
+        return Ok(());
+    }
     let token = descriptor["token"].as_str().ok_or("credential missing")?;
     let url = match args.dialect {
         Dialect::Omc => format!("{endpoint}/mcp"),

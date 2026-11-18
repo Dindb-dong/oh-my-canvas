@@ -1,4 +1,5 @@
 //! Authenticated loopback service. Document authority lives in isolated workers.
+mod browser_capture;
 mod collaboration;
 mod desktop_automation;
 mod figcraft_online;
@@ -45,6 +46,7 @@ struct App {
     router: Arc<ToolRouter>,
     collaboration: Arc<collaboration::Collaboration>,
     desktop_automation: Arc<desktop_automation::DesktopAutomation>,
+    browser_capture: Arc<browser_capture::BrowserCapture>,
     token: String,
     admission: Arc<tokio::sync::Semaphore>,
 }
@@ -78,6 +80,7 @@ async fn run() -> Result<()> {
         workspace,
         online: Arc::default(),
         desktop_automation: Arc::default(),
+        browser_capture: Arc::new(browser_capture::BrowserCapture::new(address)),
         token: token.clone(),
         admission: Arc::new(tokio::sync::Semaphore::new(32)),
     };
@@ -103,7 +106,8 @@ async fn run() -> Result<()> {
         )
         .route("/health", get(health))
         .layer(middleware::from_fn_with_state(app.clone(), authenticate))
-        .with_state(app.clone());
+        .with_state(app.clone())
+        .merge(app.browser_capture.routes());
     let legacy_port = match (
         options.legacy_mcp_port,
         std::env::var_os("OMC_LEGACY_MCP_PORT"),
@@ -124,7 +128,7 @@ async fn run() -> Result<()> {
     let descriptor = app.workspace.profile.join("native-v1/service.json");
     publish_descriptor(
         &descriptor,
-        &json!({"protocol":"omc.service/1","endpoint":format!("http://{address}"),"token":token,"pid":std::process::id()}),
+        &json!({"protocol":"omc.service/1","endpoint":format!("http://{address}"),"token":token,"browserCaptureKey":app.browser_capture.key,"pid":std::process::id()}),
     )?;
     eprintln!("Native workspace service listening on {address}");
     let result = axum::serve(listener, service)
@@ -522,9 +526,16 @@ async fn mcp_request(app: App, headers: HeaderMap, body: Bytes, figcraft: bool) 
     }
     let result = match method.as_str() {
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(
-            json!({"tools":if figcraft { json!(omc_mcp::figcraft_tools()) } else { app.router.tools() }}),
-        ),
+        "tools/list" => {
+            let tools = if figcraft {
+                json!(omc_mcp::figcraft_tools())
+            } else {
+                let mut tools = app.router.tools();
+                tools.as_array_mut().unwrap().push(browser_capture::tool());
+                tools
+            };
+            Ok(json!({"tools": tools}))
+        }
         "tools/call" => {
             let params = request["params"].clone();
             let tool_name = params["name"].as_str().unwrap_or("");
@@ -731,6 +742,17 @@ async fn mcp_request(app: App, headers: HeaderMap, body: Bytes, figcraft: bool) 
                         && command != "edit.setDefaultProperties")
             {
                 figcraft_desktop_command(&app, &session, command, params["arguments"].clone()).await
+            } else if !figcraft && tool_name == "capture_web" {
+                app.browser_capture
+                    .import(
+                        app.router.clone(),
+                        session.clone(),
+                        params
+                            .get("arguments")
+                            .cloned()
+                            .unwrap_or_else(|| json!({})),
+                    )
+                    .await
             } else if !figcraft
                 && tool_name == "prototype"
                 && matches!(

@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const chrome = process.env.OMC_CAPTURE_CHROME_BINARY
 const sdk = process.env.OMC_TEST_SDK_ROOT
 const testPixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII='
-const captureModule = new URL('../../scripts/capture-web.mjs', import.meta.url)
+const captureModule = new URL('../../browser-capture/capture-web.mjs', import.meta.url)
 let fixtureCaptures
 
 function captures() {
