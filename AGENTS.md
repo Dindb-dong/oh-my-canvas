@@ -2,6 +2,10 @@
 
 Follow the machine-wide defaults supplied by the host.
 
+## Local Rust builds and tests
+
+Use `-j 2` by default for local Cargo builds, checks, and tests to limit memory and swap pressure. Start with the narrowest test that covers the change and expand coverage when needed.
+
 ## Native desktop QA
 
 Use a task-owned profile and launch `omc-desktop --profile <isolated-directory> --automation-background` for native UI tests, screenshots, and smoke runs. Keep the test window hidden and unfocused, seed only the isolated profile, and stop task-owned processes afterward. Do not use `open`, activate a test window, or use the installed user's default profile for QA. If a check needs foreground interaction, ask for explicit permission and continue with background checks.
