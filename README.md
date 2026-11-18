@@ -51,7 +51,7 @@ Create main components, linked instances and variants, then edit text, visibilit
 
 Click **MCP → Copy MCP configuration** in the native app and add the generated stdio configuration to your client. It references this installation's `omc-cli` and profile; no global client settings are silently changed.
 
-The default OMC endpoint exposes native design, review, and workspace tools. The separate FigCraft-compatible endpoint supports its own command protocol. Use each endpoint’s live tool list for the installed build.
+The default OMC endpoint exposes native design, review, and workspace tools. The separate FigCraft-compatible endpoint supports its own command protocol. Use each endpoint’s `tools/list` for the installed build.
 
 Start with `list_documents`, then `open_document` or `create_document`, followed by `get_context`. Document edits require `documentId`. Use `create_board`, `write_html`, `edit_shapes`, `components`, `batch` and `screenshot` for a complete design loop. Native extensions add bounded queries, comments, tokens, jobs and code export.
 
