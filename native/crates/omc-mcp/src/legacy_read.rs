@@ -139,8 +139,11 @@ impl ToolRouter {
                 let [x, y, width, height] = item.bounds;
                 let clipped = item.text.as_ref().is_some_and(|text| {
                     text.truncated
-                        || text.width > item.width + 0.5
-                        || text.height > item.height + 0.5
+                        || !item
+                            .properties
+                            .get("textPath")
+                            .is_some_and(|path| path["sourceId"].is_string())
+                            && (text.width > item.width + 0.5 || text.height > item.height + 0.5)
                 });
                 let overflow = item
                     .parent
