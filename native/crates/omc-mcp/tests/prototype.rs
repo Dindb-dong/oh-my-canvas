@@ -1,3 +1,4 @@
+use base64::Engine;
 use omc_mcp::ToolRouter;
 use omc_workspace::Workspace;
 use serde_json::{Value, json};
@@ -270,4 +271,97 @@ fn native_advanced_interactions_persist_and_reject_invalid_destinations() {
     assert!(fresh["overlayId"].is_null());
     assert_eq!(fresh["variables"], json!({}));
     assert_eq!(fresh["documentRevision"], preview["documentRevision"]);
+}
+
+#[test]
+fn native_slide_deck_persists_shared_layout_and_exports_in_saved_order() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(directory.path(), None).unwrap();
+    let router = Arc::new(ToolRouter::new(workspace.clone()));
+    let open_session = || {
+        workspace.session_open(None).unwrap()["sessionId"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let session = open_session();
+    let call =
+        |session: &str, tool: &str, args| router.call(session, tool, args, Value::Null).unwrap();
+    let document = call(&session, "create_document", json!({"title":"Slide deck"}));
+    let id = &document["documentId"];
+    let frame = |name, width, height| {
+        call(
+            &session,
+            "create_board",
+            json!({"documentId":id,"name":name,"width":width,"height":height}),
+        )["rawIds"][0]
+            .clone()
+    };
+    let a = frame("Opening", 160, 90);
+    let b = frame("Results", 200, 120);
+    let c = frame("Next steps", 240, 140);
+    let template = frame("Layout source", 150, 80);
+    call(
+        &session,
+        "create_shape",
+        json!({"documentId":id,"type":"rect","parentId":template,"width":100,"height":10,
+            "properties":{"fills":[{"type":"solid","color":"#cc3366"}]}}),
+    );
+    let component = call(
+        &session,
+        "component",
+        json!({"documentId":id,"action":"create","id":template,"name":"Shared layout"}),
+    );
+    let set = call(
+        &session,
+        "prototype",
+        json!({"documentId":id,"action":"set_deck","frameIds":[a,b,c],
+            "layoutComponentId":component["rawIds"][0]}),
+    );
+    let order = json!([c, a, b]);
+    let reordered = call(
+        &session,
+        "prototype",
+        json!({"documentId":id,"action":"set_deck","frameIds":order}),
+    );
+    assert_eq!(reordered["frameIds"], order);
+    assert_eq!(reordered["layoutInstanceIds"], set["layoutInstanceIds"]);
+
+    call(
+        &session,
+        "edit_shapes",
+        json!({"documentId":id,"action":"patch","ids":[component["rawIds"][1]],
+            "properties":{"fills":[{"type":"solid","color":"#6633cc"}]}}),
+    );
+    let reader = open_session();
+    call(&reader, "open_document", json!({"id":id}));
+    let deck = call(
+        &reader,
+        "prototype",
+        json!({"documentId":id,"action":"inspect_deck"}),
+    );
+    assert_eq!(deck["frameIds"], order);
+    assert_eq!(deck["layoutInstanceIds"], set["layoutInstanceIds"]);
+    for slide in deck["frameIds"].as_array().unwrap() {
+        let svg = call(
+            &reader,
+            "export_selection",
+            json!({"documentId":id,"format":"svg","ids":[slide]}),
+        );
+        assert!(svg["content"].as_str().unwrap().contains("#6633cc"));
+    }
+    let result = call(
+        &reader,
+        "export_document",
+        json!({"id":id,"format":"pdf","pdfFrameIds":deck["frameIds"]}),
+    );
+    assert_eq!(result["pages"], 3);
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(result["base64"].as_str().unwrap())
+        .unwrap();
+    let pdf = String::from_utf8_lossy(&bytes);
+    let first = pdf.find("/MediaBox [0 0 240 140]").unwrap();
+    let second = pdf.find("/MediaBox [0 0 160 90]").unwrap();
+    let third = pdf.find("/MediaBox [0 0 200 120]").unwrap();
+    assert!(first < second && second < third);
 }

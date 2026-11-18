@@ -1,6 +1,6 @@
 {
   "name": "prototype",
-  "description": "Author and inspect prototype flows and interactions on the selected page of an explicit document. Attached desktop presentation is available when the workspace has an attached desktop.",
+  "description": "Author and inspect prototype flows, interactions and slide decks on the selected page of an explicit document. Attached desktop presentation is available when the workspace has an attached desktop.",
   "inputSchema": {
     "type": "object",
     "required": ["documentId", "action"],
@@ -9,10 +9,12 @@
       "documentId": { "type": "string", "minLength": 1, "maxLength": 128 },
       "action": {
         "type": "string",
-        "enum": ["inspect", "set_flow", "remove_flow", "set_navigation", "remove_navigation", "set_interactions", "preview_playback", "show_preview", "present", "close_preview"],
-        "description": "inspect returns start frames and, with sourceId, the specified layer's interactions. set_flow and remove_flow require frameId. set_navigation requires sourceId and destinationId. remove_navigation requires sourceId. set_interactions replaces that source layer’s interactions, including triggers, transitions and ordered actions; use an empty array to clear. Navigation and overlay action dest fields use native layer IDs. preview_playback requires frameId, accepts ordered events and untilMs, and optionally renders the final frame and overlay separately. show_preview and present require frameId and an attached desktop; close_preview exits the attached preview."
+        "enum": ["inspect", "set_flow", "remove_flow", "set_navigation", "remove_navigation", "set_interactions", "preview_playback", "show_preview", "present", "close_preview", "set_deck", "inspect_deck"],
+        "description": "inspect returns start frames and, with sourceId, the specified layer's interactions. set_flow and remove_flow require frameId. set_navigation requires sourceId and destinationId. remove_navigation requires sourceId. set_interactions replaces that source layer’s interactions, including triggers, transitions and ordered actions; use an empty array to clear. Navigation and overlay action dest fields use native layer IDs. preview_playback requires frameId, accepts ordered events and untilMs, and optionally renders the final frame and overlay separately. show_preview and present require frameId and an attached desktop; close_preview exits the attached preview. set_deck stores frameIds in slide order and can apply a live layout component. inspect_deck returns frameIds ready for export_document.pdfFrameIds."
       },
       "frameId": { "type": "string", "minLength": 1, "maxLength": 128 },
+      "frameIds": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+      "layoutComponentId": { "type": ["string", "null"], "minLength": 1, "maxLength": 128, "description": "Pass a component definition ID to apply a shared layout behind slide content, omit to keep the current layout, or use null to clear it." },
       "sourceId": { "type": "string", "minLength": 1, "maxLength": 128 },
       "interactions": { "type": "array", "maxItems": 64, "items": { "type": "object" } },
       "events": {

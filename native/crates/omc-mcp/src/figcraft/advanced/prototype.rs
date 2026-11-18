@@ -1,5 +1,6 @@
 use super::*;
 
+mod deck;
 mod native;
 mod preview;
 

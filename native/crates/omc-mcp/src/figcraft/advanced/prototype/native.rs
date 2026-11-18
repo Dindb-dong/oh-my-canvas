@@ -17,13 +17,30 @@ impl ToolRouter {
             .ok_or_else(|| EngineError::invalid("Current page is unavailable"))?;
         let resolve = |key| self.resolve(session, &snapshot.id, string(args, key)?);
         let action = string(args, "action")?;
-        if !matches!(action, "inspect" | "preview_playback")
+        if !matches!(action, "inspect" | "preview_playback" | "inspect_deck")
             && root.properties.get("locked") == Some(&Value::Bool(true))
         {
             return Err(EngineError::invalid("Page root is locked"));
         }
         let mut result = Properties::from([("pageId".into(), json!(state.page_id))]);
         let commands = match action {
+            "inspect_deck" => {
+                result.extend(deck::inspect(snapshot, root));
+                Vec::new()
+            }
+            "set_deck" => {
+                let (edits, deck) = deck::set(snapshot, root, args, |value| {
+                    self.resolve(
+                        session,
+                        &snapshot.id,
+                        value
+                            .as_str()
+                            .ok_or_else(|| EngineError::invalid("Choose a layer ID"))?,
+                    )
+                })?;
+                result.extend(deck);
+                edits
+            }
             "preview_playback" => {
                 let frame = resolve("frameId")?;
                 result.extend(preview::preview(
