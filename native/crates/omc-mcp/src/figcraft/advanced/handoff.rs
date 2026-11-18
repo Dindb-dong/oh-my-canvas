@@ -207,11 +207,24 @@ pub(super) fn annotation(context: &Context, action: &str) -> Result<Value> {
     }
     let raw = context.one()?;
     let node = &snapshot.nodes[&raw];
+    let (mut result, edit) = edit_annotation(context, node, action, &categories)?;
+    context.commit(vec![edit])?;
+    result["id"] = json!(context.alias(&raw));
+    Ok(result)
+}
+
+fn edit_annotation(
+    context: &Context,
+    node: &Node,
+    action: &str,
+    categories: &[Value],
+) -> Result<(Value, Command)> {
+    let params = context.params;
     if node.parent_id.is_none() {
         return Err(EngineError::invalid("Select a layer on the page"));
     }
     let mut entries = array(node.properties.get(ANNOTATIONS));
-    let mut result = json!({"id":context.alias(&raw)});
+    let mut result = json!({"id":node.id});
     match action {
         "add" | "edit" => {
             let position = if action == "edit" {
@@ -228,7 +241,8 @@ pub(super) fn annotation(context: &Context, action: &str) -> Result<Value> {
             };
             let note = entries
                 .get_mut(position)
-                .ok_or_else(|| EngineError::invalid("Annotation index is out of bounds"))?;
+                .filter(|note| note.is_object())
+                .ok_or_else(|| EngineError::invalid("Annotation is missing or invalid"))?;
             if let Some(value) = params.get("label").or_else(|| params.get("text")) {
                 note["label"] = json!(label(value, 5000)?);
             }
@@ -264,8 +278,7 @@ pub(super) fn annotation(context: &Context, action: &str) -> Result<Value> {
         }
         _ => return Err(EngineError::invalid("Unknown annotation action")),
     }
-    context.commit(vec![context.patch(&raw, ANNOTATIONS, json!(entries))])?;
-    Ok(result)
+    Ok((result, context.patch(&node.id, ANNOTATIONS, json!(entries))))
 }
 
 fn annotation_list(context: &Context, categories: &[Value]) -> Result<Value> {
@@ -413,7 +426,6 @@ fn resource_url(value: &Value) -> Result<String> {
 }
 
 pub(super) fn dev_resource(context: &Context, action: &str) -> Result<Value> {
-    let params = context.params;
     let raw = context.one()?;
     let node = &context.snapshot.nodes[&raw];
     if node.parent_id.is_none() {
@@ -441,6 +453,20 @@ pub(super) fn dev_resource(context: &Context, action: &str) -> Result<Value> {
         }
         return Ok(json!(links));
     }
+    let (mut output, edit) = edit_resource(context, node, action)?;
+    context.commit(vec![edit])?;
+    if output.get("id").is_some() {
+        output["id"] = json!(context.alias(&raw));
+    }
+    Ok(output)
+}
+
+fn edit_resource(context: &Context, node: &Node, action: &str) -> Result<(Value, Command)> {
+    if node.parent_id.is_none() {
+        return Err(EngineError::invalid("Pages cannot have dev resources"));
+    }
+    let params = context.params;
+    let mut links = array(node.properties.get(RESOURCES));
     let output = match action {
         "add" | "edit" => {
             let index = if action == "edit" {
@@ -457,7 +483,8 @@ pub(super) fn dev_resource(context: &Context, action: &str) -> Result<Value> {
             };
             let link = links
                 .get_mut(index)
-                .ok_or_else(|| EngineError::invalid("Resource index is out of bounds"))?;
+                .filter(|link| link.is_object())
+                .ok_or_else(|| EngineError::invalid("Resource is missing or invalid"))?;
             if let Some(url) = params
                 .get("url")
                 .or_else(|| (action == "add").then_some(&Value::Null))
@@ -480,7 +507,7 @@ pub(super) fn dev_resource(context: &Context, action: &str) -> Result<Value> {
                     .trim_end_matches('/');
                 link["name"] = json!(name.chars().take(200).collect::<String>());
             }
-            json!({"id":context.alias(&raw),"index":index})
+            json!({"id":node.id,"index":index})
         }
         "remove" => {
             let removed = if params.get("index").is_some() {
@@ -499,6 +526,246 @@ pub(super) fn dev_resource(context: &Context, action: &str) -> Result<Value> {
         }
         _ => return Err(EngineError::invalid("Unknown resource action")),
     };
-    context.commit(vec![context.patch(&raw, RESOURCES, json!(links))])?;
-    Ok(output)
+    Ok((output, context.patch(&node.id, RESOURCES, json!(links))))
+}
+
+impl ToolRouter {
+    pub(crate) fn native_handoff_definition() -> Value {
+        json!({
+            "name":"native_handoff",
+            "description":"Inspect an explicit layer with computed styles, annotations, linked resources and optional scoped code. Edit source mappings, annotations and resource links without changing selection or opening links.",
+            "inputSchema":{
+                "type":"object","additionalProperties":false,
+                "required":["version","action","documentId","nodeId"],
+                "properties":{
+                    "version":{"type":"string","enum":["1"]},
+                    "action":{"type":"string","enum":["inspect","set_mapping","remove_mapping","add_annotation","edit_annotation","remove_annotation","add_resource","edit_resource","remove_resource"]},
+                    "documentId":{"type":"string","minLength":36,"maxLength":36},
+                    "nodeId":{"type":"string","minLength":1,"maxLength":200},
+                    "language":{"type":"string","enum":["css","html","react","vue","tailwind","leptos","swiftui","compose","arkui","flutter"],
+                        "description":"Optional code output for inspect. Mapping actions require a component code language."},
+                    "styleKeys":{"type":"array","maxItems":40,"items":{"type":"string","minLength":1,"maxLength":80}},
+                    "name":{"type":"string","maxLength":200},
+                    "importPath":{"type":"string","maxLength":300},
+                    "template":{"type":"string","maxLength":4000},
+                    "label":{"type":"string","maxLength":5000},
+                    "properties":{"type":"array","maxItems":84,"items":{"type":"string","minLength":1,"maxLength":80}},
+                    "category":{"anyOf":[{"type":"string","minLength":1,"maxLength":64},{"type":"null"}]},
+                    "url":{"type":"string","minLength":1,"maxLength":2048},
+                    "index":{"type":"integer","minimum":0,"maximum":63}
+                }
+            }
+        })
+    }
+
+    pub(crate) fn native_handoff(
+        &self,
+        session: &str,
+        args: &Value,
+        meta: &Value,
+    ) -> Result<Value> {
+        let external = string(args, "documentId")?;
+        let document = native_id(external)?;
+        self.workspace.document_path(&document)?;
+        if self.state(session, &document).is_err() {
+            self.context(session, &document)?;
+        }
+        let state = self.state(session, &document)?;
+        let action = string(args, "action")?;
+        if action != "inspect"
+            && let Some(result) = self.replay(session, &document, meta)?
+        {
+            return Ok(result);
+        }
+        let raw = self.resolve(session, &document, string(args, "nodeId")?)?;
+        let snapshot = self.workspace.snapshot(&document)?;
+        let node = snapshot
+            .nodes
+            .get(&raw)
+            .filter(|node| node.parent_id.is_some())
+            .ok_or_else(|| EngineError::invalid("Layer not found in the target document"))?;
+        let context = Context {
+            router: self,
+            session,
+            snapshot: &snapshot,
+            state: &state,
+            selection: &[],
+            params: args,
+        };
+        let page = context
+            .page(&raw)
+            .ok_or_else(|| EngineError::invalid("Layer is outside the document pages"))?;
+        if action == "inspect" {
+            return inspect_layer(&context, node, page, external);
+        }
+        editable(&snapshot, node)?;
+        let (result, edit) = match action {
+            "set_mapping" | "remove_mapping" => {
+                string(args, "language")?;
+                editable(&snapshot, code_connect::owner(&snapshot, &raw)?)?;
+                code_connect::mapping_edit(
+                    &context,
+                    &raw,
+                    if action == "set_mapping" {
+                        "set"
+                    } else {
+                        "remove"
+                    },
+                )?
+            }
+            "add_annotation" | "edit_annotation" | "remove_annotation" => {
+                let (action, _) = action.split_once('_').unwrap();
+                if action != "add" {
+                    index(args, "index")?;
+                }
+                let (result, edit) =
+                    edit_annotation(&context, node, action, &categories(&snapshot))?;
+                (result, Some(edit))
+            }
+            "add_resource" | "edit_resource" | "remove_resource" => {
+                let (action, _) = action.split_once('_').unwrap();
+                if action != "add" {
+                    index(args, "index")?;
+                }
+                let (result, edit) = edit_resource(&context, node, action)?;
+                (result, Some(edit))
+            }
+            _ => return Err(EngineError::invalid("Unknown native handoff action")),
+        };
+        let mut details = properties(&result)?;
+        details.insert("nodeId".into(), json!(raw));
+        match edit {
+            Some(edit) => self.submit_with_output(
+                session,
+                &document,
+                edit,
+                meta,
+                Some(snapshot.sequence),
+                details,
+            ),
+            None => {
+                details.insert("ok".into(), json!(true));
+                details.insert("documentId".into(), json!(external));
+                details.insert("revision".into(), json!(snapshot.sequence));
+                Ok(json!(details))
+            }
+        }
+    }
+}
+
+fn editable(snapshot: &DocumentSnapshot, node: &Node) -> Result<()> {
+    if node.string("libraryId").is_some() {
+        return Err(EngineError::invalid(
+            "Linked library definitions are read-only",
+        ));
+    }
+    let mut current = Some(node);
+    while let Some(node) = current {
+        if node.properties.get("locked") == Some(&Value::Bool(true))
+            || node.properties.get("hidden") == Some(&Value::Bool(true))
+            || node.properties.get("visible") == Some(&Value::Bool(false))
+        {
+            return Err(EngineError::invalid(
+                "Layer or ancestor is locked or hidden",
+            ));
+        }
+        current = node
+            .parent_id
+            .as_ref()
+            .and_then(|id| snapshot.nodes.get(id));
+    }
+    Ok(())
+}
+
+fn inspect_layer(
+    context: &Context,
+    node: &Node,
+    page: &omc_model::Page,
+    document: &str,
+) -> Result<Value> {
+    let snapshot = context.snapshot;
+    let scene = paths::scene(snapshot, &page.id)?;
+    let item = scene
+        .item(&node.id)
+        .ok_or_else(|| EngineError::invalid("Layer is unavailable in the scene"))?;
+    let style_keys = context.params["styleKeys"].as_array();
+    let computed: BTreeMap<_, _> = item
+        .style
+        .values
+        .iter()
+        .filter(|(name, _)| {
+            !name.starts_with("--")
+                && style_keys.is_none_or(|keys| keys.iter().any(|key| key == *name))
+        })
+        .collect();
+    let provenance: BTreeMap<_, _> = item
+        .style
+        .provenance
+        .iter()
+        .filter(|(name, _)| computed.contains_key(name))
+        .collect();
+    let origin = node
+        .string("componentId")
+        .and_then(|id| snapshot.nodes.get(id));
+    let owner = origin
+        .and_then(|main| main.string("variantSetId"))
+        .and_then(|id| snapshot.nodes.get(id));
+    let mut resources = Vec::new();
+    for layer in std::iter::once(node).chain(origin).chain(owner) {
+        for (index, mut link) in array(layer.properties.get(RESOURCES))
+            .into_iter()
+            .enumerate()
+        {
+            if let Some(fields) = link.as_object_mut() {
+                fields.insert("index".into(), json!(index));
+                fields.insert("sourceId".into(), json!(layer.id));
+                resources.push(link);
+            }
+        }
+    }
+    let code = context.params["language"]
+        .as_str()
+        .map(|language| {
+            if let Ok(owner) = code_connect::owner(snapshot, &node.id)
+                && let Some(link) = code_connect::links(owner)
+                    .into_iter()
+                    .find(|link| link["language"] == language)
+            {
+                let properties = component::describe_layer(context, &node.id)?;
+                let (code, unknown) =
+                    code_connect::render(&link, properties["properties"].as_array().unwrap())?;
+                return Ok(json!({"language":language,"code":code,"connected":true,
+                "sourceId":owner.id,"mapping":link,"unknownProperties":unknown}));
+            }
+            let code = if matches!(language, "swiftui" | "compose" | "arkui" | "flutter") {
+                let name = inspect_code::symbol(node.string("name").unwrap_or("CanvasDesign"));
+                omc_export::inspect_platform(snapshot, &node.id, language, &name, &BTreeMap::new())
+            } else {
+                omc_export::inspect_web_scoped(snapshot, &node.id, language)
+            }
+            .map_err(|error| EngineError::invalid(error.to_string()))?;
+            Ok::<_, EngineError>(
+                json!({"language":language,"code":code,"connected":false,"sourceId":node.id}),
+            )
+        })
+        .transpose()?;
+    let result = json!({
+        "ok":true,"documentId":document,"revision":snapshot.revision(),"pageId":page.id,"nodeId":node.id,
+        "name":node.string("name"),"kind":node.kind,"bounds":item.bounds,
+        "authoredStyle":node.properties.get("style"),"computedStyle":computed,"styleProvenance":provenance,
+        "componentId":origin.map(|layer| &layer.id),"code":code,
+        "annotations":array(node.properties.get(ANNOTATIONS)),"resources":resources,
+        "diagnostics":scene.diagnostics.iter().filter(|entry| entry.node_id.as_deref() == Some(&node.id)).collect::<Vec<_>>()
+    });
+    if serde_json::to_vec(&result)
+        .map_err(|error| EngineError::invalid(error.to_string()))?
+        .len()
+        > 512 * 1024
+    {
+        return Err(EngineError::new(
+            "resource_limit",
+            "Handoff response exceeds 512 KiB; select a smaller layer",
+        ));
+    }
+    Ok(result)
 }

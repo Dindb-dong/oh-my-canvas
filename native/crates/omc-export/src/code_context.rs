@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 pub(super) fn prepare(
     snapshot: &DocumentSnapshot,
     page: Option<&str>,
+    document_css: bool,
 ) -> (DocumentSnapshot, String, Vec<Diagnostic>) {
     let projection = omc_scene::resolve_components(snapshot, page);
     let mut result = projection.snapshot.into_owned();
@@ -13,77 +14,97 @@ pub(super) fn prepare(
     let tokens = omc_style::catalog_entities(snapshot, "tokens");
     let styles = omc_style::catalog_entities(snapshot, "styles");
     let mut variables = BTreeMap::new();
-    for (id, token) in &tokens {
-        let mode = token
-            .get("activeMode")
-            .and_then(Value::as_str)
-            .or_else(|| snapshot.metadata.get("tokenMode").and_then(Value::as_str));
-        let value = mode
-            .and_then(|mode| token.get("modes").and_then(|m| m.get(mode)))
-            .or_else(|| token.get("value"));
-        if let Some(value) = value.and_then(|v| token_value(v, &tokens)) {
-            variables.insert(token_name(id, &tokens), value);
+    if document_css {
+        for (id, token) in &tokens {
+            let mode = token
+                .get("activeMode")
+                .and_then(Value::as_str)
+                .or_else(|| snapshot.metadata.get("tokenMode").and_then(Value::as_str));
+            let value = mode
+                .and_then(|mode| token.get("modes").and_then(|m| m.get(mode)))
+                .or_else(|| token.get("value"));
+            if let Some(value) = value.and_then(|v| token_value(v, &tokens)) {
+                variables.insert(token_name(id, &tokens), value);
+            }
         }
-    }
-    for (id, style) in &styles {
-        for (field, value) in style_fields(style) {
-            if let Some(value) = token_value(&value, &tokens) {
-                variables.insert(
-                    style_name(id, &field),
-                    with_unit(&field, &value, value.parse::<f64>().is_ok()),
-                );
+        for (id, style) in &styles {
+            for (field, value) in style_fields(style) {
+                if let Some(value) = token_value(&value, &tokens) {
+                    variables.insert(
+                        style_name(id, &field),
+                        with_unit(&field, &value, value.parse::<f64>().is_ok()),
+                    );
+                }
             }
         }
     }
+    let scoped_styles = (!document_css).then(|| omc_style::compute_styles(&result, (1440., 900.)));
     for node in result.nodes.values_mut() {
         let original = node.properties.clone();
         let (properties, issues) = references.properties(node);
         node.properties = properties;
         diagnostics.extend(issues);
-        for (reference, kind) in [
-            ("fillStyleId", "fill"),
-            ("strokeStyleId", "stroke"),
-            ("textStyleId", "text"),
-        ] {
-            if let Some(id) = original.get(reference).and_then(Value::as_str) {
-                if let Some(style) = styles.get(id) {
-                    for (field, _) in style_fields(style) {
-                        if (kind == "fill" && field != "fill")
-                            || (kind == "stroke"
-                                && !matches!(field.as_str(), "stroke" | "strokeWidth"))
-                        {
-                            continue;
-                        }
-                        let local = original.contains_key(&field)
-                            || (kind == "fill" && original.contains_key("fills"))
-                            || (kind == "stroke" && original.contains_key("strokes"));
-                        if !local {
-                            node.properties.insert(
-                                field.clone(),
-                                json!(format!("var({})", style_name(id, &field))),
-                            );
+        if let Some(computed) = scoped_styles
+            .as_ref()
+            .and_then(|styles| styles.get(&node.id))
+        {
+            let authored: BTreeMap<_, _> = computed
+                .values
+                .iter()
+                .filter(|(name, _)| {
+                    !name.starts_with("--") && computed.provenance.contains_key(*name)
+                })
+                .collect();
+            if !authored.is_empty() {
+                node.properties.insert("style".into(), json!(authored));
+            }
+        }
+        if document_css {
+            for (reference, kind) in [
+                ("fillStyleId", "fill"),
+                ("strokeStyleId", "stroke"),
+                ("textStyleId", "text"),
+            ] {
+                if let Some(id) = original.get(reference).and_then(Value::as_str) {
+                    if let Some(style) = styles.get(id) {
+                        for (field, _) in style_fields(style) {
+                            if (kind == "fill" && field != "fill")
+                                || (kind == "stroke"
+                                    && !matches!(field.as_str(), "stroke" | "strokeWidth"))
+                            {
+                                continue;
+                            }
+                            let local = original.contains_key(&field)
+                                || (kind == "fill" && original.contains_key("fills"))
+                                || (kind == "stroke" && original.contains_key("strokes"));
+                            if !local {
+                                node.properties.insert(
+                                    field.clone(),
+                                    json!(format!("var({})", style_name(id, &field))),
+                                );
+                            }
                         }
                     }
                 }
             }
-        }
-        for (key, value) in &original {
-            if value.get("$token").is_some() {
-                if let Some(value) = token_value(value, &tokens) {
-                    node.properties.insert(key.clone(), json!(value));
+            for (key, value) in &original {
+                if value.get("$token").is_some() {
+                    if let Some(value) = token_value(value, &tokens) {
+                        node.properties.insert(key.clone(), json!(value));
+                    }
                 }
             }
-        }
-        if let Some(style) = original.get("style").and_then(Value::as_object) {
-            if let Some(target) = node
-                .properties
-                .get_mut("style")
-                .and_then(Value::as_object_mut)
-            {
-                for (key, value) in style {
-                    if value.get("$token").is_some() {
-                        if let Some(value) = token_value(value, &tokens) {
-                            target.insert(key.clone(), json!(value));
+            if let Some(style) = original.get("style").and_then(Value::as_object) {
+                if let Some(target) = node
+                    .properties
+                    .get_mut("style")
+                    .and_then(Value::as_object_mut)
+                {
+                    for (key, value) in style {
+                        if value.get("$token").is_some() {
+                            if let Some(value) = token_value(value, &tokens) {
+                                target.insert(key.clone(), json!(value));
+                            }
                         }
                     }
                 }
@@ -165,14 +186,18 @@ pub(super) fn prepare(
         .map(|(name, value)| format!("{name}:{value}"))
         .collect::<Vec<_>>()
         .join(";");
-    let css = format!(
-        ":root{{{variables}}}\n{}",
-        snapshot
-            .metadata
-            .get("css")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-    );
+    let css = if document_css {
+        format!(
+            ":root{{{variables}}}\n{}",
+            snapshot
+                .metadata
+                .get("css")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+        )
+    } else {
+        String::new()
+    };
     (result, css, diagnostics)
 }
 
