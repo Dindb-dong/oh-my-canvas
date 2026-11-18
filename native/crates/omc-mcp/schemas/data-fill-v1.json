@@ -1,0 +1,31 @@
+{
+  "name": "data_fill",
+  "description": "Copy an editable template frame for each row and optional format. Row keys match descendant layer names. A row name labels the copy. A cell can supply text or an object with text, fill, visible, or fit. Returns root IDs in copies and unknown layer names in missing. One undo removes all copies.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "documentId": {"type": "string", "minLength": 36, "maxLength": 36},
+      "id": {"type": "string", "minLength": 1, "maxLength": 200},
+      "revision": {"type": "integer", "minimum": 0},
+      "gap": {"type": "number", "minimum": 0, "maximum": 20000},
+      "rows": {"type": "array", "items": {"type": "object", "additionalProperties": true}, "minItems": 1, "maxItems": 500},
+      "formats": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string", "minLength": 1, "maxLength": 200},
+            "width": {"type": "number", "minimum": 1, "maximum": 20000},
+            "height": {"type": "number", "minimum": 1, "maximum": 20000}
+          },
+          "required": ["width", "height"],
+          "additionalProperties": false
+        },
+        "minItems": 1,
+        "maxItems": 12
+      }
+    },
+    "required": ["documentId", "id", "rows"],
+    "additionalProperties": false
+  }
+}

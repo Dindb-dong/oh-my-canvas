@@ -1,6 +1,6 @@
 use super::*;
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
 const EVENT_CAPACITY: usize = 1024;
@@ -11,10 +11,105 @@ struct EventLog {
     events: VecDeque<Value>,
 }
 
+const REVIEW_DOCUMENTS: usize = 64;
+const REVIEW_CHANGES: usize = 128;
+
+struct ReviewLog {
+    epoch: String,
+    id: uuid::Uuid,
+    last_used: Instant,
+    sequence: u64,
+    changes: VecDeque<Value>,
+}
+
+#[derive(Default)]
+struct ReviewEvents {
+    documents: HashMap<String, ReviewLog>,
+}
+
+impl ReviewEvents {
+    fn log(&mut self, document: &str, epoch: &str) -> &mut ReviewLog {
+        if self.documents.len() >= REVIEW_DOCUMENTS
+            && !self.documents.contains_key(document)
+            && let Some(oldest) = self
+                .documents
+                .iter()
+                .min_by_key(|(_, log)| log.last_used)
+                .map(|(id, _)| id.clone())
+        {
+            self.documents.remove(&oldest);
+        }
+        let new_log = || ReviewLog {
+            epoch: epoch.into(),
+            id: uuid::Uuid::new_v4(),
+            last_used: Instant::now(),
+            sequence: 0,
+            changes: VecDeque::new(),
+        };
+        let log = self
+            .documents
+            .entry(document.into())
+            .or_insert_with(new_log);
+        if log.epoch != epoch {
+            *log = new_log();
+        }
+        log.last_used = Instant::now();
+        log
+    }
+
+    fn record(&mut self, document: &str, epoch: &str, mut change: Value) {
+        let log = self.log(document, epoch);
+        log.sequence += 1;
+        change["sequence"] = json!(log.sequence);
+        if log.changes.len() == REVIEW_CHANGES {
+            log.changes.pop_front();
+        }
+        log.changes.push_back(change);
+    }
+
+    fn poll(
+        &mut self,
+        document: &str,
+        epoch: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<Value> {
+        let log = self.log(document, epoch);
+        let (stream, after) = cursor.map_or(Ok((log.id, 0)), |cursor| {
+            cursor
+                .split_once(':')
+                .and_then(|(id, after)| {
+                    Some((uuid::Uuid::parse_str(id).ok()?, after.parse::<u64>().ok()?))
+                })
+                .ok_or_else(|| EngineError::invalid("Invalid review cursor"))
+        })?;
+        if stream != log.id || after > log.sequence {
+            return Ok(
+                json!({"events":[],"cursor":format!("{}:{}",log.id,log.sequence),"reset":true,"dropped":0,"hasMore":false}),
+            );
+        }
+        let floor = log.sequence - log.changes.len() as u64;
+        let dropped = floor.saturating_sub(after);
+        let first = after.max(floor);
+        let events: Vec<_> = log
+            .changes
+            .iter()
+            .skip((first - floor) as usize)
+            .take(limit)
+            .collect();
+        let next = first + events.len() as u64;
+        Ok(
+            json!({"events":events,"cursor":format!("{}:{next}",log.id),"reset":false,
+            "dropped":dropped,"hasMore":next<log.sequence}),
+        )
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Events {
     log: Mutex<EventLog>,
     changed: watch::Sender<u64>,
+    reviews: Mutex<ReviewEvents>,
 }
 
 impl Events {
@@ -128,19 +223,53 @@ impl ToolRouter {
         }
     }
 
+    pub(crate) fn read_review_changes(
+        &self,
+        document: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<Value> {
+        let context = self.workspace.context(document)?;
+        self.fig_events.reviews.lock().unwrap().poll(
+            document,
+            &context.revision.epoch,
+            cursor,
+            limit,
+        )
+    }
+
     pub fn execute_observed(&self, session: &str, envelope: CommandEnvelope) -> Result<Value> {
         if let Some(result) = super::figcraft::preview::capture(&envelope) {
             return Ok(result);
         }
         let mut changes = Vec::new();
         comment_changes(&envelope.command, &mut changes);
+        let history = match &envelope.command {
+            Command::HistoryUndo {
+                channel: omc_protocol::HistoryChannel::Comments,
+            } => Some("undo"),
+            Command::HistoryRedo {
+                channel: omc_protocol::HistoryChannel::Comments,
+            } => Some("redo"),
+            _ => None,
+        };
         let document = envelope.document_id.clone();
         let receipt = self.workspace.execute(session, envelope)?;
-        if !changes.is_empty()
+        if (!changes.is_empty() || history.is_some())
             && receipt["replayed"] != true
             && receipt["status"] == "durable"
             && let Ok(context) = self.workspace.context(&document)
         {
+            let epoch = receipt["revision"]["epoch"]
+                .as_str()
+                .unwrap_or(&context.revision.epoch);
+            if let Some(action) = history {
+                self.fig_events.reviews.lock().unwrap().record(
+                    &document,
+                    epoch,
+                    json!({"kind":format!("comment.{action}"),"revision":receipt["revision"]}),
+                );
+            }
             for (id, props) in changes {
                 let field = format!("comments/{id}/threadId");
                 let thread = context.metadata.get(&field).and_then(Value::as_str);
@@ -189,9 +318,16 @@ impl ToolRouter {
                     {
                         data["reply"] = index.into();
                     } else {
-                        data["rawReplyId"] = id.into();
+                        data["rawReplyId"] = json!(id);
                     }
                 }
+                let native_root = review_thread_root(&context.metadata, root);
+                self.fig_events.reviews.lock().unwrap().record(
+                    &document,
+                    epoch,
+                    json!({"kind":format!("comment.{kind}"),"commentId":id,"threadId":native_root,
+                        "revision":receipt["revision"]}),
+                );
                 self.fig_events
                     .record(json!({"kind":format!("comment.{kind}"),
                     "document":context.title,"documentId":external_id(&document),"data":data}));
@@ -257,6 +393,19 @@ impl ToolRouter {
             _ => Err(EngineError::new("method_not_found", "unknown MCP method")),
         }
     }
+}
+
+fn review_thread_root<'a>(metadata: &'a Properties, id: &'a str) -> &'a str {
+    let mut root = id;
+    let mut seen = std::collections::BTreeSet::new();
+    while seen.insert(root)
+        && let Some(parent) = metadata
+            .get(&format!("comments/{root}/threadId"))
+            .and_then(Value::as_str)
+    {
+        root = parent;
+    }
+    root
 }
 
 fn comment_changes(command: &Command, changes: &mut Vec<(String, Properties)>) {
@@ -403,4 +552,32 @@ fn prompt(name: &str, args: &Value) -> Result<Value> {
     Ok(
         json!({"description":definition["description"],"messages":[{"role":"user","content":{"type":"text","text":text}}]}),
     )
+}
+
+#[cfg(test)]
+mod review_events_tests {
+    use super::*;
+
+    #[test]
+    fn review_journal_bounds_retention_and_resets_after_an_epoch_change() {
+        let mut events = ReviewEvents::default();
+        let start = events.poll("a", "epoch-1", None, 20).unwrap();
+        for index in 0..REVIEW_CHANGES + 3 {
+            events.record("a", "epoch-1", json!({"commentId":index}));
+        }
+        events.record("b", "epoch-1", json!({"commentId":"other"}));
+        let overflow = events
+            .poll("a", "epoch-1", start["cursor"].as_str(), 1)
+            .unwrap();
+        assert_eq!(overflow["dropped"], 3);
+        assert_eq!(overflow["events"][0]["sequence"], 4);
+        assert_eq!(overflow["events"][0]["commentId"], 3);
+        assert_eq!(overflow["hasMore"], true);
+        let reset = events
+            .poll("a", "epoch-2", overflow["cursor"].as_str(), 20)
+            .unwrap();
+        assert_eq!(reset["events"], json!([]));
+        assert_eq!(reset["reset"], true);
+        assert_eq!(reset["hasMore"], false);
+    }
 }

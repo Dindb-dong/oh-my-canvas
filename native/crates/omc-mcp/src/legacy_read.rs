@@ -1,4 +1,5 @@
 use super::*;
+use omc_scene::measurement::{between, edges};
 
 const TREE_LIMIT: usize = 400;
 
@@ -21,6 +22,50 @@ pub(super) fn order_documents(docs: &mut [Value], sort: Option<&str>) {
 }
 
 impl ToolRouter {
+    pub(super) fn measure_layers(
+        &self,
+        session: &str,
+        document: &str,
+        args: &Value,
+    ) -> Result<Value> {
+        let from = self.resolve(session, document, string(args, "from")?)?;
+        let to = self.resolve(session, document, string(args, "to")?)?;
+        let state = self.state(session, document)?;
+        let snapshot = self.workspace.snapshot(document)?;
+        let scene = paths::scene(&snapshot, &state.page_id)?;
+        let bounds = |id| {
+            scene
+                .bounds(id)
+                .ok_or_else(|| EngineError::invalid("layer is not on the selected page"))
+        };
+        let from_bounds = bounds(&from)?;
+        let to_bounds = bounds(&to)?;
+        let segments: Vec<_> = between(edges(from_bounds), edges(to_bounds))
+            .into_iter()
+            .map(|line| {
+                json!({
+                    "start": {"x": line.x0, "y": line.y0},
+                    "end": {"x": line.x1, "y": line.y1},
+                    "distance": if line.dashed { None } else {
+                        Some((line.x1 - line.x0).hypot(line.y1 - line.y0))
+                    },
+                    "dashed": line.dashed,
+                })
+            })
+            .collect();
+        let layer = |raw_id: String, [x, y, width, height]: [f64; 4]| json!({"rawId":raw_id,"bounds":{"x":x,"y":y,"width":width,"height":height}});
+        Ok(json!({
+            "ok": true,
+            "coordinateSpace": "world",
+            "unit": "px",
+            "pageId": state.page_id,
+            "revision": {"epoch": snapshot.epoch, "sequence": snapshot.sequence.to_string()},
+            "from": layer(from, from_bounds),
+            "to": layer(to, to_bounds),
+            "segments": segments,
+        }))
+    }
+
     pub(super) fn legacy_stdio_connection(&self) -> Result<Value> {
         let executable = std::env::current_exe()
             .map_err(resources::io_error)?
@@ -94,8 +139,11 @@ impl ToolRouter {
                 let [x, y, width, height] = item.bounds;
                 let clipped = item.text.as_ref().is_some_and(|text| {
                     text.truncated
-                        || text.width > item.width + 0.5
-                        || text.height > item.height + 0.5
+                        || !item
+                            .properties
+                            .get("textPath")
+                            .is_some_and(|path| path["sourceId"].is_string())
+                            && (text.width > item.width + 0.5 || text.height > item.height + 0.5)
                 });
                 let overflow = item
                     .parent
@@ -175,7 +223,7 @@ impl Tree<'_> {
     }
 }
 
-fn is_descendant(snapshot: &DocumentSnapshot, node: &str, root: &str) -> bool {
+pub(crate) fn is_descendant(snapshot: &DocumentSnapshot, node: &str, root: &str) -> bool {
     let mut current = Some(node);
     while let Some(id) = current {
         if id == root {
@@ -243,5 +291,68 @@ fn legacy_style_value(style: &omc_style::ComputedStyle, node: Option<&Node>, key
             .unwrap_or(value)
             .to_owned(),
         _ => value.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn measures_world_gaps_and_container_margins_within_the_requested_page() {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = Workspace::open(directory.path(), None).unwrap();
+        let registration = workspace.session_open(None).unwrap();
+        let session = registration["sessionId"].as_str().unwrap();
+        let router = Arc::new(ToolRouter::new(workspace));
+        let call = |name, args| router.call(session, name, args, Value::Null).unwrap();
+        let doc = call("create_document", json!({"title":"Measurement fixture"}));
+        let id = doc["documentId"].as_str().unwrap();
+        let native = native_id(id).unwrap();
+        let frame = call(
+            "create_shape",
+            json!({"documentId":id,"type":"frame","x":200,"y":100,"width":100,"height":100}),
+        );
+        let frame = &frame["rawIds"][0];
+        let left = call(
+            "create_shape",
+            json!({"documentId":id,"type":"rect","parentId":frame,"x":10,"y":12,"width":20,"height":30}),
+        );
+        let right = call(
+            "create_shape",
+            json!({"documentId":id,"type":"rect","parentId":frame,"x":50,"y":12,"width":30,"height":30}),
+        );
+        let left = &left["rawIds"][0];
+        let right = &right["rawIds"][0];
+        let measure =
+            |from, to| router.measure_layers(session, &native, &json!({"from":from,"to":to}));
+        let gap = measure(left, right).unwrap();
+        assert_eq!(
+            gap["from"]["bounds"],
+            json!({"x":210.,"y":112.,"width":20.,"height":30.})
+        );
+        assert_eq!(
+            gap["to"]["bounds"],
+            json!({"x":250.,"y":112.,"width":30.,"height":30.})
+        );
+        assert_eq!(gap["coordinateSpace"], "world");
+        assert_eq!(gap["unit"], "px");
+        assert_eq!(gap["segments"][0]["distance"], 20.);
+        let margins = measure(left, frame).unwrap();
+        let distances: Vec<_> = margins["segments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|segment| segment["distance"].as_f64().unwrap())
+            .collect();
+        assert_eq!(distances, [10., 70., 12., 58.]);
+        assert_eq!(margins["revision"], gap["revision"]);
+
+        let separate = call("create_document", json!({"title":"Unrelated document"}));
+        let outside = call(
+            "create_shape",
+            json!({"documentId":separate["documentId"],"type":"rect","width":30,"height":30}),
+        );
+        assert!(measure(left, &outside["rawIds"][0]).is_err());
     }
 }

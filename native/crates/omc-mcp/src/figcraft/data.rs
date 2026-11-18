@@ -147,41 +147,7 @@ impl ToolRouter {
         params: &Value,
     ) -> Result<Value> {
         let source = self.fig_layer(session, snapshot, &params["id"])?;
-        let source_node = &snapshot.nodes[&source];
-        let parent = source_node
-            .parent_id
-            .as_deref()
-            .filter(|_| source_node.kind == NodeKind::Frame)
-            .ok_or_else(|| EngineError::invalid("data.fill requires a frame layer"))?;
-        let rows = params["rows"]
-            .as_array()
-            .filter(|rows| rows.len() <= 500 && rows.iter().all(Value::is_object))
-            .ok_or_else(|| EngineError::invalid("rows must be an array of at most 500 objects"))?;
-        let formats = if params["formats"].is_null() {
-            vec![None]
-        } else {
-            params["formats"]
-                .as_array()
-                .filter(|formats| (1..=12).contains(&formats.len()))
-                .ok_or_else(|| EngineError::invalid("formats must contain 1–12 sizes"))?
-                .iter()
-                .map(|value| format(value).map(Some))
-                .collect::<Result<Vec<_>>>()?
-        };
-        let number = |key: &str, default: f64| {
-            params
-                .get(key)
-                .map(|value| {
-                    value
-                        .as_f64()
-                        .filter(|value| value.is_finite())
-                        .ok_or_else(|| EngineError::invalid(format!("{key} must be a number")))
-                })
-                .transpose()
-                .map(|value| value.unwrap_or(default))
-        };
-        let gap = number("gap", 100.)?;
-        let scale = number("scale", 1.)?;
+        let scale = number(params, "scale", 1.)?;
         if !(0.1..=8.).contains(&scale) {
             return Err(EngineError::invalid(
                 "data export scale must be from 0.1 to 8",
@@ -208,145 +174,19 @@ impl ToolRouter {
                     .ok_or_else(|| EngineError::invalid("dir must be a path"))
             })
             .transpose()?;
+        let DataCopies {
+            nodes: drafts,
+            roots: results,
+            missing,
+        } = data_copies(snapshot, &state.page_id, &source, params, false)?;
         let mut output = json!({"ids":[],"missing":[]});
-        if rows.is_empty() {
+        if drafts.is_empty() {
             if output_dir.is_some() {
                 output["files"] = json!([]);
             }
             return Ok(output);
         }
 
-        let mut subtree = Vec::new();
-        let mut pending = vec![source_node];
-        while let Some(node) = pending.pop() {
-            subtree.push(node);
-            pending.extend(children(snapshot, &node.id).into_iter().rev());
-        }
-        let count = rows.len() * formats.len();
-        if subtree.len().saturating_mul(count) > 16_000 {
-            return Err(EngineError::new(
-                "resource_limit",
-                "data copies exceed 16000 native layers",
-            ));
-        }
-        let scene = paths::scene(snapshot, &state.page_id)?;
-        let source_item = scene
-            .item(&source)
-            .ok_or_else(|| EngineError::invalid("source frame is outside the active page"))?;
-        let parent_inverse = scene
-            .item(parent)
-            .and_then(|parent| parent.world.inverse())
-            .ok_or_else(|| EngineError::invalid("source parent transform is not invertible"))?;
-        let (origin_x, origin_y) = parent_inverse.point(0., 0.);
-        let column = formats
-            .iter()
-            .flatten()
-            .map(|format| format.width)
-            .fold(source_item.width, f64::max);
-        let source_name = source_node
-            .properties
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("Frame");
-        let mut ranks = copy_ranks(snapshot, parent, count)?.into_iter();
-        let mut drafts = Vec::with_capacity(subtree.len() * count);
-        let mut results = Vec::with_capacity(count);
-        let mut fits = Vec::new();
-        let mut missing = Vec::new();
-        let mut missing_keys = BTreeSet::new();
-        let target_names = subtree
-            .iter()
-            .skip(1)
-            .filter_map(|node| node.properties.get("name").and_then(Value::as_str))
-            .collect::<BTreeSet<_>>();
-        for (row_index, row) in rows.iter().enumerate() {
-            let row = row.as_object().unwrap();
-            let name = row
-                .get("name")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .unwrap_or_else(|| format!("{source_name} {}", row_index + 1));
-            let mut cells = BTreeMap::new();
-            for (key, value) in row.iter().filter(|(key, _)| *key != "name") {
-                if target_names.contains(key.as_str()) {
-                    cells.insert(key.as_str(), read_cell(value)?);
-                } else if missing_keys.insert(key.clone()) {
-                    missing.push(key.clone());
-                }
-            }
-            let dx = (column + gap) * (row_index + 1) as f64;
-            let mut dy = 0.;
-            for format in &formats {
-                let map = subtree
-                    .iter()
-                    .map(|node| (node.id.clone(), omc_model::new_id("node")))
-                    .collect::<BTreeMap<_, _>>();
-                let (x, y) = parent_inverse.point(dx, dy);
-                let copy_name = format
-                    .as_ref()
-                    .map(|format| format!("{name}-{}", format.name))
-                    .unwrap_or_else(|| name.clone());
-                results.push((map[&source].clone(), copy_name.clone()));
-                for (index, node) in subtree.iter().enumerate() {
-                    let mut copy = (*node).clone();
-                    copy.id = map[&node.id].clone();
-                    copy.home_shard = omc_model::new_id("shard");
-                    remap_values(&mut copy.properties, &map);
-                    if index == 0 {
-                        copy.rank = ranks.next().unwrap();
-                        copy.properties
-                            .insert("x".into(), json!(node.number("x", 0.) + x - origin_x));
-                        copy.properties
-                            .insert("y".into(), json!(node.number("y", 0.) + y - origin_y));
-                        copy.properties.insert("name".into(), json!(copy_name));
-                        if let Some(format) = format {
-                            copy.properties.insert("width".into(), json!(format.width));
-                            copy.properties
-                                .insert("height".into(), json!(format.height));
-                            dy += format.height + gap;
-                        }
-                    } else {
-                        copy.parent_id = node.parent_id.as_ref().map(|parent| map[parent].clone());
-                        if let Some(cell) = node
-                            .properties
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .and_then(|name| cells.get(name))
-                        {
-                            if copy.kind == NodeKind::Text {
-                                if let Some(text) = &cell.text {
-                                    copy.properties.insert("text".into(), json!(text));
-                                    copy.properties.remove("textRuns");
-                                }
-                                if let Some(fit) = &cell.fit {
-                                    fits.push((drafts.len(), fit.clone()));
-                                }
-                            }
-                            if let Some(paint) = &cell.paint {
-                                copy.properties.remove("fillStyleId");
-                                copy.properties.extend(paint.clone());
-                            }
-                            if let Some(visible) = cell.visible {
-                                copy.properties.insert("visible".into(), json!(visible));
-                            }
-                        }
-                    }
-                    drafts.push(copy);
-                }
-            }
-        }
-        if !fits.is_empty() {
-            let draft_snapshot = with_drafts(snapshot, &drafts);
-            let scene = paths::scene(&draft_snapshot, &state.page_id)?;
-            for (index, options) in fits {
-                let node = &mut drafts[index];
-                let item = scene
-                    .item(&node.id)
-                    .ok_or_else(|| EngineError::invalid("data text is outside the active page"))?;
-                let fit = text::fit_text_node(node, item, &options)?;
-                apply_fit(node, fit.current, fit.chosen);
-            }
-        }
         let mut export_snapshot = output_dir.map(|_| with_drafts(snapshot, &drafts));
         let mut envelope = CommandEnvelope::new(
             &snapshot.id,
@@ -410,6 +250,255 @@ impl ToolRouter {
         }
         Ok(output)
     }
+
+    pub(crate) fn native_data_fill(
+        &self,
+        session: &str,
+        document: &str,
+        args: &Value,
+        meta: &Value,
+    ) -> Result<Value> {
+        if let Some(replay) = self.replay(session, document, meta)? {
+            return Ok(replay);
+        }
+        let snapshot = self.workspace.snapshot(document)?;
+        if args["revision"]
+            .as_u64()
+            .is_some_and(|revision| revision != snapshot.sequence)
+        {
+            return Err(EngineError::new(
+                "stale_revision",
+                "document revision changed",
+            ));
+        }
+        let source = self.resolve(session, document, string(args, "id")?)?;
+        let state = self.state(session, document)?;
+        let DataCopies {
+            nodes,
+            roots,
+            missing,
+        } = data_copies(&snapshot, &state.page_id, &source, args, true)?;
+        self.submit_with_output(
+            session,
+            document,
+            Command::NodeCreateMany { nodes },
+            meta,
+            Some(snapshot.sequence),
+            Properties::from([
+                (
+                    "copies".into(),
+                    json!(
+                        roots
+                            .into_iter()
+                            .map(|(id, name)| json!({"id":id,"name":name}))
+                            .collect::<Vec<_>>()
+                    ),
+                ),
+                ("missing".into(), json!(missing)),
+            ]),
+        )
+    }
+}
+
+struct DataCopies {
+    nodes: Vec<Node>,
+    roots: Vec<(String, String)>,
+    missing: Vec<String>,
+}
+
+fn number(params: &Value, key: &str, default: f64) -> Result<f64> {
+    params
+        .get(key)
+        .map(|value| {
+            value
+                .as_f64()
+                .filter(|value| value.is_finite())
+                .ok_or_else(|| EngineError::invalid(format!("{key} must be a number")))
+        })
+        .transpose()
+        .map(|value| value.unwrap_or(default))
+}
+
+fn data_copies(
+    snapshot: &DocumentSnapshot,
+    page_id: &str,
+    source: &str,
+    params: &Value,
+    native: bool,
+) -> Result<DataCopies> {
+    let source_node = snapshot
+        .nodes
+        .get(source)
+        .ok_or_else(|| EngineError::invalid("source frame is outside the document"))?;
+    let parent = source_node
+        .parent_id
+        .as_deref()
+        .filter(|_| source_node.kind == NodeKind::Frame)
+        .ok_or_else(|| EngineError::invalid("data.fill requires a frame layer"))?;
+    let rows = params["rows"]
+        .as_array()
+        .filter(|rows| rows.len() <= 500 && rows.iter().all(Value::is_object))
+        .ok_or_else(|| EngineError::invalid("rows must be an array of at most 500 objects"))?;
+    let formats = if params["formats"].is_null() {
+        vec![None]
+    } else {
+        params["formats"]
+            .as_array()
+            .filter(|formats| (1..=12).contains(&formats.len()))
+            .ok_or_else(|| EngineError::invalid("formats must contain 1–12 sizes"))?
+            .iter()
+            .map(|value| format(value).map(Some))
+            .collect::<Result<Vec<_>>>()?
+    };
+    let gap = number(params, "gap", 100.)?;
+    if rows.is_empty() {
+        return Ok(DataCopies {
+            nodes: Vec::new(),
+            roots: Vec::new(),
+            missing: Vec::new(),
+        });
+    }
+    let mut subtree = Vec::new();
+    let mut pending = vec![source_node];
+    while let Some(node) = pending.pop() {
+        subtree.push(node);
+        pending.extend(children(snapshot, &node.id).into_iter().rev());
+    }
+    let count = rows.len() * formats.len();
+    if subtree.len().saturating_mul(count) > 16_000 {
+        return Err(EngineError::new(
+            "resource_limit",
+            "data copies exceed 16000 native layers",
+        ));
+    }
+    let scene = paths::scene(snapshot, page_id)?;
+    let source_item = scene
+        .item(source)
+        .ok_or_else(|| EngineError::invalid("source frame is outside the active page"))?;
+    if native && !paths::editable(&scene, source) {
+        return Err(EngineError::invalid(
+            "choose a visible, unlocked source frame on the selected page",
+        ));
+    }
+    let parent_inverse = scene
+        .item(parent)
+        .and_then(|parent| parent.world.inverse())
+        .ok_or_else(|| EngineError::invalid("source parent transform is not invertible"))?;
+    let (origin_x, origin_y) = parent_inverse.point(0., 0.);
+    let column = formats
+        .iter()
+        .flatten()
+        .map(|format| format.width)
+        .fold(source_item.width, f64::max);
+    let source_name = source_node
+        .properties
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("Frame");
+    let mut ranks = copy_ranks(snapshot, parent, count)?.into_iter();
+    let mut drafts = Vec::with_capacity(subtree.len() * count);
+    let mut results = Vec::with_capacity(count);
+    let mut fits = Vec::new();
+    let mut missing = Vec::new();
+    let mut missing_keys = BTreeSet::new();
+    let target_names = subtree
+        .iter()
+        .skip(1)
+        .filter_map(|node| node.properties.get("name").and_then(Value::as_str))
+        .collect::<BTreeSet<_>>();
+    for (row_index, row) in rows.iter().enumerate() {
+        let row = row.as_object().unwrap();
+        let name = row
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("{source_name} {}", row_index + 1));
+        let mut cells = BTreeMap::new();
+        for (key, value) in row.iter().filter(|(key, _)| *key != "name") {
+            if target_names.contains(key.as_str()) {
+                cells.insert(key.as_str(), read_cell(value)?);
+            } else if missing_keys.insert(key.clone()) {
+                missing.push(key.clone());
+            }
+        }
+        let dx = (column + gap) * (row_index + 1) as f64;
+        let mut dy = 0.;
+        for format in &formats {
+            let map = subtree
+                .iter()
+                .map(|node| (node.id.clone(), omc_model::new_id("node")))
+                .collect::<BTreeMap<_, _>>();
+            let (x, y) = parent_inverse.point(dx, dy);
+            let copy_name = format
+                .as_ref()
+                .map(|format| format!("{name}-{}", format.name))
+                .unwrap_or_else(|| name.clone());
+            results.push((map[source].clone(), copy_name.clone()));
+            for (index, node) in subtree.iter().enumerate() {
+                let mut copy = (*node).clone();
+                copy.id = map[&node.id].clone();
+                copy.home_shard = omc_model::new_id("shard");
+                remap_values(&mut copy.properties, &map);
+                if index == 0 {
+                    copy.rank = ranks.next().unwrap();
+                    copy.properties
+                        .insert("x".into(), json!(node.number("x", 0.) + x - origin_x));
+                    copy.properties
+                        .insert("y".into(), json!(node.number("y", 0.) + y - origin_y));
+                    copy.properties.insert("name".into(), json!(copy_name));
+                    if let Some(format) = format {
+                        copy.properties.insert("width".into(), json!(format.width));
+                        copy.properties
+                            .insert("height".into(), json!(format.height));
+                        dy += format.height + gap;
+                    }
+                } else {
+                    copy.parent_id = node.parent_id.as_ref().map(|parent| map[parent].clone());
+                    if let Some(cell) = node
+                        .properties
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .and_then(|name| cells.get(name))
+                    {
+                        if copy.kind == NodeKind::Text {
+                            if let Some(text) = &cell.text {
+                                copy.properties.insert("text".into(), json!(text));
+                                copy.properties.remove("textRuns");
+                            }
+                            if let Some(fit) = &cell.fit {
+                                fits.push((drafts.len(), fit.clone()));
+                            }
+                        }
+                        if let Some(paint) = &cell.paint {
+                            copy.properties.remove("fillStyleId");
+                            copy.properties.extend(paint.clone());
+                        }
+                        if let Some(visible) = cell.visible {
+                            copy.properties.insert("visible".into(), json!(visible));
+                        }
+                    }
+                }
+                drafts.push(copy);
+            }
+        }
+    }
+    if !fits.is_empty() {
+        let draft_snapshot = with_drafts(snapshot, &drafts);
+        let scene = paths::scene(&draft_snapshot, page_id)?;
+        for (index, options) in fits {
+            let node = &mut drafts[index];
+            let item = scene
+                .item(&node.id)
+                .ok_or_else(|| EngineError::invalid("data text is outside the active page"))?;
+            let fit = text::fit_text_node(node, item, &options)?;
+            apply_fit(node, fit.current, fit.chosen);
+        }
+    }
+    Ok(DataCopies {
+        nodes: drafts,
+        roots: results,
+        missing,
+    })
 }
 
 fn with_drafts(snapshot: &DocumentSnapshot, drafts: &[Node]) -> DocumentSnapshot {

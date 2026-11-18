@@ -1,0 +1,277 @@
+{
+  "name": "board",
+  "description": "Edit sticky notes, tables and mind maps or connect layers on the current page. Model-backed connectors follow their targets. All changes are document-scoped.",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "documentId",
+      "action"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "documentId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "parentId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "fromId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "toId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "targetId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "action": {
+        "type": "string",
+        "enum": [
+          "create_sticky",
+          "update_sticky",
+          "connect",
+          "reattach",
+          "create_table",
+          "inspect_table",
+          "edit_table",
+          "set_table_cell",
+          "create_mind_map",
+          "inspect_mind_map",
+          "add_mind_topic",
+          "rename_mind_topic",
+          "remove_mind_topic",
+          "layout_mind_map"
+        ],
+        "description": "update_sticky requires id plus text or color. connect requires fromId and toId. reattach requires id, end and targetId. create_table accepts cells or dimensions. inspect_table, edit_table, and set_table_cell require the table id. edit_table requires operation. set_table_cell requires zero-based row and column plus text. create_mind_map requires ordered topics. Each key must be unique; a parent key must precede its children, and only the first topic omits parent. Other mind-map actions require the map id. add_mind_topic takes parentId and text, rename_mind_topic takes targetId and text, and remove_mind_topic removes the subtree of targetId."
+      },
+      "x": {
+        "type": "number",
+        "minimum": -1000000,
+        "maximum": 1000000
+      },
+      "y": {
+        "type": "number",
+        "minimum": -1000000,
+        "maximum": 1000000
+      },
+      "text": {
+        "type": "string",
+        "maxLength": 32000
+      },
+      "color": {
+        "type": "string",
+        "maxLength": 128
+      },
+      "author": {
+        "type": "string",
+        "maxLength": 128
+      },
+      "fromSide": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "top",
+          "right",
+          "bottom",
+          "left"
+        ]
+      },
+      "toSide": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "top",
+          "right",
+          "bottom",
+          "left"
+        ]
+      },
+      "side": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "top",
+          "right",
+          "bottom",
+          "left"
+        ]
+      },
+      "fromAt": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "toAt": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "at": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "style": {
+        "type": "string",
+        "enum": [
+          "straight",
+          "elbow",
+          "curved"
+        ]
+      },
+      "startCap": {
+        "type": "string",
+        "enum": [
+          "none",
+          "lineArrow",
+          "triangleArrow",
+          "triangle",
+          "circleFilled",
+          "circle",
+          "diamondFilled",
+          "diamond",
+          "squareFilled",
+          "square",
+          "round"
+        ]
+      },
+      "endCap": {
+        "type": "string",
+        "enum": [
+          "none",
+          "lineArrow",
+          "triangleArrow",
+          "triangle",
+          "circleFilled",
+          "circle",
+          "diamondFilled",
+          "diamond",
+          "squareFilled",
+          "square",
+          "round"
+        ]
+      },
+      "label": {
+        "type": "string",
+        "maxLength": 8192
+      },
+      "end": {
+        "type": "string",
+        "enum": [
+          "from",
+          "to"
+        ]
+      },
+      "rows": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50
+      },
+      "columns": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20
+      },
+      "cells": {
+        "type": "array",
+        "maxItems": 50,
+        "items": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        }
+      },
+      "operation": {
+        "type": "string",
+        "enum": [
+          "add_row",
+          "remove_row",
+          "add_column",
+          "remove_column"
+        ]
+      },
+      "index": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 49
+      },
+      "row": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 49
+      },
+      "column": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 19
+      },
+      "name": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "topics": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 50,
+        "items": {
+          "type": "object",
+          "required": [
+            "key",
+            "text"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "parent": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 512
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -13,38 +13,51 @@ pub(super) fn command(context: &Context, action: &str) -> Result<Value> {
         "export" => export(context),
         "set" | "remove" => {
             let id = context.one()?;
-            let component = owner(context.snapshot, &id)?;
-            let name = context.params.get("language").map(language).transpose()?;
-            let mut links = links(component);
-            let before = links.len();
-            let result = if action == "remove" {
-                links.retain(|link| name.is_some_and(|lang| link["language"] != lang));
-                json!({"component":context.alias(&component.id),"removed":before-links.len()})
-            } else {
-                let language = name.unwrap_or("react");
-                let existing = links.iter().find(|link| link["language"] == language);
-                let mut value = existing
-                    .cloned()
-                    .unwrap_or_else(|| json!({"language":language}));
-                for key in ["name", "importPath", "template"] {
-                    if let Some(field) = context.params.get(key).filter(|field| !field.is_null()) {
-                        value[key] = field.clone();
-                    }
-                }
-                let properties = component::describe_layer(context, &id)?["properties"].clone();
-                let props = properties.as_array().expect("component properties");
-                let link = normalize(&value, component, language, props)?;
-                let (code, unknown) = render(&link, props)?;
-                update(&mut links, link);
-                json!({"component":context.alias(&component.id),"language":language,"code":code,"unknown":unknown})
-            };
-            if links != self::links(component) {
-                context.commit(vec![context.patch(&component.id, KEY, json!(links))])?;
+            let (mut result, edit) = mapping_edit(context, &id, action)?;
+            if let Some(edit) = edit {
+                context.commit(vec![edit])?;
             }
+            let component = result["component"].as_str().unwrap();
+            result["component"] = json!(context.alias(component));
             Ok(result)
         }
         _ => Err(EngineError::invalid("Unknown code connection action")),
     }
+}
+
+pub(super) fn mapping_edit(
+    context: &Context,
+    id: &str,
+    action: &str,
+) -> Result<(Value, Option<Command>)> {
+    let component = owner(context.snapshot, id)?;
+    let language = context.params.get("language").map(language).transpose()?;
+    let mut links = self::links(component);
+    let before = links.len();
+    let result = if action == "remove" {
+        links.retain(|link| language.is_some_and(|lang| link["language"] != lang));
+        json!({"component":component.id,"removed":before-links.len()})
+    } else {
+        let language = language.unwrap_or("react");
+        let existing = links.iter().find(|link| link["language"] == language);
+        let mut value = existing
+            .cloned()
+            .unwrap_or_else(|| json!({"language":language}));
+        for key in ["name", "importPath", "template"] {
+            if let Some(field) = context.params.get(key).filter(|field| !field.is_null()) {
+                value[key] = field.clone();
+            }
+        }
+        let properties = component::describe_layer(context, id)?["properties"].clone();
+        let props = properties.as_array().expect("component properties");
+        let link = normalize(&value, component, language, props)?;
+        let (code, unknown) = render(&link, props)?;
+        update(&mut links, link);
+        json!({"component":component.id,"language":language,"code":code,"unknown":unknown})
+    };
+    let edit =
+        (links != self::links(component)).then(|| context.patch(&component.id, KEY, json!(links)));
+    Ok((result, edit))
 }
 
 fn language(value: &Value) -> Result<&str> {

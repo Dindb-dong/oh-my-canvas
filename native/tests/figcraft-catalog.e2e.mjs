@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -340,6 +340,19 @@ test('FigCraft catalog commands render changes and persist components, styles, v
     await create('rectangle', 'Second page marker', 12, 18);
     const archived = await run('file.saveAs', { data: true });
     assert.equal(archived.nativeCatalog, true);
+    const archivePath = join(profile, 'catalog-consumer.figcraft');
+    const archiveBytes = Buffer.from(archived.data, 'base64');
+    await writeFile(archivePath, archiveBytes);
+    const importedArchive = await call(omc, 'import_document', { format: 'figcraft', filePath: archivePath });
+    assert.notEqual(importedArchive.documentId, destination);
+    assert.equal(importedArchive.page.name, 'Selected catalog page');
+    assert.deepEqual(importedArchive.diagnostics, []);
+    const readImported = () => call(omc, 'get_tree', { documentId: importedArchive.documentId, detail: 'detailed' });
+    const marker = (await readImported()).nodes.find(layer => layer.name === 'Second page marker');
+    assert.equal(marker.width, 50);
+    await call(omc, 'edit_shapes', { documentId: importedArchive.documentId, action: 'translate', ids: [marker.id], dx: 5, dy: 0 });
+    assert.equal((await readImported()).nodes.find(layer => layer.rawId === marker.rawId).x, marker.x + 5);
+    assert.deepEqual(await readFile(archivePath), archiveBytes);
     await run('file.open', { data: archived.data, name: 'Reopened kit consumer.figcraft' });
     assert.ok((await call(fig, 'inspect_document')).layers.some(layer => layer.name === 'Second page marker'));
     await run('page.select', { index: 0 });

@@ -2,7 +2,7 @@
 <h1 align="center">Oh My Canvas</h1>
 <p align="center"><strong>HTML/CSS로 그리는 디자인. 사람과 여러 에이전트가 함께.</strong></p>
 <p align="center">Rust와 Skia 기반의 로컬 우선 네이티브 디자인 스튜디오. HTML/CSS로 직접 그리고, 여러 MCP 에이전트와 동시에 작업하세요.</p>
-<p align="center"><img src="assets/readme/badges.svg" alt="Native Rust · 59 OMC MCP tools · HTML/CSS · Multi-agent" width="660"></p>
+<p align="center"><img src="assets/readme/badges.svg" alt="Native Rust · Native MCP · HTML/CSS · Multi-agent" width="660"></p>
 <p align="center"><a href="README.md">English</a> · <strong>한국어</strong> · <a href="README-ja.md">日本語</a> · <a href="README-zh-CN.md">简体中文</a></p>
 
 <p align="center"><img src="assets/readme/native-editor.png" alt="Native Oh My Canvas editor with HTML-imported editable design system, layers and inspector" width="1280"></p>
@@ -51,7 +51,7 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 
 네이티브 앱의 **MCP → Copy MCP configuration**에서 stdio 설정을 복사해 클라이언트에 등록하세요. 설치된 `omc-cli`와 프로필을 가리키며 글로벌 클라이언트 설정을 자동으로 변경하지 않습니다.
 
-**OMC 방언은 MCP 도구 59개(편집·작업 공간 50개 + 네이티브 확장 9개)**를 제공합니다. 별도 **FigCraft 호환 방언은 MCP 도구 19개를 통해 명령 ID 643개**를 노출합니다. 명령 643개가 MCP 도구 643개를 뜻하지는 않습니다.
+기본 OMC 연결은 디자인·리뷰·작업 공간 도구를 제공합니다. 별도 FigCraft 호환 연결은 기존 FigCraft 명령 프로토콜을 지원합니다. 설치된 버전에서 제공하는 도구는 각 연결의 `tools/list`에서 확인하세요.
 
 `list_documents` → `open_document` 또는 `create_document` → `get_context` 순서로 시작하세요. 문서 변경에는 `documentId`가 필요합니다. `create_board`, `write_html`, `edit_shapes`, `components`, `batch`, `screenshot`으로 생성·수정·확인합니다. 네이티브 확장에는 범위 제한 조회, 댓글, 토큰, 작업과 코드 내보내기가 있습니다.
 

@@ -2,6 +2,8 @@
 mod image_paint;
 mod paints;
 mod pattern;
+mod procedural_shader;
+pub use procedural_shader::{PROCEDURAL_SHADER_PROPERTY, ProceduralShader};
 mod variable_stroke;
 mod vector_point_stroke;
 pub use paints::stroke_outlines;
@@ -798,6 +800,28 @@ fn paint_item(
                     canvas.draw_path(&shape, &fill);
                 } else if background != "none" {
                     diagnose(scene, item, "background-image", background, diagnostics)?;
+                }
+            }
+            if let Some(value) = item.properties.get(PROCEDURAL_SHADER_PROPERTY) {
+                let shader = ProceduralShader::parse(value).and_then(|shader| {
+                    ProceduralShader::supports(item.kind)
+                        .then(|| shader.shader(scene.time_ms))
+                        .flatten()
+                        .ok_or_else(|| "procedural shader could not render this layer".to_owned())
+                });
+                match shader {
+                    Ok(shader) => {
+                        let mut overlay = Paint::default();
+                        overlay.set_anti_alias(true).set_shader(shader);
+                        canvas.draw_path(&shape, &overlay);
+                    }
+                    Err(message) => diagnose(
+                        scene,
+                        item,
+                        PROCEDURAL_SHADER_PROPERTY,
+                        &message,
+                        diagnostics,
+                    )?,
                 }
             }
             if item.kind == NodeKind::Image {

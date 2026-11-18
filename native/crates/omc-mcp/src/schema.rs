@@ -4,7 +4,18 @@ use std::sync::OnceLock;
 pub fn tools() -> &'static Vec<Value> {
     static TOOLS: OnceLock<Vec<Value>> = OnceLock::new();
     TOOLS.get_or_init(|| {
-        serde_json::from_str(include_str!("../schemas/tools-v1.json")).expect("checked schema")
+        let mut tools: Vec<Value> =
+            serde_json::from_str(include_str!("../schemas/tools-v1.json")).expect("checked schema");
+        for definition in [
+            include_str!("../schemas/board-v1.json"),
+            include_str!("../schemas/prototype-v1.json"),
+            include_str!("../schemas/shape-builder-v1.json"),
+            include_str!("../schemas/data-fill-v1.json"),
+            include_str!("../schemas/guides-v1.json"),
+        ] {
+            tools.push(serde_json::from_str(definition).expect("checked design tool schema"));
+        }
+        tools
     })
 }
 pub fn validate(name: &str, args: &Value) -> Result<()> {
@@ -26,7 +37,10 @@ pub fn validate(name: &str, args: &Value) -> Result<()> {
         ("edit_shapes", "resize") => &["width", "height"],
         ("edit_shapes", "rotate") => &["angle"],
         ("edit_shapes", "layout") => &["layout"],
+        ("edit_shapes", "appearance") => &["appearance"],
         ("edit_text", "replace") => &["text"],
+        ("edit_text", "path_attach") => &["pathId"],
+        ("prototype", "show_preview" | "present") => &["frameId"],
         ("edit_text", "range_style") => &["range", "style"],
         ("edit_text", "paragraph_style") => &["style"],
         ("edit_text", "find_replace") => &["find", "replace"],
@@ -35,7 +49,8 @@ pub fn validate(name: &str, args: &Value) -> Result<()> {
         ("styles", "update") => &["id", "patch"],
         ("styles", "apply") => &["id", "ids"],
         ("styles", "detach") => &["ids"],
-        ("libraries", "get" | "remove" | "export") => &["id"],
+        ("libraries", "get" | "remove" | "export" | "check_updates" | "refresh") => &["id"],
+        ("libraries", "link_source") => &["sourceDocumentId"],
         ("libraries", "add") => &["snapshot"],
         ("libraries", "update") => &["id", "snapshot"],
         ("libraries", "enable") => &["id", "enabled"],
@@ -50,6 +65,7 @@ pub fn validate(name: &str, args: &Value) -> Result<()> {
         ("component", "property" | "bind") => &["propertyType"],
         ("component", "edit_property" | "remove_property") => &["property"],
         ("component", "set_property") => &["property", "value"],
+        ("component", "swap") => &["id", "source"],
         ("collaboration", "invite") => &["address"],
         ("collaboration", "join") => &["invite"],
         ("edit_path", "move_nodes") => &["indices", "dx", "dy"],
@@ -73,7 +89,7 @@ pub fn validate(name: &str, args: &Value) -> Result<()> {
         ));
     }
     if name == "import_document"
-        && matches!(args["format"].as_str(), Some("fig" | "sketch"))
+        && matches!(args["format"].as_str(), Some("fig" | "sketch" | "figcraft"))
         && args.get("filePath").is_none()
     {
         return Err(EngineError::invalid("design file import requires filePath"));
@@ -185,8 +201,16 @@ pub fn check(schema: &Value, value: &Value, path: &str) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
-    fn catalog_has_pinned_50_tools() {
-        assert_eq!(tools().len(), 50);
+    fn catalog_includes_design_tools_and_rejects_invalid_arguments() {
+        for name in [
+            "create_shape",
+            "board",
+            "measure",
+            "prototype",
+            "document_assets",
+        ] {
+            assert!(tools().iter().any(|tool| tool["name"] == name));
+        }
         assert!(validate("create_shape", &serde_json::json!({"type":"rect"})).is_err());
         assert!(validate("get_context", &serde_json::json!({"authorId":"fake"})).is_err());
     }

@@ -22,210 +22,41 @@ impl ToolRouter {
             .ok_or_else(|| {
                 EngineError::invalid("select a slot frame or an instance with a named slot")
             })?;
-        let mut commands = Vec::new();
         let mut select = None;
-        let result = if name.starts_with("component.") {
+        let (commands, result) = if name.starts_with("component.") {
             let id = self.fig_layer(session, snapshot, target)?;
-            let frame = &snapshot.nodes[&id];
-            let owner = owning_component(snapshot, frame)?;
-            let mut definitions = array(owner.properties.get(DEFINITIONS));
-            if name == "component.makeSlot" {
-                if frame.string(SLOT_ID).is_some() {
-                    return Err(EngineError::invalid("selected frame is already a slot"));
-                }
-                let used = |name: &str| definitions.iter().any(|property| property["name"] == name);
-                let title = if params.get("name").is_some() {
-                    let title = string(params, "name")?.trim();
-                    if title.is_empty() || title.chars().count() > 256 || used(title) {
-                        return Err(EngineError::invalid(
-                            "slot name must be nonempty and unique in the component",
-                        ));
-                    }
-                    title.to_owned()
-                } else {
-                    let base = frame
-                        .string("name")
-                        .filter(|name| !name.is_empty())
-                        .unwrap_or("Slot");
-                    std::iter::once(base.to_owned())
-                        .chain((2..).map(|index| format!("{base} {index}")))
-                        .find(|name| !used(name))
-                        .unwrap()
-                };
-                let mut preferred = Vec::new();
-                if let Some(items) = params.get("preferred").filter(|value| !value.is_null()) {
-                    let items = items
-                        .as_array()
-                        .filter(|items| items.len() <= 500)
-                        .ok_or_else(|| {
-                            EngineError::invalid("preferred must contain component or set IDs")
-                        })?;
-                    for item in items {
-                        let raw = self.fig_layer(session, snapshot, item)?;
-                        let node = &snapshot.nodes[&raw];
-                        if node.kind != NodeKind::Component
-                            && node.properties.get("isVariantSet") != Some(&Value::Bool(true))
-                        {
-                            return Err(EngineError::invalid(
-                                "preferred must contain component or set IDs",
-                            ));
-                        }
-                        if !preferred.contains(&raw) {
-                            preferred.push(raw);
-                        }
-                    }
-                }
-                let property = omc_model::new_id("component_prop");
-                definitions.push(json!({"id":property,"name":title,"type":"slot","layer":id,"preferred":preferred}));
-                commands.push(Command::NodeSet {
-                    node_id: id.clone(),
-                    properties: Properties::from([
-                        (SLOT_ID.into(), json!(property)),
-                        (SLOT_NAME.into(), json!(title)),
-                    ]),
-                });
-                commands.push(set(owner, DEFINITIONS, json!(definitions)));
-                json!({"id":target,"name":title,"property":property})
+            let make = name == "component.makeSlot";
+            let preferred = if make {
+                preferred_ids(params, |id| self.fig_layer(session, snapshot, id))?
             } else {
-                let property = frame
-                    .string(SLOT_ID)
-                    .ok_or_else(|| EngineError::invalid("frame is not a component slot"))?;
-                let title = frame.string(SLOT_NAME).unwrap_or_default();
-                definitions.retain(|entry| entry["id"] != property);
-                commands.push(set(owner, DEFINITIONS, json!(definitions)));
-                commands.push(Command::NodeUnset {
-                    node_id: id.clone(),
-                    properties: vec![SLOT_ID.into(), SLOT_NAME.into()],
-                });
-                let contents = snapshot
-                    .nodes
-                    .values()
-                    .filter(|node| node.string(SLOT_CONTENT) == Some(&id))
-                    .map(|node| node.id.clone())
-                    .collect::<Vec<_>>();
-                if !contents.is_empty() {
-                    commands.push(Command::NodeDelete { node_ids: contents });
-                }
-                for instance in snapshot
-                    .nodes
-                    .values()
-                    .filter(|node| node.kind == NodeKind::Instance)
-                {
-                    let mut replacements = replacement_map(instance);
-                    let before = replacements.len();
-                    replacements.retain(|key, _| key.rsplit('/').next() != Some(&id));
-                    if replacements.len() != before {
-                        commands.push(set(
-                            instance,
-                            SLOT_REPLACEMENTS,
-                            Value::Object(replacements),
-                        ));
-                    }
-                }
-                json!({"id":target,"name":title})
-            }
+                Vec::new()
+            };
+            let (commands, mut result) = slot_definition(snapshot, &id, make, params, preferred)?;
+            result["id"] = target.clone();
+            (commands, result)
         } else {
             let projected = omc_scene::resolve_components(snapshot, Some(&state.page_id));
             let raw = self.fig_layer(session, &projected.snapshot, target)?;
-            let (instance, projected_instance, frame, projected_slot) =
-                instance_slot(snapshot, &projected.snapshot, &raw, params["slot"].as_str())?;
-            let slot_alias = self.fig_alias(session, &snapshot.id, &projected_slot.id);
-            let scope =
-                (instance.id != projected_instance.id).then_some(projected_instance.id.as_str());
-            let replacement_key =
-                scope.map_or_else(|| frame.id.clone(), |scope| format!("{scope}/{}", frame.id));
-            let custom = children(snapshot, &instance.id)
-                .into_iter()
-                .filter(|node| {
-                    node.string(SLOT_CONTENT) == Some(&frame.id)
-                        && node.string("slotInstanceFor") == scope
-                })
-                .collect::<Vec<_>>();
-            let mut replacements = replacement_map(instance);
-            if name == "instance.resetSlot" {
-                let replaced = replacements.remove(&replacement_key).is_some();
-                if replaced {
-                    commands.push(set(
-                        instance,
-                        SLOT_REPLACEMENTS,
-                        Value::Object(replacements),
-                    ));
-                }
-                if !custom.is_empty() {
-                    commands.push(Command::NodeDelete {
-                        node_ids: custom.iter().map(|node| node.id.clone()).collect(),
-                    });
-                }
-                json!({"id":slot_alias,"changed":replaced || !custom.is_empty()})
+            let component = if name == "instance.slotInsert" {
+                Some(self.fig_layer(session, snapshot, &params["component"])?)
             } else {
-                let component = self.fig_layer(session, snapshot, &params["component"])?;
-                let component = main_component(snapshot, &component)?;
-                let mut parent = Some(projected_instance);
-                while let Some(owner) = parent {
-                    if let Some(definition) = owner
-                        .string("sourceComponentId")
-                        .or_else(|| owner.string("componentId"))
-                        && reaches_component(snapshot, &component.id, definition)
-                    {
-                        return Err(EngineError::invalid(
-                            "slot insertion would create a component cycle",
-                        ));
-                    }
-                    parent = owner
-                        .string("instanceId")
-                        .and_then(|id| projected.snapshot.nodes.get(id));
-                }
-                let replace = optional_flag(params, "replace")?.unwrap_or(false);
-                let index = params
-                    .get("index")
-                    .filter(|value| !value.is_null())
-                    .map(|_| geometry_index(params, "index"))
-                    .transpose()?;
-                if replace && !custom.is_empty() {
-                    commands.push(Command::NodeDelete {
-                        node_ids: custom.iter().map(|node| node.id.clone()).collect(),
-                    });
-                }
-                let peers = if replace {
-                    Vec::new()
-                } else {
-                    children(&projected.snapshot, &projected_slot.id)
-                };
-                let index = index.unwrap_or(peers.len()).min(peers.len());
-                let rank = rank_between(
-                    index
-                        .checked_sub(1)
-                        .map(|previous| peers[previous].rank.as_str()),
-                    peers.get(index).map(|node| node.rank.as_str()),
-                )
-                .ok_or_else(|| {
-                    EngineError::new("resource_limit", "slot child order requires rank rebalance")
-                })?;
-                if replace {
-                    replacements.insert(replacement_key, Value::Bool(true));
-                    commands.push(set(
-                        instance,
-                        SLOT_REPLACEMENTS,
-                        Value::Object(replacements),
-                    ));
-                }
-                let mut node = Node::new(NodeKind::Instance);
-                node.parent_id = Some(instance.id.clone());
-                node.home_shard = instance.home_shard.clone();
-                node.rank = rank;
-                node.properties = properties(&json!({
-                    "name":component.string("name").unwrap_or("Component"),"componentId":component.id,
-                    "x":0,"y":0, "slotContentFor":frame.id,
-                }))?;
-                if let Some(scope) = scope {
-                    node.properties
-                        .insert("slotInstanceFor".into(), json!(scope));
-                }
-                let id = self.fig_alias(session, &snapshot.id, &node.id);
-                select = Some(json!(id));
-                commands.push(Command::NodeCreate { node });
-                json!({"id":id,"slot":slot_alias})
+                None
+            };
+            let (commands, mut result) = slot_contents(
+                snapshot,
+                &projected.snapshot,
+                &raw,
+                params,
+                component.as_deref(),
+            )?;
+            let id = string(&result, "id")?;
+            result["id"] = json!(self.fig_alias(session, &snapshot.id, id));
+            if component.is_some() {
+                select = Some(result["id"].clone());
+                let slot = string(&result, "slot")?;
+                result["slot"] = json!(self.fig_alias(session, &snapshot.id, slot));
             }
+            (commands, result)
         };
         if !commands.is_empty() {
             self.submit(
@@ -241,6 +72,433 @@ impl ToolRouter {
         }
         Ok(result)
     }
+
+    pub(crate) fn native_instance_swap(
+        &self,
+        session: &str,
+        snapshot: &DocumentSnapshot,
+        args: &Value,
+    ) -> Result<Command> {
+        let state = self.state(session, &snapshot.id)?;
+        let raw = self.resolve(session, &snapshot.id, string(args, "id")?)?;
+        let source = self.resolve(session, &snapshot.id, string(args, "source")?)?;
+        let instance = slot_target(snapshot, &state.root, &raw, true)?;
+        if instance.kind != NodeKind::Instance {
+            return Err(EngineError::invalid("choose an editable linked instance"));
+        }
+        let definition = snapshot
+            .nodes
+            .get(&source)
+            .filter(|node| node.kind == NodeKind::Component)
+            .ok_or_else(|| EngineError::invalid("replacement must be a component definition"))?;
+        if let Some(library) = definition.string("libraryId")
+            && !crate::resources::catalogs(&snapshot.metadata, "libraries")
+                .get(library)
+                .is_some_and(|entry| entry["enabled"] != false)
+        {
+            return Err(EngineError::invalid(
+                "replacement library is disabled or unlinked",
+            ));
+        }
+        if instance.string("componentId") != Some(&source) {
+            if instance
+                .properties
+                .get("componentPropertyRefs")
+                .is_some_and(|refs| refs.get("mainComponent").is_some())
+            {
+                return Err(EngineError::new(
+                    "conflict",
+                    "instance component is controlled by a property",
+                ));
+            }
+            if !replacement_map(instance).is_empty()
+                || children(snapshot, &raw)
+                    .iter()
+                    .any(|node| node.properties.contains_key(SLOT_CONTENT))
+            {
+                return Err(EngineError::new(
+                    "conflict",
+                    "reset slot overrides before swapping this instance",
+                ));
+            }
+        }
+        let mut parent = instance.parent_id.as_deref();
+        while let Some(ancestor) = parent.and_then(|id| snapshot.nodes.get(id)) {
+            let owner = if ancestor.kind == NodeKind::Component {
+                if ancestor.string("libraryId").is_some() {
+                    return Err(EngineError::invalid(
+                        "published component definitions are read-only",
+                    ));
+                }
+                Some(ancestor.id.as_str())
+            } else {
+                ancestor.string("componentId")
+            };
+            if owner.is_some_and(|owner| reaches_component(snapshot, &source, owner)) {
+                return Err(EngineError::invalid("component swap would create a cycle"));
+            }
+            parent = ancestor.parent_id.as_deref();
+        }
+        let mut properties = crate::figcraft_catalog::library_swap::instance_patch(
+            snapshot, instance, &source, false,
+        )?;
+        if instance.string("libraryId") != definition.string("libraryId") {
+            properties.insert("libraryId".into(), json!(definition.string("libraryId")));
+        }
+        Ok(Command::NodeSet {
+            node_id: raw,
+            properties,
+        })
+    }
+
+    pub(crate) fn native_slot_commands(
+        &self,
+        session: &str,
+        snapshot: &DocumentSnapshot,
+        args: &Value,
+    ) -> Result<(Vec<Command>, Properties)> {
+        let action = string(args, "action")?;
+        let state = self.state(session, &snapshot.id)?;
+        let id = self.resolve(session, &snapshot.id, string(args, "id")?)?;
+        if matches!(action, "slot_create" | "slot_remove") {
+            slot_target(snapshot, &state.root, &id, true)?;
+            let make = action == "slot_create";
+            let preferred = if make {
+                preferred_ids(args, |id| {
+                    self.resolve(
+                        session,
+                        &snapshot.id,
+                        id.as_str().ok_or_else(|| {
+                            EngineError::invalid("invalid preferred component ID")
+                        })?,
+                    )
+                })?
+            } else {
+                Vec::new()
+            };
+            let (commands, result) = slot_definition(snapshot, &id, make, args, preferred)?;
+            return Ok((commands, properties(&result)?));
+        }
+        let projected = omc_scene::resolve_components(snapshot, Some(&state.page_id));
+        let projected = &projected.snapshot;
+        let target = slot_target(projected, &state.root, &id, action != "slot_list")?;
+        if action == "slot_list" {
+            return Ok((Vec::new(), properties(&list_slots(projected, target)?)?));
+        }
+        let source = match action {
+            "slot_insert" => Some(self.resolve(session, &snapshot.id, string(args, "source")?)?),
+            "slot_reset" => None,
+            _ => return Err(EngineError::invalid("unknown component slot action")),
+        };
+        let (commands, result) = slot_contents(snapshot, projected, &id, args, source.as_deref())?;
+        let slot_id = string(&result, if source.is_some() { "slot" } else { "id" })?;
+        slot_target(projected, &state.root, slot_id, true)?;
+        Ok((commands, properties(&result)?))
+    }
+}
+
+fn slot_definition(
+    snapshot: &DocumentSnapshot,
+    id: &str,
+    make: bool,
+    params: &Value,
+    preferred: Vec<String>,
+) -> Result<(Vec<Command>, Value)> {
+    let mut commands = Vec::new();
+    let result = {
+        let frame = snapshot
+            .nodes
+            .get(id)
+            .ok_or_else(|| EngineError::invalid("slot frame does not exist"))?;
+        let owner = owning_component(snapshot, frame)?;
+        let mut definitions = array(owner.properties.get(DEFINITIONS));
+        if make {
+            if frame.string(SLOT_ID).is_some() {
+                return Err(EngineError::invalid("selected frame is already a slot"));
+            }
+            let used = |name: &str| definitions.iter().any(|property| property["name"] == name);
+            let title = if params.get("name").is_some() {
+                let title = string(params, "name")?.trim();
+                if title.is_empty() || title.chars().count() > 256 || used(title) {
+                    return Err(EngineError::invalid(
+                        "slot name must be nonempty and unique in the component",
+                    ));
+                }
+                title.to_owned()
+            } else {
+                let base = frame
+                    .string("name")
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or("Slot");
+                std::iter::once(base.to_owned())
+                    .chain((2..).map(|index| format!("{base} {index}")))
+                    .find(|name| !used(name))
+                    .unwrap()
+            };
+            let preferred = preferred_components(snapshot, preferred)?;
+            let property = omc_model::new_id("component_prop");
+            definitions.push(
+                json!({"id":property,"name":title,"type":"slot","layer":id,"preferred":preferred}),
+            );
+            commands.push(Command::NodeSet {
+                node_id: id.to_owned(),
+                properties: Properties::from([
+                    (SLOT_ID.into(), json!(property)),
+                    (SLOT_NAME.into(), json!(title)),
+                ]),
+            });
+            commands.push(set(owner, DEFINITIONS, json!(definitions)));
+            json!({"id":id,"name":title,"property":property})
+        } else {
+            let property = frame
+                .string(SLOT_ID)
+                .ok_or_else(|| EngineError::invalid("frame is not a component slot"))?;
+            let title = frame.string(SLOT_NAME).unwrap_or_default();
+            definitions.retain(|entry| entry["id"] != property);
+            commands.push(set(owner, DEFINITIONS, json!(definitions)));
+            commands.push(Command::NodeUnset {
+                node_id: id.to_owned(),
+                properties: vec![SLOT_ID.into(), SLOT_NAME.into()],
+            });
+            let contents = snapshot
+                .nodes
+                .values()
+                .filter(|node| node.string(SLOT_CONTENT) == Some(id))
+                .map(|node| node.id.clone())
+                .collect::<Vec<_>>();
+            if !contents.is_empty() {
+                commands.push(Command::NodeDelete { node_ids: contents });
+            }
+            for instance in snapshot
+                .nodes
+                .values()
+                .filter(|node| node.kind == NodeKind::Instance)
+            {
+                let mut replacements = replacement_map(instance);
+                let before = replacements.len();
+                replacements.retain(|key, _| key.rsplit('/').next() != Some(id));
+                if replacements.len() != before {
+                    commands.push(set(
+                        instance,
+                        SLOT_REPLACEMENTS,
+                        Value::Object(replacements),
+                    ));
+                }
+            }
+            json!({"id":id,"name":title})
+        }
+    };
+    Ok((commands, result))
+}
+
+fn slot_contents(
+    snapshot: &DocumentSnapshot,
+    projected: &DocumentSnapshot,
+    raw: &str,
+    params: &Value,
+    component: Option<&str>,
+) -> Result<(Vec<Command>, Value)> {
+    let mut commands = Vec::new();
+    let (instance, projected_instance, frame, projected_slot) =
+        instance_slot(snapshot, projected, raw, params["slot"].as_str())?;
+    let slot_id = &projected_slot.id;
+    let scope = (instance.id != projected_instance.id).then_some(projected_instance.id.as_str());
+    let replacement_key =
+        scope.map_or_else(|| frame.id.clone(), |scope| format!("{scope}/{}", frame.id));
+    let custom = children(snapshot, &instance.id)
+        .into_iter()
+        .filter(|node| {
+            node.string(SLOT_CONTENT) == Some(&frame.id) && node.string("slotInstanceFor") == scope
+        })
+        .collect::<Vec<_>>();
+    let mut replacements = replacement_map(instance);
+    let result = if let Some(component) = component {
+        let component = main_component(snapshot, component)?;
+        let mut parent = Some(projected_instance);
+        while let Some(owner) = parent {
+            if let Some(definition) = owner
+                .string("sourceComponentId")
+                .or_else(|| owner.string("componentId"))
+                && reaches_component(snapshot, &component.id, definition)
+            {
+                return Err(EngineError::invalid(
+                    "slot insertion would create a component cycle",
+                ));
+            }
+            parent = owner
+                .string("instanceId")
+                .and_then(|id| projected.nodes.get(id));
+        }
+        let replace = optional_flag(params, "replace")?.unwrap_or(false);
+        let index = params
+            .get("index")
+            .filter(|value| !value.is_null())
+            .map(|_| geometry_index(params, "index"))
+            .transpose()?;
+        if replace && !custom.is_empty() {
+            commands.push(Command::NodeDelete {
+                node_ids: custom.iter().map(|node| node.id.clone()).collect(),
+            });
+        }
+        let peers = if replace {
+            Vec::new()
+        } else {
+            children(projected, &projected_slot.id)
+        };
+        let index = index.unwrap_or(peers.len()).min(peers.len());
+        let rank = rank_between(
+            index
+                .checked_sub(1)
+                .map(|previous| peers[previous].rank.as_str()),
+            peers.get(index).map(|node| node.rank.as_str()),
+        )
+        .ok_or_else(|| {
+            EngineError::new("resource_limit", "slot child order requires rank rebalance")
+        })?;
+        if replace {
+            replacements.insert(replacement_key, Value::Bool(true));
+            commands.push(set(
+                instance,
+                SLOT_REPLACEMENTS,
+                Value::Object(replacements),
+            ));
+        }
+        let mut node = Node::new(NodeKind::Instance);
+        node.parent_id = Some(instance.id.clone());
+        node.home_shard = instance.home_shard.clone();
+        node.rank = rank;
+        node.properties = properties(&json!({
+            "name":component.string("name").unwrap_or("Component"),"componentId":component.id,
+            "x":0,"y":0, "slotContentFor":frame.id,
+        }))?;
+        if let Some(scope) = scope {
+            node.properties
+                .insert("slotInstanceFor".into(), json!(scope));
+        }
+        let id = node.id.clone();
+        commands.push(Command::NodeCreate { node });
+        json!({"id":id,"slot":slot_id})
+    } else {
+        let replaced = replacements.remove(&replacement_key).is_some();
+        if replaced {
+            commands.push(set(
+                instance,
+                SLOT_REPLACEMENTS,
+                Value::Object(replacements),
+            ));
+        }
+        if !custom.is_empty() {
+            commands.push(Command::NodeDelete {
+                node_ids: custom.iter().map(|node| node.id.clone()).collect(),
+            });
+        }
+        json!({"id":slot_id,"changed":replaced || !custom.is_empty()})
+    };
+    Ok((commands, result))
+}
+
+fn preferred_ids(
+    params: &Value,
+    mut resolve: impl FnMut(&Value) -> Result<String>,
+) -> Result<Vec<String>> {
+    match params.get("preferred") {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(items) => items
+            .as_array()
+            .filter(|items| items.len() <= 500)
+            .ok_or_else(|| EngineError::invalid("preferred must contain component or set IDs"))?
+            .iter()
+            .map(&mut resolve)
+            .collect(),
+    }
+}
+
+fn preferred_components(snapshot: &DocumentSnapshot, ids: Vec<String>) -> Result<Vec<String>> {
+    let mut unique = Vec::new();
+    for id in ids {
+        let node = snapshot
+            .nodes
+            .get(&id)
+            .filter(|node| {
+                node.kind == NodeKind::Component
+                    || node.properties.get("isVariantSet") == Some(&Value::Bool(true))
+            })
+            .ok_or_else(|| EngineError::invalid("preferred must contain component or set IDs"))?;
+        if !unique.contains(&node.id) {
+            unique.push(node.id.clone());
+        }
+    }
+    Ok(unique)
+}
+
+fn slot_target<'a>(
+    snapshot: &'a DocumentSnapshot,
+    root: &str,
+    id: &str,
+    edit: bool,
+) -> Result<&'a Node> {
+    let invalid = || EngineError::invalid("slot target is not on the selected page");
+    let node = snapshot.nodes.get(id).ok_or_else(invalid)?;
+    let mut current = node;
+    loop {
+        if edit
+            && (current.properties.get("locked") == Some(&Value::Bool(true))
+                || current.properties.get("hidden") == Some(&Value::Bool(true))
+                || current.properties.get("visible") == Some(&Value::Bool(false)))
+        {
+            return Err(EngineError::invalid(
+                "slot target or ancestor is locked or hidden",
+            ));
+        }
+        if current.id == root {
+            return Ok(node);
+        }
+        current = current
+            .parent_id
+            .as_ref()
+            .and_then(|parent| snapshot.nodes.get(parent))
+            .ok_or_else(invalid)?;
+    }
+}
+
+fn list_slots(snapshot: &DocumentSnapshot, node: &Node) -> Result<Value> {
+    if node.kind == NodeKind::Component {
+        let slots = array(node.properties.get(DEFINITIONS))
+            .into_iter()
+            .filter(|property| property["type"] == "slot")
+            .collect::<Vec<_>>();
+        return Ok(json!({"id":node.id,"slots":slots}));
+    }
+    if node.kind != NodeKind::Instance && node.string(SLOT_ID).is_none() {
+        return Err(EngineError::invalid(
+            "choose a component, instance, or slot",
+        ));
+    }
+    let slots = if node.kind == NodeKind::Instance {
+        snapshot
+            .nodes
+            .values()
+            .filter(|candidate| {
+                candidate.string("instanceId") == Some(node.id.as_str())
+                    && candidate.string(SLOT_ID).is_some()
+            })
+            .collect::<Vec<_>>()
+    } else {
+        vec![node]
+    };
+    let slots = slots
+        .into_iter()
+        .map(|slot| {
+            let contents = children(snapshot, &slot.id);
+            json!({"id":slot.id,"name":slot.string(SLOT_NAME),"property":slot.string(SLOT_ID),
+            "sourceNodeId":slot.string("sourceNodeId"),"contentCount":contents.len(),
+            "contents":contents.into_iter().take(200).map(|child| json!({
+                "id":child.id,"name":child.string("name"),"componentId":child.string("componentId"),
+                "sourceNodeId":child.string("sourceNodeId")
+            })).collect::<Vec<_>>()})
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({"id":node.id,"slots":slots}))
 }
 
 fn array(value: Option<&Value>) -> Vec<Value> {
@@ -284,7 +542,10 @@ fn owning_component<'a>(snapshot: &'a DocumentSnapshot, frame: &Node) -> Result<
     Err(refuse())
 }
 fn main_component<'a>(snapshot: &'a DocumentSnapshot, id: &str) -> Result<&'a Node> {
-    let node = &snapshot.nodes[id];
+    let node = snapshot
+        .nodes
+        .get(id)
+        .ok_or_else(|| EngineError::invalid("component is not in this document"))?;
     if node.kind == NodeKind::Component {
         return Ok(node);
     }
@@ -306,13 +567,18 @@ fn instance_slot<'a>(
     raw: &str,
     name: Option<&str>,
 ) -> Result<(&'a Node, &'a Node, &'a Node, &'a Node)> {
-    let node = &projected.nodes[raw];
+    let node = projected
+        .nodes
+        .get(raw)
+        .ok_or_else(|| EngineError::invalid("slot target is not on the selected page"))?;
     let slot = if let Some(name) = name {
         if node.kind != NodeKind::Instance {
             return Err(EngineError::invalid("named slot requires an instance"));
         }
         projected.nodes.values().find(|candidate| {
-            candidate.string("instanceId") == Some(raw) && candidate.string(SLOT_NAME) == Some(name)
+            candidate.string("instanceId") == Some(raw)
+                && (candidate.string(SLOT_NAME) == Some(name)
+                    || candidate.string(SLOT_ID) == Some(name))
         })
     } else {
         Some(node)
@@ -348,12 +614,44 @@ fn reaches_component(snapshot: &DocumentSnapshot, start: &str, target: &str) -> 
         if !seen.insert(id) {
             continue;
         }
-        if let Some(component) = snapshot
-            .nodes
-            .get(id)
-            .and_then(|node| node.string("componentId"))
-        {
+        let Some(node) = snapshot.nodes.get(id) else {
+            continue;
+        };
+        if let Some(component) = node.string("componentId") {
             pending.push(component);
+            if let Some(definition) = snapshot.nodes.get(component) {
+                for property in definition
+                    .properties
+                    .get(DEFINITIONS)
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if property["type"] == "swap"
+                        && let Some(property_id) = property["id"].as_str()
+                        && let Some(value) = ["componentProperties", "propertyValues"]
+                            .into_iter()
+                            .find_map(|key| {
+                                node.properties
+                                    .get(key)
+                                    .and_then(|values| values.get(property_id))
+                            })
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.is_empty())
+                    {
+                        pending.push(value);
+                    }
+                }
+            }
+        }
+        if let Some(definitions) = node.properties.get(DEFINITIONS).and_then(Value::as_array) {
+            pending.extend(
+                definitions
+                    .iter()
+                    .filter(|entry| entry["type"] == "swap")
+                    .filter_map(|entry| entry["default"].as_str())
+                    .filter(|value| !value.is_empty()),
+            );
         }
         pending.extend(
             children(snapshot, id)

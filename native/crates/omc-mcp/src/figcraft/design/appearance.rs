@@ -2,6 +2,149 @@ use super::*;
 use omc_style::{Color, parse_color};
 
 impl ToolRouter {
+    pub(crate) fn native_appearance_command(
+        &self,
+        snapshot: &DocumentSnapshot,
+        ids: &[String],
+        edit: &Value,
+    ) -> Result<Vec<Command>> {
+        let key = string(edit, "stack")?;
+        let (scalar, reference, limit) = match key {
+            "fills" => ("fill", "fillStyleId", 128),
+            "strokes" => ("stroke", "strokeStyleId", 128),
+            "effects" => ("", "effectStyleId", 32),
+            _ => return Err(EngineError::invalid("unknown appearance stack")),
+        };
+        let operation = string(edit, "operation")?;
+        let index = optional_index(edit, "index")?
+            .ok_or_else(|| EngineError::invalid("appearance index required"))?;
+        let entry = edit.get("entry");
+        let to = optional_index(edit, "to")?;
+        if matches!(operation, "insert" | "replace") != entry.is_some()
+            || (operation == "move") != to.is_some()
+        {
+            return Err(EngineError::invalid(
+                "insert and replace require entry; move requires to",
+            ));
+        }
+        if ids.iter().collect::<BTreeSet<_>>().len() != ids.len() {
+            return Err(EngineError::invalid("choose distinct layers"));
+        }
+        let mut commands = Vec::new();
+        for id in ids {
+            let node = snapshot
+                .nodes
+                .get(id)
+                .ok_or_else(|| EngineError::invalid("layer not found"))?;
+            if node.parent_id.is_none() {
+                return Err(EngineError::invalid("choose a layer inside a page"));
+            }
+            let mut current = Some(node);
+            while let Some(ancestor) = current {
+                if ancestor.properties.get("locked") == Some(&Value::Bool(true))
+                    || ancestor.properties.get("hidden") == Some(&Value::Bool(true))
+                    || ancestor.properties.get("visible") == Some(&Value::Bool(false))
+                {
+                    return Err(EngineError::invalid(
+                        "layer or ancestor is locked or hidden",
+                    ));
+                }
+                current = ancestor
+                    .parent_id
+                    .as_ref()
+                    .and_then(|parent| snapshot.nodes.get(parent));
+            }
+            if node.properties.contains_key(reference) {
+                return Err(EngineError::invalid(
+                    "detach the linked style before editing an appearance stack",
+                ));
+            }
+            let mut list = if key == "effects" {
+                effect_stack(node)
+            } else if !node.properties.contains_key(key)
+                && let Some(value) = node.properties.get(scalar)
+                && value.get("$token").is_some()
+            {
+                vec![json!({"type":"solid","color":value})]
+            } else {
+                paint_stack(&node.properties, node.kind, key, scalar)
+            };
+            let before = list.clone();
+            match (operation, entry, to) {
+                ("insert", Some(entry), _) if index <= list.len() => {
+                    list.insert(index, native_entry(node, key, entry)?);
+                }
+                ("replace", Some(entry), _) if index < list.len() => {
+                    list[index] = native_entry(node, key, entry)?;
+                }
+                ("remove", _, _) if index < list.len() => {
+                    list.remove(index);
+                }
+                ("move", _, Some(to)) if index < list.len() && to < list.len() => {
+                    let value = list.remove(index);
+                    list.insert(to, value);
+                }
+                _ => {
+                    return Err(EngineError::invalid(
+                        "invalid appearance operation or index",
+                    ));
+                }
+            }
+            if list == before {
+                continue;
+            }
+            if list.len() > limit {
+                return Err(EngineError::invalid(
+                    "appearance stack exceeds its entry limit",
+                ));
+            }
+            let mut properties = if key == "effects" {
+                let properties = effect_render_fields(&list);
+                let flags = ["blurHidden", "backgroundBlurHidden"]
+                    .into_iter()
+                    .filter(|key| node.properties.contains_key(*key))
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>();
+                if !flags.is_empty() {
+                    commands.push(Command::NodeUnset {
+                        node_id: id.clone(),
+                        properties: flags,
+                    });
+                }
+                properties
+            } else {
+                if scalar == "fill"
+                    && node.kind == NodeKind::Text
+                    && !(list.len() == 1
+                        && matches!(list[0]["type"].as_str(), None | Some("solid" | "color")))
+                {
+                    return Err(EngineError::new(
+                        "unsupported_feature",
+                        "native text supports one solid fill",
+                    ));
+                }
+                let color = list
+                    .iter()
+                    .rev()
+                    .find(|paint| paint["visible"] != false && paint["hidden"] != true)
+                    .and_then(|paint| {
+                        paint
+                            .get("color")
+                            .cloned()
+                            .or_else(|| color(paint).map(hex).map(Value::String))
+                    })
+                    .unwrap_or_else(|| json!("transparent"));
+                Properties::from([(scalar.into(), color)])
+            };
+            properties.insert(key.into(), json!(list));
+            commands.push(Command::NodeSet {
+                node_id: id.clone(),
+                properties,
+            });
+        }
+        Ok(commands)
+    }
+
     pub(super) fn fig_document_colors(
         &self,
         session: &str,
@@ -326,34 +469,7 @@ impl ToolRouter {
                     json!(first.map_or_else(|| "transparent".to_owned(), hex)),
                 );
             } else if domain == "effect" {
-                let shadows = list
-                    .iter()
-                    .filter(|effect| {
-                        matches!(effect["type"].as_str(), Some("dropShadow" | "innerShadow"))
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let sigma = list
-                    .iter()
-                    .filter(|effect| effect["type"] == "layerBlur" && effect["visible"] != false)
-                    .filter_map(|effect| effect["radius"].as_f64())
-                    .map(|radius| radius * radius)
-                    .sum::<f64>()
-                    .sqrt()
-                    .min(256.);
-                patch.insert("shadows".into(), json!(shadows));
-                patch.insert("blur".into(), json!(sigma));
-                let backdrop = list
-                    .iter()
-                    .filter(|effect| {
-                        effect["type"] == "backgroundBlur" && effect["visible"] != false
-                    })
-                    .filter_map(|effect| effect["radius"].as_f64())
-                    .map(|radius| radius * radius)
-                    .sum::<f64>()
-                    .sqrt()
-                    .min(256.);
-                patch.insert("backgroundBlur".into(), json!(backdrop));
+                patch.extend(effect_render_fields(&list));
                 if node.properties.contains_key("blurHidden") {
                     commands.push(Command::NodeUnset {
                         node_id: id.clone(),
@@ -368,6 +484,91 @@ impl ToolRouter {
         }
         Ok(json!({"ok":true}))
     }
+}
+
+fn native_entry(node: &Node, key: &str, entry: &Value) -> Result<Value> {
+    if key == "effects" {
+        if entry
+            .get("visible")
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err(EngineError::invalid("visible must be boolean"));
+        }
+        return effect(Some(entry), None);
+    }
+    let mut entry = paint(Some(entry), default_color(node.kind, key))?;
+    if key == "strokes" {
+        for (from, to, alias) in [
+            ("strokeWidth", "width", "thickness"),
+            ("strokeAlignment", "align", "alignment"),
+            ("strokeCap", "cap", "lineCap"),
+            ("strokeJoin", "join", "lineJoin"),
+            ("strokeDashArray", "dash", "dashes"),
+        ] {
+            if let Some(value) = node.properties.get(from)
+                && entry.get(to).is_none()
+                && entry.get(alias).is_none()
+            {
+                entry[to] = value.clone();
+            }
+        }
+        if entry
+            .get("width")
+            .or_else(|| entry.get("thickness"))
+            .is_some_and(|value| {
+                !value
+                    .as_f64()
+                    .is_some_and(|width| (0. ..=10_000.).contains(&width))
+            })
+        {
+            return Err(EngineError::invalid(
+                "stroke width must be between 0 and 10000",
+            ));
+        }
+        if entry
+            .get("dash")
+            .or_else(|| entry.get("dashes"))
+            .is_some_and(|value| {
+                !value.as_array().is_some_and(|dash| {
+                    dash.len().next_multiple_of(2) <= 128
+                        && dash.iter().all(|length| {
+                            length.as_f64().is_some_and(|length| {
+                                (length as f32).is_finite() && (length as f32) > 0.
+                            })
+                        })
+                })
+            })
+        {
+            return Err(EngineError::invalid(
+                "dash intervals must be positive, finite and bounded",
+            ));
+        }
+    }
+    Ok(entry)
+}
+
+fn effect_render_fields(list: &[Value]) -> Properties {
+    let shadows = list
+        .iter()
+        .filter(|effect| matches!(effect["type"].as_str(), Some("dropShadow" | "innerShadow")))
+        .cloned()
+        .collect::<Vec<_>>();
+    let blur = |kind| {
+        list.iter()
+            .filter(|effect| {
+                effect["type"] == kind && effect["visible"] != false && effect["hidden"] != true
+            })
+            .filter_map(|effect| effect["radius"].as_f64())
+            .map(|radius| radius * radius)
+            .sum::<f64>()
+            .sqrt()
+            .min(256.)
+    };
+    Properties::from([
+        ("shadows".into(), json!(shadows)),
+        ("blur".into(), json!(blur("layerBlur"))),
+        ("backgroundBlur".into(), json!(blur("backgroundBlur"))),
+    ])
 }
 
 fn color(value: &Value) -> Option<Color> {
@@ -626,7 +827,9 @@ fn effect_stack(node: &Node) -> Vec<Value> {
         .cloned()
         .unwrap_or_default();
     for shadow in &mut effects {
-        if shadow.is_object() {
+        if shadow.is_object()
+            && !matches!(shadow["type"].as_str(), Some("dropShadow" | "innerShadow"))
+        {
             shadow["type"] = if shadow["style"] == "inner" {
                 json!("innerShadow")
             } else {

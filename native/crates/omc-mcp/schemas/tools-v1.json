@@ -329,9 +329,12 @@
             "open",
             "join",
             "merge",
-            "primitive"
+            "primitive",
+            "reverse"
           ]
         },
+        "contour": {"type": "integer", "minimum": 0},
+        "smooth": {"type": "boolean"},
         "otherId": {
           "type": "string"
         },
@@ -703,7 +706,7 @@
   },
   {
     "name": "batch",
-    "description": "Apply 1–100 supported writes atomically as one agent operation. Requires explicit documentId; never targets the visible tab implicitly.",
+    "description": "Apply 1–100 supported writes atomically to one explicit document. Named steps can include create_board, create_shape, duplicate, component creation or instancing, and board sticky or connector creation. Later node-ID arguments and ids array entries accept {from: step name, field: id}. namedResults returns each named root node ID.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -722,12 +725,21 @@
                   "delete",
                   "create_board",
                   "create_shape",
+                  "board",
+                  "prototype",
+                  "component",
                   "edit_shapes",
                   "edit_text",
                   "styles",
                   "libraries",
                   "document_assets"
                 ]
+              },
+              "as": {
+                "type": "string",
+                "description": "Unique name for the root node created by this step.",
+                "minLength": 1,
+                "maxLength": 64
               },
               "args": {
                 "type": "object",
@@ -742,6 +754,11 @@
           },
           "minItems": 1,
           "maxItems": 100
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Apply only if the document is still at this revision."
         },
         "documentId": {
           "type": "string",
@@ -910,9 +927,19 @@
             "set_property",
             "reset",
             "detach",
-            "axes"
+            "axes",
+            "slot_create",
+            "slot_remove",
+            "slot_insert",
+            "slot_reset",
+            "slot_list",
+            "swap"
           ]
         },
+        "slot": {"type": "string", "minLength": 1, "maxLength": 200},
+        "preferred": {"type": "array", "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 200}},
+        "replace": {"type": "boolean"},
+        "index": {"type": "integer", "minimum": 0},
         "variantProperties": {
           "type": "array",
           "items": {
@@ -1000,6 +1027,8 @@
     "inputSchema": {
       "type": "object",
       "properties": {
+        "family": {"type": "string", "minLength": 1, "maxLength": 256},
+        "style": {"type": "string", "minLength": 1, "maxLength": 256},
         "query": {
           "type": "string"
         },
@@ -2052,7 +2081,7 @@
   },
   {
     "name": "edit_shapes",
-    "description": "Atomically edit explicit layers using native inspector properties, structure, geometry, layout or arrangement operations. Never uses the human selection. Requires explicit documentId; never targets the visible tab implicitly.",
+    "description": "Atomically edit explicit layers using native inspector properties, structure, geometry, layout, arrangement or indexed paint and effect operations. Never uses the human selection. Requires explicit documentId; never targets the visible tab implicitly.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2073,7 +2102,8 @@
             "translate",
             "resize",
             "rotate",
-            "layout"
+            "layout",
+            "appearance"
           ]
         },
         "ids": {
@@ -2086,6 +2116,20 @@
           "minItems": 1,
           "maxItems": 200
         },
+        "appearance": {
+          "type": "object",
+          "description": "Use zero-based stack indices. Insert also accepts the stack length; move uses the final index. Detach a linked appearance style before editing its stack.",
+          "properties": {
+            "stack": {"type": "string", "enum": ["fills", "strokes", "effects"]},
+            "operation": {"type": "string", "enum": ["insert", "replace", "remove", "move"]},
+            "index": {"type": "integer", "minimum": 0, "maximum": 128},
+            "to": {"type": "integer", "minimum": 0, "maximum": 128},
+            "entry": {"type": "object", "additionalProperties": true}
+          },
+          "required": ["stack", "operation", "index"],
+          "additionalProperties": false
+        },
+        "revision": {"type": "integer", "minimum": 0},
         "properties": {
           "type": "object",
           "properties": {
@@ -3102,7 +3146,7 @@
   },
   {
     "name": "edit_text",
-    "description": "Edit rich text ranges and paragraph styles, or find and replace text while preserving unaffected runs. Requires explicit documentId; never targets the visible tab implicitly.",
+    "description": "Edit rich text ranges and paragraph styles, find and replace text, or attach editable text to a copy of an explicit vector outline. Requires explicit documentId; never targets the visible tab implicitly.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3117,9 +3161,15 @@
             "replace",
             "range_style",
             "paragraph_style",
-            "find_replace"
+            "find_replace",
+            "path_attach",
+            "path_options",
+            "path_detach"
           ]
         },
+        "pathId": {"type": "string", "minLength": 1, "maxLength": 200},
+        "start": {"type": "number", "minimum": 0, "maximum": 1},
+        "flip": {"type": "boolean"},
         "revision": {
           "type": "integer",
           "minimum": 0
@@ -3419,9 +3469,17 @@
             "enable",
             "remove",
             "insert",
-            "export"
+            "export",
+            "publish",
+            "publication",
+            "link_source",
+            "check_updates",
+            "refresh"
           ]
         },
+        "sourceDocumentId": {"type": "string", "minLength": 1, "maxLength": 128},
+        "expectedVersion": {"type": "integer", "minimum": 1},
+        "description": {"type": "string", "maxLength": 4000},
         "id": {
           "type": "string",
           "minLength": 1,
@@ -3466,7 +3524,7 @@
   },
   {
     "name": "document_assets",
-    "description": "Manage embedded images, SVG and font assets. Sources must be embedded data URLs; no implicit filesystem or network fetch. Requires explicit documentId; never targets the visible tab implicitly.",
+    "description": "Manage embedded images, SVG and font assets. Sources must be embedded data URLs; no implicit filesystem or network fetch. Requires explicit documentId. For inspect_original or download_original, supply exactly one catalog id or nodeId. A zero-based index selects a font face or image fill. Download returns a session-scoped native_result ID.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3476,7 +3534,9 @@
             "list",
             "add",
             "remove",
-            "place"
+            "place",
+            "inspect_original",
+            "download_original"
           ]
         },
         "id": {
@@ -3484,6 +3544,8 @@
           "minLength": 1,
           "maxLength": 200
         },
+        "nodeId": {"type": "string", "minLength": 1, "maxLength": 200},
+        "index": {"type": "integer", "minimum": 0, "maximum": 999},
         "kind": {
           "type": "string",
           "enum": [
@@ -3806,6 +3868,7 @@
     "inputSchema": {
       "type": "object",
       "properties": {
+        "vdCompat": {"type": "string", "enum": ["bestEffort", "exact", "ignore"]},
         "format": {
           "type": "string",
           "enum": [
@@ -3814,6 +3877,7 @@
             "jpg",
             "webp",
             "pdf",
+            "xml",
             "json",
             "html"
           ]
@@ -3984,7 +4048,7 @@
   },
   {
     "name": "create_document",
-    "description": "Create and bind a blank local canvas, optionally named with 1–120 characters. focus defaults to false; true reveals its tab. Returns its saved document ID and context.",
+    "description": "Create and bind a local canvas. Supply a starterId from workspace design_starters for a bundled editable design, or omit it for a blank canvas. focus defaults to false; true reveals its tab. Returns its saved document ID and context.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3998,6 +4062,7 @@
           "type": "boolean",
           "default": false
         },
+        "starterId": {"type": "string", "minLength": 1, "maxLength": 80},
         "sample": {
           "type": "boolean"
         }
@@ -4063,7 +4128,7 @@
   },
   {
     "name": "workspace",
-    "description": "Inspect tabs, focus or close an explicit document, show the library, inspect public connection/app information, control the app window or request a saved quit. Closing may release only this caller’s binding.",
+    "description": "Inspect tabs, focus or close an explicit document, show the library, list design starters, inspect public connection/app information, control the app window or request a saved quit. Closing may release only this caller’s binding.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4079,6 +4144,7 @@
             "window",
             "quit",
             "capabilities",
+            "design_starters",
             "sample_color"
           ]
         },
@@ -4216,7 +4282,7 @@
   },
   {
     "name": "import_document",
-    "description": "Import editable HTML with design CSS, .omc, or canvas JSON from a bounded payload or explicit absolute local file path; .fig and .sketch require filePath without a dialog. Opening stays in the background by default.",
+    "description": "For a bounded rendered browser capture JSON with editable elements, use web-capture. Import editable HTML with design CSS, .omc, or canvas JSON from a bounded payload or explicit absolute local file path; .fig and .sketch require filePath without a dialog. Opening stays in the background by default.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4227,7 +4293,9 @@
             "json",
             "html",
             "fig",
-            "sketch"
+            "sketch",
+            "web-capture",
+            "figcraft"
           ]
         },
         "mode": {
@@ -4266,7 +4334,7 @@
   },
   {
     "name": "export_document",
-    "description": "Export a targeted canvas to typed content or an explicit absolute file path. For OMC, mode merge exports the native causal history. Existing files are preserved unless overwrite is explicitly true.",
+    "description": "Export a targeted canvas to typed content or an explicit absolute file path. For OMC, mode merge exports the native causal history. For PDF, pdfFrameIds exports one page per visible frame in supplied order, including frames across document pages. Existing files are preserved unless overwrite is explicitly true.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4276,6 +4344,7 @@
           "maxLength": 36,
           "pattern": "^[a-f0-9-]{36}$"
         },
+        "vdCompat": {"type": "string", "enum": ["bestEffort", "exact", "ignore"]},
         "format": {
           "type": "string",
           "enum": [
@@ -4286,8 +4355,16 @@
             "jpg",
             "webp",
             "pdf",
+            "xml",
             "html"
           ]
+        },
+        "pdfFrameIds": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1, "maxLength": 200},
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true
         },
         "filePath": {
           "type": "string",
@@ -4520,6 +4597,20 @@
         "action",
         "documentId"
       ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "measure",
+    "description": "Measure spacing or container margins between two layers on the selected page, using world-space pixel bounds. Requires an explicit documentId.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "documentId": {"type": "string", "minLength": 36, "maxLength": 36, "pattern": "^[a-f0-9-]{36}$"},
+        "from": {"type": "string", "minLength": 1, "maxLength": 200},
+        "to": {"type": "string", "minLength": 1, "maxLength": 200}
+      },
+      "required": ["documentId", "from", "to"],
       "additionalProperties": false
     }
   }

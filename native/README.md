@@ -37,7 +37,7 @@ Validated atomic commands, durable idempotency, scoped Undo, immutable query cut
 
 ## MCP connection and collaboration preview
 
-Build or bundle `omc-cli` and `omc-service` beside `omc-desktop`. **MCP → Copy MCP configuration** produces two stdio entries for the current native profile. The OMC entry uses the existing tool schemas. The separate `--dialect figcraft` entry exposes the 643 command IDs from FigCraft v0.17.0. Headless workflows include native layer and text editing, catalog data, component operations, document branches and versions, exports, and metered Wasm plugins. Window and pointer commands use an attached desktop. The copied config contains executable and profile paths only.
+Build or bundle `omc-cli` and `omc-service` beside `omc-desktop`. **MCP → Copy MCP configuration** produces one OMC stdio entry for the current native profile. Headless workflows include layer and text editing, design systems, reviews, exports, and metered Wasm plugins. Presentation controls use an attached desktop. Clients using the compatible command protocol can explicitly register a separate entry with `--dialect figcraft`. The generated configuration contains executable and profile paths only.
 
 FigCraft v1 archive interchange supports the portable subset of layers and document properties. Use a separate native `.omc` destination when saving OMC-only catalog data from an imported FigCraft file. See [MCP parity](../docs/MCP_PARITY.md) for native history packages and Electron document migration.
 

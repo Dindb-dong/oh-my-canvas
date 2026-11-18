@@ -1,13 +1,13 @@
 # MCP capability map
 
-The shared OMC catalog contains 50 tools: 37 editor tools and 13 workspace tools. The Rust service adds 9 `native_*` extensions for **59 OMC-dialect MCP tools**. Its separate FigCraft-compatible dialect exposes **19 MCP tools**, with **643 command IDs** behind the command interface; command IDs are not separate MCP tools. Existing tools keep their names. `workspace({action:"capabilities"})` returns the actual catalog, targeting requirements, file limits and platform availability for the running build. Reconnect clients that cache an older tool list after updating the app.
+The default OMC catalog includes the shared editor and workspace tools, native design operations and versioned `native_*` extensions. The optional FigCraft-compatible endpoint supports clients using its command interface. Existing tools keep their names. `workspace({action:"capabilities"})` returns the actual catalog, targeting requirements, file limits and platform availability for the running build. Reconnect clients that cache an older tool list after updating the app.
 
 MCP exposes semantic operations: creating a path replaces drawing gestures, a typed value replaces an inspector dialog, and a returned payload replaces a clipboard export. It does not need to click a toolbar or open a picker to do the underlying work. The public schemas returned by `tools/list` are authoritative for arguments.
 
 | App capability | MCP operation |
 |---|---|
 | Canvas library, search, favorites and sorting | `list_documents`, `preferences` |
-| Blank/sample creation, open, click-title rename, duplicate | `create_document` (`sample` optional), `open_document`, `rename_document`, `duplicate_document` |
+| Blank/sample/starter creation, open, rename, duplicate | `create_document` (`sample` or `starterId` optional), `open_document`, `rename_document`, `duplicate_document` |
 | Save, close/release, focus, library and deletion | `save_document`, `workspace`, `delete_document` |
 | Pages and page guides | `page` list/create/rename/duplicate/delete/reorder/update; `select_page` |
 | All drawing primitives, freehand, paths, text and images | `create_shape`, `write_html`, `write_svg` |
@@ -17,11 +17,16 @@ MCP exposes semantic operations: creating a path replaces drawing gestures, a ty
 | Flex/grid, tracks, sizing, constraints, grid cells, frame guides/grids | Native `properties` and `edit_shapes` layout |
 | Rich text runs, paragraph/list formatting and find/replace | `edit_text`; detailed `get_tree` returns native properties |
 | Path nodes, handles, contours, join/merge and polygon/star primitives | `get_path`, `edit_path` with a fresh revision |
-| Boolean operations and source-preserving outlines | `boolean`, `outline` |
+| Boolean operations, vector regions and source-preserving outlines | `boolean`, `shape_builder`, `outline` |
+| Text along an editable curve and data-filled template copies | `edit_text` path actions, `data_fill` |
 | Image crop/fit/adjustments, background removal/restoration | Native image properties and `image` |
 | Components, variants, axes, typed properties and instances | `components`, `component`, including action `axes` |
 | Shared styles, usage, apply/detach | `styles` |
-| Linked library import/update/enable/unlink/export/instances | `libraries` |
+| Linked library publish/import/refresh/enable/unlink/export/instances | `libraries` |
+| Editable tables, stickies, connectors and mind maps | `board` |
+| Flows, conditional/delayed interactions, slides and playback | `prototype` |
+| Scoped handoff, review threads and change cursors | `native_handoff`, `native_comments` |
+| Keyframes, procedural stripes, PNG samples and local MP4 encoding | `native_motion` |
 | Local image/SVG/font import, listing and placement | `document_assets`, `import_resource` |
 | Optional provider search and font catalog | Existing `assets`, `fonts`; no hosted provider is implied |
 | Cut/copy/paste/here/in-place/replace and property transfer | `clipboard`, with private agent state or explicit payload |
@@ -52,7 +57,7 @@ Closing with `workspace({action:"close",documentId})` saves and releases this ca
 
 ## Files and repeatable output
 
-`import_document` accepts exactly one inline payload or explicit absolute local `filePath`. JSON, Figma `.fig`, and Sketch `.sketch` imports create independent canvases. The binary design formats require `filePath`; conversion warnings are returned. OMC defaults to identity-preserving merge, refusing an in-use target; `mode:"copy"` creates an independent canvas. `focus` defaults to false. `import_resource` ingests a local image/SVG/font/library; place the returned asset separately.
+`import_document` accepts exactly one inline payload or explicit absolute local `filePath`. JSON, supported Figma `.fig`, Sketch `.sketch`, FigCraft archives, and web capture bundles import into independent canvases. The binary design formats require `filePath`; conversion warnings are returned. OMC defaults to identity-preserving merge, refusing an in-use target; `mode:"copy"` creates an independent canvas. `focus` defaults to false. `import_resource` ingests a local image/SVG/font/library; place the returned asset separately.
 
 `export_selection` returns typed UTF-8 or base64 content. `export_document` returns base64 or writes an explicit path. Layer export IDs are explicit, or omitted desktop export scope is the entire active page; human selection never chooses the output. Raster/PDF export requires one explicit layer when a page contains multiple roots. Full OMC preserves the editable document, embedded assets and merge history.
 

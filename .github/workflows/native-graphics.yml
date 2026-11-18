@@ -1,7 +1,7 @@
 name: Native graphics
 on:
   pull_request:
-    paths: ['native/**', '.github/workflows/native-graphics.yml']
+    paths: ['native/**', 'browser-capture/**', 'package*.json', '.github/workflows/native-graphics.yml']
 permissions:
   contents: read
 jobs:
@@ -23,17 +23,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
-      - run: cargo test --manifest-path native/Cargo.toml --locked -p omc-text -p omc-layout -p omc-scene -p omc-render -p omc-import -p omc-export -p omc-mcp -p omc-desktop
+      - run: cargo test --manifest-path native/Cargo.toml --locked --no-fail-fast -p omc-text -p omc-layout -p omc-scene -p omc-render -p omc-import -p omc-export -p omc-mcp -p omc-desktop
       - name: Native service and stdio bridge
         run: cargo build --manifest-path native/Cargo.toml --locked -p omc-service -p omc-cli
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Official MCP SDK test dependency
-        run: npm install --prefix "${{ runner.temp }}/omc-mcp-sdk" --ignore-scripts --no-audit --no-fund "@modelcontextprotocol/sdk@1.32.2" "ws@8.21.0"
+      - name: Install locked SDK and browser test dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install Chromium for browser capture tests
+        run: npx playwright install --no-shell chromium ${{ runner.os == 'Linux' && '--with-deps' || '' }}
+      - name: Register Chromium executable
+        run: >-
+          node --input-type=module -e "import { chromium } from 'playwright';
+          import { accessSync, appendFileSync } from 'node:fs';
+          const chromiumPath = chromium.executablePath(); accessSync(chromiumPath);
+          appendFileSync(process.env.GITHUB_ENV, 'OMC_CAPTURE_CHROME_BINARY=' + chromiumPath + '\n');"
       - name: Official MCP client contracts
-        env:
-          OMC_TEST_SDK_ROOT: ${{ runner.temp }}/omc-mcp-sdk/node_modules/@modelcontextprotocol/sdk
         run: >-
           node --test --test-concurrency=2 native/tests/mcp.e2e.mjs
           native/tests/mcp-replica-import.e2e.mjs
@@ -46,3 +52,7 @@ jobs:
           native/tests/figcraft-text.e2e.mjs
           native/tests/figcraft-server.e2e.mjs
           native/tests/mcp.figcraft-files.e2e.mjs
+          native/tests/mcp.browser-picker.e2e.mjs
+          native/tests/mcp.web-capture.e2e.mjs
+          native/tests/mcp.system.e2e.mjs
+          native/tests/mcp.presentation.e2e.mjs

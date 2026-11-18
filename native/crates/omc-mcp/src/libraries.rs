@@ -1,5 +1,6 @@
 //! Embedded library definitions keep stable native identities across source updates.
 use super::*;
+use crate::figcraft_catalog::library_ops;
 use omc_model::{NodeKind, new_id, rank_between};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -25,12 +26,29 @@ impl ToolRouter {
         &self,
         session: &str,
         id: &str,
-        args: Value,
+        mut args: Value,
         meta: Value,
     ) -> Result<Value> {
         let snapshot = self.workspace.snapshot(id)?;
         let entries = resources::catalogs(&snapshot.metadata, "libraries");
-        let action = string(&args, "action")?;
+        let action = string(&args, "action")?.to_owned();
+        let action = action.as_str();
+        if action == "publish" {
+            let (publication, command) = library_ops::publication(&snapshot, &args)?;
+            return self.submit_with_output(
+                session,
+                id,
+                command,
+                &meta,
+                Some(snapshot.sequence),
+                Properties::from([("publication".into(), library_ops::summary(&publication))]),
+            );
+        }
+        if action == "publication" {
+            let publication = library_ops::published(&snapshot.metadata)
+                .ok_or_else(|| EngineError::invalid("document has no published library"))?;
+            return Ok(json!({"ok":true,"publication":library_ops::summary(publication)}));
+        }
         if action == "list" {
             return Ok(
                 json!({"ok":true,"libraries":entries.values().map(public_library).collect::<Vec<_>>()}),
@@ -54,6 +72,9 @@ impl ToolRouter {
                 .filter(|entry| entry["enabled"] != false)
                 .ok_or_else(|| EngineError::invalid("library unavailable or disabled"))?;
             let component = string(&args, "componentId")?;
+            if library["snapshot"]["components"][component]["published"] == false {
+                return Err(EngineError::invalid("library component is not published"));
+            }
             let root = library["componentMap"][component]
                 .as_str()
                 .ok_or_else(|| EngineError::invalid("library component not found"))?;
@@ -111,11 +132,73 @@ impl ToolRouter {
                 Some(snapshot.sequence),
             );
         }
-        if !matches!(action, "add" | "update") {
+        let existing = entries.get(&library_id);
+        let mut source_document = None;
+        if matches!(action, "link_source" | "check_updates" | "refresh") {
+            let source_id = if action == "link_source" {
+                let source_id = external_id(&native_id(string(&args, "sourceDocumentId")?)?);
+                if entries
+                    .values()
+                    .any(|library| library["sourceDocumentId"] == source_id)
+                    || existing.is_some()
+                {
+                    return Err(EngineError::new("conflict", "library is already linked"));
+                }
+                source_id
+            } else {
+                existing
+                    .and_then(|library| library["sourceDocumentId"].as_str())
+                    .ok_or_else(|| EngineError::invalid("document-linked library not found"))?
+                    .to_owned()
+            };
+            let native_source = native_id(&source_id)?;
+            if native_source == id {
+                return Err(EngineError::invalid(
+                    "cannot link a document to its own library",
+                ));
+            }
+            let source_snapshot = self.workspace.snapshot(&native_source)?;
+            let publication = library_ops::published(&source_snapshot.metadata)
+                .ok_or_else(|| EngineError::invalid("source document has no published library"))?;
+            let version = publication["version"]
+                .as_u64()
+                .ok_or_else(|| EngineError::invalid("source publication version missing"))?;
+            let installed = existing.and_then(|library| library["version"].as_u64());
+            if let Some(entry) = existing
+                && (entry["snapshot"]["id"] != publication["id"]
+                    || installed.is_some_and(|old| old > version))
+            {
+                return Err(EngineError::new(
+                    "conflict",
+                    "source publication changed identity or moved backwards",
+                ));
+            }
+            if args["expectedVersion"]
+                .as_u64()
+                .is_some_and(|expected| expected != version)
+            {
+                return Err(EngineError::new(
+                    "conflict",
+                    "source publication version changed",
+                ));
+            }
+            if action == "check_updates" || installed == Some(version) {
+                return Ok(json!({
+                    "ok":true, "id":library_id, "sourceDocumentId":source_id,
+                    "installedVersion":installed, "availableVersion":version,
+                    "updateAvailable":installed.is_none_or(|old| old < version)
+                }));
+            }
+            source_document = Some(source_id);
+            args["snapshot"] = publication.clone();
+        } else if !matches!(action, "add" | "update") {
             return Err(EngineError::invalid("unknown library action"));
-        }
-        if action == "update" && !entries.contains_key(&library_id) {
+        } else if action == "update" && existing.is_none() {
             return Err(EngineError::invalid("library not found"));
+        } else if existing.is_some_and(|library| library["sourceDocumentId"].is_string()) {
+            return Err(EngineError::invalid(
+                "use refresh for document-linked libraries",
+            ));
         }
         let source = args["snapshot"]
             .as_object()
@@ -177,6 +260,20 @@ impl ToolRouter {
             }
             component_map.insert(key.clone(), native.clone());
         }
+        let variant_sets: BTreeMap<_, _> = objects
+            .iter()
+            .filter(|(_, object)| {
+                object["type"] == "frame" && object["properties"]["isVariantSet"] == true
+            })
+            .map(|(key, _)| (key.clone(), mapping[key].clone()))
+            .collect();
+        let source_parent = |key: &str| {
+            let parent = objects[key]["parentId"].as_str()?;
+            if definition_roots.contains_key(key) && !variant_sets.contains_key(parent) {
+                return None;
+            }
+            mapping.contains_key(parent).then_some(parent)
+        };
         let mut token_map = BTreeMap::new();
         let mut collection_map = BTreeMap::new();
         if let Some(collections) = source.get("collections").and_then(Value::as_object) {
@@ -249,11 +346,7 @@ impl ToolRouter {
         while !remaining.is_empty() {
             let key = remaining
                 .iter()
-                .find(|key| {
-                    let parent = objects[*key]["parentId"].as_str();
-                    definition_roots.contains_key(*key)
-                        || parent.is_none_or(|p| !mapping.contains_key(p) || installed.contains(p))
-                })
+                .find(|key| source_parent(key).is_none_or(|parent| installed.contains(parent)))
                 .cloned()
                 .ok_or_else(|| EngineError::invalid("cyclic library objects"))?;
             remaining.remove(&key);
@@ -285,15 +378,10 @@ impl ToolRouter {
             };
             let mut node = Node::new(kind);
             node.id = mapping[&key].clone();
-            node.parent_id = Some(if definition_roots.contains_key(&key) {
-                container_id.clone()
-            } else {
-                object["parentId"]
-                    .as_str()
-                    .and_then(|p| mapping.get(p))
-                    .cloned()
-                    .unwrap_or(container_id.clone())
-            });
+            node.parent_id = Some(
+                source_parent(&key)
+                    .map_or_else(|| container_id.clone(), |parent| mapping[parent].clone()),
+            );
             node.rank = object["rank"]
                 .as_str()
                 .filter(|rank| omc_model::valid_rank(rank))
@@ -358,8 +446,45 @@ impl ToolRouter {
             {
                 node.properties.insert(
                     "componentPropertyDefinitions".into(),
-                    library_component_properties(properties, &component_map)?,
+                    library_component_properties(
+                        properties,
+                        &component_map,
+                        &mapping,
+                        &variant_sets,
+                    )?,
                 );
+            }
+            if let Some(mapped) = node
+                .properties
+                .get("variantSetId")
+                .and_then(Value::as_str)
+                .and_then(|id| variant_sets.get(id))
+            {
+                node.properties.insert("variantSetId".into(), json!(mapped));
+            }
+            for key in ["slotContentFor", "slotInstanceFor"] {
+                if let Some(target) = node.properties.get(key).and_then(Value::as_str)
+                    && let Some(mapped) = mapping.get(target)
+                {
+                    node.properties.insert(key.into(), json!(mapped));
+                }
+            }
+            if let Some(replacements) = node
+                .properties
+                .get_mut("slotReplacements")
+                .and_then(Value::as_object_mut)
+            {
+                *replacements = std::mem::take(replacements)
+                    .into_iter()
+                    .map(|(key, value)| {
+                        let mapped = key
+                            .split('/')
+                            .map(|part| mapping.get(part).map_or(part, String::as_str))
+                            .collect::<Vec<_>>()
+                            .join("/");
+                        (mapped, value)
+                    })
+                    .collect();
             }
             for reference in [
                 "fillStyleId",
@@ -469,14 +594,58 @@ impl ToolRouter {
             .get(&library_id)
             .and_then(|entry| entry["nodeIds"].as_array())
         {
-            let obsolete = old
+            let obsolete: BTreeSet<_> = old
                 .iter()
                 .filter_map(Value::as_str)
                 .filter(|id| !native_ids.contains(*id) && snapshot.nodes.contains_key(*id))
+                .collect();
+            let definitions: BTreeSet<_> = obsolete
+                .iter()
+                .copied()
+                .filter(|id| {
+                    let node = &snapshot.nodes[*id];
+                    node.kind == NodeKind::Component || library_ops::is_library_variant_set(node)
+                })
+                .collect();
+            for node in snapshot
+                .nodes
+                .values()
+                .filter(|node| !definitions.is_empty() && !obsolete.contains(node.id.as_str()))
+            {
+                if [
+                    "componentId",
+                    "componentProperties",
+                    "propertyValues",
+                    "componentOverrides",
+                    "overrides",
+                    "componentPropertyDefinitions",
+                ]
+                .iter()
+                .filter_map(|key| node.properties.get(*key))
+                .any(|value| references_removed_definition(value, &definitions))
+                {
+                    return Err(EngineError::new(
+                        "conflict",
+                        format!(
+                            "Library update would remove a component still referenced by layer {}",
+                            node.id
+                        ),
+                    ));
+                }
+            }
+            let roots: Vec<_> = obsolete
+                .iter()
+                .copied()
+                .filter(|id| {
+                    snapshot.nodes[*id]
+                        .parent_id
+                        .as_deref()
+                        .is_none_or(|parent| !obsolete.contains(parent))
+                })
                 .map(str::to_owned)
-                .collect::<Vec<_>>();
-            if !obsolete.is_empty() {
-                commands.push(Command::NodeDelete { node_ids: obsolete });
+                .collect();
+            if !roots.is_empty() {
+                commands.push(Command::NodeDelete { node_ids: roots });
             }
         }
         let enabled = entries
@@ -495,7 +664,7 @@ impl ToolRouter {
             entity_id: library_id.clone(),
             properties: properties(&json!({
                 "name":source.get("name"), "version":source.get("version"), "snapshot":source, "path":path,
-                "enabled":enabled, "deleted":false, "componentMap":component_map, "nodeIds":native_ids,
+                "enabled":enabled, "deleted":false, "sourceDocumentId":source_document, "componentMap":component_map, "nodeIds":native_ids,
                 "containerId":container_id, "styleMap":style_map, "collectionMap":collection_map, "variableMap":token_map,
             }))?,
         });
@@ -506,15 +675,23 @@ impl ToolRouter {
                 "library update exceeds ordinary transaction limit",
             ));
         }
-        let mut result = self.submit(
+        let mut output = Properties::from([("id".into(), library_id.into())]);
+        if let Some(source_id) = source_document {
+            output.insert("sourceDocumentId".into(), source_id.into());
+            output.insert(
+                "installedVersion".into(),
+                source.get("version").cloned().unwrap_or_default(),
+            );
+            output.insert("updateAvailable".into(), false.into());
+        }
+        self.submit_with_output(
             session,
             id,
             Command::Batch { commands },
             &meta,
             Some(snapshot.sequence),
-        )?;
-        result["id"] = library_id.into();
-        Ok(result)
+            output,
+        )
     }
 }
 
@@ -541,9 +718,24 @@ fn remap_token_refs(value: &mut Value, tokens: &BTreeMap<String, String>) {
     }
 }
 
+fn references_removed_definition(value: &Value, definitions: &BTreeSet<&str>) -> bool {
+    match value {
+        Value::String(id) => definitions.contains(id.as_str()),
+        Value::Array(items) => items
+            .iter()
+            .any(|item| references_removed_definition(item, definitions)),
+        Value::Object(items) => items
+            .values()
+            .any(|item| references_removed_definition(item, definitions)),
+        _ => false,
+    }
+}
+
 fn library_component_properties(
     properties: &Value,
     component_map: &BTreeMap<String, String>,
+    node_map: &BTreeMap<String, String>,
+    variant_sets: &BTreeMap<String, String>,
 ) -> Result<Value> {
     let properties = properties
         .as_array()
@@ -564,6 +756,28 @@ fn library_component_properties(
             return Err(EngineError::invalid("duplicate library component property"));
         }
         let kind = string(property, "type")?;
+        if kind == "slot" {
+            let layer = node_map
+                .get(string(property, "layer")?)
+                .ok_or_else(|| EngineError::invalid("library slot layer missing"))?;
+            let preferred = property["preferred"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|asset| {
+                    asset
+                        .as_str()
+                        .and_then(|id| component_map.get(id).or_else(|| variant_sets.get(id)))
+                        .cloned()
+                        .ok_or_else(|| {
+                            EngineError::invalid("library slot preferred component missing")
+                        })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            definitions
+                .push(json!({"id":id,"name":name,"type":kind,"layer":layer,"preferred":preferred}));
+            continue;
+        }
         let default =
             match (kind, &property["default"]) {
                 ("text", Value::String(text)) => json!(text),

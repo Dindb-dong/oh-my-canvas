@@ -20,6 +20,9 @@ mod legacy_read;
 mod legacy_view;
 mod libraries;
 mod mutations;
+mod native_motion;
+mod native_review;
+mod native_tokens;
 mod paths;
 mod resources;
 pub mod schema;
@@ -164,6 +167,21 @@ impl ToolRouter {
                 )
             }
             "create_document" => {
+                if let Some(starter) = args["starterId"].as_str() {
+                    if args["sample"] == true {
+                        return Err(EngineError::invalid("choose a sample or a design starter"));
+                    }
+                    let content = figcraft::starters::content(
+                        starter,
+                        args["title"].as_str(),
+                        "unknown design starter",
+                    )?;
+                    let title = content.title.clone();
+                    let snapshot = self.workspace.create(session, &title, Some(content))?;
+                    let mut result = self.context_from(session, &snapshot)?;
+                    result["starterId"] = starter.into();
+                    return Ok(result);
+                }
                 if args["sample"] == true {
                     // The Studio 01 sample from the Electron app, in its portable canvas form.
                     let title = args["title"].as_str().unwrap_or("Studio 01");
@@ -265,6 +283,8 @@ impl ToolRouter {
                     self.context(session, &id)?;
                 }
                 match name {
+                    "measure" => self.measure_layers(session, &id, &args),
+                    "data_fill" => self.native_data_fill(session, &id, &args, &meta),
                     "image" => self.image_operation(session, &id, &args, &meta),
                     "select_page" => {
                         let snapshot = self.workspace.snapshot(&id)?;
@@ -481,6 +501,9 @@ impl ToolRouter {
             );
         }
         if name == "fonts" {
+            if args.get("family").is_some() {
+                return self.native_font_details(&snapshot, args);
+            }
             let query = args["query"].as_str().unwrap_or_default().to_lowercase();
             let manager = skia_safe::FontMgr::default();
             let mut fonts = manager
@@ -721,7 +744,9 @@ impl ToolRouter {
                 _ => None,
             }
         }
-        if let Some(id) = catalog_id(&envelope.command) {
+        if output.get("id").is_none()
+            && let Some(id) = catalog_id(&envelope.command)
+        {
             output["id"] = id.into();
         }
         let (envelope, output) = if meta["oh-my-canvas/idempotency-key"].is_string() {
@@ -771,6 +796,7 @@ impl ToolRouter {
                 )
             }
             "capabilities" => Ok(extensions::capabilities()),
+            "design_starters" => Ok(json!({"ok":true,"starters":figcraft::starters::list()})),
             "about" => Ok(
                 json!({"name":"Oh My Canvas Native","version":"0.1.0","releaseStatus":"incomplete-preview","browserRuntime":false}),
             ),

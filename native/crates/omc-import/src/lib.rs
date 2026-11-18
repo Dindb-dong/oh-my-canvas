@@ -6,6 +6,7 @@ mod kiwi;
 mod native;
 mod sketch;
 mod svg;
+mod web_capture;
 pub use fig::{import_fig, import_fig_reader};
 pub use html::import_html;
 pub use native::import_json;
@@ -73,6 +74,9 @@ pub fn import_bytes(
     }
     if kind.eq_ignore_ascii_case("fig") {
         return import_fig(bytes, options);
+    }
+    if kind.eq_ignore_ascii_case("web-capture") {
+        return web_capture::import_web_capture(bytes, options);
     }
     let text = std::str::from_utf8(bytes)
         .map_err(|_| ImportError::Invalid("source is not UTF-8".into()))?;

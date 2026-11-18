@@ -6,22 +6,51 @@ const CELL_WIDTH: f64 = 160.;
 const CELL_HEIGHT: f64 = 40.;
 const HEADER: &str = "#f1efeb";
 
+type TextIds = Vec<Vec<Option<String>>>;
+
 pub(super) fn command(context: &Context, action: &str) -> Result<Value> {
     if action == "table" {
-        return create(context);
+        let root = &context.snapshot.nodes[&context.state.root];
+        let (id, cells, edits) = create(context.snapshot, root, context.params)?;
+        context.commit(edits)?;
+        select(context, &id);
+        return Ok(response(context.alias(&id), &cells, |id| context.alias(id)));
     }
-    let mut target = context.one()?;
+    let target = context.one()?;
+    let mut target = target.as_str();
     let table = loop {
-        let node = &context.snapshot.nodes[&target];
+        let node = &context.snapshot.nodes[target];
         if node.string(TYPE) == Some("table") {
             break node;
         }
         target = node
             .parent_id
-            .clone()
+            .as_deref()
             .ok_or_else(|| EngineError::invalid("Choose a table or a cell"))?;
     };
-    let row_nodes = children(context.snapshot, &table.id);
+    let operation = string(context.params, "action")?;
+    if matches!(operation, "inspect" | "set_cell") {
+        return Err(EngineError::invalid(
+            "action must be addRow, removeRow, addColumn or removeColumn",
+        ));
+    }
+    let (cells, edits) = edit(context.snapshot, table, context.params, operation)?;
+    context.commit(edits)?;
+    Ok(response(context.alias(&table.id), &cells, |id| {
+        context.alias(id)
+    }))
+}
+
+pub(super) fn edit(
+    snapshot: &DocumentSnapshot,
+    table: &Node,
+    params: &Value,
+    operation: &str,
+) -> Result<(TextIds, Vec<Command>)> {
+    if table.string(TYPE) != Some("table") {
+        return Err(EngineError::invalid("Choose a table"));
+    }
+    let row_nodes = children(snapshot, &table.id);
     let mut rows = row_nodes
         .into_iter()
         .filter(|node| node.string(TYPE) == Some("tableRow"))
@@ -30,7 +59,7 @@ pub(super) fn command(context: &Context, action: &str) -> Result<Value> {
     let mut cells = rows
         .iter()
         .map(|row| {
-            children(context.snapshot, &row.id)
+            children(snapshot, &row.id)
                 .into_iter()
                 .filter(|node| node.string(TYPE) == Some("tableCell"))
                 .cloned()
@@ -43,7 +72,7 @@ pub(super) fn command(context: &Context, action: &str) -> Result<Value> {
             cells
                 .iter()
                 .map(|cell| {
-                    children(context.snapshot, &cell.id)
+                    children(snapshot, &cell.id)
                         .into_iter()
                         .find(|node| node.kind == NodeKind::Text)
                         .map(|node| node.id.clone())
@@ -62,15 +91,14 @@ pub(super) fn command(context: &Context, action: &str) -> Result<Value> {
         ));
     }
     let mut edits = Vec::new();
-    let operation = string(context.params, "action")?;
     let old_width = table.number("width", CELL_WIDTH * columns as f64);
     let cell_width = old_width / columns as f64;
     let mut new_columns = columns;
     let index_for = |end: usize| -> Result<usize> {
-        if context.params["index"].is_null() {
+        if params["index"].is_null() {
             return Ok(end);
         }
-        let i = index(context.params, "index")?;
+        let i = index(params, "index")?;
         if i > end {
             return Err(EngineError::invalid(format!(
                 "index must be between 0 and {end}"
@@ -79,6 +107,25 @@ pub(super) fn command(context: &Context, action: &str) -> Result<Value> {
         Ok(i)
     };
     match operation {
+        "inspect" => return Ok((texts, edits)),
+        "set_cell" => {
+            let row = index(params, "row")?;
+            let column = index(params, "column")?;
+            let label = texts
+                .get(row)
+                .and_then(|cells| cells.get(column))
+                .and_then(Option::as_ref)
+                .and_then(|id| snapshot.nodes.get(id))
+                .ok_or_else(|| EngineError::invalid("Choose a cell with editable text"))?;
+            let text = cell_text(&params["text"])?;
+            if label.string("text") != Some(text) {
+                edits.push(Command::TextReplace {
+                    node_id: label.id.clone(),
+                    text: text.into(),
+                });
+            }
+            return Ok((texts, edits));
+        }
         "addRow" if rows.len() < MAX_ROWS => {
             let i = index_for(rows.len())?;
             let (row, new_cells, new_texts) = make_row(
@@ -132,20 +179,40 @@ pub(super) fn command(context: &Context, action: &str) -> Result<Value> {
         }
     }
     if new_columns != columns {
-        edits.push(context.patch(&table.id, "width", json!(new_columns as f64 * cell_width)));
+        edits.push(patch(
+            &table.id,
+            "width",
+            json!(new_columns as f64 * cell_width),
+        ));
     }
     for (index, row) in rows.iter().enumerate() {
         let fill = if index == 0 { HEADER } else { "transparent" };
         if row.string("fill") != Some(fill) {
-            edits.push(context.patch(&row.id, "fill", json!(fill)));
+            edits.push(patch(&row.id, "fill", json!(fill)));
         }
     }
-    context.commit(edits)?;
-    Ok(response(context, &table.id, &texts))
+    Ok((texts, edits))
 }
 
-fn create(context: &Context) -> Result<Value> {
-    let params = context.params;
+fn patch(id: &str, key: &str, value: Value) -> Command {
+    Command::NodeSet {
+        node_id: id.into(),
+        properties: Properties::from([(key.into(), value)]),
+    }
+}
+
+fn cell_text(value: &Value) -> Result<&str> {
+    value
+        .as_str()
+        .filter(|text| text.chars().count() <= 4096)
+        .ok_or_else(|| EngineError::invalid("Cells must be text of up to 4096 characters"))
+}
+
+pub(super) fn create(
+    snapshot: &DocumentSnapshot,
+    root: &Node,
+    params: &Value,
+) -> Result<(String, TextIds, Vec<Command>)> {
     let given = if params["cells"].is_null() {
         Vec::new()
     } else {
@@ -159,13 +226,7 @@ fn create(context: &Context) -> Result<Value> {
                     .filter(|row| row.len() <= MAX_COLUMNS)
                     .ok_or_else(|| EngineError::invalid("Each row must hold up to 20 text cells"))?
                     .iter()
-                    .map(|text| {
-                        text.as_str()
-                            .filter(|text| text.chars().count() <= 4096)
-                            .ok_or_else(|| {
-                                EngineError::invalid("Cells must be text of up to 4096 characters")
-                            })
-                    })
+                    .map(cell_text)
                     .collect::<Result<Vec<_>>>()
             })
             .collect::<Result<Vec<_>>>()?
@@ -195,11 +256,10 @@ fn create(context: &Context) -> Result<Value> {
         number(params, "x", (1440. - width) / 2.)?,
         number(params, "y", (900. - rows as f64 * CELL_HEIGHT) / 2.)?,
     );
-    let root = &context.snapshot.nodes[&context.state.root];
     let table = new_layer(
         NodeKind::Frame,
         root,
-        append_rank(context.snapshot, &root.id)?,
+        append_rank(snapshot, &root.id)?,
         json!({
             "name":"Table","x":x,"y":y,"width":width,"fill":"#ffffff","radius":4.,"clipContent":true,
             "boardItemType":"table","style":{"position":"absolute","display":"flex","flex-direction":"column"},
@@ -229,9 +289,7 @@ fn create(context: &Context) -> Result<Value> {
         )?;
         result.push(text_ids);
     }
-    context.commit(edits)?;
-    select(context, &table.id);
-    Ok(response(context, &table.id, &result))
+    Ok((table.id, result, edits))
 }
 
 fn rank_at(nodes: &[Node], i: usize) -> Result<String> {
@@ -310,14 +368,18 @@ fn make_cell(
     Ok((cell, label.id))
 }
 
-fn response(context: &Context, table: &str, cells: &[Vec<Option<String>>]) -> Value {
+pub(super) fn response<I: serde::Serialize>(
+    table: I,
+    cells: &[Vec<Option<String>>],
+    layer_id: impl Fn(&str) -> I,
+) -> Value {
     let ids = cells
         .iter()
         .map(|row| {
             row.iter()
-                .map(|cell| cell.as_ref().map(|id| context.alias(id)))
+                .map(|cell| cell.as_deref().map(&layer_id))
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    json!({"id":context.alias(table),"rows":cells.len(),"columns":cells.first().map_or(0,Vec::len),"cells":ids})
+    json!({"id":table,"rows":cells.len(),"columns":cells.first().map_or(0,Vec::len),"cells":ids})
 }

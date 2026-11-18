@@ -4,6 +4,7 @@ use omc_export::{ExportArtifact, ExportOptions};
 use omc_import::ImportOptions;
 use std::{io::Write, path::Path};
 
+pub(super) mod frame_pdf;
 mod replica;
 
 impl ToolRouter {
@@ -26,6 +27,24 @@ impl ToolRouter {
         strict: bool,
         job: Option<&omc_workspace::jobs::JobContext>,
     ) -> Result<(DocumentSnapshot, Value)> {
+        if format == "figcraft" {
+            let (content, page, _) = self.decode_figcraft_archive(bytes)?;
+            let page_id = content.pages[page].id.clone();
+            let imported = omc_import::ImportResult {
+                content,
+                resources: Vec::new(),
+                diagnostics: Vec::new(),
+                source_map: BTreeMap::new(),
+            };
+            let (snapshot, diagnostics) = self.publish_imported(session, imported, title, job)?;
+            self.states
+                .lock()
+                .unwrap()
+                .entry((session.into(), snapshot.id.clone()))
+                .or_default()
+                .page_id = page_id;
+            return Ok((snapshot, diagnostics));
+        }
         if format == "omc" {
             let value = serde_json::from_slice::<Value>(bytes)
                 .map_err(|error| EngineError::invalid(error.to_string()))?;
@@ -151,8 +170,20 @@ impl ToolRouter {
     }
 
     pub(crate) fn import_document(self: &Arc<Self>, session: &str, args: Value) -> Result<Value> {
+        let figcraft_archive = args["format"] == "figcraft";
+        let file_limit = if figcraft_archive {
+            crate::figcraft_file::MAX_FILE
+        } else {
+            64 * 1024 * 1024
+        };
         if let Some(path) = args["filePath"].as_str() {
             let size = std::fs::metadata(path).map_err(resources::io_error)?.len();
+            if figcraft_archive && size > file_limit as u64 {
+                return Err(EngineError::new(
+                    "resource_limit",
+                    "FigCraft archive exceeds 16 MiB",
+                ));
+            }
             if size > 4 * 1024 * 1024 {
                 let fig = args["format"]
                     .as_str()
@@ -188,7 +219,7 @@ impl ToolRouter {
                             return Ok(result);
                         }
                         let bytes =
-                            resources::read_explicit(string(&args, "filePath")?, 64 * 1024 * 1024)?;
+                            resources::read_explicit(string(&args, "filePath")?, file_limit)?;
                         job.check_cancelled()?;
                         router.import_tool_bytes(&session, &args, &bytes, Some(&job))
                     },
@@ -198,9 +229,20 @@ impl ToolRouter {
         let bytes = if let Some(payload) = args["payload"].as_str() {
             payload.as_bytes().to_vec()
         } else {
-            resources::read_explicit(string(&args, "filePath")?, 64 * 1024 * 1024)?
+            resources::read_explicit(string(&args, "filePath")?, file_limit)?
         };
         self.import_tool_bytes(session, &args, &bytes, None)
+    }
+
+    pub fn import_browser_capture(
+        self: &Arc<Self>,
+        session: &str,
+        title: Option<&str>,
+        bytes: &[u8],
+    ) -> Result<Value> {
+        self.workspace.session(session)?;
+        let args = json!({"format":"web-capture","title":title,"strict":false});
+        self.import_tool_bytes(session, &args, bytes, None)
     }
 
     fn import_tool_bytes(
@@ -485,6 +527,18 @@ impl ToolRouter {
         mut args: Value,
         job: Option<&omc_workspace::jobs::JobContext>,
     ) -> Result<Value> {
+        if args.get("vdCompat").is_some() && args["format"] != "xml" {
+            return Err(EngineError::invalid("vdCompat requires Android XML format"));
+        }
+        if args.get("pdfFrameIds").is_some() {
+            let (artifact, pages) = self.export_frame_pdf(session, id, &args, job)?;
+            if let Some(job) = job {
+                job.begin_commit()?;
+            }
+            let mut result = self.deliver_export(session, &args, artifact)?;
+            result["pages"] = json!(pages);
+            return Ok(result);
+        }
         if let Some(ids) = args["ids"].as_array() {
             let raw = ids
                 .iter()

@@ -57,7 +57,7 @@ impl ExtensionState {
     }
 }
 pub fn capabilities() -> Value {
-    json!({"protocol":"omc.native/1","releaseStatus":"incomplete-preview","browserRuntime":false,"legacyToolCount":50,"legacyParity":"incomplete","extensions":["identity.resume/1","workspace.organization/1","comments/1","tokens/1","code.static/1","query.snapshot/1","jobs/1"],"limits":{"mcpRequestBytes":1048576,"batchOperations":100,"queryPageNodes":200,"queryPageBytes":524288,"snapshotsPerSession":4,"snapshotIdleSeconds":60,"resultBytes":67108864},"qualification":{"databaseCommitKillTests":200,"installedOsInteraction":"NOT_RUN","fourHardwarePeers":"NOT_RUN","fullPerformanceWorkloads":"NOT_RUN"},"unsupported":["complete FIG/Sketch fidelity","full desktop capability matrix","complete 30 shader registry","large staged library updates","portable native history backup"]})
+    json!({"protocol":"omc.native/1","releaseStatus":"incomplete-preview","browserRuntime":false,"legacyToolCount":50,"legacyParity":"incomplete","extensions":["identity.resume/1","workspace.organization/1","comments/1","tokens/1","code.static/1","query.snapshot/1","jobs/1","plugins/1","motion/1","handoff/1"],"limits":{"mcpRequestBytes":1048576,"batchOperations":100,"queryPageNodes":200,"queryPageBytes":524288,"snapshotsPerSession":4,"snapshotIdleSeconds":60,"resultBytes":67108864},"qualification":{"databaseCommitKillTests":200,"installedOsInteraction":"NOT_RUN","fourHardwarePeers":"NOT_RUN","fullPerformanceWorkloads":"NOT_RUN"},"unsupported":["complete FIG/Sketch fidelity","full desktop capability matrix","complete 30 shader registry","large staged library updates","portable native history backup"]})
 }
 pub fn definitions() -> Vec<Value> {
     let defs = [
@@ -79,9 +79,12 @@ pub fn definitions() -> Vec<Value> {
         ),
         (
             "native_comments",
-            "Manage anchored comments with independent per-author comment Undo.",
+            "Manage anchored comments with independent per-author Undo. Use list_threads and get_thread to read filtered comments, and changes for a document-scoped cursor.",
         ),
-        ("native_tokens", "Manage typed design tokens and modes."),
+        (
+            "native_tokens",
+            "Author token collections, modes, aliases and layer bindings. Use inspect with documentId and id, plus optional nodeId, to read authored and effective values.",
+        ),
         (
             "native_job",
             "Submit, inspect or cancel bounded background imports/exports.",
@@ -95,7 +98,24 @@ pub fn definitions() -> Vec<Value> {
             "Export deterministic static React/CSS or Tailwind output.",
         ),
     ];
-    defs.into_iter().map(|(name,description)|json!({"name":name,"description":description,"inputSchema":{"type":"object","properties":{"version":{"type":"string","enum":["1"]},"action":{"type":"string"},"documentId":{"type":"string"},"id":{"type":"string"},"cursor":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":200},"targetEpoch":{"type":"string"},"idempotencyKey":{"type":"string"},"title":{"type":"string"},"parentId":{"type":["string","null"]},"folderId":{"type":["string","null"]},"body":{"type":"string"},"threadId":{"type":"string"},"nodeId":{"type":"string"},"start":{"type":"integer"},"end":{"type":"integer"},"resolved":{"type":"boolean"},"patch":{"type":"object"},"value":{},"name":{"type":"string"},"type":{"type":"string"},"modes":{"type":"object"},"activeMode":{"type":"string"},"property":{"type":"string"},"jobId":{"type":"string"},"kind":{"type":"string"},"arguments":{"type":"object"},"resultId":{"type":"string"},"offset":{"type":"integer"},"length":{"type":"integer"},"format":{"type":"string"}},"required":["version"],"additionalProperties":false}})).collect()
+    defs.into_iter().map(|(name,description)|json!({"name":name,"description":description,"inputSchema":{"type":"object","properties":{"version":{"type":"string","enum":["1"]},"action":{"type":"string"},"documentId":{"type":"string"},"id":{"type":"string"},"cursor":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":200},"targetEpoch":{"type":"string"},"idempotencyKey":{"type":"string"},"title":{"type":"string"},"parentId":{"type":["string","null"]},"folderId":{"type":["string","null"]},"body":{"type":"string"},"threadId":{"type":"string"},"nodeId":{"type":"string"},"start":{"type":"integer"},"end":{"type":"integer"},"resolved":{"type":"boolean"},"patch":{"type":"object"},"value":{},"name":{"type":"string"},"type":{"type":"string"},"modes":{"type":"object"},"activeMode":{"type":"string"},"property":{"type":"string"},"jobId":{"type":"string"},"kind":{"type":"string"},"arguments":{"type":"object"},"resultId":{"type":"string"},"offset":{"type":"integer"},"length":{"type":"integer"},"format":{"type":"string"}},"required":["version"],"additionalProperties":false}})).map(|mut definition| {
+        if definition["name"] == "native_comments" {
+            definition["inputSchema"]["properties"]["authorId"] = json!({"type":"string","minLength":1,"maxLength":200});
+        } else if definition["name"] == "native_tokens" {
+            let props = &mut definition["inputSchema"]["properties"];
+            props["mode"] = json!({"anyOf":[{"type":"string","minLength":1,"maxLength":256},{"type":"null"}]});
+            props["modeNames"] = json!({"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","minLength":1,"maxLength":256}});
+            props["collectionId"] = json!({"type":"string","minLength":1,"maxLength":128});
+            props["fromMode"] = json!({"type":"string","minLength":1,"maxLength":256});
+            props["index"] = json!({"type":"integer","minimum":0,"maximum":63});
+            props["description"] = json!({"type":"string","maxLength":4000});
+        }
+        definition
+    }).chain([
+        figcraft::plugins::native_definition(),
+        native_motion::definition(),
+        ToolRouter::native_handoff_definition(),
+    ]).collect()
 }
 impl ToolRouter {
     pub(crate) fn extension(
@@ -118,6 +138,15 @@ impl ToolRouter {
         }
         if name == "native_capabilities" {
             return Ok(capabilities());
+        }
+        if name == "native_handoff" {
+            return self.native_handoff(session, &args, &meta);
+        }
+        if name == "native_motion" {
+            return self.native_motion(session, &args, &meta);
+        }
+        if name == "native_plugins" {
+            return self.native_plugins(session, &args);
         }
         if name == "native_result" {
             let result_id = string(&args, "resultId")?;
@@ -252,7 +281,22 @@ impl ToolRouter {
         {
             self.context(session, &id)?;
         }
-        if matches!(name, "native_comments" | "native_tokens") && args["action"] != "list" {
+        if name == "native_comments"
+            && matches!(
+                args["action"].as_str(),
+                Some("get_thread" | "list_threads" | "changes")
+            )
+        {
+            return self.review_threads(session, &id, &args);
+        }
+        if matches!(name, "native_comments" | "native_tokens")
+            && args["action"] != "list"
+            && (name != "native_tokens"
+                || !matches!(
+                    args["action"].as_str(),
+                    Some("inspect" | "list_collections")
+                ))
+        {
             if let Some(result) = self.replay(session, &id, &meta)? {
                 return Ok(result);
             }
@@ -265,6 +309,20 @@ impl ToolRouter {
             return self.export_document(session, &id, json!({"format":format}));
         }
         let snapshot = self.workspace.snapshot(&id)?;
+        if name == "native_tokens" && args["action"] == "inspect" {
+            return self.inspect_native_token(session, &id, &snapshot, &args);
+        }
+        if name == "native_tokens"
+            && matches!(
+                args["action"].as_str(),
+                Some("list_collections" | "set_scope_mode")
+            )
+        {
+            return self.native_token_scope(session, &id, &snapshot, &args, &meta);
+        }
+        if name == "native_tokens" && native_tokens::is_definition_action(&snapshot, &args) {
+            return self.native_token_definition(session, &id, &snapshot, &args, &meta);
+        }
         let namespace = match name {
             "native_tokens" => "tokens",
             "native_comments" => "comments",

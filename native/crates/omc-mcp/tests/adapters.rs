@@ -527,3 +527,76 @@ fn find_replace_keeps_unaffected_runs_and_reads_prior_batch_marks() {
     assert_eq!(snapshot.nodes[raw].string("text"), Some("Restored"));
     assert!(!snapshot.nodes[raw].properties.contains_key("width"));
 }
+
+#[test]
+fn named_batch_nodes_are_scoped_atomic_and_replayable() {
+    let (_dir, workspace, router, session, id) = setup();
+    let native = format!("doc_{}", id.replace('-', ""));
+    let before = workspace.snapshot(&native).unwrap();
+    let reference = |name: &str| json!({"from":name,"field":"id"});
+    let args = json!({"documentId":id,"revision":before.sequence,"ops":[
+        {"as":"card","tool":"create_board","args":{"name":"Card","width":240}},
+        {"as":"label","tool":"create_shape","args":{"type":"text","parentId":reference("card")}},
+        {"tool":"edit_shapes","args":{"action":"translate","ids":[reference("label")],"dx":4,"dy":8}},
+        {"as":"master","tool":"component","args":{"action":"create","id":reference("card")}},
+        {"as":"copy","tool":"component","args":{"action":"instance","source":reference("master")}}
+    ]});
+    let key = json!({"oh-my-canvas/idempotency-key":"named-batch"});
+    let result = router
+        .call(&session, "batch", args.clone(), key.clone())
+        .unwrap();
+    let named = &result["namedResults"];
+    let raw = |name: &str| named[name]["id"].as_str().unwrap();
+    let snapshot = workspace.snapshot(&native).unwrap();
+    assert_eq!(
+        snapshot.nodes[raw("label")].parent_id.as_deref(),
+        Some(raw("card"))
+    );
+    assert_eq!(snapshot.nodes[raw("label")].number("x", 0.), 4.);
+    assert_eq!(
+        snapshot.nodes[raw("copy")].string("componentId"),
+        Some(raw("master"))
+    );
+    let replay = router
+        .call(&session, "batch", args.clone(), key.clone())
+        .unwrap();
+    assert_eq!(replay["namedResults"], *named);
+    assert_eq!(replay["receipt"]["replayed"], true);
+    assert_eq!(
+        workspace.snapshot(&native).unwrap().sequence,
+        snapshot.sequence
+    );
+    assert!(router.call(&session, "batch", args, Value::Null).is_err());
+
+    let other = invoke(
+        &router,
+        &session,
+        "create_document",
+        json!({"title":"Another file"}),
+    );
+    let first = json!({"as":"card","tool":"create_board","args":{"name":"Rollback","width":240}});
+    for last in [
+        json!({"as":"card","tool":"create_shape","args":{"type":"rect"}}),
+        json!({"tool":"update","args":{"id":reference("later"),"text":"error"}}),
+        json!({"tool":"update","args":{"id":{"from":"card","field":"unknown"},"text":"error"}}),
+        json!({"as":"empty","tool":"update","args":{"id":reference("card"),"attrs":{"name":"error"}}}),
+        json!({"tool":"update","args":{"id":reference("card"),"documentId":other["documentId"],"attrs":{"name":"error"}}}),
+        json!({"tool":"edit_text","args":{"action":"replace","revision":before.sequence,"id":raw("label"),"text":"error"}}),
+    ] {
+        let failure = json!({"documentId":id,"ops":[first,last]});
+        assert!(
+            router
+                .call(&session, "batch", failure, Value::Null)
+                .is_err()
+        );
+        assert_eq!(
+            workspace.snapshot(&native).unwrap().sequence,
+            snapshot.sequence
+        );
+    }
+    invoke(&router, &session, "undo", json!({"documentId":id}));
+    assert_eq!(
+        workspace.snapshot(&native).unwrap().nodes.len(),
+        before.nodes.len()
+    );
+}

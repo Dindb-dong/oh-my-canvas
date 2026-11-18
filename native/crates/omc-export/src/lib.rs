@@ -5,7 +5,7 @@ mod platform_code;
 mod print_pdf;
 mod vector_drawable;
 use base64::Engine;
-pub use code::{export_html, export_react, inspect_web};
+pub use code::{export_html, export_react, inspect_web, inspect_web_scoped};
 use omc_model::{DocumentContent, DocumentSnapshot};
 use omc_render::{RasterFormat, RenderOptions, ResourceProvider};
 use omc_scene::{SceneOptions, build_scene_in_color_profile};

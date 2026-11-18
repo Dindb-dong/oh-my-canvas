@@ -1,0 +1,22 @@
+{
+  "name": "shape_builder",
+  "description": "Inspect editable regions made by overlapping vector layers, then merge or remove picked regions. Sources stay in the document as hidden layers when edited. Region indices are valid only at the preview revision. Optionally pick by world-space points instead.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "documentId": {"type": "string", "minLength": 36, "maxLength": 36},
+      "ids": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 200}, "minItems": 1, "maxItems": 24},
+      "action": {"type": "string", "enum": ["regions", "merge", "remove"]},
+      "revision": {"type": "integer", "minimum": 0},
+      "regions": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 511}, "minItems": 1, "maxItems": 512},
+      "points": {
+        "type": "array",
+        "items": {"type": "array", "items": {"type": "number", "minimum": -100000000, "maximum": 100000000}, "minItems": 2, "maxItems": 2},
+        "minItems": 1,
+        "maxItems": 512
+      }
+    },
+    "required": ["documentId", "ids", "action"],
+    "additionalProperties": false
+  }
+}

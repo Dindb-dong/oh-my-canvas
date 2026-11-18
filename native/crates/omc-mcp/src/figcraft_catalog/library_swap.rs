@@ -1,7 +1,7 @@
 use super::*;
 use serde_json::Map;
 
-pub(super) fn instance_patch(
+pub(crate) fn instance_patch(
     snapshot: &DocumentSnapshot,
     node: &Node,
     destination: &str,
@@ -58,18 +58,13 @@ pub(super) fn instance_patch(
         }
         patch.insert("overrides".into(), Value::Object(mapped));
     }
-    let key = ["componentProperties", "propertyValues"]
-        .into_iter()
-        .find(|key| {
-            node.properties
-                .get(*key)
-                .and_then(Value::as_object)
-                .is_some()
-        });
-    if let Some(key) = key {
+    for key in ["componentProperties", "propertyValues"] {
+        let Some(overrides) = node.properties.get(key).and_then(Value::as_object) else {
+            continue;
+        };
         if text_only {
             patch.insert(key.into(), json!({}));
-            return Ok(patch);
+            continue;
         }
         let mut values = Map::new();
         let old = original
@@ -80,7 +75,7 @@ pub(super) fn instance_patch(
             .properties
             .get("componentPropertyDefinitions")
             .and_then(Value::as_array);
-        for (id, value) in node.properties[key].as_object().unwrap() {
+        for (id, value) in overrides {
             let source = old
                 .into_iter()
                 .flatten()

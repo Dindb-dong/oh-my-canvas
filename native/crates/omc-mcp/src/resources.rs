@@ -76,6 +76,8 @@ pub(crate) fn detect_mime(bytes: &[u8]) -> Result<&'static str> {
         "image/jpeg"
     } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
         "image/webp"
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        "image/gif"
     } else if bytes.starts_with(b"OTTO") {
         "font/otf"
     } else if bytes.starts_with(b"\0\x01\0\0") || bytes.starts_with(b"ttcf") {
@@ -105,6 +107,12 @@ impl ToolRouter {
         args: Value,
         meta: Value,
     ) -> Result<Value> {
+        if matches!(
+            args["action"].as_str(),
+            Some("inspect_original" | "download_original")
+        ) {
+            return self.original_asset(session, id, &args);
+        }
         if args["action"] != "list" {
             if let Some(replay) = self.replay(session, id, &meta)? {
                 return Ok(replay);
@@ -239,6 +247,101 @@ impl ToolRouter {
             }
             _ => Err(EngineError::invalid("unknown asset action")),
         }
+    }
+    fn original_asset(&self, session: &str, id: &str, args: &Value) -> Result<Value> {
+        let index = args
+            .get("index")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .and_then(|index| usize::try_from(index).ok())
+                    .ok_or_else(|| EngineError::invalid("nonnegative asset index required"))
+            })
+            .transpose()?;
+        let snapshot = self.workspace.snapshot(id)?;
+        let (hash, mut result) = match (args["id"].as_str(), args["nodeId"].as_str()) {
+            (Some(asset_id), None) => {
+                let assets = catalogs(&snapshot.metadata, "assets");
+                let asset = assets
+                    .get(asset_id)
+                    .ok_or_else(|| EngineError::invalid("asset not found in this document"))?;
+                let mut result = json!({"id":asset_id,"source":"catalog"});
+                let source = if let Some(faces) = asset["faces"].as_array() {
+                    let index = index
+                        .or_else(|| (faces.len() == 1).then_some(0))
+                        .ok_or_else(|| EngineError::invalid("specify the font face index"))?;
+                    result["index"] = json!(index);
+                    result["source"] = "font_face".into();
+                    faces
+                        .get(index)
+                        .ok_or_else(|| EngineError::invalid("font face index out of range"))?
+                } else {
+                    if index.is_some() {
+                        return Err(EngineError::invalid("catalog asset has no indexed faces"));
+                    }
+                    asset
+                };
+                (source["hash"].as_str().map(str::to_owned), result)
+            }
+            (None, Some(node_id)) => {
+                let raw_id = self.resolve(session, id, node_id)?;
+                let node = snapshot
+                    .nodes
+                    .get(&raw_id)
+                    .ok_or_else(|| EngineError::invalid("layer not found in this document"))?;
+                let (hash, source) = if let Some(index) = index {
+                    let paint = node
+                        .properties
+                        .get("fills")
+                        .and_then(Value::as_array)
+                        .and_then(|fills| fills.get(index))
+                        .filter(|paint| paint["type"] == "image" || paint["image"].is_object())
+                        .ok_or_else(|| {
+                            EngineError::invalid("index does not select an image fill")
+                        })?;
+                    (
+                        paint["assetHash"]
+                            .as_str()
+                            .or_else(|| paint["image"]["hash"].as_str()),
+                        "image_fill",
+                    )
+                } else if node.kind == NodeKind::Image {
+                    (
+                        match node.properties.get("originalImage") {
+                            Some(original) => original["assetHash"].as_str(),
+                            None => crate::image::image_hash(node),
+                        },
+                        "image_layer",
+                    )
+                } else {
+                    return Err(EngineError::invalid(
+                        "choose an image layer or specify an image fill index",
+                    ));
+                };
+                let mut result = json!({"nodeId":raw_id,"source":source});
+                if let Some(index) = index {
+                    result["index"] = json!(index);
+                }
+                (hash.map(str::to_owned), result)
+            }
+            _ => return Err(EngineError::invalid("specify exactly one of id and nodeId")),
+        };
+        let hash = hash.ok_or_else(|| EngineError::invalid("original asset is unavailable"))?;
+        let bytes = self.resources()?.0.read(&hash)?;
+        let mime = detect_mime(&bytes)?;
+        result["ok"] = true.into();
+        result["documentId"] = external_id(id).into();
+        result["hash"] = hash.into();
+        result["mimeType"] = mime.into();
+        result["byteLength"] = json!(bytes.len());
+        result["revision"] = json!(snapshot.sequence);
+        if args["action"] == "download_original" {
+            result["resultId"] = self
+                .extensions
+                .put_result(session, bytes, mime.into())?
+                .into();
+        }
+        Ok(result)
     }
     pub(crate) fn import_resource(&self, session: &str, args: Value, meta: Value) -> Result<Value> {
         let id = native_id(string(&args, "documentId")?)?;
@@ -1091,4 +1194,155 @@ fn clipboard_text_style_fields() -> std::collections::BTreeSet<&'static str> {
     ]
     .into_iter()
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn original_asset_reaches_verified_bytes_through_document_scoped_handles() {
+        let profile = tempfile::tempdir().unwrap();
+        let workspace = Workspace::open(profile.path(), None).unwrap();
+        let router = Arc::new(ToolRouter::new(workspace.clone()));
+        let session = workspace.session_open(None).unwrap()["sessionId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let other_session = workspace.session_open(None).unwrap()["sessionId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let document = |title| {
+            let snapshot = workspace.create(&session, title, None).unwrap();
+            router.context(&session, &snapshot.id).unwrap();
+            snapshot.id
+        };
+        let design = document("Asset fixture");
+        let unrelated = document("Separate design");
+        let original = base64::engine::general_purpose::STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS9sAAAAASUVORK5CYII=")
+            .unwrap();
+        let added = router
+            .assets_tool(
+                &session,
+                &design,
+                json!({"action":"add","dataUrl":format!("data:image/png;base64,{}",base64::engine::general_purpose::STANDARD.encode(&original))}),
+                Value::Null,
+            )
+            .unwrap();
+        let asset_id = added["id"].as_str().unwrap();
+        let hash = added["asset"]["hash"].as_str().unwrap();
+        let placed = router
+            .assets_tool(
+                &session,
+                &design,
+                json!({"action":"place","id":asset_id}),
+                Value::Null,
+            )
+            .unwrap();
+        let node_id = placed["rawIds"][0].as_str().unwrap();
+        let transformed = router
+            .resources()
+            .unwrap()
+            .0
+            .ingest(
+                &base64::engine::general_purpose::STANDARD
+                    .decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
+                    .unwrap(),
+                "image/gif",
+            )
+            .unwrap();
+        router
+            .submit(
+                &session,
+                &design,
+                Command::NodeSet {
+                    node_id: node_id.into(),
+                    properties: properties(&json!({
+                        "imageCrop":[0.25,0.25,0.5,0.5],
+                        "assetHash":transformed.hash,
+                        "originalImage":{"assetHash":hash},
+                        "fills":[{"type":"solid","color":"#ffffff"},{"type":"image","assetHash":transformed.hash}],
+                    }))
+                    .unwrap(),
+                },
+                &Value::Null,
+                None,
+            )
+            .unwrap();
+
+        let call = |doc: &str, args| router.assets_tool(&session, doc, args, Value::Null);
+        let selector = json!({"action":"download_original","nodeId":node_id});
+        assert!(call(&unrelated, selector.clone()).is_err());
+        assert!(
+            call(
+                &unrelated,
+                json!({"action":"inspect_original","id":asset_id})
+            )
+            .is_err()
+        );
+        assert!(call(&design, json!({"action":"inspect_original","id":hash})).is_err());
+        assert!(
+            call(
+                &design,
+                json!({"action":"inspect_original","id":asset_id,"nodeId":node_id})
+            )
+            .is_err()
+        );
+        let catalog = call(&design, json!({"action":"inspect_original","id":asset_id})).unwrap();
+        let download = call(&design, selector).unwrap();
+        assert!(catalog.get("resultId").is_none());
+        assert_eq!(download["hash"], catalog["hash"]);
+        assert_eq!(download["mimeType"], "image/png");
+        assert_eq!(download["byteLength"], original.len());
+        assert_ne!(download["hash"], transformed.hash);
+        let fill = call(
+            &design,
+            json!({"action":"inspect_original","nodeId":node_id,"index":1}),
+        )
+        .unwrap();
+        assert_eq!(fill["source"], "image_fill");
+        assert_eq!(fill["hash"], transformed.hash);
+        assert_eq!(fill["mimeType"], "image/gif");
+        assert!(
+            call(
+                &design,
+                json!({"action":"inspect_original","nodeId":node_id,"index":0})
+            )
+            .is_err()
+        );
+
+        let result_id = download["resultId"].as_str().unwrap();
+        let read = |reader: &str, action: &str, offset: usize| {
+            router.call(
+                reader,
+                "native_result",
+                json!({"version":"1","action":action,"resultId":result_id,"offset":offset,"length":19}),
+                Value::Null,
+            )
+        };
+        assert_eq!(
+            read(&other_session, "read", 0).unwrap_err().code,
+            "snapshot_expired"
+        );
+        let mut bytes = Vec::new();
+        let mut offset = 0;
+        loop {
+            let part = read(&session, "read", offset).unwrap();
+            bytes.extend(
+                base64::engine::general_purpose::STANDARD
+                    .decode(part["base64"].as_str().unwrap())
+                    .unwrap(),
+            );
+            let Some(next) = part["nextOffset"].as_u64() else {
+                break;
+            };
+            assert!(next > offset as u64);
+            offset = next as usize;
+        }
+        assert_eq!(bytes, original);
+        assert_eq!(read(&session, "release", 0).unwrap()["released"], true);
+        assert!(read(&session, "read", 0).is_err());
+    }
 }

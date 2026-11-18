@@ -2,7 +2,7 @@
 <h1 align="center">Oh My Canvas</h1>
 <p align="center"><strong>用 HTML/CSS 绘制可编辑设计。人与多个智能体一起工作。</strong></p>
 <p align="center">基于 Rust 和 Skia 的本地优先原生设计工作室，支持 HTML/CSS 创作和多个 MCP 智能体并行工作。</p>
-<p align="center"><img src="assets/readme/badges.svg" alt="Native Rust · 59 OMC MCP tools · HTML/CSS · Multi-agent" width="660"></p>
+<p align="center"><img src="assets/readme/badges.svg" alt="Native Rust · Native MCP · HTML/CSS · Multi-agent" width="660"></p>
 <p align="center"><a href="README.md">English</a> · <a href="README-ko.md">한국어</a> · <a href="README-ja.md">日本語</a> · <strong>简体中文</strong></p>
 
 <p align="center"><img src="assets/readme/native-editor.png" alt="Native Oh My Canvas editor with HTML-imported editable design system, layers and inspector" width="1280"></p>
@@ -51,7 +51,7 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 
 在原生应用中点击 **MCP → Copy MCP configuration**，将 stdio 配置加入客户端。配置指向安装的 `omc-cli` 和对应配置目录，不会自动修改全局设置。
 
-**OMC 方言提供 59 个 MCP 工具：50 个基本工具与 9 个原生扩展。** 独立的 **FigCraft 兼容方言通过 19 个 MCP 工具提供 643 个命令 ID**，并不是 643 个 MCP 工具。
+默认 OMC 连接提供设计、审阅和工作区工具。单独的 FigCraft 兼容连接支持现有的 FigCraft 命令协议。请通过各连接的 `tools/list` 查看当前安装版本提供的工具。
 
 从 `list_documents` → `open_document` 或 `create_document` → `get_context` 开始。修改文档须指定 `documentId`。用 `create_board`、`write_html`、`edit_shapes`、`components`、`batch` 和 `screenshot` 完成创作与检查。原生扩展支持有界查询、评论、令牌、任务和代码导出。
 

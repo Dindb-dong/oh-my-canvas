@@ -6,7 +6,7 @@ pub fn export_html(
     snapshot: &DocumentSnapshot,
     page_id: Option<&str>,
 ) -> Result<(String, Vec<Diagnostic>), ExportError> {
-    let (prepared, css, mut diagnostics) = super::code_context::prepare(snapshot, page_id);
+    let (prepared, css, mut diagnostics) = super::code_context::prepare(snapshot, page_id, true);
     let snapshot = &prepared;
     let root = root(snapshot, page_id)?;
     let body = element(
@@ -35,7 +35,7 @@ pub fn export_react(
     page_id: Option<&str>,
     tailwind: bool,
 ) -> Result<(String, Vec<Diagnostic>), ExportError> {
-    let (prepared, css, mut diagnostics) = super::code_context::prepare(snapshot, page_id);
+    let (prepared, css, mut diagnostics) = super::code_context::prepare(snapshot, page_id, true);
     let snapshot = &prepared;
     let root = root(snapshot, page_id)?;
     let body = element(
@@ -70,7 +70,36 @@ pub fn inspect_web(
     component: Option<(&str, &BTreeMap<String, String>)>,
     mobile: Option<&str>,
 ) -> Result<String, ExportError> {
-    let (prepared, css, mut diagnostics) = super::code_context::prepare(snapshot, Some(id));
+    inspect_web_code(
+        snapshot,
+        id,
+        language,
+        root_font_size,
+        component,
+        mobile,
+        true,
+    )
+}
+
+pub fn inspect_web_scoped(
+    snapshot: &DocumentSnapshot,
+    id: &str,
+    language: &str,
+) -> Result<String, ExportError> {
+    inspect_web_code(snapshot, id, language, None, None, None, false)
+}
+
+fn inspect_web_code(
+    snapshot: &DocumentSnapshot,
+    id: &str,
+    language: &str,
+    root_font_size: Option<f64>,
+    component: Option<(&str, &BTreeMap<String, String>)>,
+    mobile: Option<&str>,
+    document_css: bool,
+) -> Result<String, ExportError> {
+    let (prepared, css, mut diagnostics) =
+        super::code_context::prepare(snapshot, Some(id), document_css);
     let node = prepared
         .nodes
         .get(id)
@@ -301,7 +330,7 @@ fn responsive_styles(
     original: &DocumentSnapshot,
     mobile_root: &str,
 ) -> BTreeMap<String, BTreeMap<String, String>> {
-    let (mobile, _, _) = super::code_context::prepare(original, Some(mobile_root));
+    let (mobile, _, _) = super::code_context::prepare(original, Some(mobile_root), true);
     let children = |snapshot: &DocumentSnapshot| {
         let mut by_parent = BTreeMap::<String, Vec<(String, String, String)>>::new();
         for node in snapshot.nodes.values() {

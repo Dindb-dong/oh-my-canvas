@@ -197,12 +197,80 @@ struct PluginHost<'a> {
     router: &'a ToolRouter,
     session: &'a str,
     root: &'a str,
+    scope: Option<&'a str>,
+    scope_violation: bool,
     manifest: &'a Manifest,
     snapshot: DocumentSnapshot,
     selection: Vec<Value>,
     commands: Vec<Command>,
     settings: BTreeMap<String, String>,
     changed_selection: bool,
+}
+
+pub(crate) fn native_definition() -> Value {
+    let id = json!({"type":"string","minLength":1,"maxLength":128});
+    json!({
+        "name":"native_plugins",
+        "description":"Import, list, remove or run session-local creative Wasm plugins. Run requires explicit documentId and scopeId; ids optionally selects layers within that subtree.",
+        "inputSchema":{
+            "type":"object",
+            "required":["version","action"],
+            "additionalProperties":false,
+            "anyOf":[
+                {"type":"object","properties":{"action":{"enum":["list"]}}},
+                {"type":"object","properties":{"action":{"enum":["import"]}},"required":["path"]},
+                {"type":"object","properties":{"action":{"enum":["import"]}},"required":["manifest","wasm"]},
+                {"type":"object","properties":{"action":{"enum":["remove"]}},"required":["id"]},
+                {"type":"object","properties":{"action":{"enum":["run"]}},"required":["id","documentId","scopeId"]}
+            ],
+            "properties":{
+                "version":{"type":"string","enum":["1"]},
+                "action":{"type":"string","enum":["list","import","remove","run"]},
+                "documentId":{"type":"string","minLength":36,"maxLength":36},
+                "scopeId":id,
+                "ids":{"type":"array","items":id,"maxItems":100},
+                "id":id,
+                "command":id,
+                "params":{"type":"object"},
+                "fuel":{"type":"integer","minimum":1,"maximum":25000000},
+                "path":{"type":"string","minLength":1},
+                "manifest":{},
+                "wasm":{"type":"string","minLength":1}
+            }
+        }
+    })
+}
+
+impl PluginHost<'_> {
+    fn check_scope(&mut self, id: &str) -> std::result::Result<(), String> {
+        if self
+            .scope
+            .is_some_and(|scope| !legacy_read::is_descendant(&self.snapshot, id, scope))
+        {
+            self.scope_violation = true;
+            return Err("layer is outside the authorized plugin subtree".into());
+        }
+        Ok(())
+    }
+
+    fn check_write_scope(&mut self, id: &str) -> std::result::Result<(), String> {
+        self.check_scope(id)?;
+        let mut next = self.snapshot.nodes.get(id);
+        while let Some(node) = next {
+            if node.properties.get("locked") == Some(&Value::Bool(true))
+                || node.properties.get("hidden") == Some(&Value::Bool(true))
+                || node.properties.get("visible") == Some(&Value::Bool(false))
+            {
+                self.scope_violation = true;
+                return Err("plugin write targets a locked or hidden layer".into());
+            }
+            next = node
+                .parent_id
+                .as_ref()
+                .and_then(|parent| self.snapshot.nodes.get(parent));
+        }
+        Ok(())
+    }
 }
 
 impl Host for PluginHost<'_> {
@@ -222,6 +290,7 @@ impl Host for PluginHost<'_> {
                     .router
                     .fig_layer(self.session, &self.snapshot, &params["id"])
                     .map_err(|error| error.message)?;
+                self.check_scope(&id)?;
                 let depth = params["depth"].as_u64().unwrap_or(1).min(12) as usize;
                 Ok(self.router.fig_node(
                     self.session,
@@ -240,6 +309,9 @@ impl Host for PluginHost<'_> {
                         params["ids"].as_array().ok_or("ids must be an array")?,
                     )
                     .map_err(|error| error.message)?;
+                for id in &raw {
+                    self.check_scope(id)?;
+                }
                 self.selection = raw
                     .iter()
                     .map(|id| json!(self.router.fig_alias(self.session, &self.snapshot.id, id)))
@@ -292,6 +364,28 @@ impl Host for PluginHost<'_> {
                 {
                     return Err("plugin edit exceeds 100 operations".into());
                 }
+                if self.scope.is_some() {
+                    for command in &commands {
+                        match command {
+                            Command::NodeCreate { node } => {
+                                self.check_write_scope(
+                                    node.parent_id.as_deref().unwrap_or_default(),
+                                )?;
+                            }
+                            Command::NodeSet { node_id, .. }
+                            | Command::NodeUnset { node_id, .. }
+                            | Command::TextReplace { node_id, .. } => {
+                                self.check_write_scope(node_id)?
+                            }
+                            _ => {
+                                self.scope_violation = true;
+                                return Err(
+                                    "plugin edit is outside the scoped edit contract".into()
+                                );
+                            }
+                        }
+                    }
+                }
                 self.snapshot = candidate;
                 self.changed_selection |= self.selection != selected;
                 self.selection = selected;
@@ -338,6 +432,67 @@ impl ToolRouter {
         name: &str,
         args: &Value,
         params: &Value,
+    ) -> Result<Value> {
+        self.plugin_command(session, name, args, params, None)
+    }
+
+    pub(crate) fn native_plugins(&self, session: &str, args: &Value) -> Result<Value> {
+        let action = string(args, "action")?;
+        let (name, params) = match action {
+            "list" => ("plugin.list", json!({})),
+            "import" => {
+                if let Some(path) = args["path"].as_str() {
+                    if !std::path::Path::new(path).is_absolute() {
+                        return Err(EngineError::invalid("plugin path must be absolute"));
+                    }
+                    if args.get("manifest").is_some() || args.get("wasm").is_some() {
+                        return Err(EngineError::invalid("pass path or manifest and wasm"));
+                    }
+                    ("plugin.import", json!({"path":path}))
+                } else {
+                    (
+                        "plugin.import",
+                        json!({"manifest":args["manifest"],"wasm":string(args,"wasm")?}),
+                    )
+                }
+            }
+            "remove" => ("plugin.remove", json!({"id":string(args,"id")?})),
+            "run" => {
+                let document_id = string(args, "documentId")?;
+                let document = self
+                    .workspace
+                    .target(session, Some(&native_id(document_id)?))?;
+                self.context(session, &document)?;
+                let scope = string(args, "scopeId")?;
+                let mut params = json!({"id":string(args,"id")?});
+                for key in ["command", "params", "fuel"] {
+                    if let Some(value) = args.get(key) {
+                        params[key] = value.clone();
+                    }
+                }
+                return self.plugin_command(
+                    session,
+                    "plugin.run",
+                    &json!({"document":document_id}),
+                    &params,
+                    Some((
+                        scope,
+                        args["ids"].as_array().map(Vec::as_slice).unwrap_or(&[]),
+                    )),
+                );
+            }
+            _ => return Err(EngineError::invalid("unknown plugin action")),
+        };
+        self.plugin_command(session, name, &Value::Null, &params, None)
+    }
+
+    fn plugin_command(
+        &self,
+        session: &str,
+        name: &str,
+        args: &Value,
+        params: &Value,
+        native_scope: Option<(&str, &[Value])>,
     ) -> Result<Value> {
         let id_schema = json!({"type":"string","minLength":1,"maxLength":128});
         let fields = match name {
@@ -419,10 +574,35 @@ impl ToolRouter {
         )?;
         let snapshot = self.workspace.snapshot(&document)?;
         let view = self.state(session, &document)?;
-        let selection = view.view["selection"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let (scope, selection) = if let Some((scope, ids)) = native_scope {
+            let scope = self.resolve(session, &document, scope)?;
+            if !legacy_read::is_descendant(&snapshot, &scope, &view.root) {
+                return Err(EngineError::invalid(
+                    "plugin scope must belong to the selected page",
+                ));
+            }
+            let selection = ids
+                .iter()
+                .map(|id| {
+                    let id = self.resolve(session, &document, id.as_str().unwrap_or_default())?;
+                    if !legacy_read::is_descendant(&snapshot, &id, &scope) {
+                        return Err(EngineError::invalid(
+                            "selection is outside the plugin subtree",
+                        ));
+                    }
+                    Ok(json!(self.fig_alias(session, &document, &id)))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            (Some(scope), selection)
+        } else {
+            (
+                None,
+                view.view["selection"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default(),
+            )
+        };
         let mut panel = None;
         let (id, command, values, fuel, callback) = match name {
             "plugin.run" => (
@@ -495,7 +675,9 @@ impl ToolRouter {
         let mut host = PluginHost {
             router: self,
             session,
-            root: &view.root,
+            root: scope.as_deref().unwrap_or(&view.root),
+            scope: scope.as_deref(),
+            scope_violation: false,
             manifest: &manifest,
             snapshot,
             selection,
@@ -513,8 +695,15 @@ impl ToolRouter {
         let out = instance
             .call(&input.to_string(), &mut host)
             .map_err(plugin_error)?;
-        if !host.commands.is_empty() {
-            self.submit(
+        if host.scope_violation {
+            return Err(EngineError::invalid(
+                "plugin accessed a layer outside its authorized scope",
+            ));
+        }
+        let receipt = if host.commands.is_empty() {
+            None
+        } else {
+            Some(self.submit(
                 session,
                 &document,
                 Command::Batch {
@@ -522,9 +711,9 @@ impl ToolRouter {
                 },
                 &Value::Null,
                 Some(original),
-            )?;
-        }
-        if host.changed_selection {
+            )?)
+        };
+        if host.changed_selection && native_scope.is_none() {
             self.fig_selection(&(session.to_owned(), document.clone()), &host.selection);
         }
         state.settings.insert(id.clone(), host.settings);
@@ -570,9 +759,14 @@ impl ToolRouter {
             }
         }
         let output = serde_json::from_str::<Value>(&output).unwrap_or(Value::String(output));
-        Ok(
-            json!({"plugin":id,"command":command.id,"output":output,"logs":logs,"calls":calls,"fuel":fuel,
-            "panel":state.panels.iter().find(|panel|panel.id==id).map(OpenPanel::describe)}),
-        )
+        let mut result = json!({"plugin":id,"command":command.id,"output":output,"logs":logs,"calls":calls,"fuel":fuel,
+            "panel":state.panels.iter().find(|panel|panel.id==id).map(OpenPanel::describe)});
+        if native_scope.is_some() {
+            result["rawIds"] = receipt
+                .as_ref()
+                .map_or_else(|| json!([]), |r| r["rawIds"].clone());
+            result["receipt"] = receipt.map_or(Value::Null, |r| r["receipt"].clone());
+        }
+        Ok(result)
     }
 }

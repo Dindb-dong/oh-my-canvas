@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Oh My Canvas Browser Capture",
+  "version": "0.1.0",
+  "description": "Select a webpage element and turn it into editable Oh My Canvas layers.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "action": {"default_title": "Select an element for Oh My Canvas"},
+  "background": {"service_worker": "background.js", "type": "module"},
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {"resources": ["capture-web.mjs"], "matches": ["<all_urls>"]}
+  ]
+}

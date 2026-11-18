@@ -43,216 +43,278 @@ impl ToolRouter {
             return Ok(json!({"mode":mode}));
         }
         let ids = geometry_targets(self, session, snapshot, selection, params)?;
-        if ids.len() > 24 {
-            return Err(EngineError::new(
-                "resource_limit",
-                "shape builder accepts at most 24 layers",
-            ));
+        let action = name.trim_start_matches("shapeBuilder.");
+        let (commands, result) =
+            shape_builder_plan(snapshot, &state.page_id, &ids, action, params, |id| {
+                json!(self.fig_alias(session, document, id))
+            })?;
+        if !commands.is_empty() {
+            self.submit(
+                session,
+                document,
+                Command::Batch { commands },
+                &Value::Null,
+                Some(snapshot.sequence),
+            )?;
         }
-        let scene = paths::scene(snapshot, &state.page_id)?;
-        let mut items = geometry_items(&scene, &ids)?;
-        let indices: BTreeMap<_, _> = scene
-            .items
-            .iter()
-            .enumerate()
-            .map(|(i, item)| (item.id.as_str(), i))
-            .collect();
-        items.sort_by_key(|item| indices[item.id.as_str()]);
-        let mut parts = Vec::new();
-        for item in &items {
-            if !matches!(
-                item.kind,
-                NodeKind::Rect
-                    | NodeKind::Ellipse
-                    | NodeKind::Line
-                    | NodeKind::Path
-                    | NodeKind::Frame
-            ) || !item.children.is_empty() && item.boolean_operation().is_none()
-            {
-                return Err(EngineError::invalid(
-                    "shape builder requires shapes without content layers",
-                ));
-            }
-            let mut fills = vector::solid_fills(item)?;
-            fills.retain(visible_paint);
-            if !fills.is_empty() {
-                let path = omc_scene::shape_path(item)
-                    .ok_or_else(|| EngineError::invalid("invalid shape geometry"))?;
-                let path = page_path(path, item.world)?;
-                if let Some(path) = area(path)? {
-                    parts.push(Part {
-                        item,
-                        stroke: false,
-                        path,
-                        fills,
-                    });
-                }
-            }
-            let has_strokes = item
-                .properties
-                .get("strokes")
-                .and_then(Value::as_array)
-                .map_or_else(
-                    || {
-                        item.style
-                            .color("border-color")
-                            .is_some_and(|color| color.a > 0.)
-                    },
-                    |strokes| strokes.iter().any(visible_paint),
-                );
-            if has_strokes {
-                for (path, fill) in omc_render::stroke_outlines(item)
-                    .map_err(|error| EngineError::invalid(error.to_string()))?
-                {
-                    if visible_paint(&fill)
-                        && let Some(path) = area(page_path(path, item.world)?)?
-                    {
-                        parts.push(Part {
-                            item,
-                            stroke: true,
-                            path,
-                            fills: vec![fill],
-                        });
-                    }
-                }
-            }
-        }
-        if parts.len() > 64 {
-            return Err(EngineError::new(
-                "resource_limit",
-                "shape builder accepts at most 64 fill and stroke parts",
-            ));
-        }
-        let regions = partition(&parts)?;
-        let alias = |id: &str| self.fig_alias(session, document, id);
-        if name == "shapeBuilder.regions" {
-            let values = regions.iter().enumerate().map(|(index,region)| {
-                let (svg,bounds,_) = omc_scene::path_geometry(&region.path);
-                let mut seen = BTreeSet::new();
-                let sources = region.parts.iter().rev().filter_map(|&part| {
-                    let id = alias(&parts[part].item.id);
-                    seen.insert(id).then_some(id)
-                }).collect::<Vec<_>>();
-                let covering = region.parts.iter().rev().map(|&part| json!({"id":alias(&parts[part].item.id),"stroke":parts[part].stroke})).collect::<Vec<_>>();
-                json!({"index":index,"path":svg,"sources":sources,"parts":covering,"bounds":bounds,"point":region.point})
-            }).collect::<Vec<_>>();
-            return Ok(
-                json!({"sources":items.iter().map(|item|alias(&item.id)).collect::<Vec<_>>(),"regions":values}),
-            );
-        }
-        let mut selection = BTreeSet::new();
-        if let Some(list) = params.get("regions") {
-            for index in list
-                .as_array()
-                .filter(|list| list.len() <= 512)
-                .ok_or_else(|| EngineError::invalid("regions must be an array"))?
-            {
-                let index = index
-                    .as_u64()
-                    .filter(|&index| index < regions.len() as u64)
-                    .ok_or_else(|| EngineError::invalid("unknown shape builder region"))?;
-                selection.insert(index as usize);
-            }
-        }
-        if let Some(points) = params.get("points") {
-            for point in points
-                .as_array()
-                .filter(|list| list.len() <= 512)
-                .ok_or_else(|| EngineError::invalid("points must be an array"))?
-            {
-                let (x, y) = point_pair(point)?;
-                if let Some(index) = regions
-                    .iter()
-                    .position(|region| region.path.contains((x as f32, y as f32)))
-                {
-                    selection.insert(index);
-                }
-            }
-        }
-        if selection.is_empty() {
-            return Err(EngineError::invalid(
-                "choose at least one shape builder region",
-            ));
-        }
-        let mut cutters = BTreeMap::<usize, Path>::new();
-        let mut merged = Path::new();
-        for &index in &selection {
-            let region = &regions[index];
-            merged = merge(&merged, &region.path, PathOp::Union)?;
-            for &part in &region.parts {
-                let prior = cutters.remove(&part).unwrap_or_default();
-                cutters.insert(part, merge(&prior, &region.path, PathOp::Union)?);
-            }
-        }
-        let mut commands = Vec::new();
-        let mut outlines = Vec::new();
-        let mut changed = Vec::new();
-        let mut removed = Vec::new();
-        for item in &items {
-            if !cutters.keys().any(|&index| parts[index].item.id == item.id) {
-                continue;
-            }
-            let parent = &scene.items[item.parent.unwrap()];
-            let mut made = false;
-            for (index, part) in parts
-                .iter()
-                .enumerate()
-                .filter(|(_, part)| part.item.id == item.id)
-            {
-                let path = if let Some(cutter) = cutters.get(&index) {
-                    merge(&part.path, cutter, PathOp::Difference)?
-                } else {
-                    part.path.clone()
-                };
-                if path.is_empty() {
-                    continue;
-                }
-                let node = region_node(
-                    snapshot,
-                    part,
-                    parent,
-                    path,
-                    item.properties
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or("Vector"),
-                )?;
-                if part.stroke {
-                    outlines.push(alias(&node.id));
-                }
-                changed.push(alias(&node.id));
-                commands.push(Command::NodeCreate { node });
-                made = true;
-            }
-            commands.push(vector::hide(&item.id));
-            if !made {
-                removed.push(alias(&item.id));
-            }
-        }
-        let mut result =
-            json!({"changed":changed,"removed":removed,"outlines":outlines,"regions":selection});
-        if name == "shapeBuilder.merge" {
-            let source = &parts[*regions[*selection.first().unwrap()].parts.last().unwrap()];
-            let parent = &scene.items[source.item.parent.unwrap()];
-            let node = region_node(snapshot, source, parent, merged, "Shape builder")?;
-            result["id"] = json!(alias(&node.id));
-            commands.push(Command::NodeCreate { node });
-        }
-        self.submit(
-            session,
-            document,
-            Command::Batch { commands },
-            &Value::Null,
-            Some(snapshot.sequence),
-        )?;
         if let Some(id) = result.get("id") {
             self.fig_selection(
                 &(session.into(), document.clone()),
                 std::slice::from_ref(id),
             );
         }
-        Ok(result)
+        Ok(json!(result))
     }
+
+    pub(crate) fn native_shape_builder_commands(
+        &self,
+        session: &str,
+        snapshot: &DocumentSnapshot,
+        args: &Value,
+    ) -> Result<(Vec<Command>, Properties)> {
+        let mut seen = BTreeSet::new();
+        let ids = args["ids"]
+            .as_array()
+            .filter(|ids| (1..=24).contains(&ids.len()))
+            .ok_or_else(|| EngineError::invalid("choose 1–24 layers"))?
+            .iter()
+            .map(|input| {
+                let raw =
+                    self.resolve(session, &snapshot.id, input.as_str().unwrap_or_default())?;
+                if !snapshot.nodes.contains_key(&raw) || !seen.insert(raw.clone()) {
+                    return Err(EngineError::invalid(
+                        "choose distinct layers in this document",
+                    ));
+                }
+                Ok(raw)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let action = string(args, "action")?;
+        if action != "regions" && args.get("regions").is_some() && args.get("revision").is_none() {
+            return Err(EngineError::invalid(
+                "region indices require the preview revision",
+            ));
+        }
+        let state = self.state(session, &snapshot.id)?;
+        shape_builder_plan(snapshot, &state.page_id, &ids, action, args, |id| json!(id))
+    }
+}
+
+fn shape_builder_plan(
+    snapshot: &DocumentSnapshot,
+    page_id: &str,
+    ids: &[String],
+    action: &str,
+    params: &Value,
+    identify: impl Fn(&str) -> Value,
+) -> Result<(Vec<Command>, Properties)> {
+    if ids.len() > 24 {
+        return Err(EngineError::new(
+            "resource_limit",
+            "shape builder accepts at most 24 layers",
+        ));
+    }
+    let scene = paths::scene(snapshot, page_id)?;
+    let mut items = geometry_items(&scene, ids)?;
+    let indices: BTreeMap<_, _> = scene
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| (item.id.as_str(), i))
+        .collect();
+    items.sort_by_key(|item| indices[item.id.as_str()]);
+    let mut parts = Vec::new();
+    for item in &items {
+        if !matches!(
+            item.kind,
+            NodeKind::Rect | NodeKind::Ellipse | NodeKind::Line | NodeKind::Path | NodeKind::Frame
+        ) || !item.children.is_empty() && item.boolean_operation().is_none()
+        {
+            return Err(EngineError::invalid(
+                "shape builder requires shapes without content layers",
+            ));
+        }
+        let mut fills = vector::solid_fills(item)?;
+        fills.retain(visible_paint);
+        if !fills.is_empty() {
+            let path = omc_scene::shape_path(item)
+                .ok_or_else(|| EngineError::invalid("invalid shape geometry"))?;
+            let path = page_path(path, item.world)?;
+            if let Some(path) = area(path)? {
+                parts.push(Part {
+                    item,
+                    stroke: false,
+                    path,
+                    fills,
+                });
+            }
+        }
+        let has_strokes = item
+            .properties
+            .get("strokes")
+            .and_then(Value::as_array)
+            .map_or_else(
+                || {
+                    item.style
+                        .color("border-color")
+                        .is_some_and(|color| color.a > 0.)
+                },
+                |strokes| strokes.iter().any(visible_paint),
+            );
+        if has_strokes {
+            for (path, fill) in omc_render::stroke_outlines(item)
+                .map_err(|error| EngineError::invalid(error.to_string()))?
+            {
+                if visible_paint(&fill)
+                    && let Some(path) = area(page_path(path, item.world)?)?
+                {
+                    parts.push(Part {
+                        item,
+                        stroke: true,
+                        path,
+                        fills: vec![fill],
+                    });
+                }
+            }
+        }
+    }
+    if parts.len() > 64 {
+        return Err(EngineError::new(
+            "resource_limit",
+            "shape builder accepts at most 64 fill and stroke parts",
+        ));
+    }
+    let regions = partition(&parts)?;
+    if action == "regions" {
+        let values = regions.iter().enumerate().map(|(index,region)| {
+                let (svg,bounds,_) = omc_scene::path_geometry(&region.path);
+                let mut seen = BTreeSet::new();
+                let sources = region.parts.iter().rev().filter_map(|&part| {
+                    let id = parts[part].item.id.as_str();
+                    seen.insert(id).then(|| identify(id))
+                }).collect::<Vec<_>>();
+                let covering = region.parts.iter().rev().map(|&part| json!({"id":identify(&parts[part].item.id),"stroke":parts[part].stroke})).collect::<Vec<_>>();
+                json!({"index":index,"path":svg,"sources":sources,"parts":covering,"bounds":bounds,"point":region.point})
+            }).collect::<Vec<_>>();
+        return Ok((
+            Vec::new(),
+            Properties::from([
+                (
+                    "sources".into(),
+                    json!(
+                        items
+                            .iter()
+                            .map(|item| identify(&item.id))
+                            .collect::<Vec<_>>()
+                    ),
+                ),
+                ("regions".into(), json!(values)),
+            ]),
+        ));
+    }
+    let mut selection = BTreeSet::new();
+    if let Some(list) = params.get("regions") {
+        for index in list
+            .as_array()
+            .filter(|list| list.len() <= 512)
+            .ok_or_else(|| EngineError::invalid("regions must be an array"))?
+        {
+            let index = index
+                .as_u64()
+                .filter(|&index| index < regions.len() as u64)
+                .ok_or_else(|| EngineError::invalid("unknown shape builder region"))?;
+            selection.insert(index as usize);
+        }
+    }
+    if let Some(points) = params.get("points") {
+        for point in points
+            .as_array()
+            .filter(|list| list.len() <= 512)
+            .ok_or_else(|| EngineError::invalid("points must be an array"))?
+        {
+            let (x, y) = point_pair(point)?;
+            if let Some(index) = regions
+                .iter()
+                .position(|region| region.path.contains((x as f32, y as f32)))
+            {
+                selection.insert(index);
+            }
+        }
+    }
+    if selection.is_empty() {
+        return Err(EngineError::invalid(
+            "choose at least one shape builder region",
+        ));
+    }
+    let mut cutters = BTreeMap::<usize, Path>::new();
+    let mut merged = Path::new();
+    for &index in &selection {
+        let region = &regions[index];
+        merged = merge(&merged, &region.path, PathOp::Union)?;
+        for &part in &region.parts {
+            let prior = cutters.remove(&part).unwrap_or_default();
+            cutters.insert(part, merge(&prior, &region.path, PathOp::Union)?);
+        }
+    }
+    let mut commands = Vec::new();
+    let mut outlines = Vec::new();
+    let mut changed = Vec::new();
+    let mut removed = Vec::new();
+    for item in &items {
+        if !cutters.keys().any(|&index| parts[index].item.id == item.id) {
+            continue;
+        }
+        let parent = &scene.items[item.parent.unwrap()];
+        let mut made = false;
+        for (index, part) in parts
+            .iter()
+            .enumerate()
+            .filter(|(_, part)| part.item.id == item.id)
+        {
+            let path = if let Some(cutter) = cutters.get(&index) {
+                merge(&part.path, cutter, PathOp::Difference)?
+            } else {
+                part.path.clone()
+            };
+            if path.is_empty() {
+                continue;
+            }
+            let node = region_node(
+                snapshot,
+                part,
+                parent,
+                path,
+                item.properties
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Vector"),
+            )?;
+            if part.stroke {
+                outlines.push(identify(&node.id));
+            }
+            changed.push(identify(&node.id));
+            commands.push(Command::NodeCreate { node });
+            made = true;
+        }
+        commands.push(vector::hide(&item.id));
+        if !made {
+            removed.push(identify(&item.id));
+        }
+    }
+    let mut result = Properties::from([
+        ("changed".into(), json!(changed)),
+        ("removed".into(), json!(removed)),
+        ("outlines".into(), json!(outlines)),
+        ("regions".into(), json!(selection)),
+    ]);
+    if action == "merge" {
+        let source = &parts[*regions[*selection.first().unwrap()].parts.last().unwrap()];
+        let parent = &scene.items[source.item.parent.unwrap()];
+        let node = region_node(snapshot, source, parent, merged, "Shape builder")?;
+        result.insert("id".into(), identify(&node.id));
+        commands.push(Command::NodeCreate { node });
+    }
+    Ok((commands, result))
 }
 
 fn visible_paint(paint: &Value) -> bool {

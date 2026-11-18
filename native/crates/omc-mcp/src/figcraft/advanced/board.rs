@@ -2,6 +2,8 @@ use super::*;
 
 mod connectors;
 mod grid;
+mod mind_map;
+mod native;
 mod table;
 mod templates;
 
@@ -10,6 +12,8 @@ const SHAPE: &str = "boardShape";
 const TIMER: &str = "boardTimer";
 const STICKY_SIZE: f64 = 200.;
 const STICKY_GAP: f64 = 24.;
+const STICKY_TEXT: &str = "boardStickyText";
+const STICKY_AUTHOR: &str = "boardStickyAuthor";
 
 pub(super) fn command(context: &Context, action: &str) -> Result<Value> {
     match action {
@@ -110,17 +114,7 @@ fn build_note(context: &Context, action: &str) -> Result<(Node, Node, Vec<Comman
         .map(|id| context.resolve(id))
         .transpose()?
         .unwrap_or_else(|| context.state.root.clone());
-    let mut text = params["text"]
-        .as_str()
-        .unwrap_or_default()
-        .replace("\r\n", "\n")
-        .replace('\r', "\n");
-    if text.chars().count() > 16_000 {
-        return Err(EngineError::new(
-            "resource_limit",
-            "Board note exceeds 16000 characters",
-        ));
-    }
+    let mut text = note_text(params["text"].as_str().unwrap_or_default())?;
     let sticky = action != "shape";
     let mut color = params
         .get("color")
@@ -171,7 +165,7 @@ fn build_note(context: &Context, action: &str) -> Result<(Node, Node, Vec<Comman
     } else {
         number(params, "width", 160.)?.max(1.)
     };
-    let mut height = if sticky {
+    let height = if sticky {
         STICKY_SIZE
     } else {
         number(params, "height", 160.)?.max(1.)
@@ -197,6 +191,61 @@ fn build_note(context: &Context, action: &str) -> Result<(Node, Node, Vec<Comman
             .take(64)
             .collect(),
     };
+    let shape = if sticky { "" } else { string(params, "shape")? };
+    let parent = &snapshot.nodes[&parent_id];
+    if !is_container(parent)
+        || context
+            .page(&parent_id)
+            .is_none_or(|page| page.id != context.state.page_id)
+    {
+        return Err(EngineError::invalid(
+            "Board parent must be a container on the current page",
+        ));
+    }
+    let rank = append_rank(snapshot, &parent_id)?;
+    build_note_layers(
+        Note {
+            shape: (!sticky).then_some(shape),
+            text: &text,
+            color: &color,
+            author: &author,
+            x,
+            y,
+            width,
+            height,
+        },
+        parent,
+        rank,
+    )
+}
+
+fn is_container(node: &Node) -> bool {
+    matches!(
+        node.kind,
+        NodeKind::Frame | NodeKind::Group | NodeKind::Component
+    )
+}
+
+fn note_text(text: &str) -> Result<String> {
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    if text.chars().count() > 16_000 {
+        return Err(EngineError::new(
+            "resource_limit",
+            "Board note exceeds 16000 characters",
+        ));
+    }
+    Ok(text)
+}
+
+fn note_label_name(text: &str) -> String {
+    text.lines()
+        .next()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.chars().take(64).collect())
+        .unwrap_or_else(|| "Text".into())
+}
+
+fn note_metrics(text: &str, width: f64, sticky: bool) -> (f64, f64) {
     let weight = text.chars().count() + 24 * text.matches('\n').count();
     let size = if !sticky {
         16.
@@ -218,27 +267,44 @@ fn build_note(context: &Context, action: &str) -> Result<(Node, Node, Vec<Comman
         })
         .sum::<f64>()
         .max(1.);
-    let text_height = (lines * size * 1.4).max(size * 1.4);
+    (size, (lines * size * 1.4).max(size * 1.4))
+}
+
+struct Note<'a> {
+    shape: Option<&'a str>,
+    text: &'a str,
+    color: &'a str,
+    author: &'a str,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+fn build_note_layers(
+    options: Note<'_>,
+    parent: &Node,
+    rank: String,
+) -> Result<(Node, Node, Vec<Command>)> {
+    let Note {
+        shape,
+        text,
+        color,
+        author,
+        x,
+        y,
+        width,
+        mut height,
+    } = options;
+    let sticky = shape.is_none();
+    let (size, text_height) = note_metrics(text, width, sticky);
     if sticky {
-        height = height.max(text_height + if author.is_empty() { 32. } else { 54. });
-    }
-    let shape = if sticky { "" } else { string(params, "shape")? };
-    let parent = &snapshot.nodes[&parent_id];
-    if !matches!(
-        parent.kind,
-        NodeKind::Frame | NodeKind::Group | NodeKind::Component
-    ) || context
-        .page(&parent_id)
-        .is_none_or(|page| page.id != context.state.page_id)
-    {
-        return Err(EngineError::invalid(
-            "Board parent must be a container on the current page",
-        ));
+        height = height.max(sticky_content_height(text_height, !author.is_empty()));
     }
     let mut note = new_layer(
         NodeKind::Frame,
         parent,
-        append_rank(snapshot, &parent_id)?,
+        rank,
         json!({
             "name":if sticky { "Sticky" } else { "Board shape" },"x":x,"y":y,"width":width,"height":height,
             "style":{"position":"absolute"},"clipContent":false
@@ -254,7 +320,7 @@ fn build_note(context: &Context, action: &str) -> Result<(Node, Node, Vec<Comman
     }
     let mut edits = vec![Command::NodeCreate { node: note.clone() }];
     let mut rank = rank_between(None, None).unwrap();
-    if !sticky {
+    if let Some(shape) = shape {
         let background = new_layer(
             NodeKind::Path,
             &note,
@@ -267,22 +333,25 @@ fn build_note(context: &Context, action: &str) -> Result<(Node, Node, Vec<Comman
         edits.push(Command::NodeCreate { node: background });
         rank = rank_between(Some(&rank), None).unwrap();
     }
-    let label = new_layer(
+    let mut label = new_layer(
         NodeKind::Text,
         &note,
         rank.clone(),
         json!({
-            "name":text.lines().next().filter(|line| !line.trim().is_empty()).map(|line| line.chars().take(64).collect::<String>()).unwrap_or_else(|| "Text".into()),
+            "name":note_label_name(text),
             "x":16,"y":if sticky {16.} else {(height-text_height).max(0.)/2.},
             "width":(width-32.).max(1.),"height":text_height,"text":text,"fill":"#1e1e1e","fontSize":size,
             "textAlign":if sticky {"left"} else {"center"},"style":{"position":"absolute"}
         }),
     )?;
+    if sticky {
+        label.properties.insert(STICKY_TEXT.into(), json!(true));
+    }
     edits.push(Command::NodeCreate {
         node: label.clone(),
     });
     if sticky && !author.is_empty() {
-        let author = new_layer(
+        let mut author = new_layer(
             NodeKind::Text,
             &note,
             rank_between(Some(&rank), None).unwrap(),
@@ -290,9 +359,14 @@ fn build_note(context: &Context, action: &str) -> Result<(Node, Node, Vec<Comman
                 "name":"Author","text":author,"x":16,"y":height-26.,"width":width-32.,"height":14.,"fill":"#5c5a55","fontSize":10,"style":{"position":"absolute"}
             }),
         )?;
+        author.properties.insert(STICKY_AUTHOR.into(), json!(true));
         edits.push(Command::NodeCreate { node: author });
     }
     Ok((note, label, edits))
+}
+
+fn sticky_content_height(text_height: f64, has_author: bool) -> f64 {
+    text_height + if has_author { 54. } else { 32. }
 }
 
 fn shape_path(shape: &str, w: f64, h: f64) -> Result<String> {

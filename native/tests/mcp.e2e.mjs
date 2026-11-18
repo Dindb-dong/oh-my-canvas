@@ -5,7 +5,8 @@ import {mkdtemp,readFile,realpath,rm,writeFile,copyFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
-import {spawn} from 'node:child_process';
+import {execFile,spawn} from 'node:child_process';
+import {promisify} from 'node:util';
 import {createServer,connect as connectSocket} from 'node:net';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createMcpFetch} from './support/mcp-fetch.mjs';
@@ -171,7 +172,9 @@ try{
   const connection=await api.call('workspace',{action:'connection',transport:'stdio'});
   assert.equal(connection.available,true);
   assert.equal(connection.transport,'stdio');
-  const config=JSON.parse(connection.config).mcpServers['oh-my-canvas'];
+  const {mcpServers}=JSON.parse(connection.config);
+  assert.deepEqual(Object.keys(mcpServers),['oh-my-canvas']);
+  const config=mcpServers['oh-my-canvas'];
   assert.equal(config.args[0],'--profile');
   assert.equal(await realpath(config.args[1]),await realpath(profile));
   assert.equal(config.env,undefined);
@@ -194,10 +197,61 @@ try{
   let service=await start(join(temporary,'primary'));let client=await connect(service);const identity=client.registration;assert.ok(identity?.credential);
   const initial=await client.call('create_document',{title:'SDK contract canvas'});const documentId=initial.documentId;const doc=native(documentId);
   await t.test('pinned tools and shared native command authority',async()=>{
-   const {tools}=await client.client.listTools();assert.equal(tools.filter(t=>!t.name.startsWith('native_')).length,50);
+   const {tools}=await client.client.listTools();for(const name of ['board','measure','native_plugins'])assert.ok(tools.some(t=>t.name===name));
    const result=await client.call('create_shape',{documentId,type:'rect',x:12,y:18,width:80,height:40,properties:{name:'Red box',fills:[{type:'solid',color:'#ff0000'}]}});
    assert.equal(result.receipt.status,'durable');assert.equal(result.createdIds.length,1);
    const tree=await client.call('get_tree',{documentId,detail:'detailed'});assert.equal(tree.nodes.find(n=>n.name==='Red box').width,80);
+  });
+  await t.test('native design authoring and inspection use explicit document targets', async () => {
+   const {documentId}=await client.call('create_document',{title:'Native design coverage'});
+   const shape=async(x,name)=>(await client.call('create_shape',{documentId,type:'rect',x,y:0,width:40,height:24,properties:{name,fills:[{type:'solid',color:'#dc2626'}]}})).rawIds[0];
+   const from=await shape(0,'Left');const to=await shape(60,'Right');
+   const grouped=await client.call('batch',{documentId,ops:[
+    {tool:'board',as:'start',args:{action:'create_sticky',text:'Source',x:40,y:130}},
+    {tool:'board',as:'destination',args:{action:'create_sticky',text:'Destination',x:320,y:130}},
+    {tool:'board',as:'connector',args:{action:'connect',fromId:{from:'start',field:'id'},toId:{from:'destination',field:'id'}}},
+   ]});
+   assert.equal(grouped.receipt.status,'durable');
+   assert.ok(grouped.namedResults.connector.id);
+   const measured=await client.call('measure',{documentId,from,to});
+   assert.equal(measured.unit,'px');
+   assert.equal(measured.from.rawId,from);
+   assert.equal(measured.to.rawId,to);
+   await client.call('edit_shapes',{documentId,action:'appearance',ids:[to],appearance:{
+    stack:'fills',operation:'replace',index:0,entry:{type:'solid',color:'#2563eb'},
+   }});
+   const tree=await client.call('get_tree',{documentId,detail:'detailed'});
+   assert.equal(tree.nodes.find(node=>node.rawId===to).properties.fills[0].color,'#2563EB');
+   const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
+   const asset=await client.call('document_assets',{documentId,action:'add',kind:'image',name:'Original pixel',dataUrl:`data:image/png;base64,${png}`});
+   const original=await client.call('document_assets',{documentId,action:'download_original',id:asset.id});
+   const bytes=await client.call('native_result',{version:'1',resultId:original.resultId});
+   assert.equal(original.mimeType,'image/png');
+   assert.equal(bytes.base64,png);
+   await client.call('native_result',{version:'1',action:'release',resultId:original.resultId});
+   const createFrame=async(width,height)=>(await client.call('create_shape',{documentId,type:'frame',width,height})).rawIds[0];
+   const first=await createFrame(120,70);
+   const second=await createFrame(200,60);
+   const pdf=await client.call('export_document',{id:documentId,format:'pdf',pdfFrameIds:[second,first]});
+   assert.equal(pdf.pages,2);
+   const content=Buffer.from(pdf.base64,'base64').toString('latin1');
+   assert.ok(content.startsWith('%PDF'));
+   assert.ok(content.indexOf('/MediaBox [0 0 200 60]')>=0);
+   assert.ok(content.indexOf('/MediaBox [0 0 120 70]')>content.indexOf('/MediaBox [0 0 200 60]'));
+   const prototype=args=>client.call('prototype',{documentId,...args});
+   await prototype({action:'set_flow',frameId:first,name:'Entry'});
+   await prototype({action:'set_navigation',sourceId:first,destinationId:second});
+   const graph=await prototype({action:'inspect',sourceId:first});
+   assert.equal(graph.flows[0].start,first);
+   assert.equal(graph.interactions[0].trigger.type,'onClick');
+   assert.ok(JSON.stringify(graph.interactions[0]).includes(second));
+   const comment=(action,args)=>client.call('native_comments',{version:'1',documentId,action,...args});
+   const note=await comment('create',{nodeId:from,body:'Move edge to the token grid.'});
+   await comment('reply',{threadId:note.id,body:'Updated.'});
+   const threads=await comment('list_threads',{nodeId:from,resolved:false});
+   assert.deepEqual(threads.items.map(thread=>thread.id),[note.id]);
+   const thread=await comment('get_thread',{threadId:note.id});
+   assert.equal(thread.replies[0].body,'Updated.');
   });
   await t.test('failed batch leaves no first-operation mutation',async()=>{
    const tree=await client.call('get_tree',{documentId,detail:'detailed'});const box=tree.nodes.find(n=>n.name==='Red box');
@@ -262,11 +316,206 @@ try{
    assert.equal(status.state,'completed');assert.ok(status.result.content.includes('<svg'));
    const cancelled=await client.call('native_job',{version:'1',action:'cancel',jobId:ticket.jobId});assert.equal(cancelled.cancellation,'already_finished');
   });
-  await t.test('official SDK uses the Rust stdio bridge',async()=>{
+  const connectNativeStdio=async (name,profile=service.profile)=>{
    const cli=process.env.OMC_CLI_BINARY??join(root,'native/target/debug',process.platform==='win32'?'omc-cli.exe':'omc-cli');
-   const transport=new StdioClientTransport({command:cli,args:['--profile',service.profile,'--connect-only'],stderr:'pipe'});
-   const stdio=new Client({name:'stdio-contracts',version:'1.0.0'});
-   try{await stdio.connect(transport);const listed=await stdio.listTools();assert.equal(listed.tools.filter(t=>!t.name.startsWith('native_')).length,50);const result=await stdio.callTool({name:'create_document',arguments:{title:'Rust stdio document'}});assert.notEqual(result.isError,true);assert.ok(result.structuredContent.documentId);}finally{await stdio.close();}
+   const transport=new StdioClientTransport({command:cli,args:['--profile',profile,'--connect-only'],stderr:'pipe'});
+   const sdkClient=new Client({name,version:'1.0.0'});
+   await sdkClient.connect(transport);
+   return {sdkClient,async call(tool,args={}){
+    const result=await sdkClient.callTool({name:tool,arguments:args});
+    const value=result.structuredContent??JSON.parse(result.content.find(item=>item.type==='text').text);
+    if(result.isError)throw Object.assign(Error(value.message??JSON.stringify(value)),value);
+    return value;
+   }};
+  };
+  await t.test('design authoring works through the default OMC stdio connection and survives reopen',async t=>{
+   const author=await connectNativeStdio('native-design-author');
+   let reviewer;
+   try{
+    const {tools}=await author.sdkClient.listTools();
+    const names=new Set(tools.map(tool=>tool.name));
+    t.diagnostic(`Default OMC tools/list returned ${tools.length} tools`);
+    assert.equal(names.size,tools.length);
+    for(const name of ['board','shape_builder','data_fill','measure','native_tokens','native_motion','native_plugins','native_handoff'])assert.ok(names.has(name),name);
+    assert.ok(!names.has('run_command'));
+    const {starters}=await author.call('workspace',{action:'design_starters'});
+    assert.ok(starters.some(starter=>starter.id==='wireframe-kit'));
+    await assert.rejects(author.call('create_document',{starterId:'wireframe-kit',sample:true}),{code:'invalid_argument'});
+    const seeded=await author.call('create_document',{starterId:'wireframe-kit',title:'Editable starter fixture'});
+    assert.equal(seeded.document.title,'Editable starter fixture');
+    assert.equal(seeded.starterId,'wireframe-kit');
+    const seededTree=await author.call('get_tree',{documentId:seeded.documentId,detail:'detailed'});
+    assert.ok(seededTree.nodes.length>5);
+
+    const {documentId}=await author.call('create_document',{title:'Native workflow fixture'});
+    const doc={documentId};
+    const foreground=(await author.call('create_shape',{...doc,type:'frame',width:240,height:120,properties:{name:'Motion frame'}})).rawIds[0];
+    const moving=(await author.call('create_shape',{...doc,type:'rect',parentId:foreground,x:15,y:30,width:40,height:30,
+     properties:{fills:[{type:'solid',color:'#E8193A'}]}
+    })).rawIds[0];
+    const text=(await author.call('create_shape',{...doc,type:'text',x:95,y:420,width:90,height:20,properties:{text:'Editable curve label'}})).rawIds[0];
+    const path=(await author.call('create_shape',{...doc,type:'ellipse',x:120,y:560,width:340,height:150})).rawIds[0];
+    const textPreview={...doc,id:text,mode:'overview'};
+    const plainText=await author.call('screenshot',textPreview);
+    await author.call('edit_text',{...doc,id:text,action:'path_attach',pathId:path});
+    const curvedText=await author.call('screenshot',textPreview);
+    assert.notEqual(curvedText.base64,plainText.base64);
+    const font=await author.call('fonts',{...doc,family:'Inter'});
+    assert.equal(font.source,'bundled');
+    assert.ok(font.styles.length);
+    await author.call('guides',{...doc,action:'add',ownerId:foreground,offset:42});
+    const shapes=[];
+    for(const x of [310,350])shapes.push((await author.call('create_shape',{
+     ...doc,type:'rect',x,y:320,width:80,height:50,properties:{fills:[{type:'solid',color:'#223355'}]},
+    })).rawIds[0]);
+    const builder=(action,args={})=>author.call('shape_builder',{...doc,action,ids:shapes,...args});
+    const regionPreview=await builder('regions');
+    assert.equal(regionPreview.regions.length,3);
+    const overlap=regionPreview.regions.find(region=>region.sources.length===2);
+    assert.deepEqual(overlap.bounds,[350,320,40,50]);
+    const merged=await builder('merge',{regions:[overlap.index],revision:regionPreview.revision});
+    assert.equal(merged.receipt.status,'durable');
+    const table=await author.call('board',{...doc,action:'create_table',x:310,y:30,cells:[['Step','Owner'],['Draft','Ada']]});
+    await author.call('board',{...doc,action:'set_table_cell',id:table.id,row:1,column:0,text:'Reviewed'});
+    const map=await author.call('board',{...doc,action:'create_mind_map',x:620,y:50,topics:[
+     {key:'root',text:'Design review'},{key:'details',parent:'root',text:'Details'},
+    ]});
+    const detail=map.topics.find(topic=>topic.parentId);
+    assert.ok(detail.connectorId);
+    await author.call('board',{...doc,action:'rename_mind_topic',id:map.id,targetId:detail.id,text:'Decisions'});
+
+    const tokens=(action,args={})=>author.call('native_tokens',{...doc,version:'1',action,...args});
+    const collection=await tokens('create_collection',{name:'Design colors',modeNames:['Light','Dark']});
+    const base=await tokens('create',{collectionId:collection.id,type:'color',name:'Base',modes:{Light:'#ffffff',Dark:'#000000'}});
+    const alias=await tokens('create',{collectionId:collection.id,type:'color',name:'Surface',value:{$token:base.id}});
+    const swatch=(await author.call('create_shape',{...doc,type:'rect',parentId:foreground,x:170,y:85,width:25,height:25})).rawIds[0];
+    await tokens('bind',{id:alias.id,nodeId:swatch,property:'fill'});
+    await tokens('set_scope_mode',{id:collection.id,nodeId:foreground,mode:'Dark'});
+    const resolved=await tokens('inspect',{id:alias.id,nodeId:swatch});
+    assert.equal(resolved.effectiveValue,'#000000');
+    await assert.rejects(tokens('set_value',{id:base.id,value:{$token:alias.id}}),/cycle/);
+    const template=(await author.call('create_shape',{...doc,type:'frame',x:0,y:820,width:260,height:96})).rawIds[0];
+    await author.call('create_shape',{...doc,type:'text',parentId:template,
+     properties:{name:'Headline',text:'Template copy'}
+    });
+    const filled=await author.call('data_fill',{...doc,id:template,rows:[{name:'City card',Headline:'Seoul'}]});
+    assert.equal(filled.copies.length,1);
+    const filledTree=await author.call('get_tree',{...doc,id:filled.copies[0].id,detail:'detailed'});
+    assert.equal(filledTree.tree.children[0].text,'Seoul');
+
+    const handoff=(action,args={})=>author.call('native_handoff',{...doc,version:'1',action,nodeId:moving,...args});
+    await handoff('add_annotation',{label:'Motion review',properties:['width'],category:'development'});
+    await handoff('add_resource',{url:'https://example.com/spec'});
+    const specification=await handoff('inspect',{language:'react',styleKeys:['width']});
+    assert.equal(specification.annotations[0].label,'Motion review');
+    assert.ok(specification.code);
+    const comments=(action,args={})=>author.call('native_comments',{...doc,version:'1',action,...args});
+    const {cursor}=await comments('changes');
+    const thread=await comments('create',{nodeId:moving,body:'Review motion spacing'});
+    const changes=await comments('changes',{cursor});
+    assert.equal(changes.events.length,1);
+    assert.equal(changes.events[0].kind,'comment.added');
+    const isolated=await comments('changes',{documentId:seeded.documentId,cursor});
+    assert.equal(isolated.reset,true);
+    assert.deepEqual(isolated.events,[]);
+
+    const motion=(action,args={})=>author.call('native_motion',{...doc,version:'1',action,...args});
+    await motion('set_track',{nodeId:moving,property:'translateX',keyframes:[{timeMs:0,value:0},{timeMs:1000,value:95}]});
+    const plain=await motion('sample',{frameId:foreground,timeMs:0});
+    await motion('set_shader',{nodeId:moving,shader:{kind:'stripes',colors:['#E8193A','#223355'],periodPx:8,phasePx:0,speedPxPerSecond:20}});
+    const initial=await motion('sample',{frameId:foreground,timeMs:0});
+    assert.notEqual(plain.sha256,initial.sha256);
+    const midpoint=await motion('sample',{frameId:foreground,timeMs:500});
+    assert.equal(Buffer.from(midpoint.base64,'base64').subarray(1,4).toString(),'PNG');
+    assert.notEqual(initial.sha256,midpoint.sha256);
+    assert.equal(initial.width,midpoint.width);
+    const motionTemplate=(await author.call('create_shape',{...doc,type:'frame',width:120,height:80})).rawIds[0];
+    const motionDefinition=(await author.call('component',{...doc,action:'create',id:motionTemplate,name:'Animated component'})).rawIds[0];
+    const motionChild=(await author.call('create_shape',{...doc,type:'rect',parentId:motionDefinition,width:20,height:20,
+     properties:{fills:[{type:'solid',color:'#E8193A'}]}
+    })).rawIds[0];
+    await motion('set_track',{nodeId:motionChild,property:'translateX',keyframes:[{timeMs:0,value:0},{timeMs:1000,value:40}]});
+    const instanceFrame=(await author.call('create_shape',{...doc,type:'frame',width:120,height:80})).rawIds[0];
+    await author.call('component',{...doc,action:'instance',source:motionDefinition,parent:instanceFrame});
+    const instanceStart=await motion('sample',{frameId:instanceFrame,timeMs:0});
+    const instanceEnd=await motion('sample',{frameId:instanceFrame,timeMs:1000});
+    assert.deepEqual(Object.values(instanceEnd.values),[{translateX:40}]);
+    assert.notEqual(instanceStart.sha256,instanceEnd.sha256);
+    const {mp4}=await author.call('native_motion',{version:'1',action:'capabilities'});
+    if(process.env.OMC_MOTION_FFMPEG)assert.equal(mp4.available,true);
+    if(mp4.available){
+     const filePath=join(temporary,'native-motion.mp4');
+     const video=await motion('export_video',{frameId:foreground,durationMs:1000,fps:4,filePath});
+     assert.equal(video.frameCount,4);
+     assert.equal((await readFile(filePath)).subarray(4,8).toString(),'ftyp');
+     const decoder=process.env.OMC_MOTION_FFMPEG;
+     if(decoder){
+      const {stdout}=await promisify(execFile)(decoder,[
+       '-hide_banner','-loglevel','error','-i',filePath,'-f','rawvideo','-pix_fmt','rgb24','pipe:1',
+      ],{encoding:'buffer'});
+      const frameBytes=initial.width*initial.height*3;
+      assert.equal(stdout.length,4*frameBytes);
+      assert.equal(stdout.subarray(0,frameBytes).equals(stdout.subarray(3*frameBytes)),false);
+     }
+    }
+    await author.call('save_document',{id:documentId});
+    await author.call('workspace',{...doc,action:'close'});
+
+    reviewer=await connectNativeStdio('native-design-reviewer');
+    await reviewer.call('open_document',{id:documentId});
+    const tree=await reviewer.call('get_tree',{...doc,detail:'detailed'});
+    assert.equal(tree.nodes.find(node=>node.rawId===text).properties.textPath.sourceId,path);
+    assert.equal((await reviewer.call('screenshot',textPreview)).base64,curvedText.base64);
+    assert.ok(tree.nodes.some(node=>node.text==='Reviewed'));
+    assert.equal(tree.nodes.find(node=>node.rawId===merged.id).kind,'path');
+    const guides=await reviewer.call('guides',{...doc,action:'list',ownerId:foreground});
+    assert.deepEqual(guides.guides,[{vertical:true,offset:42}]);
+    const review=await reviewer.call('native_comments',{...doc,version:'1',action:'get_thread',threadId:thread.id});
+    assert.equal(review.thread.body,'Review motion spacing');
+    const reopenedMap=await reviewer.call('board',{...doc,action:'inspect_mind_map',id:map.id});
+    assert.equal(reopenedMap.topics.find(topic=>topic.id===detail.id).connectorId,detail.connectorId);
+    assert.ok(tree.nodes.some(node=>node.text==='Decisions'));
+    const reopenedToken=await reviewer.call('native_tokens',{...doc,version:'1',action:'inspect',id:alias.id,nodeId:swatch});
+    assert.equal(reopenedToken.effectiveValue,'#000000');
+    const reopened=await reviewer.call('native_motion',{...doc,version:'1',action:'sample',frameId:foreground,timeMs:500});
+    assert.equal(reopened.sha256,midpoint.sha256);
+   }finally{
+    await reviewer?.sdkClient.close();
+    await author.sdkClient.close();
+   }
+  });
+  await t.test('native prototype presents on an isolated background desktop',{
+   skip: !process.env.OMC_TEST_DESKTOP_BINARY&&'set OMC_TEST_DESKTOP_BINARY to run the background desktop',
+  },async()=>{
+   const isolated=await start(join(temporary,'background-prototype'));
+   const desktop=spawn(process.env.OMC_TEST_DESKTOP_BINARY,[
+    '--profile',isolated.profile,'--automation-background','--smoke-exit-ms','45000','--smoke-size','1000x800',
+   ],{stdio:'ignore'});
+   children.push(desktop);
+   let author;
+   try{
+    author=await connectNativeStdio('native-background-prototype',isolated.profile);
+    const {documentId}=await author.call('create_document',{title:'Background native prototype fixture'});
+    const frameId=(await author.call('create_board',{documentId,name:'Entry',width:320,height:220})).rawIds[0];
+    await author.call('prototype',{documentId,action:'set_flow',frameId});
+    let focused=false;
+    for(let attempt=0;attempt<90&&desktop.exitCode===null;attempt++){
+     const opened=await author.call('open_document',{id:documentId,focus:true});
+     if(opened.focused){focused=true;break;}
+     await delay(100);
+    }
+    assert.ok(focused,'background desktop did not open the requested document');
+    const preview=await author.call('prototype',{documentId,action:'show_preview',frameId});
+    assert.equal(preview.prototypeStart,frameId);
+    await author.call('prototype',{documentId,action:'close_preview'});
+    const presented=await author.call('prototype',{documentId,action:'present',frameId});
+    assert.equal(presented.prototypeStart,frameId);
+    await author.call('prototype',{documentId,action:'close_preview'});
+   }finally{
+    await author?.sdkClient.close();
+    await stop({child:desktop});
+    await stop(isolated);
+   }
   });
   await t.test('legacy page duplication, reordering and guides persist and support undo',async()=>{
    const doc=await client.call('create_document',{title:'Page action fixture'});
@@ -606,6 +855,26 @@ try{
    const selectedDoc=(await client.call('export_document',{id:documentId,...options})).content.toLowerCase();
    assert.match(selectedDoc,/#(?:11cc66|1c6)"/);
    assert.doesNotMatch(selectedDoc,/#(?:5511ff|51f)"/);
+  });
+  await t.test('Android XML exports explicit editable vector bounds through native tools', async () => {
+   const {documentId}=await client.call('create_document',{title:'Android Vector Drawable'});
+   const {rawIds:[id]}=await client.call('create_shape',{
+    documentId,type:'rect',x:12,y:15,width:24,height:18,
+    properties:{fills:[{type:'solid',color:'#2563EB'}]},
+   });
+   await client.call('create_shape',{documentId,type:'rect',x:80,y:50,width:20,height:20,properties:{fills:[{type:'solid',color:'#E11D48'}]}});
+   const options={format:'xml',ids:[id],bounds:{x:12,y:15,width:24,height:18},vdCompat:'exact'};
+   const selection=await client.call('export_selection',{documentId,...options});
+   const document=await client.call('export_document',{id:documentId,...options});
+   assert.equal(selection.sha256,document.sha256);
+   assert.equal(document.mimeType,'application/xml');
+   assert.deepEqual(document.diagnostics,[]);
+   const xml=Buffer.from(document.base64,'base64').toString();
+   assert.match(xml,/<vector .*android:width="24dp" android:height="18dp"/);
+   assert.match(xml,/android:pathData="M/);
+   assert.match(xml,/#(?:FF)?2563EB/i);
+   assert.doesNotMatch(xml,/#(?:FF)?E11D48/i);
+   await assert.rejects(client.call('export_document',{id:documentId,format:'svg',vdCompat:'exact'}),/vdCompat requires Android XML/);
   });
   await t.test('legacy viewport fits actual world-space layer bounds',async()=>{
    const {documentId}=await client.call('create_document',{title:'Viewport fit'});

@@ -98,7 +98,7 @@ impl ToolRouter {
     }
 }
 
-fn image_hash(node: &Node) -> Option<&str> {
+pub(super) fn image_hash(node: &Node) -> Option<&str> {
     node.string("assetHash")
         .or_else(|| node.string("imageHash"))
         .or_else(|| node.properties.get("image")?.get("hash")?.as_str())
