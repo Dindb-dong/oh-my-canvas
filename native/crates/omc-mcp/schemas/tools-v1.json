@@ -703,7 +703,7 @@
   },
   {
     "name": "batch",
-    "description": "Apply 1–100 supported writes atomically as one agent operation. Requires explicit documentId; never targets the visible tab implicitly.",
+    "description": "Apply 1–100 supported writes atomically to one explicit document. Name a create_board, create_shape, duplicate, component create or component instance step with as. Later node-ID arguments and ids array entries accept {from: step name, field: id}. namedResults returns each named root node ID.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -722,12 +722,19 @@
                   "delete",
                   "create_board",
                   "create_shape",
+                  "component",
                   "edit_shapes",
                   "edit_text",
                   "styles",
                   "libraries",
                   "document_assets"
                 ]
+              },
+              "as": {
+                "type": "string",
+                "description": "Unique name for the root node created by this step.",
+                "minLength": 1,
+                "maxLength": 64
               },
               "args": {
                 "type": "object",
@@ -742,6 +749,11 @@
           },
           "minItems": 1,
           "maxItems": 100
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Apply only if the document is still at this revision."
         },
         "documentId": {
           "type": "string",

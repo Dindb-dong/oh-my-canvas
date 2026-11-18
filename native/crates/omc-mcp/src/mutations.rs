@@ -245,7 +245,7 @@ impl ToolRouter {
             if expected != sequence {
                 return Err(EngineError::new(
                     "stale_revision",
-                    "text request revision changed",
+                    "document revision changed",
                 ));
             }
         }
@@ -339,6 +339,81 @@ impl ToolRouter {
         self.build_mutation(session, &id, "batch", &json!({"ops":ops}), &mut draft)?;
         Ok(draft.snapshot)
     }
+    fn build_batch(
+        &self,
+        session: &str,
+        document: &str,
+        args: &Value,
+        draft: &mut Draft,
+    ) -> Result<()> {
+        let document_id = external_id(document);
+        let mut named = BTreeMap::new();
+        for step in args["ops"].as_array().unwrap() {
+            let tool = string(step, "tool")?;
+            let mut input = step["args"].clone();
+            if input.get("documentId").is_some_and(|id| id != &document_id) {
+                return Err(EngineError::invalid("batch step targets another document"));
+            }
+            input["documentId"] = document_id.clone().into();
+            for key in [
+                "id", "parentId", "target", "parent", "source", "layer", "maskId",
+            ] {
+                if let Some(value) = input.get_mut(key) {
+                    resolve_step_id(value, &named)?;
+                }
+            }
+            if let Some(ids) = input.get_mut("ids").and_then(Value::as_array_mut) {
+                for id in ids {
+                    resolve_step_id(id, &named)?;
+                }
+            }
+            schema::validate(tool, &input)?;
+            if input["revision"]
+                .as_u64()
+                .is_some_and(|r| r != draft.snapshot.sequence)
+            {
+                return Err(EngineError::new(
+                    "stale_revision",
+                    "batch step revision changed",
+                ));
+            }
+            if matches!(
+                tool,
+                "batch" | "undo" | "redo" | "document_assets" | "export_selection"
+            ) {
+                return Err(EngineError::invalid(
+                    "operation cannot be nested in an atomic batch",
+                ));
+            }
+            let output = step["as"].as_str();
+            if let Some(name) = output {
+                if named.contains_key(name) {
+                    return Err(EngineError::invalid("batch step names must be unique"));
+                }
+                if !(matches!(tool, "create_shape" | "create_board" | "duplicate")
+                    || tool == "component"
+                        && matches!(input["action"].as_str(), Some("create" | "instance")))
+                {
+                    return Err(EngineError::invalid(
+                        "this batch step has no named node result",
+                    ));
+                }
+            }
+            let first = draft.created.len();
+            self.build_mutation(session, document, tool, &input, draft)?;
+            if let Some(name) = output {
+                let root = draft
+                    .created
+                    .get(first)
+                    .ok_or_else(|| EngineError::invalid("batch step produced no node"))?;
+                named.insert(name, json!({"id":root}));
+            }
+        }
+        if !named.is_empty() {
+            draft.result.insert("namedResults".into(), json!(named));
+        }
+        Ok(())
+    }
     fn build_mutation(
         &self,
         session: &str,
@@ -364,24 +439,7 @@ impl ToolRouter {
                 .collect()
         };
         match name {
-            "batch" => {
-                for op in args["ops"].as_array().unwrap() {
-                    let name = string(op, "tool")?;
-                    let mut checked = op["args"].clone();
-                    checked["documentId"] = external_id(id).into();
-                    schema::validate(name, &checked)?;
-                    if matches!(
-                        name,
-                        "batch" | "undo" | "redo" | "document_assets" | "export_selection"
-                    ) {
-                        return Err(EngineError::invalid(
-                            "operation cannot be nested in an atomic batch",
-                        ));
-                    }
-                    self.build_mutation(session, id, name, &checked, draft)?;
-                }
-                Ok(())
-            }
+            "batch" => self.build_batch(session, id, args, draft),
             "create_shape" | "create_board" => {
                 let kind = if name == "create_board" {
                     NodeKind::Frame
@@ -1275,6 +1333,22 @@ impl ToolRouter {
         Ok(())
     }
 }
+fn resolve_step_id(value: &mut Value, named: &BTreeMap<&str, Value>) -> Result<()> {
+    let Some(reference) = value.as_object() else {
+        return Ok(());
+    };
+    if reference.len() != 2 || value["field"] != "id" {
+        return Err(EngineError::invalid(
+            "batch node reference requires from and field id",
+        ));
+    }
+    let result = named.get(string(value, "from")?).ok_or_else(|| {
+        EngineError::invalid("batch node reference requires an earlier named step")
+    })?;
+    *value = result["id"].clone();
+    Ok(())
+}
+
 fn placement(draft: &Draft, target: &str, position: &str) -> Result<(String, String)> {
     let node = draft.node(target)?;
     let (parent, left, right) = match position {
