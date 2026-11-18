@@ -102,36 +102,23 @@ fn native_collection_modes_scope_to_the_requested_frame_and_inherit_on_clear() {
     let document = call("create_document", json!({"title":"Scoped palette"})).unwrap();
     let document = document["documentId"].as_str().unwrap();
     let native = format!("doc_{}", document.replace('-', ""));
-    router
-        .fig_bind_collaboration_tab(session, document)
-        .unwrap();
-    let command = |command: &str, params: Value| {
-        router
-            .call_figcraft(
-                session,
-                "run_command",
-                json!({"command":command,"params":params}),
-            )
-            .unwrap()
-    };
-    let collection = command(
-        "variable.createCollection",
-        json!({"name":"Palette","modes":["Light","Dark"]}),
-    );
-    let base = command(
-        "variable.create",
-        json!({"collection":collection["id"],"type":"color","name":"base","values":{"Light":"#ffffff","Dark":"#000000"}}),
-    );
-    let alias = command(
-        "variable.create",
-        json!({"collection":collection["id"],"type":"color","name":"surface","value":{"alias":base["id"]}}),
-    );
-
     let tokens = |mut args: Value| {
         args["version"] = json!("1");
         args["documentId"] = json!(document);
         call("native_tokens", args)
     };
+    let collection =
+        tokens(json!({"action":"create_collection","name":"Palette","modeNames":["Light","Dark"]}))
+            .unwrap();
+    let base = tokens(
+        json!({"action":"create","collectionId":collection["id"],"type":"color","name":"base","modes":{"Light":"#ffffff","Dark":"#000000"}}),
+    )
+    .unwrap();
+    let alias = tokens(
+        json!({"action":"create","collectionId":collection["id"],"type":"color","name":"surface","value":{"$token":base["id"]}}),
+    )
+    .unwrap();
+
     let palette = tokens(json!({"action":"list_collections"})).unwrap();
     assert_eq!(palette["items"][0]["id"], collection["id"]);
     let light = &palette["items"][0]["modes"][0]["id"];
@@ -171,6 +158,24 @@ fn native_collection_modes_scope_to_the_requested_frame_and_inherit_on_clear() {
     assert_eq!(local["authoredValue"], json!({"$token":base["id"]}));
     assert_eq!(inspect(&outside)["effectiveValue"], "#000000");
 
+    assert!(
+        tokens(json!({"action":"set_value","id":base["id"],"value":{"$token":alias["id"]}}))
+            .unwrap_err()
+            .message
+            .contains("cycle")
+    );
+    assert!(
+        tokens(json!({"action":"bind","id":alias["id"],"nodeId":inside,"property":"width"}))
+            .unwrap_err()
+            .message
+            .contains("types do not match")
+    );
+    assert!(
+        tokens(json!({"action":"update","id":base["id"],"patch":{"value":{"$token":alias["id"]}}}))
+            .unwrap_err()
+            .message
+            .contains("set_value")
+    );
     assert!(scoped(&inside, light).is_err());
     assert!(scoped(frame, &json!("unknown")).is_err());
     assert_eq!(inspect(&inside)["revision"], local["revision"]);
@@ -179,4 +184,42 @@ fn native_collection_modes_scope_to_the_requested_frame_and_inherit_on_clear() {
     assert_eq!(inspect(&inside)["effectiveValue"], "#000000");
     call("undo", json!({"documentId":document})).unwrap();
     assert_eq!(inspect(&inside)["effectiveValue"], "#ffffff");
+
+    let dim =
+        tokens(json!({"action":"add_mode","id":collection["id"],"name":"Dim","fromMode":"Dark"}))
+            .unwrap();
+    let mode = dim["id"].as_str().unwrap();
+    assert!(mode.starts_with("mode_"));
+    let alias = &alias["id"];
+    tokens(json!({"action":"set_value","id":base["id"],"mode":mode,"value":"#222222"})).unwrap();
+    tokens(json!({"action":"set_value","id":alias,"mode":mode,"value":{"$token":base["id"]}}))
+        .unwrap();
+    scoped(frame, &json!(mode)).unwrap();
+    assert_eq!(inspect(&inside)["effectiveValue"], "#222222");
+    assert_eq!(inspect(&outside)["effectiveValue"], "#000000");
+
+    let reopened = workspace.session_open(None).unwrap();
+    let reopened = reopened["sessionId"].as_str().unwrap();
+    router
+        .call(
+            reopened,
+            "open_document",
+            json!({"id":document}),
+            Value::Null,
+        )
+        .unwrap();
+    let resolved = router.call(reopened, "native_tokens",
+        json!({"action":"inspect","version":"1","documentId":document,"id":alias,"nodeId":inside}),
+        Value::Null).unwrap();
+    assert_eq!(resolved["effectiveValue"], "#222222");
+    assert_eq!(resolved["mode"], mode);
+
+    tokens(json!({"action":"unbind","nodeId":inside,"property":"fill"})).unwrap();
+    let snapshot = workspace.snapshot(&native).unwrap();
+    assert_eq!(
+        snapshot.nodes[inside.as_str().unwrap()].properties["fill"],
+        "#222222"
+    );
+    tokens(json!({"action":"remove_mode","id":collection["id"],"mode":mode})).unwrap();
+    assert_eq!(inspect(&outside)["effectiveValue"], "#000000");
 }
