@@ -464,7 +464,7 @@ impl ToolRouter {
         if frames.is_empty() {
             return Err(invalid("the page has no visible frames"));
         }
-        if frames.len() > 100 {
+        if frames.len() > interchange::frame_pdf::MAX_FRAMES {
             return Err(EngineError::new(
                 "resource_limit",
                 "PDF has more than 100 frames",
@@ -477,39 +477,20 @@ impl ToolRouter {
         });
         let count = frames.len();
         let resources = self.resources()?;
-        let mut bytes = Vec::new();
-        {
-            let metadata = skia_safe::pdf::Metadata {
-                title: snapshot.title.clone(),
-                ..Default::default()
-            };
-            let mut document = skia_safe::pdf::new_document(&mut bytes, Some(&metadata));
-            for frame in frames {
-                let [x, y, width, height] = frame.bounds;
-                if !(0.01..=1_000_000.).contains(&width) || !(0.01..=1_000_000.).contains(&height) {
-                    return Err(invalid(
-                        "PDF frame dimensions are outside the supported range",
-                    ));
-                }
-                let mut page = document.begin_page((width as f32, height as f32), None);
-                let canvas = page.canvas();
-                canvas.translate((-x as f32, -y as f32));
-                let diagnostics =
-                    omc_render::paint_scene_frame(canvas, &scene, &frame.id, &resources)
-                        .map_err(invalid)?;
-                if diagnostics
-                    .iter()
-                    .any(|diagnostic| diagnostic.fidelity_lost)
-                {
-                    return Err(unsupported("PDF rendering would lose frame content"));
-                }
-                document = page.end_page();
+        let (bytes, _) = interchange::frame_pdf::render(
+            &snapshot.title,
+            frames.into_iter().map(|frame| Ok((&scene, frame))),
+            &resources,
+            usize::MAX,
+            None,
+        )
+        .map_err(|error| {
+            if error.code == "unsupported_feature" {
+                unsupported(error.message)
+            } else {
+                error
             }
-            document.close();
-        }
-        if !bytes.starts_with(b"%PDF-") {
-            return Err(invalid("PDF encoding failed"));
-        }
+        })?;
         if let Some(path) = params.get("path") {
             let path = path
                 .as_str()

@@ -4,6 +4,7 @@ use omc_export::{ExportArtifact, ExportOptions};
 use omc_import::ImportOptions;
 use std::{io::Write, path::Path};
 
+pub(super) mod frame_pdf;
 mod replica;
 
 impl ToolRouter {
@@ -485,6 +486,15 @@ impl ToolRouter {
         mut args: Value,
         job: Option<&omc_workspace::jobs::JobContext>,
     ) -> Result<Value> {
+        if args.get("pdfFrameIds").is_some() {
+            let (artifact, pages) = self.export_frame_pdf(session, id, &args, job)?;
+            if let Some(job) = job {
+                job.begin_commit()?;
+            }
+            let mut result = self.deliver_export(session, &args, artifact)?;
+            result["pages"] = json!(pages);
+            return Ok(result);
+        }
         if let Some(ids) = args["ids"].as_array() {
             let raw = ids
                 .iter()
