@@ -419,6 +419,34 @@ pub fn build_scene_in_color_profile(
                         .bounds(r.width() as f64, r.height() as f64)
                 })
                 .unwrap_or_else(|| world.bounds(b.width, b.height))
+        } else if let Some(text) = &text
+            && node
+                .properties
+                .get("textPath")
+                .is_some_and(|path| path.get("sourceId").is_some())
+        {
+            let world_bounds = |[x, y, width, height]: [f64; 4]| {
+                world
+                    .multiply(Affine::translation(x, y))
+                    .bounds(width, height)
+            };
+            text.path_outline()
+                .map(|outline| {
+                    let bounds = outline.compute_tight_bounds();
+                    world_bounds([
+                        bounds.left as f64,
+                        bounds.top as f64,
+                        bounds.width() as f64,
+                        bounds.height() as f64,
+                    ])
+                })
+                .or_else(|| {
+                    text.selection_rects(0, text.utf16_len)
+                        .into_iter()
+                        .map(world_bounds)
+                        .reduce(measurement::union)
+                })
+                .unwrap_or_else(|| world.bounds(b.width, b.height))
         } else {
             world.bounds(b.width, b.height)
         };

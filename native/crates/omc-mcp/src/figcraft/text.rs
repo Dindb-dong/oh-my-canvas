@@ -242,6 +242,40 @@ fn number(value: &Value, field: &str, min: f64, max: f64) -> Result<f64> {
         .ok_or_else(|| EngineError::invalid(format!("{field} must be between {min} and {max}")))
 }
 
+fn text_path_options(path: &mut Value, params: &Value) -> Result<()> {
+    if let Some(start) = params.get("start") {
+        path["start"] = json!(number(start, "start", 0., 1.)?);
+    }
+    if let Some(flip) = params.get("flip") {
+        path["flip"] = json!(
+            flip.as_bool()
+                .ok_or_else(|| EngineError::invalid("flip must be a boolean"))?
+        );
+    }
+    Ok(())
+}
+
+fn text_path_curve(item: &omc_scene::SceneItem) -> Result<skia_safe::Path> {
+    if !matches!(
+        item.kind,
+        NodeKind::Path | NodeKind::Rect | NodeKind::Ellipse | NodeKind::Line | NodeKind::Frame
+    ) {
+        return Err(EngineError::invalid("layer has no usable text path"));
+    }
+    omc_scene::shape_path(item).ok_or_else(|| EngineError::invalid("layer has no usable text path"))
+}
+
+fn check_text_path_curve(curve: &skia_safe::Path) -> Result<()> {
+    if curve.count_verbs() > 20_000 || !curve.is_finite() {
+        return Err(EngineError::invalid("path is invalid or too complex"));
+    }
+    let length = skia_safe::PathMeasure::new(curve, false, None).length();
+    if !length.is_finite() || length <= 0. {
+        return Err(EngineError::invalid("path is empty or too complex"));
+    }
+    Ok(())
+}
+
 fn format_length(value: &Value, field: &str, min: f64, max: f64) -> Result<Value> {
     if field == "lineHeight" && value == "auto" {
         return Ok(json!("normal"));
@@ -826,15 +860,7 @@ impl ToolRouter {
                     });
                     continue;
                 }
-                if let Some(start) = params.get("start") {
-                    path["start"] = json!(number(start, "start", 0., 1.)?);
-                }
-                if let Some(flip) = params.get("flip") {
-                    path["flip"] = json!(
-                        flip.as_bool()
-                            .ok_or_else(|| EngineError::invalid("flip must be a boolean"))?
-                    );
-                }
+                text_path_options(&mut path, params)?;
                 commands.push(Command::NodeSet {
                     node_id: node.id.clone(),
                     properties: Properties::from([("textPath".into(), path)]),
@@ -1076,6 +1102,74 @@ impl ToolRouter {
         Ok(Properties::from([(pair.0.into(), pair.1)]))
     }
 
+    pub(crate) fn native_text_path_commands(
+        &self,
+        session: &str,
+        snapshot: &DocumentSnapshot,
+        id: &str,
+        args: &Value,
+    ) -> Result<Vec<Command>> {
+        let text = snapshot
+            .nodes
+            .get(id)
+            .ok_or_else(|| EngineError::invalid("text layer not found"))?;
+        allow_text(text)?;
+        let scene = paths::scene(snapshot, &self.state(session, &snapshot.id)?.page_id)?;
+        if !paths::editable(&scene, id) {
+            return Err(EngineError::invalid(
+                "choose visible, unlocked text on the selected page",
+            ));
+        }
+        let existing = text.properties.get("textPath");
+        let action = string(args, "action")?;
+        if action == "path_detach" {
+            return Ok(existing
+                .map(|path| Command::NodeUnset {
+                    node_id: id.into(),
+                    properties: if path.get("sourceId").is_some() {
+                        vec!["textPath".into()]
+                    } else {
+                        vec!["textPath".into(), "width".into(), "height".into()]
+                    },
+                })
+                .into_iter()
+                .collect());
+        }
+        if args["pathId"].is_string() != (action == "path_attach") {
+            return Err(EngineError::invalid("only path_attach accepts pathId"));
+        }
+        let mut path = if action == "path_attach" {
+            let source = self.resolve(session, &snapshot.id, string(args, "pathId")?)?;
+            if !snapshot.nodes.contains_key(&source) || !paths::editable(&scene, &source) {
+                return Err(EngineError::invalid(
+                    "choose a visible, unlocked path on the selected page",
+                ));
+            }
+            let item = scene.item(&source).unwrap();
+            let mut curve = text_path_curve(item)?;
+            let text_transform = scene.item(id).unwrap().world;
+            let inverse = text_transform
+                .inverse()
+                .ok_or_else(|| EngineError::invalid("text transform is not invertible"))?;
+            let [a, b, c, d, x, y] = inverse.multiply(item.world).0.map(|coord| coord as f32);
+            curve.transform(&skia_safe::Matrix::new_all(a, c, x, b, d, y, 0., 0., 1.));
+            check_text_path_curve(&curve)?;
+            json!({"path":curve.to_svg(),"start":0.,"flip":false,"sourceId":source})
+        } else {
+            existing
+                .cloned()
+                .ok_or_else(|| EngineError::invalid("text has no attached path"))?
+        };
+        text_path_options(&mut path, args)?;
+        if existing == Some(&path) {
+            return Ok(Vec::new());
+        }
+        Ok(vec![Command::NodeSet {
+            node_id: id.into(),
+            properties: Properties::from([("textPath".into(), path)]),
+        }])
+    }
+
     fn fig_put_text_on_path(
         &self,
         session: &str,
@@ -1105,12 +1199,6 @@ impl ToolRouter {
         let text_node = &snapshot.nodes[&text];
         allow_text(text_node)?;
         let path_node = &snapshot.nodes[&path];
-        if !matches!(
-            path_node.kind,
-            NodeKind::Path | NodeKind::Rect | NodeKind::Ellipse | NodeKind::Line | NodeKind::Frame
-        ) {
-            return Err(EngineError::invalid("layer has no usable text path"));
-        }
         if !children(snapshot, &path).is_empty() {
             return Err(EngineError::invalid("choose a shape without child layers"));
         }
@@ -1125,32 +1213,12 @@ impl ToolRouter {
             ));
         }
         let path_item = scene.item(&path).unwrap();
-        let curve = omc_scene::shape_path(path_item)
-            .ok_or_else(|| EngineError::invalid("layer has no usable text path"))?;
-        if curve.count_verbs() > 20_000
-            || skia_safe::PathMeasure::new(&curve, false, None).length() <= 0.
-        {
-            return Err(EngineError::invalid("path is empty or too complex"));
-        }
-        let start = params
-            .get("start")
-            .map(|value| number(value, "start", 0., 1.))
-            .transpose()?
-            .unwrap_or(0.);
-        let flip = params
-            .get("flip")
-            .map(|value| {
-                value
-                    .as_bool()
-                    .ok_or_else(|| EngineError::invalid("flip must be a boolean"))
-            })
-            .transpose()?
-            .unwrap_or(false);
+        let curve = text_path_curve(path_item)?;
+        check_text_path_curve(&curve)?;
+        let mut path_options = json!({"path":curve.to_svg(),"start":0.,"flip":false});
+        text_path_options(&mut path_options, params)?;
         let mut patch = Properties::from([
-            (
-                "textPath".into(),
-                json!({"path":curve.to_svg(),"start":start,"flip":flip}),
-            ),
+            ("textPath".into(), path_options),
             (
                 "x".into(),
                 json!(path_node.number("x", path_item.local.0[4])),
