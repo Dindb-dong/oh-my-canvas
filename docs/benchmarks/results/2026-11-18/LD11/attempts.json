@@ -1,0 +1,201 @@
+{
+  "schema_version": "omc-public-benchmark-results/1",
+  "measurement_source_commit": "c0a63518b9f084b6ab18a52cb1a99698efbf3c75",
+  "attempts": [
+    {
+      "attempt_id": "ld11-acknowledged",
+      "source_result_sha256": "2a1f0374e4c61680e01417e03745241ef35d3d034ee2ef0ad430276b048c62b4",
+      "result": {
+        "schema_version": "omc-local-dev/1",
+        "run_id": "ld11-acknowledged",
+        "workload_id": "LD11",
+        "product_profile": "omc-native-installed",
+        "execution_status": "DIAGNOSTIC",
+        "reason": "no_registered_oracle",
+        "observed_wall_ms": 779.821833,
+        "published_ready_ms": null,
+        "cleanup_ms": 0.22075,
+        "accepted_ready_ms": null,
+        "analysis_capped_time_ms": null,
+        "candidate_sha256": null,
+        "returncode": 0,
+        "acceptance_returncode": null,
+        "usage": null,
+        "resources": {
+          "type": "resource.summary",
+          "measurement_completeness": {
+            "physical_footprint": "INCOMPLETE",
+            "cpu": "INCOMPLETE",
+            "disk_io": "INCOMPLETE",
+            "wakeups": "INCOMPLETE"
+          },
+          "physical_footprint_peak_bytes": 182609208,
+          "physical_footprint_mean_bytes": 123148021.20717184,
+          "physical_footprint_byte_seconds": 94442042.96303402,
+          "integrated_duration_seconds": 0.7668985829999999,
+          "sampling_window_seconds": 0.771302583,
+          "cpu_seconds": 0.60549608,
+          "disk_read_bytes": 32768,
+          "disk_write_bytes": 6430720,
+          "package_idle_wakeups": 0,
+          "interrupt_wakeups": 58,
+          "sample_count": 28,
+          "max_sample_gap_ms": 50.363291,
+          "max_acquisition_ms": 0.406708,
+          "observed_process_instances": 7,
+          "departed_without_final_counters": 5,
+          "fork_notifications": 6,
+          "observed_exit_notifications": 7,
+          "read_or_discovery_errors": 6,
+          "counter_anomalies": []
+        },
+        "resource_tail_ms": null,
+        "provider_input_tokens": null,
+        "provider_output_tokens": null,
+        "physical_footprint_peak_bytes": 182609208,
+        "cpu_seconds": 0.60549608,
+        "measurement_completeness": {
+          "time": "INCOMPLETE",
+          "tokens": "NOT_OBSERVABLE",
+          "physical_footprint": "INCOMPLETE",
+          "cpu": "INCOMPLETE",
+          "presentation": "NOT_OBSERVABLE"
+        }
+      },
+      "registration": {
+        "timeout_seconds": 60,
+        "sample_resources": true
+      }
+    },
+    {
+      "attempt_id": "ld11-active-import",
+      "source_result_sha256": "dd962f3074b3a33b56b05f19cd7b7967e3deacd2da4f8a8341f6b6b6d27427f0",
+      "result": {
+        "schema_version": "omc-local-dev/1",
+        "run_id": "ld11-active-import",
+        "workload_id": "LD11",
+        "product_profile": "omc-native-installed",
+        "execution_status": "DIAGNOSTIC",
+        "reason": "no_registered_oracle",
+        "observed_wall_ms": 857.944333,
+        "published_ready_ms": null,
+        "cleanup_ms": 0.215542,
+        "accepted_ready_ms": null,
+        "analysis_capped_time_ms": null,
+        "candidate_sha256": null,
+        "returncode": 0,
+        "acceptance_returncode": null,
+        "usage": null,
+        "resources": {
+          "type": "resource.summary",
+          "measurement_completeness": {
+            "physical_footprint": "INCOMPLETE",
+            "cpu": "INCOMPLETE",
+            "disk_io": "INCOMPLETE",
+            "wakeups": "INCOMPLETE"
+          },
+          "physical_footprint_peak_bytes": 429112760,
+          "physical_footprint_mean_bytes": 199153137.95726904,
+          "physical_footprint_byte_seconds": 168107520.32881224,
+          "integrated_duration_seconds": 0.8441118329999999,
+          "sampling_window_seconds": 0.848601292,
+          "cpu_seconds": 0.776087412,
+          "disk_read_bytes": 32768,
+          "disk_write_bytes": 40517632,
+          "package_idle_wakeups": 0,
+          "interrupt_wakeups": 108,
+          "sample_count": 29,
+          "max_sample_gap_ms": 50.142333,
+          "max_acquisition_ms": 0.361583,
+          "observed_process_instances": 7,
+          "departed_without_final_counters": 6,
+          "fork_notifications": 6,
+          "observed_exit_notifications": 7,
+          "read_or_discovery_errors": 6,
+          "counter_anomalies": []
+        },
+        "resource_tail_ms": null,
+        "provider_input_tokens": null,
+        "provider_output_tokens": null,
+        "physical_footprint_peak_bytes": 429112760,
+        "cpu_seconds": 0.776087412,
+        "measurement_completeness": {
+          "time": "INCOMPLETE",
+          "tokens": "NOT_OBSERVABLE",
+          "physical_footprint": "INCOMPLETE",
+          "cpu": "INCOMPLETE",
+          "presentation": "NOT_OBSERVABLE"
+        }
+      },
+      "registration": {
+        "timeout_seconds": 60,
+        "sample_resources": true
+      }
+    },
+    {
+      "attempt_id": "ld11-receipt-unconsumed",
+      "source_result_sha256": "9e2b13ad907e78ad6ae1f4858c5b1e026e43f98a863141a143a641836c470e7e",
+      "result": {
+        "schema_version": "omc-local-dev/1",
+        "run_id": "ld11-receipt-unconsumed",
+        "workload_id": "LD11",
+        "product_profile": "omc-native-installed",
+        "execution_status": "DIAGNOSTIC",
+        "reason": "no_registered_oracle",
+        "observed_wall_ms": 770.01175,
+        "published_ready_ms": null,
+        "cleanup_ms": 0.20675,
+        "accepted_ready_ms": null,
+        "analysis_capped_time_ms": null,
+        "candidate_sha256": null,
+        "returncode": 0,
+        "acceptance_returncode": null,
+        "usage": null,
+        "resources": {
+          "type": "resource.summary",
+          "measurement_completeness": {
+            "physical_footprint": "INCOMPLETE",
+            "cpu": "INCOMPLETE",
+            "disk_io": "INCOMPLETE",
+            "wakeups": "INCOMPLETE"
+          },
+          "physical_footprint_peak_bytes": 172761608,
+          "physical_footprint_mean_bytes": 123898417.83765408,
+          "physical_footprint_byte_seconds": 93836072.34894407,
+          "integrated_duration_seconds": 0.757362959,
+          "sampling_window_seconds": 0.761525709,
+          "cpu_seconds": 0.570922662,
+          "disk_read_bytes": 32768,
+          "disk_write_bytes": 6352896,
+          "package_idle_wakeups": 0,
+          "interrupt_wakeups": 58,
+          "sample_count": 25,
+          "max_sample_gap_ms": 50.184291,
+          "max_acquisition_ms": 0.358584,
+          "observed_process_instances": 6,
+          "departed_without_final_counters": 5,
+          "fork_notifications": 5,
+          "observed_exit_notifications": 6,
+          "read_or_discovery_errors": 5,
+          "counter_anomalies": []
+        },
+        "resource_tail_ms": null,
+        "provider_input_tokens": null,
+        "provider_output_tokens": null,
+        "physical_footprint_peak_bytes": 172761608,
+        "cpu_seconds": 0.570922662,
+        "measurement_completeness": {
+          "time": "INCOMPLETE",
+          "tokens": "NOT_OBSERVABLE",
+          "physical_footprint": "INCOMPLETE",
+          "cpu": "INCOMPLETE",
+          "presentation": "NOT_OBSERVABLE"
+        }
+      },
+      "registration": {
+        "timeout_seconds": 60,
+        "sample_resources": true
+      }
+    }
+  ]
+}

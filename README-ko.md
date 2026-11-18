@@ -74,7 +74,27 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 
 이 실험에서 OMC는 **Paper보다 10,216개(31.1%)**, **Figma보다 9,759개(30.2%)** 적게 사용했습니다. 캐시 입력과 출력을 포함해 승인된 모든 모델 요청의 토큰을 합산한 값입니다. OMC/Penpot은 공통 검사를 통과했고, Paper/Figma는 편집 결과만 확인되어 전체 재열기 검증 등이 빠졌습니다. 단일 탐색 실험의 관측값이며 일반적인 절감 보장이나 청구 금액 비교는 아닙니다. 이후 중단 조건을 정리한 60초 LD02/LD03 실험에서는 제품 간 토큰 합계가 거의 비슷했습니다.
 
-[전체 결과·한계](docs/benchmarks/results/2026-11-18/README.md) · [초기 토큰 기록](docs/benchmarks/results/2026-11-18/earlier-ld03-tokens.json) · [실험 프로토콜](docs/benchmarks/README.md)
+[전체 결과·한계](docs/benchmarks/results/2026-11-18/README.md) · [초기 토큰 기록](docs/benchmarks/results/2026-11-18/LD03/earlier-tokens.json) · [실험 프로토콜](docs/benchmarks/README.md)
+
+### 실험 인덱스
+
+| ID | 내용 | 기록 |
+| --- | --- | --- |
+| [LD01](docs/benchmarks/results/2026-11-18/LD01/README.md) | 화면 생성 | 8 |
+| [LD02](docs/benchmarks/results/2026-11-18/LD02/README.md) | 대형 문서 부분 수정 | 4 |
+| [LD03](docs/benchmarks/results/2026-11-18/LD03/README.md) | 공유 컴포넌트·스타일 변경 | 16 |
+| [LD04](docs/benchmarks/results/2026-11-18/LD04/README.md) | 반응형 레이아웃 | 11 |
+| [LD05](docs/benchmarks/results/2026-11-18/LD05/README.md) | 코드 ↔ 캔버스 왕복 | 8 |
+| [LD06](docs/benchmarks/results/2026-11-18/LD06/README.md) | 에셋·폰트·콘텐츠 | 10 |
+| [LD07](docs/benchmarks/results/2026-11-18/LD07/README.md) | 결함 진단·수정 | 2 |
+| [LD08](docs/benchmarks/results/2026-11-18/LD08/README.md) | 동시 문서 작업 | 9 |
+| [LD09](docs/benchmarks/results/2026-11-18/LD09/README.md) | 시작·가져오기·재열기 | 7 |
+| [LD10](docs/benchmarks/results/2026-11-18/LD10/README.md) | 상호작용·유휴 자원 | 중단·부분 기록 |
+| [LD11](docs/benchmarks/results/2026-11-18/LD11/README.md) | 저장·복구 | 3 |
+| [LD12](docs/benchmarks/results/2026-11-18/LD12/README.md) | 빌드·IDE 자원 경합 | 보조 관측만 |
+| [LD13](docs/benchmarks/results/2026-11-18/LD13/README.md) | 4인 협업 | 미측정 |
+
+78 개 시도이며 실패·재시도를 포함합니다. 초기 LD03 토큰 실험은 별도 조건입니다.
 
 ## 사람끼리도 함께 작업하기
 

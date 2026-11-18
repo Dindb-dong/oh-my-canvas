@@ -8,7 +8,7 @@ These observations cover individual attempts on a shared host. The [registered p
 
 ## Earlier LD03 token observations
 
-An earlier, separately recorded field-relay experiment used the same pinned fixture, prompt v2, Codex 0.169.0 and local Qwen 2.5 3B model across four products. Fresh model servers and Codex homes were used per product. The [sanitized token cross-check](earlier-ld03-tokens.json) preserves complete provider input/output/cache splits, attempt IDs, acceptance scope and original ledger SHA-256 identities. All four archived ledger hashes and terminal summary totals were checked during the README refresh. These earlier runs are additional evidence, **outside the 78 indexed 60-second pilot attempts**; they must not be pooled as the same condition.
+An earlier, separately recorded field-relay experiment used the same pinned fixture, prompt v2, Codex 0.169.0 and local Qwen 2.5 3B model across four products. Fresh model servers and Codex homes were used per product. The [sanitized token cross-check](LD03/earlier-tokens.json) preserves complete provider input/output/cache splits, attempt IDs, acceptance scope and original ledger SHA-256 identities. All four archived ledger hashes and terminal summary totals were checked during the README refresh. These earlier runs are additional evidence, **outside the 78 indexed 60-second pilot attempts**; they must not be pooled as the same condition.
 
 | Product | Gross provider tokens | Cached input included | Provider requests | Observed acceptance |
 | --- | ---: | ---: | ---: | --- |
@@ -23,12 +23,32 @@ These are single exploratory observations with unequal lifecycle coverage, no ac
 
 ## Published data
 
-- [All 78 indexed attempts in CSV](attempts.csv) retain conditions, statuses, actual wall times, accepted times, failure caps, provider usage completeness and resource boundaries.
-- [Sanitized result records](attempts.json) include original-result SHA-256 identities, measured fields, available acceptance failures and per-attempt registration pins. Records are indexed by `attempt_id`.
+- The per-experiment CSV files below retain all **78 indexed attempts**, including conditions, statuses, actual wall times, accepted times, failure caps, provider usage completeness and resource boundaries.
+- Each experiment's `attempts.json` preserves sanitized result records, original-result SHA-256 identities, measured fields, acceptance failures and registration pins. Records are indexed by `attempt_id`.
 - [Environment and model runtime](environment.json) preserve the initial host/app inventory and the prepared OMC LD03 runtime. Later per-attempt pins take precedence over the initial inventory.
-- [LD02 prompt](ld02-prompt.txt) and [LD03 prompt](ld03-prompt.txt) identify the shared model tasks.
+- [LD02 prompt](LD02/prompt.txt) and [LD03 prompt](LD03/prompt.txt) identify the shared model tasks.
 
-The public records exclude credentials, document/account identifiers, authenticated endpoints, private file paths and raw model/UI traces. Original-result hashes identify the retained source records. They do not reconstruct excluded bytes. The CSV's `selected_latest` field selects within a condition. Earlier model profiles and start conditions remain distinct rows.
+The public records exclude credentials, document/account identifiers, authenticated endpoints, private file paths and raw model/UI traces. Original-result hashes identify the retained source records. They do not reconstruct excluded bytes. Each CSV's `selected_latest` field selects within a condition. Earlier model profiles and start conditions remain distinct rows.
+
+## Experiment index
+
+| Experiment | Task | Indexed attempts | Data |
+| --- | --- | ---: | --- |
+| [LD01](LD01/README.md) | Create a dashboard | 8 | [CSV](LD01/attempts.csv) · [JSON](LD01/attempts.json) |
+| [LD02](LD02/README.md) | Make a scoped edit in a large document | 4 | [CSV](LD02/attempts.csv) · [JSON](LD02/attempts.json) |
+| [LD03](LD03/README.md) | Change a shared component/style | 16 | [CSV](LD03/attempts.csv) · [JSON](LD03/attempts.json) |
+| [LD04](LD04/README.md) | Adapt a responsive layout | 11 | [CSV](LD04/attempts.csv) · [JSON](LD04/attempts.json) |
+| [LD05](LD05/README.md) | Repeat code-to-canvas-to-code changes | 8 | [CSV](LD05/attempts.csv) · [JSON](LD05/attempts.json) |
+| [LD06](LD06/README.md) | Work with local assets, fonts and content | 10 | [CSV](LD06/attempts.csv) · [JSON](LD06/attempts.json) |
+| [LD07](LD07/README.md) | Diagnose and repair defects | 2 | [CSV](LD07/attempts.csv) · [JSON](LD07/attempts.json) |
+| [LD08](LD08/README.md) | Concurrent documents and foreground editing | 9 | [CSV](LD08/attempts.csv) · [JSON](LD08/attempts.json) |
+| [LD09](LD09/README.md) | Startup, import and reopen | 7 | [CSV](LD09/attempts.csv) · [JSON](LD09/attempts.json) |
+| [LD10](LD10/README.md) | Interaction and idle resource use | — | No indexed rows |
+| [LD11](LD11/README.md) | Save, offline work and recovery | 3 | [CSV](LD11/attempts.csv) · [JSON](LD11/attempts.json) |
+| [LD12](LD12/README.md) | Compete with ordinary local development | — | No indexed rows |
+| [LD13](LD13/README.md) | Four-person collaboration | — | No indexed rows |
+
+The per-experiment files replace the combined CSV/JSON. Their 78 records are unchanged. LD10, LD12 and LD13 have status pages so incomplete or unmeasured work is explicit; no successful rows or zero measurements have been invented. The earlier LD03 token experiment is stored separately on the LD03 page.
 
 ## Model-assisted tasks
 

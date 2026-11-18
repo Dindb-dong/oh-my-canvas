@@ -74,7 +74,27 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 
 この実験では**Paperより10,216トークン（31.1%）**、**Figmaより9,759トークン（30.2%）**少ない結果でした。キャッシュ入力と出力を含む全受付リクエストの合計です。OMC/Penpotは共通検証を通過し、Paper/Figmaは編集結果のみ確認され、再オープン等の検証が不足しています。単発の探索実験であり、一般的な削減保証や請求額比較ではありません。後の60秒LD02/LD03では各製品の合計がほぼ同じでした。
 
-[結果と限界](docs/benchmarks/results/2026-11-18/README.md) · [初期トークン記録](docs/benchmarks/results/2026-11-18/earlier-ld03-tokens.json) · [プロトコル](docs/benchmarks/README.md)
+[結果と限界](docs/benchmarks/results/2026-11-18/README.md) · [初期トークン記録](docs/benchmarks/results/2026-11-18/LD03/earlier-tokens.json) · [プロトコル](docs/benchmarks/README.md)
+
+### 実験インデックス
+
+| ID | 内容 | 記録 |
+| --- | --- | --- |
+| [LD01](docs/benchmarks/results/2026-11-18/LD01/README.md) | 画面作成 | 8 |
+| [LD02](docs/benchmarks/results/2026-11-18/LD02/README.md) | 大規模文書の部分編集 | 4 |
+| [LD03](docs/benchmarks/results/2026-11-18/LD03/README.md) | 共有コンポーネント・スタイル編集 | 16 |
+| [LD04](docs/benchmarks/results/2026-11-18/LD04/README.md) | レスポンシブレイアウト | 11 |
+| [LD05](docs/benchmarks/results/2026-11-18/LD05/README.md) | コード ↔ キャンバス往復 | 8 |
+| [LD06](docs/benchmarks/results/2026-11-18/LD06/README.md) | アセット・フォント・コンテンツ | 10 |
+| [LD07](docs/benchmarks/results/2026-11-18/LD07/README.md) | 不具合の診断・修正 | 2 |
+| [LD08](docs/benchmarks/results/2026-11-18/LD08/README.md) | 同時文書作業 | 9 |
+| [LD09](docs/benchmarks/results/2026-11-18/LD09/README.md) | 起動・インポート・再オープン | 7 |
+| [LD10](docs/benchmarks/results/2026-11-18/LD10/README.md) | 操作・アイドル時の資源 | 中断・部分記録 |
+| [LD11](docs/benchmarks/results/2026-11-18/LD11/README.md) | 保存・復旧 | 3 |
+| [LD12](docs/benchmarks/results/2026-11-18/LD12/README.md) | ビルド・IDEとの資源競合 | 補助観測のみ |
+| [LD13](docs/benchmarks/results/2026-11-18/LD13/README.md) | 4人共同作業 | 未測定 |
+
+78 試行で、失敗と再試行を含みます。初期LD03トークン実験は別条件です。
 
 ## 人同士の共同作業
 

@@ -9,6 +9,7 @@ work/
 /native/target/
 /native/.profiles/
 
+# Local-only OMX plans, state, and agent artifacts.
 .omx/
 
 .worktrees/

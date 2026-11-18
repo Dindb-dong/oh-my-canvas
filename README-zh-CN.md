@@ -74,7 +74,27 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 
 该实验中 OMC **比 Paper 少 10,216 个令牌（31.1%）**、**比 Figma 少 9,759 个（30.2%）**。统计包含所有已接纳请求的缓存输入和输出。OMC/Penpot 通过共同验收；Paper/Figma 仅验证了编辑结果，缺少完整重新打开等观察。这是单次探索实验，不代表普遍节省保证或账单费用比较。后续调整停止条件的 60 秒 LD02/LD03 实验中，各产品总量接近。
 
-[完整结果与限制](docs/benchmarks/results/2026-11-18/README.md) · [早期令牌记录](docs/benchmarks/results/2026-11-18/earlier-ld03-tokens.json) · [实验协议](docs/benchmarks/README.md)
+[完整结果与限制](docs/benchmarks/results/2026-11-18/README.md) · [早期令牌记录](docs/benchmarks/results/2026-11-18/LD03/earlier-tokens.json) · [实验协议](docs/benchmarks/README.md)
+
+### 实验索引
+
+| ID | 内容 | 记录 |
+| --- | --- | --- |
+| [LD01](docs/benchmarks/results/2026-11-18/LD01/README.md) | 创建界面 | 8 |
+| [LD02](docs/benchmarks/results/2026-11-18/LD02/README.md) | 大型文档局部编辑 | 4 |
+| [LD03](docs/benchmarks/results/2026-11-18/LD03/README.md) | 共享组件与样式修改 | 16 |
+| [LD04](docs/benchmarks/results/2026-11-18/LD04/README.md) | 响应式布局 | 11 |
+| [LD05](docs/benchmarks/results/2026-11-18/LD05/README.md) | 代码 ↔ 画布往返 | 8 |
+| [LD06](docs/benchmarks/results/2026-11-18/LD06/README.md) | 资源、字体与内容 | 10 |
+| [LD07](docs/benchmarks/results/2026-11-18/LD07/README.md) | 缺陷诊断与修复 | 2 |
+| [LD08](docs/benchmarks/results/2026-11-18/LD08/README.md) | 并发文档 | 9 |
+| [LD09](docs/benchmarks/results/2026-11-18/LD09/README.md) | 启动、导入与重新打开 | 7 |
+| [LD10](docs/benchmarks/results/2026-11-18/LD10/README.md) | 交互与空闲资源 | 中断与部分记录 |
+| [LD11](docs/benchmarks/results/2026-11-18/LD11/README.md) | 保存与恢复 | 3 |
+| [LD12](docs/benchmarks/results/2026-11-18/LD12/README.md) | 构建与 IDE 资源竞争 | 仅辅助观察 |
+| [LD13](docs/benchmarks/results/2026-11-18/LD13/README.md) | 四人协作 | 未测量 |
+
+78 次尝试，包含失败与重试。早期 LD03 令牌实验属于单独条件。
 
 ## 人与人也能协作
 

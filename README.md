@@ -74,7 +74,27 @@ An **earlier LD03 experiment**, with the same model, fixture and prompt, recorde
 
 That is **10,216 fewer tokens than Paper (31.1%)** and **9,759 fewer than Figma (30.2%)** in this experiment. Counts include cached input and output across all admitted provider requests. OMC/Penpot passed the common oracle; Paper/Figma qualified the edited candidate but lacked full lifecycle observations. These are single exploratory runs, not a general saving guarantee or a billing-cost comparison. Later guarded 60-second LD02/LD03 runs had nearly equal provider totals across products.
 
-[Full results and limits](docs/benchmarks/results/2026-11-18/README.md) · [Earlier token records](docs/benchmarks/results/2026-11-18/earlier-ld03-tokens.json) · [Protocol](docs/benchmarks/README.md)
+[Full results and limits](docs/benchmarks/results/2026-11-18/README.md) · [Earlier token records](docs/benchmarks/results/2026-11-18/LD03/earlier-tokens.json) · [Protocol](docs/benchmarks/README.md)
+
+### Experiment index
+
+| ID | Task | Records |
+| --- | --- | --- |
+| [LD01](docs/benchmarks/results/2026-11-18/LD01/README.md) | Dashboard creation | 8 |
+| [LD02](docs/benchmarks/results/2026-11-18/LD02/README.md) | Scoped large-document edit | 4 |
+| [LD03](docs/benchmarks/results/2026-11-18/LD03/README.md) | Shared component/style edit | 16 |
+| [LD04](docs/benchmarks/results/2026-11-18/LD04/README.md) | Responsive layout | 11 |
+| [LD05](docs/benchmarks/results/2026-11-18/LD05/README.md) | Code ↔ canvas round trips | 8 |
+| [LD06](docs/benchmarks/results/2026-11-18/LD06/README.md) | Assets, fonts and content | 10 |
+| [LD07](docs/benchmarks/results/2026-11-18/LD07/README.md) | Defect diagnosis and repair | 2 |
+| [LD08](docs/benchmarks/results/2026-11-18/LD08/README.md) | Concurrent documents | 9 |
+| [LD09](docs/benchmarks/results/2026-11-18/LD09/README.md) | Startup/import/reopen | 7 |
+| [LD10](docs/benchmarks/results/2026-11-18/LD10/README.md) | Interaction and idle use | Interrupted |
+| [LD11](docs/benchmarks/results/2026-11-18/LD11/README.md) | Save and recovery | 3 |
+| [LD12](docs/benchmarks/results/2026-11-18/LD12/README.md) | Build/IDE contention | Companion only |
+| [LD13](docs/benchmarks/results/2026-11-18/LD13/README.md) | Four-person collaboration | Not measured |
+
+78 attempts, including failures/retries; the earlier LD03 token experiment is separate.
 
 ## People can work together too
 
