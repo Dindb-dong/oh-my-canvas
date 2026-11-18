@@ -1,0 +1,18 @@
+{
+  "name": "guides",
+  "description": "List or edit native ruler guides on the selected page or one of its top-level frames. A missing ownerId selects the page. Move and remove require the listed revision and zero-based guide index.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "documentId": {"type": "string", "minLength": 36, "maxLength": 36},
+      "ownerId": {"type": "string", "minLength": 1, "maxLength": 200},
+      "action": {"type": "string", "enum": ["list", "add", "move", "remove", "clear"]},
+      "revision": {"type": "integer", "minimum": 0},
+      "index": {"type": "integer", "minimum": 0, "maximum": 9999},
+      "offset": {"type": "number", "minimum": -10000000, "maximum": 10000000},
+      "vertical": {"type": "boolean"}
+    },
+    "required": ["documentId", "action"],
+    "additionalProperties": false
+  }
+}

@@ -260,3 +260,72 @@ fn native_data_fill_creates_distinct_editable_copies_with_one_undo() {
     }
     assert_eq!(inspect(&label)["tree"]["text"], "Template");
 }
+
+#[test]
+fn native_guides_keep_page_and_frame_scopes_after_a_contour_edit() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(directory.path(), None).unwrap();
+    let router = Arc::new(ToolRouter::new(workspace.clone()));
+    let registration = workspace.session_open(None).unwrap();
+    let session = registration["sessionId"].as_str().unwrap();
+    let call = |tool: &str, params: Value| router.call(session, tool, params, Value::Null).unwrap();
+    let doc = call("create_document", json!({"title":"Guides and contour"}));
+    let document = &doc["documentId"];
+    let frame = call(
+        "create_shape",
+        json!({"documentId":document,"type":"frame","width":250,"height":120}),
+    )["rawIds"][0]
+        .clone();
+    call(
+        "guides",
+        json!({"documentId":document,"action":"add","offset":18,"vertical":false}),
+    );
+    let frame_guide = call(
+        "guides",
+        json!({"documentId":document,"action":"add","ownerId":frame,"offset":30}),
+    );
+    call(
+        "write_svg",
+        json!({"documentId":document,"target":frame,"position":"last","svg":
+        "<svg width=\"108\" height=\"100\"><path fill=\"#223355\" fill-rule=\"evenodd\" d=\"M5 5 L95 5 L95 95 L5 95 Z M25 24 L56 24 L56 61 L25 61 Z\"/></svg>"}),
+    );
+    let tree = call("get_tree", json!({"documentId":document,"id":frame}));
+    let path = tree["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["kind"] == "path")
+        .unwrap();
+    let id = &path["rawId"];
+    let geometry = || call("get_path", json!({"documentId":document,"id":id}));
+    let before = geometry();
+    call(
+        "edit_path",
+        json!({"documentId":document,"id":id,"revision":before["revision"],"action":"reverse","contour":1}),
+    );
+    let after = geometry();
+    let segments = |result: &Value| result["segments"].as_array().unwrap().clone();
+    assert_eq!(segments(&before)[..5], segments(&after)[..5]);
+    assert_ne!(segments(&before)[5..], segments(&after)[5..]);
+    assert_eq!(after["fillRule"], "evenodd");
+    let move_guide = |revision: &Value| {
+        router.call(session,"guides",json!({
+        "documentId":document,"action":"move","ownerId":frame,"index":0,"offset":42,"revision":revision
+    }),Value::Null)
+    };
+    assert_eq!(
+        move_guide(&frame_guide["revision"]).unwrap_err().code,
+        "stale_revision"
+    );
+    let listed = call(
+        "guides",
+        json!({"documentId":document,"action":"list","ownerId":frame}),
+    );
+    assert_eq!(
+        move_guide(&listed["revision"]).unwrap()["guides"],
+        json!([{"offset":42.,"vertical":true}])
+    );
+    let page = call("guides", json!({"documentId":document,"action":"list"}));
+    assert_ne!(page["ownerId"], frame);
+    assert_eq!(page["guides"], json!([{"offset":18.,"vertical":false}]));
+}
