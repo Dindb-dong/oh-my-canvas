@@ -486,6 +486,9 @@ impl ToolRouter {
         mut args: Value,
         job: Option<&omc_workspace::jobs::JobContext>,
     ) -> Result<Value> {
+        if args.get("vdCompat").is_some() && args["format"] != "xml" {
+            return Err(EngineError::invalid("vdCompat requires Android XML format"));
+        }
         if args.get("pdfFrameIds").is_some() {
             let (artifact, pages) = self.export_frame_pdf(session, id, &args, job)?;
             if let Some(job) = job {

@@ -658,6 +658,26 @@ try{
    assert.match(selectedDoc,/#(?:11cc66|1c6)"/);
    assert.doesNotMatch(selectedDoc,/#(?:5511ff|51f)"/);
   });
+  await t.test('Android XML exports explicit editable vector bounds through native tools', async () => {
+   const {documentId}=await client.call('create_document',{title:'Android Vector Drawable'});
+   const {rawIds:[id]}=await client.call('create_shape',{
+    documentId,type:'rect',x:12,y:15,width:24,height:18,
+    properties:{fills:[{type:'solid',color:'#2563EB'}]},
+   });
+   await client.call('create_shape',{documentId,type:'rect',x:80,y:50,width:20,height:20,properties:{fills:[{type:'solid',color:'#E11D48'}]}});
+   const options={format:'xml',ids:[id],bounds:{x:12,y:15,width:24,height:18},vdCompat:'exact'};
+   const selection=await client.call('export_selection',{documentId,...options});
+   const document=await client.call('export_document',{id:documentId,...options});
+   assert.equal(selection.sha256,document.sha256);
+   assert.equal(document.mimeType,'application/xml');
+   assert.deepEqual(document.diagnostics,[]);
+   const xml=Buffer.from(document.base64,'base64').toString();
+   assert.match(xml,/<vector .*android:width="24dp" android:height="18dp"/);
+   assert.match(xml,/android:pathData="M/);
+   assert.match(xml,/#(?:FF)?2563EB/i);
+   assert.doesNotMatch(xml,/#(?:FF)?E11D48/i);
+   await assert.rejects(client.call('export_document',{id:documentId,format:'svg',vdCompat:'exact'}),/vdCompat requires Android XML/);
+  });
   await t.test('legacy viewport fits actual world-space layer bounds',async()=>{
    const {documentId}=await client.call('create_document',{title:'Viewport fit'});
    const rect=await client.call('create_shape',{documentId,type:'rect',x:100,y:200,width:200,height:100});
