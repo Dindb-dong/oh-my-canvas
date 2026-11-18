@@ -185,3 +185,78 @@ fn native_shape_builder_previews_and_edits_the_selected_regions() {
     call("undo", json!({"documentId":document}));
     assert_eq!(inspect(&merged["id"])["properties"], path["properties"]);
 }
+
+#[test]
+fn native_data_fill_creates_distinct_editable_copies_with_one_undo() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(directory.path(), None).unwrap();
+    let router = Arc::new(ToolRouter::new(workspace.clone()));
+    let registration = workspace.session_open(None).unwrap();
+    let session = registration["sessionId"].as_str().unwrap();
+    let call = |tool: &str, params: Value| router.call(session, tool, params, Value::Null).unwrap();
+    let doc = call("create_document", json!({"title":"Data-driven design"}));
+    let document = &doc["documentId"];
+    let frame = call(
+        "create_shape",
+        json!({"documentId":document,"type":"frame","width":280,"height":180}),
+    )["rawIds"][0]
+        .clone();
+    let label = call(
+        "create_shape",
+        json!({"documentId":document,"type":"text","parentId":frame,
+        "properties":{"name":"Headline","text":"Template"}}),
+    )["rawIds"][0]
+        .clone();
+    let args = json!({"documentId":document,"id":frame,"rows":[
+        {"name":"First row","Headline":"Seoul"},
+        {"name":"Second row","Headline":{"text":"Busan","fill":"#112233"},"Unmapped":"ignored"}
+    ],"formats":[{"name":"Small","width":180,"height":120}]});
+    let fill = || {
+        router
+            .call(
+                session,
+                "data_fill",
+                args.clone(),
+                json!({"oh-my-canvas/idempotency-key":"filled-template"}),
+            )
+            .unwrap()
+    };
+    let first = fill();
+    assert_eq!(first["receipt"]["status"], "durable");
+    assert_eq!(first["missing"], json!(["Unmapped"]));
+    assert_eq!(fill()["copies"], first["copies"]);
+    let inspect = |id: &Value| {
+        call(
+            "get_tree",
+            json!({"documentId":document,"id":id,"detail":"detailed"}),
+        )
+    };
+    let one = &first["copies"][0]["id"];
+    let two = &first["copies"][1]["id"];
+    assert_ne!(one, two);
+    let row_one = inspect(one);
+    let row_two = inspect(two);
+    assert_eq!(row_one["tree"]["name"], "First row-Small");
+    assert_eq!(row_one["tree"]["width"], 180.);
+    assert_eq!(row_one["tree"]["children"][0]["text"], "Seoul");
+    assert_eq!(row_two["tree"]["children"][0]["text"], "Busan");
+    assert_eq!(
+        row_two["tree"]["children"][0]["properties"]["fill"],
+        "#112233"
+    );
+    assert_eq!(inspect(&label)["tree"]["text"], "Template");
+    call("undo", json!({"documentId":document}));
+    for copy in [one, two] {
+        assert!(
+            router
+                .call(
+                    session,
+                    "get_tree",
+                    json!({"documentId":document,"id":copy}),
+                    Value::Null
+                )
+                .is_err()
+        );
+    }
+    assert_eq!(inspect(&label)["tree"]["text"], "Template");
+}
