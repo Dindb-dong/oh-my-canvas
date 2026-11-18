@@ -86,4 +86,4 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 
 [贡献](CONTRIBUTING.md) · [测试](docs/TESTING.md) · [原生验证](native/README.md) · [安全](SECURITY.md) · [设计方向](DESIGN.md)
 
-实现采用 [MIT](LICENSE)，依赖和字体保留各自许可证。[第三方声明](THIRD_PARTY_NOTICES.md) · [实现来源](docs/independent/PROVENANCE.md)。当前为私有仓库，不承诺公共下载或托管服务。
+实现采用 [MIT](LICENSE)，依赖和字体保留各自许可证。[第三方声明](THIRD_PARTY_NOTICES.md) · [实现来源](docs/independent/PROVENANCE.md)。源代码已在 [GitHub](https://github.com/Dindb-dong/oh-my-canvas) 公开。

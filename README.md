@@ -86,4 +86,4 @@ Host a native TLS room and privately share its pinned-certificate invitation. Up
 
 [Contributing](CONTRIBUTING.md) · [Testing](docs/TESTING.md) · [Native verification](native/README.md) · [Security](SECURITY.md) · [Design direction](DESIGN.md)
 
-The implementation is [MIT licensed](LICENSE); dependencies and fonts keep their own licenses. See [third-party notices](THIRD_PARTY_NOTICES.md) and [implementation provenance](docs/independent/PROVENANCE.md). This private repository does not promise a public download or hosted service.
+The implementation is [MIT licensed](LICENSE); dependencies and fonts keep their own licenses. See [third-party notices](THIRD_PARTY_NOTICES.md) and [implementation provenance](docs/independent/PROVENANCE.md). Source code is available on [GitHub](https://github.com/Dindb-dong/oh-my-canvas).

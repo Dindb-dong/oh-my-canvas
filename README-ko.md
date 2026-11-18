@@ -86,4 +86,4 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 
 [기여 안내](CONTRIBUTING.md) · [테스트](docs/TESTING.md) · [네이티브 검증](native/README.md) · [보안](SECURITY.md) · [디자인 방향](DESIGN.md)
 
-프로젝트 구현은 [MIT](LICENSE)이며 외부 의존성·폰트는 각 라이선스를 따릅니다. [외부 구성요소 고지](THIRD_PARTY_NOTICES.md) · [구현 출처](docs/independent/PROVENANCE.md). 현재 비공개 저장소이며 공개 다운로드·호스팅 서비스를 보장하지 않습니다.
+프로젝트 구현은 [MIT](LICENSE)이며 외부 의존성·폰트는 각 라이선스를 따릅니다. [외부 구성요소 고지](THIRD_PARTY_NOTICES.md) · [구현 출처](docs/independent/PROVENANCE.md). 소스 코드는 [GitHub](https://github.com/Dindb-dong/oh-my-canvas)에서 확인할 수 있습니다.

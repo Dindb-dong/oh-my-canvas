@@ -86,4 +86,4 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 
 [貢献](CONTRIBUTING.md) · [テスト](docs/TESTING.md) · [ネイティブ検証](native/README.md) · [セキュリティ](SECURITY.md) · [デザイン](DESIGN.md)
 
-実装は[MIT](LICENSE)、依存関係・フォントは各ライセンスに従います。[第三者告知](THIRD_PARTY_NOTICES.md) · [実装の来歴](docs/independent/PROVENANCE.md)。非公開リポジトリであり、公開ダウンロードやホストサービスは保証しません。
+実装は[MIT](LICENSE)、依存関係・フォントは各ライセンスに従います。[第三者告知](THIRD_PARTY_NOTICES.md) · [実装の来歴](docs/independent/PROVENANCE.md)。ソースコードは[GitHub](https://github.com/Dindb-dong/oh-my-canvas)で公開しています。
