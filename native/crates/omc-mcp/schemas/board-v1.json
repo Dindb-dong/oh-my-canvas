@@ -1,6 +1,6 @@
 {
   "name": "board",
-  "description": "Create or edit a sticky note and connect or reattach layers on the current page. Model-backed connectors follow their targets. All changes are document-scoped.",
+  "description": "Create or edit sticky notes and tables, or connect and reattach layers on the current page. Model-backed connectors follow their targets. All changes are document-scoped.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -45,9 +45,13 @@
           "create_sticky",
           "update_sticky",
           "connect",
-          "reattach"
+          "reattach",
+          "create_table",
+          "inspect_table",
+          "edit_table",
+          "set_table_cell"
         ],
-        "description": "update_sticky requires id plus text or color. connect requires fromId and toId. reattach requires id, end and targetId."
+        "description": "update_sticky requires id plus text or color. connect requires fromId and toId. reattach requires id, end and targetId. create_table accepts cells or dimensions. inspect_table, edit_table, and set_table_cell require the table id. edit_table requires operation. set_table_cell requires zero-based row and column plus text."
       },
       "x": {
         "type": "number",
@@ -181,6 +185,52 @@
           "from",
           "to"
         ]
+      },
+      "rows": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50
+      },
+      "columns": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20
+      },
+      "cells": {
+        "type": "array",
+        "maxItems": 50,
+        "items": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        }
+      },
+      "operation": {
+        "type": "string",
+        "enum": [
+          "add_row",
+          "remove_row",
+          "add_column",
+          "remove_column"
+        ]
+      },
+      "index": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 49
+      },
+      "row": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 49
+      },
+      "column": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 19
       }
     }
   }

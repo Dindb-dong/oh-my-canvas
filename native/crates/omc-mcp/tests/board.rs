@@ -117,3 +117,71 @@ fn native_board_sticky_and_connector_stay_editable_after_reopen() {
         third["id"]
     );
 }
+
+#[test]
+fn native_board_tables_preserve_editable_cells_and_render_after_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(directory.path(), None).unwrap();
+    let router = Arc::new(ToolRouter::new(workspace.clone()));
+    let session = workspace.session_open(None).unwrap()["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let call =
+        |session: &str, tool: &str, args| router.call(session, tool, args, Value::Null).unwrap();
+    let document = call(
+        &session,
+        "create_document",
+        json!({"title":"Editable board table"}),
+    );
+    let id = &document["documentId"];
+    let board = |session: &str, mut args: Value| {
+        args["documentId"] = id.clone();
+        call(session, "board", args)
+    };
+    let created = board(
+        &session,
+        json!({"action":"create_table","rows":8,"columns":8,"x":20,"y":20,
+               "cells":[["Heading"],["Original"]]}),
+    );
+    let table = &created["id"];
+    let old_cell = &created["cells"][1][0];
+    assert_eq!(created["rawIds"][0], *table);
+    assert!(created["rawIds"].as_array().unwrap().len() > 100);
+    let inserted = board(
+        &session,
+        json!({"action":"edit_table","id":table,"operation":"add_column","index":0}),
+    );
+    assert_eq!(inserted["cells"][1][1], *old_cell);
+    let updated = board(
+        &session,
+        json!({"action":"set_table_cell","id":table,"row":1,"column":1,"text":"Editable table cell"}),
+    );
+    assert_eq!(updated["cells"][1][1], *old_cell);
+    let removed = board(
+        &session,
+        json!({"action":"edit_table","id":table,"operation":"remove_column","index":0}),
+    );
+    assert_eq!(removed["cells"][1][0], *old_cell);
+
+    let reader = workspace.session_open(None).unwrap()["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    call(&reader, "open_document", json!({"id":id}));
+    let read = board(&reader, json!({"action":"inspect_table","id":table}));
+    assert_eq!(read["rows"], 8);
+    assert_eq!(read["columns"], 8);
+    assert_eq!(read["cells"][1][0], *old_cell);
+    let svg = call(
+        &reader,
+        "export_selection",
+        json!({"documentId":id,"format":"svg","ids":[table]}),
+    );
+    assert!(
+        svg["content"]
+            .as_str()
+            .unwrap()
+            .contains("Editable table cell")
+    );
+}

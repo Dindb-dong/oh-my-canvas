@@ -65,6 +65,60 @@ impl ToolRouter {
                 }
                 Ok((commands, result))
             }
+            "create_table" => {
+                let parent_id = if args.get("parentId").is_some() {
+                    resolve("parentId")?
+                } else {
+                    root.id.clone()
+                };
+                let parent = on_page(snapshot, &root.id, &parent_id, true)?;
+                if !is_container(parent) {
+                    return Err(EngineError::invalid("Table parent must be a container"));
+                }
+                let (id, cells, commands) = table::create(snapshot, parent, args)?;
+                table_response(id, &cells, commands)
+            }
+            action @ ("inspect_table" | "edit_table" | "set_table_cell") => {
+                let target = resolve("id")?;
+                let table = on_page(snapshot, &root.id, &target, action != "inspect_table")?;
+                let operation = match action {
+                    "inspect_table" => "inspect",
+                    "set_table_cell" => "set_cell",
+                    _ => match string(args, "operation")? {
+                        "add_row" => "addRow",
+                        "remove_row" => "removeRow",
+                        "add_column" => "addColumn",
+                        "remove_column" => "removeColumn",
+                        _ => return Err(EngineError::invalid("Unknown table operation")),
+                    },
+                };
+                let (cells, commands) = table::edit(snapshot, table, args, operation)?;
+                for command in &commands {
+                    match command {
+                        Command::NodeSet { node_id, .. } | Command::TextReplace { node_id, .. } => {
+                            on_page(snapshot, &root.id, node_id, true)?;
+                        }
+                        Command::NodeCreate { node } => {
+                            if let Some(parent) = node.parent_id.as_ref()
+                                && snapshot.nodes.contains_key(parent)
+                            {
+                                on_page(snapshot, &root.id, parent, true)?;
+                            }
+                        }
+                        Command::NodeDelete { node_ids } => {
+                            let mut pending: Vec<_> = node_ids.iter().map(String::as_str).collect();
+                            while let Some(id) = pending.pop() {
+                                on_page(snapshot, &root.id, id, true)?;
+                                pending.extend(
+                                    children(snapshot, id).iter().map(|node| node.id.as_str()),
+                                );
+                            }
+                        }
+                        _ => unreachable!("table edits produce only layer commands"),
+                    }
+                }
+                table_response(table.id.clone(), &cells, commands)
+            }
             "connect" | "reattach" => {
                 let scene = paths::scene(snapshot, &state.page_id)?;
                 let endpoint = |id_field, side_field, at_field| {
@@ -121,6 +175,28 @@ impl ToolRouter {
             _ => Err(EngineError::invalid("Unknown native board action")),
         }
     }
+}
+
+fn table_response(
+    id: String,
+    cells: &[Vec<Option<String>>],
+    commands: Vec<Command>,
+) -> Result<(Vec<Command>, Properties)> {
+    let mut nodes = Vec::new();
+    let mut edits = Vec::new();
+    for command in commands {
+        match command {
+            Command::NodeCreate { node } => nodes.push(node),
+            other => edits.push(other),
+        }
+    }
+    if !nodes.is_empty() {
+        edits.insert(0, Command::NodeCreateMany { nodes });
+    }
+    Ok((
+        edits,
+        properties(&table::response(id, cells, str::to_owned))?,
+    ))
 }
 
 fn on_page<'a>(
