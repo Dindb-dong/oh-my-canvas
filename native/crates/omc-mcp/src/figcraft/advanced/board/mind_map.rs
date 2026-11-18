@@ -51,7 +51,10 @@ pub(super) fn command(
                 label: label.clone(),
             });
         } else if layer.properties.get(EDGE) == Some(&json!(true))
-            && let Some(to) = layer.properties[connectors::CONNECTOR]["to"]["layer"].as_str()
+            && let Some(to) = layer
+                .properties
+                .get(connectors::CONNECTOR)
+                .and_then(|route| route["to"]["layer"].as_str())
         {
             edges.insert(to.to_owned(), layer);
         }
