@@ -1,0 +1,22 @@
+{
+  "name": "prototype",
+  "description": "Inspect prototype starts and a layer's interactions, create or rename a flow, and connect a layer to a different frame on click. Uses an explicit documentId and the session's selected page. Existing advanced click behavior is protected.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["documentId", "action"],
+    "additionalProperties": false,
+    "properties": {
+      "documentId": { "type": "string", "minLength": 1, "maxLength": 128 },
+      "action": {
+        "type": "string",
+        "enum": ["inspect", "set_flow", "remove_flow", "set_navigation", "remove_navigation"],
+        "description": "inspect returns start frames and, with sourceId, the specified layer's interactions. set_flow and remove_flow require frameId. set_navigation requires sourceId and destinationId. remove_navigation requires sourceId."
+      },
+      "frameId": { "type": "string", "minLength": 1, "maxLength": 128 },
+      "sourceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+      "destinationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+      "name": { "type": "string", "minLength": 1, "maxLength": 400 },
+      "description": { "type": "string", "maxLength": 10000 }
+    }
+  }
+}

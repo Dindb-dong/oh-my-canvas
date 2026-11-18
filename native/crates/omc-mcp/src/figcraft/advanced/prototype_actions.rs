@@ -47,29 +47,7 @@ pub(super) fn command(context: &Context, name: &str) -> Result<Value> {
                 edit_blocks(context, &environment, actions, action)?
             };
         }
-        let simple = matches!(interactions.as_slice(), [entry]
-            if entry["trigger"]["type"] == "onClick"
-                && entry["transition"]["type"] == "instant"
-                && entry["delay_ms"] == 0
-                && entry["actions"].as_array().is_some_and(|actions| matches!(actions.as_slice(), [action]
-                    if action["type"] == "navigate" && action["preserve_scroll"] != true)));
-        let mut unset = Vec::new();
-        if simple {
-            changes.push(context.patch(&id, CLICK, interactions[0]["actions"][0]["dest"].clone()));
-        } else if node.properties.contains_key(CLICK) {
-            unset.push(CLICK.into());
-        }
-        if !simple && !interactions.is_empty() {
-            changes.push(context.patch(&id, INTERACTIONS, json!(interactions)));
-        } else if node.properties.contains_key(INTERACTIONS) {
-            unset.push(INTERACTIONS.into());
-        }
-        if !unset.is_empty() {
-            changes.push(Command::NodeUnset {
-                node_id: id,
-                properties: unset,
-            });
-        }
+        changes.extend(interaction_commands(node, &interactions));
     }
     context.commit(changes)?;
     Ok(output)
@@ -80,12 +58,60 @@ pub(in crate::figcraft) fn stored(node: &Node) -> Vec<Value> {
         return array(Some(value));
     }
     node.string(CLICK)
-        .map(|dest| {
-            let mut entry = default_interaction();
-            entry["actions"] = json!([{"type":"navigate","dest":dest}]);
-            vec![entry]
-        })
+        .map(|dest| vec![click_navigation(dest)])
         .unwrap_or_default()
+}
+
+pub(super) fn click_destination(entry: &Value) -> Option<&str> {
+    if entry["trigger"]["type"] == "onClick"
+        && entry["transition"]["type"] == "instant"
+        && entry["delay_ms"] == 0
+        && let Some([action]) = entry["actions"].as_array().map(Vec::as_slice)
+        && action["type"] == "navigate"
+        && action["preserve_scroll"] != true
+    {
+        action["dest"].as_str()
+    } else {
+        None
+    }
+}
+
+pub(super) fn interaction_commands(node: &Node, interactions: &[Value]) -> Vec<Command> {
+    let simple = match interactions {
+        [entry] => click_destination(entry),
+        _ => None,
+    };
+    let mut changes = Vec::new();
+    let mut unset = Vec::new();
+    let mut set = |key: &str, value| {
+        changes.push(Command::NodeSet {
+            node_id: node.id.clone(),
+            properties: Properties::from([(key.into(), value)]),
+        });
+    };
+    if let Some(dest) = simple {
+        set(CLICK, json!(dest));
+    } else if node.properties.contains_key(CLICK) {
+        unset.push(CLICK.into());
+    }
+    if simple.is_none() && !interactions.is_empty() {
+        set(INTERACTIONS, json!(interactions));
+    } else if node.properties.contains_key(INTERACTIONS) {
+        unset.push(INTERACTIONS.into());
+    }
+    if !unset.is_empty() {
+        changes.push(Command::NodeUnset {
+            node_id: node.id.clone(),
+            properties: unset,
+        });
+    }
+    changes
+}
+
+pub(super) fn click_navigation(dest: &str) -> Value {
+    let mut entry = default_interaction();
+    entry["actions"] = json!([{"type":"navigate","dest":dest}]);
+    entry
 }
 
 fn default_interaction() -> Value {
