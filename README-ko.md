@@ -94,7 +94,7 @@ cargo build --locked --release -p omc-desktop -p omc-service -p omc-cli
 | [LD12](docs/benchmarks/results/2026-11-18/LD12/README.md) | 빌드·IDE 자원 경합 | 보조 관측만 |
 | [LD13](docs/benchmarks/results/2026-11-18/LD13/README.md) | 4인 협업 | 미측정 |
 
-78 개 시도이며 실패·재시도를 포함합니다. 초기 LD03 토큰 실험은 별도 조건입니다.
+78개 시도이며 실패·재시도를 포함합니다. 초기 LD03 토큰 실험은 별도 조건입니다.
 
 ## 사람끼리도 함께 작업하기
 
