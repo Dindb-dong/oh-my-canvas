@@ -17,7 +17,7 @@ use std::{
 };
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
-const MAX_FILE: usize = 16 * 1024 * 1024;
+pub(super) const MAX_FILE: usize = 16 * 1024 * 1024;
 const MAX_NODES: usize = 10_000;
 
 pub(super) const FILE_COMMANDS: &[(&str, &str, bool, &str)] = &[
@@ -260,13 +260,27 @@ impl ToolRouter {
         Ok(())
     }
 
+    pub(super) fn decode_figcraft_archive(
+        &self,
+        bytes: &[u8],
+    ) -> Result<(DocumentContent, usize, bool)> {
+        if bytes.len() > MAX_FILE {
+            return Err(EngineError::new(
+                "resource_limit",
+                "FigCraft archive exceeds 16 MiB",
+            ));
+        }
+        if let Some((content, page)) = self.fig_decode_catalog_archive(bytes)? {
+            return Ok((content, page, false));
+        }
+        let (content, page) = decode(bytes)?;
+        Ok((content, page, true))
+    }
+
     fn fig_decode_input(&self, input: &FileInput) -> Result<(DocumentContent, usize, Value, bool)> {
         if input.extension == "figcraft" {
-            if let Some((content, page)) = self.fig_decode_catalog_archive(&input.bytes)? {
-                return Ok((content, page, json!([]), false));
-            }
-            let (content, page) = decode(&input.bytes)?;
-            return Ok((content, page, json!([]), true));
+            let (content, page, upstream_archive) = self.decode_figcraft_archive(&input.bytes)?;
+            return Ok((content, page, json!([]), upstream_archive));
         }
         if input.extension == "json" {
             let file = omc_protocol::decode_json_with_limit(&input.bytes, MAX_FILE)?;
